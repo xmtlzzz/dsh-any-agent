@@ -32,6 +32,11 @@ if (code === 0) {
   // 审批上下文与裁决：纯本地会话对象，不调用模型或拉起DSH。
   code = await run('approval-details.mjs');
 }
+if (code === 0) {
+  // setup 命令改的是别人的客户端配置，必须每次必跑：一个会误写或误删的
+  // setup 比没有 setup 更糟。沙箱在临时 HOME 里，无副作用。
+  code = await run('setup.mjs');
+}
 if (code === 0 && all) {
   code = await run('boundary.mjs');
 }

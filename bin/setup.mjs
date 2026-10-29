@@ -126,6 +126,21 @@ const CLIENTS = [
       const run = (a) => spawnSync('claude', a, { encoding: 'utf8', shell: IS_WIN });
       const tried = (r) => (((r.stdout || '') + (r.stderr || '')).toLowerCase());
 
+      // Dry-run must not shell out: `claude mcp add` writes immediately, so
+      // previewing by running it would be a write, not a preview.
+      if (!WRITE) {
+        const probe = run(['mcp', 'get', NAME]);
+        const registered = probe.status === 0;
+        if (REMOVE) {
+          return registered
+            ? { preview: 'would be unregistered via \`claude mcp remove\`' }
+            : { skipped: 'not registered' };
+        }
+        return { preview: registered
+          ? 'would be re-registered via \`claude mcp add\` (replacing the existing entry)'
+          : 'would be registered via \`claude mcp add\` (user scope)' };
+      }
+
       if (REMOVE) {
         const r = run(['mcp', 'remove', NAME, '-s', 'user']);
         if (r.status !== 0) {
@@ -179,6 +194,7 @@ const CLIENTS = [
       }
       out += '\n';
       if (out === raw) return { skipped: 'already up to date' };
+      if (!WRITE) return { preview: REMOVE ? 'TOML block would be removed' : 'TOML block would be written' };
       backup(cfg);
       atomicWrite(cfg, out);
       return { done: REMOVE ? 'TOML block removed' : 'TOML block written' };
@@ -212,6 +228,13 @@ function applyJson(c) {
   const text = JSON.stringify(root, null, 2) + '\n';
   if (text === parsed.raw.trimEnd() + '\n') return { skipped: 'no change' };
   JSON.parse(text);            // self-check before touching disk
+
+  // Dry-run must stop here. This file used to write unconditionally and only
+  // reported "would write" in the orchestration layer, which meant `setup`
+  // without --yes silently modified every client config it found -- the exact
+  // opposite of what the docs promise.
+  if (!WRITE) return { preview: REMOVE ? 'entry would be removed' : 'entry would be written' };
+
   backup(file);
   atomicWrite(file, text);
   const back = parseJson(file); // self-check after writing
@@ -248,7 +271,8 @@ for (const c of CLIENTS) {
 
   if (r.error) { bang(r.error); failed++; }
   else if (r.skipped) { dash('skipped: ' + r.skipped); skipped++; }
-  else { tick((WRITE ? '' : 'would ') + r.done); changed++; }
+  else if (r.preview) { tick(r.preview); changed++; }
+  else { tick(r.done); changed++; }
   log('');
 }
 

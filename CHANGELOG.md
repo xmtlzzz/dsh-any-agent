@@ -7,22 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.1] — 2026-10-29
+
+A correctness release. Two of the fixes matter if you are on Node 20 or were
+relying on `dsh-any-agent-setup` to preview before writing.
+
+### Fixed
+
+- **`engines` was wrong: this needs Node ≥ 22.15, not ≥ 20.** `src/workspace.mjs`
+  imports `zstdDecompressSync` from `node:zlib` to read DSH session headers;
+  that API does not exist before 22.15, and a named import of a missing export
+  is a load-time error. On Node 20 the server exited with code 1 before it
+  could answer a single request, and `package.json` had been telling people
+  Node 20 was fine. Both `engines` and the README now say 22.15.
+- **`dsh-any-agent-setup` wrote files during a dry run.** Every writer path
+  called the backup-and-write helper unconditionally and only *reported*
+  "would write" afterwards, so a preview run with no `--yes` modified the
+  client configs it found and left `.bak-dsh-*` files behind. The Claude Code
+  path shelled out to `claude mcp add` during the preview, which writes
+  immediately. All three paths now return a preview and stop before touching
+  disk, and a dry run performs no subprocess that can mutate state.
+
 ### Added
 
-- `dsh-any-agent --version` / `--help`, answered before the hub starts so
-  asking for a version has no side effects. Same for `dsh-any-agent-setup`.
-- `test/package-check.mjs` — a pre-publish check for the mistakes only a
-  tarball reveals: a missing `bin` field, a path without `./`, a missing
-  shebang, a `private:true`, test or state paths leaking into `files`.
-- GitHub Actions: four offline suites (smoke, guards, prune,
-  approval-details) across Node 22/24 on Linux and Windows, plus a packaging
-  job that packs, installs into a scratch project, and asserts the tarball
-  carries no state, tests or credentials.
+- `dsh-any-agent --version` / `--help`, answered before the hub starts, so
+  asking for a version spawns no reaper and touches no registry. Same for
+  `dsh-any-agent-setup`.
+- `test/setup.mjs` — 35 checks over the client-config writer, run against a
+  throwaway HOME: dry run is byte-identical, existing entries survive, writes
+  are idempotent, `--remove` takes out only its own entry, a corrupt config is
+  refused rather than rewritten, absent clients are skipped, and the Codex TOML
+  block round-trips.
+- `test/package-check.mjs` — catches what only a tarball reveals: a missing
+  `bin` field, a path without `./`, a missing shebang, `private:true`, test or
+  state paths in `files`, and an `engines` floor that contradicts what the
+  source actually imports.
+- GitHub Actions: guards, prune, approval-details and setup across Node 22/24
+  on Linux and Windows, plus a packaging job that packs, installs into a
+  scratch project and asserts the tarball carries no state, tests or
+  credentials.
 
 ### Changed
 
-- `SERVER_VERSION` now comes from `package.json` instead of a hard-coded
-  copy in `src/mcp.mjs`, so `npm version` cannot leave it stale.
+- `SERVER_VERSION` now comes from `package.json` instead of a hard-coded copy
+  in `src/mcp.mjs`, so `npm version` cannot leave it stale.
 
 ## [0.1.0] — 2026-10-29
 
@@ -118,5 +148,6 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/xmtlzzz/dsh-any-agent/releases/tag/v0.1.0

@@ -8,7 +8,8 @@ name: tests
 #     guards            env-var edge cases            31 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          24 checks
-#     package-check     publishability                10 checks
+#     setup             client config writer          35 checks
+#     package-check     publishability                12 checks
 #     package job       pack -> install -> --version
 #
 #     These load modules and touch the filesystem: no DSH, no model, no
@@ -81,6 +82,10 @@ jobs:
       - name: approval-details (credential redaction)
         env: { DSH_MCP_LOG: silent }
         run: node test/approval-details.mjs
+
+      - name: setup (client config writer)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/setup.mjs
 
       - name: package-check (publishability)
         run: node test/package-check.mjs
