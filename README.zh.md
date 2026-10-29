@@ -199,7 +199,9 @@ tool_timeout_sec = 120.0
 ### 3. 自检
 
 ```bash
-node test/smoke.mjs        # 不调用 LLM，验证整条管道
+dsh-any-agent --version      # 打印版本，不启动任何东西
+dsh-any-agent --help         # 参数、关键环境变量、文档链接
+node test/smoke.mjs          # 不调用 LLM，验证整条管道
 ```
 
 ## 🧰 工具

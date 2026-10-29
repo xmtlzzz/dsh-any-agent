@@ -1,0 +1,117 @@
+name: tests
+
+# What CI can and cannot check, stated up front so a green check is not
+# over-read:
+#
+#   Included -- suites that exercise this server's own logic with no model
+#   and no DSH install: smoke (protocol handshake, tool table, registry
+#   purity), guards (env-var edge cases), prune (sentinel retention),
+#   approval-details (credential redaction), plus a packaging check.
+#
+#   Excluded -- boundary, integration, async, sentinel, timeout, lock, cycle,
+#   concurrency, capability, workspace-effect, acceptance, multi, permission,
+#   list. Those spawn a real DSH process and drive real turns, which needs a
+#   provider and credentials; run them locally with `npm test -- --all`.
+#
+# A green run therefore proves the protocol surface, the safety guards and
+# that the tarball is installable -- not end-to-end agent behaviour.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    name: offline suites (node ${{ matrix.node }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['20', '22']
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # The suite needs no containers, no services, and no secrets. Keeping
+      # this job dependency-free is what lets it run on every push.
+      - name: smoke (protocol, tool table, registry purity)
+        env:
+          DSH_MCP_LOG: silent
+        run: node test/smoke.mjs
+
+      - name: guards (environment-variable edge cases)
+        env:
+          DSH_MCP_LOG: silent
+        run: node test/guards.mjs
+
+      - name: prune (sentinel retention)
+        env:
+          DSH_MCP_LOG: silent
+        run: node test/prune.mjs
+
+      - name: approval-details (credential redaction)
+        env:
+          DSH_MCP_LOG: silent
+        run: node test/approval-details.mjs
+
+      - name: CLI answers --version and --help without side effects
+        run: |
+          node bin/dsh-any-agent.mjs --version
+          node bin/dsh-any-agent.mjs --help
+          node bin/setup.mjs --version
+
+  package:
+    name: tarball is publishable and installable
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: package.json and bin sanity
+        run: node test/package-check.mjs
+
+      - name: install the packed tarball into a scratch project
+        run: |
+          set -euo pipefail
+          npm pack --pack-destination "$RUNNER_TEMP"
+          tgz=$(ls "$RUNNER_TEMP"/dsh-any-agent-*.tgz | head -1)
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer"
+          npm init -y > /dev/null
+          npm install "$tgz" --no-audit --no-fund
+          test -x node_modules/.bin/dsh-any-agent
+          test -x node_modules/.bin/dsh-any-agent-setup
+          node_modules/.bin/dsh-any-agent --version
+
+      - name: tarball carries no state, tests, or credentials
+        run: |
+          set -euo pipefail
+          npm pack --pack-destination "$RUNNER_TEMP" > /dev/null
+          tgz=$(ls "$RUNNER_TEMP"/dsh-any-agent-*.tgz | head -1)
+          listing=$(tar -tzf "$tgz")
+          for forbidden in "package/state/" "package/test/" "package/.state/" "package/.npmrc" "package/.birdview"; do
+            if echo "$listing" | grep -qF "$forbidden"; then echo "tarball contains $forbidden"; exit 1; fi
+          done
+          if tar -xzOf "$tgz" | grep -qE 'sk-[A-Za-z0-9]{20,}'; then
+            echo 'tarball looks like it contains a credential'; exit 1
+          fi
+          echo 'tarball contents ok'

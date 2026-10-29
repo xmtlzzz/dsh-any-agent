@@ -14,10 +14,45 @@
  *   DSH_MCP_LOG_STDERR          1 才转发 DSH 子树进程的原始 stderr（可能含思考内容）
  */
 
-import { createLogger } from '../src/config.mjs';
-import { Hub } from '../src/hub.mjs';
-import { createMcpServer } from '../src/mcp.mjs';
-import { listOrphans, pruneDeadMarkers } from '../src/locks.mjs';
+import { SERVER_VERSION } from '../src/mcp.mjs';
+
+/**
+ * `--version` / `--help` must be answered *before* the hub starts: the module
+ * graph above already pulls in config and locks, and starting the hub would
+ * spawn reapers and touch the registry just to print a version string.
+ */
+const argv = process.argv.slice(2);
+if (argv.includes('--version') || argv.includes('-v')) {
+  process.stdout.write(SERVER_VERSION + '\n');
+  process.exit(0);
+}
+if (argv.includes('--help') || argv.includes('-h')) {
+  process.stdout.write(
+    'dsh-any-agent ' + SERVER_VERSION + '\n\n' +
+    'An MCP server that drives DeepSeek Harness (DSH) as a long-lived coding agent.\n' +
+    'Runs as an MCP stdio server; normally launched by your MCP client, not by hand.\n\n' +
+    'Usage:\n' +
+    '  dsh-any-agent                 run the MCP server on stdio\n' +
+    '  dsh-any-agent --version       print the version and exit\n' +
+    '  dsh-any-agent --help          this text\n\n' +
+    'Register it with your client:\n' +
+    '  dsh-any-agent-setup           detect clients and preview (writes nothing)\n' +
+    '  dsh-any-agent-setup --yes     apply\n\n' +
+    'Key environment variables (all optional):\n' +
+    '  DSH_BIN                  path to @deepseek-ai/dsh/lib/bin.js; auto-detected\n' +
+    '  DSH_MCP_PROFILE          DSH profile to drive (default dsh-mcp)\n' +
+    '  DSH_MCP_PERMISSION       danger-full-access | workspace-write | read-only\n' +
+    '  DSH_MCP_APPROVAL         auto-allow | auto-deny | ask\n' +
+    '  DSH_MCP_LOG              silent (default) | info | debug\n\n' +
+    'Docs: https://github.com/xmtlzzz/dsh-any-agent\n',
+  );
+  process.exit(0);
+}
+
+const { createLogger } = await import('../src/config.mjs');
+const { Hub } = await import('../src/hub.mjs');
+const { createMcpServer } = await import('../src/mcp.mjs');
+const { listOrphans, pruneDeadMarkers } = await import('../src/locks.mjs');
 
 const log = createLogger();
 

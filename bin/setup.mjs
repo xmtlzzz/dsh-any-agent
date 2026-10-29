@@ -24,7 +24,37 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const NAME = 'dsh-any-agent';
+
+/** Same source of truth as the server: package.json, not a hard-coded copy. */
+const VERSION = (() => {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    return JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')).version ?? '0.0.0';
+  } catch { return '0.0.0'; }
+})();
+
 const argv = process.argv.slice(2);
+if (argv.includes('--version') || argv.includes('-v')) {
+  process.stdout.write(VERSION + '\n');
+  process.exit(0);
+}
+if (argv.includes('--help') || argv.includes('-h')) {
+  process.stdout.write(
+    'dsh-any-agent-setup ' + VERSION + '\n\n' +
+    'Detect installed MCP clients and register ' + NAME + ' with each.\n\n' +
+    'Usage:\n' +
+    '  dsh-any-agent-setup                     preview (writes nothing)\n' +
+    '  dsh-any-agent-setup --yes               apply\n' +
+    '  dsh-any-agent-setup --yes --only a,b    only these clients\n' +
+    '  dsh-any-agent-setup --yes --permission read-only\n' +
+    '  dsh-any-agent-setup --remove --yes      unregister\n\n' +
+    'Clients: Claude Code, Codex, Cursor, Windsurf, Zed.\n' +
+    'Every write is preceded by a .bak-dsh-<timestamp> backup; JSON clients are\n' +
+    'validated before and after writing; re-running is idempotent.\n',
+  );
+  process.exit(0);
+}
+
 const has = (f) => argv.includes(f);
 const val = (f, d) => {
   const i = argv.indexOf(f);

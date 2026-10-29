@@ -184,7 +184,9 @@ For a local checkout, use `"command": "node"` and `"args": ["/absolute/path/to/s
 ### 3. Try it
 
 ```bash
-node test/smoke.mjs        # no LLM calls, verifies the whole plumbing
+dsh-any-agent --version      # prints the version, starts nothing
+dsh-any-agent --help         # flags, key env vars, docs link
+node test/smoke.mjs          # no LLM calls, verifies the whole plumbing
 ```
 
 ## 🧰 Tools

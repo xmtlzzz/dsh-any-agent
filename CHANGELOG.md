@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `dsh-any-agent --version` / `--help`, answered before the hub starts so
+  asking for a version has no side effects. Same for `dsh-any-agent-setup`.
+- `test/package-check.mjs` — a pre-publish check for the mistakes only a
+  tarball reveals: a missing `bin` field, a path without `./`, a missing
+  shebang, a `private:true`, test or state paths leaking into `files`.
+- GitHub Actions: four offline suites (smoke, guards, prune,
+  approval-details) across Node 20/22 on Linux and Windows, plus a packaging
+  job that packs, installs into a scratch project, and asserts the tarball
+  carries no state, tests or credentials.
+
+### Changed
+
+- `SERVER_VERSION` now comes from `package.json` instead of a hard-coded
+  copy in `src/mcp.mjs`, so `npm version` cannot leave it stale.
 
 ## [0.1.0] — 2026-10-29
 

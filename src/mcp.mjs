@@ -5,11 +5,27 @@
  * 因为混进 stdout 的日志会直接破坏报文。日志默认静默（见 config.createLogger）。
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createHandlers, TOOL_DEFS } from './tools.mjs';
 import { DEFAULT_PERMISSION } from './config.mjs';
 
 const SERVER_NAME = 'dsh-any-agent';
-const SERVER_VERSION = '0.1.0';
+/**
+ * Version comes from package.json so it cannot drift from the published
+ * artifact. The old hard-coded copy is exactly the kind of duplicated fact
+ * that goes stale the moment someone runs `npm version`.
+ */
+export const SERVER_VERSION = (() => {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'));
+    return pkg.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 const FALLBACK_PROTOCOL = '2025-06-18';
 
 const INSTRUCTIONS = `这个服务把 DeepSeek Harness (DSH) 当作一个**可长期共事的编码 agent** 来驱动。
