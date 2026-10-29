@@ -23,7 +23,7 @@
     "orchestration"
   ],
   "bin": {
-    "dsh-any-agent": "./bin/dsh-any-agent.mjs"
+    "dsh-any-agent": "bin/dsh-any-agent.mjs"
   },
   "files": [
     "bin/",
