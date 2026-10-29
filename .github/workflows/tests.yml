@@ -1,25 +1,31 @@
 name: tests
 
-# What CI can and cannot check, stated up front so a green check is not
-# over-read:
+# SCOPE -- read this before trusting a green check.
 #
-#   Included -- suites that exercise this server's own logic with no model
-#   and no DSH install: smoke (protocol handshake, tool table, registry
-#   purity), guards (env-var edge cases), prune (sentinel retention),
-#   approval-details (credential redaction), plus a packaging check.
+# This project's suite has two halves, and only one of them can run here.
 #
-#   Excluded -- boundary, integration, async, sentinel, timeout, lock, cycle,
-#   concurrency, capability, workspace-effect, acceptance, multi, permission,
-#   list. Those spawn a real DSH process and drive real turns, which needs a
-#   provider and credentials; run them locally with `npm test -- --all`.
+#   OFFLINE (runs in CI)
+#     guards            env-var edge cases            31 checks
+#     prune             sentinel retention            11 checks
+#     approval-details  credential redaction          24 checks
+#     package-check     publishability                10 checks
+#     package job       pack -> install -> --version
 #
-# A green run therefore proves the protocol surface, the safety guards and
-# that the tarball is installable -- not end-to-end agent behaviour.
-
-# Note: the repository root IS the package root -- this project lives at
-# <repo>/bin, <repo>/src and so on, with no nested server/ directory. Do not
-# add `working-directory: server`; it does not exist in a fresh checkout and
-# every `run` step fails before the first command executes.
+#     These load modules and touch the filesystem: no DSH, no model, no
+#     credentials.
+#
+#   NEEDS DSH (does NOT run in CI)
+#     smoke, boundary, integration, async, sentinel, timeout, lock, cycle,
+#     concurrency, capability, workspace-effect, acceptance, multi,
+#     permission, list
+#
+#     Each spawns a real DSH process. smoke is only partly protocol: its
+#     sections 1-2 (handshake, tool table) pass without DSH, then it calls
+#     dsh_start and fails with 'DSH CLI entry not found'. Run locally:
+#         npm test -- --all
+#
+# A green run means the protocol surface is intact, the safety guards hold,
+# and the tarball installs. It does not mean agent behaviour was exercised.
 
 on:
   push:
@@ -31,9 +37,13 @@ on:
 permissions:
   contents: read
 
+# The repository root IS the package root: <repo>/bin, <repo>/src, <repo>/test.
+# Do not add 'working-directory: server' -- no such directory exists in a
+# fresh checkout, and every run step then fails before its first command.
+
 jobs:
-  offline-tests:
-    name: offline suites (node ${{ matrix.node }} / ${{ matrix.os }})
+  offline-suites:
+    name: offline (${{ matrix.os }} / node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -48,36 +58,38 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      # The suite needs no containers, no services, and no secrets. Keeping
-      # this job dependency-free is what lets it run on every push.
-      - name: smoke (protocol, tool table, registry purity)
-        env:
-          DSH_MCP_LOG: silent
-        run: node test/smoke.mjs
+      # Proves the suite really is DSH-independent: if one of these needed
+      # DSH, that would be a silent skip, not a visible failure.
+      - name: confirm no DSH on this runner
+        shell: bash
+        run: |
+          if command -v dsh > /dev/null 2>&1; then echo 'dsh unexpectedly present'; exit 1; fi
+          echo 'no dsh on PATH, as expected'
 
       - name: guards (environment-variable edge cases)
-        env:
-          DSH_MCP_LOG: silent
+        env: { DSH_MCP_LOG: silent }
         run: node test/guards.mjs
 
       - name: prune (sentinel retention)
-        env:
-          DSH_MCP_LOG: silent
+        env: { DSH_MCP_LOG: silent }
         run: node test/prune.mjs
 
       - name: approval-details (credential redaction)
-        env:
-          DSH_MCP_LOG: silent
+        env: { DSH_MCP_LOG: silent }
         run: node test/approval-details.mjs
 
-      - name: CLI answers --version and --help without side effects
+      - name: package-check (publishability)
+        run: node test/package-check.mjs
+
+      - name: version and help answer without side effects
+        shell: bash
         run: |
           node bin/dsh-any-agent.mjs --version
-          node bin/dsh-any-agent.mjs --help
+          node bin/dsh-any-agent.mjs --help > /dev/null
           node bin/setup.mjs --version
 
   package:
-    name: tarball is publishable and installable
+    name: tarball installs and starts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +100,8 @@ jobs:
       - name: package.json and bin sanity
         run: node test/package-check.mjs
 
-      - name: install the packed tarball into a scratch project
+      - name: pack, install into a scratch project, run it
+        shell: bash
         run: |
           set -euo pipefail
           npm pack --pack-destination "$RUNNER_TEMP"
@@ -100,8 +113,10 @@ jobs:
           test -x node_modules/.bin/dsh-any-agent
           test -x node_modules/.bin/dsh-any-agent-setup
           node_modules/.bin/dsh-any-agent --version
+          node_modules/.bin/dsh-any-agent-setup --help > /dev/null
 
       - name: tarball carries no state, tests, or credentials
+        shell: bash
         run: |
           set -euo pipefail
           npm pack --pack-destination "$RUNNER_TEMP" > /dev/null
