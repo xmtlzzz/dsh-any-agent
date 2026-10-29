@@ -50,7 +50,14 @@ if (argv.includes('--help') || argv.includes('-h')) {
     '  dsh-any-agent-setup --remove --yes      unregister\n\n' +
     'Clients: Claude Code, Codex, Cursor, Windsurf, Zed.\n' +
     'Every write is preceded by a .bak-dsh-<timestamp> backup; JSON clients are\n' +
-    'validated before and after writing; re-running is idempotent.\n',
+    'validated before and after writing; re-running is idempotent.\n\n' +
+    'Only one entry per client is added, named "' + NAME + '", and --remove takes\n' +
+    'out exactly that entry. Your other MCP servers are never read, rewritten or\n' +
+    'deleted; the only thing that changes about them is JSON whitespace, since a\n' +
+    'JSON config is re-serialised on write.\n\n' +
+    'NOTE: the path recorded in each client is absolute. If you move or delete\n' +
+    'this installation, those clients will report CONNECTION_CLOSED until you\n' +
+    'run setup again from the new location (or --remove to clean up).\n',
   );
   process.exit(0);
 }

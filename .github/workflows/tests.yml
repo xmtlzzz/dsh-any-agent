@@ -8,7 +8,8 @@ name: tests
 #     guards            env-var edge cases            31 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          24 checks
-#     setup             client config writer          35 checks
+#     setup             client config writer          41 checks
+#     removal-scope     --remove only touches its own   24 checks
 #     package-check     publishability                12 checks
 #     package job       pack -> install -> --version
 #
@@ -86,6 +87,10 @@ jobs:
       - name: setup (client config writer)
         env: { DSH_MCP_LOG: silent }
         run: node test/setup.mjs
+
+      - name: removal-scope (--remove touches only its own entry)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/removal-scope.mjs
 
       - name: package-check (publishability)
         run: node test/package-check.mjs

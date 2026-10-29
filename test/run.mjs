@@ -37,6 +37,10 @@ if (code === 0) {
   // setup 比没有 setup 更糟。沙箱在临时 HOME 里，无副作用。
   code = await run('setup.mjs');
 }
+if (code === 0) {
+  // 卸载的影响范围：只删自己那条，用户既有的 MCP 服务器与无关设置必须原样。
+  code = await run('removal-scope.mjs');
+}
 if (code === 0 && all) {
   code = await run('boundary.mjs');
 }

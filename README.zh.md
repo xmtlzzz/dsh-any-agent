@@ -162,6 +162,46 @@ Zed          33 -> 33 个键   只有 context_servers 多了个子项
 
 唯一会就地改动的是 `mcp.json` 和 `settings.json` 的**排版**（会按 2 空格缩进重新序列化）。值不变，但空白格式不保证原样。每个被改的文件旁边都留了 `.bak-dsh-<时间戳>` 备份。
 
+**安装 / 更新 / 删除**
+
+| 要做的事 | 命令 |
+|---|---|
+| 预览会改什么（不写） | `dsh-any-agent-setup` |
+| 注册到所有检测到的客户端 | `dsh-any-agent-setup --yes` |
+| 只注册某几个 | `dsh-any-agent-setup --yes --only cursor,zed` |
+| 就地改权限档 | `dsh-any-agent-setup --yes --permission read-only` |
+| 升级包之后更新配置 | `dsh-any-agent-setup --yes`（幂等，只重写有差异的条目） |
+| 从所有客户端移除 | `dsh-any-agent-setup --remove --yes` |
+| 只从某几个移除 | `dsh-any-agent-setup --remove --yes --only codex` |
+| 撤销某次误写 | 把 `.bak-dsh-<时间戳>` 复制回原文件 |
+
+**`--remove` 到底动了什么 —— 实测**
+
+注销只删掉每个客户端里的**那一个键**，其余一概不碰。在真机上测得的前后对比：
+
+```
+Cursor       { keep, dsh-any-agent }  ->  { keep }
+             手工写的那条原样保留
+Claude Code  6 个服务                  ->  5 个服务
+             原有五个都还在列表里
+Zed          33 个顶层键               ->  33 个键
+             只有 context_servers 少了子项，现在是空对象
+Codex        我们的两个 TOML 段        ->  已移除
+             model、approval_policy、sandbox_mode、node_repl、rea 全部完好
+```
+
+这些条目之外的东西它一概不读、不改、不删。你的凭据、其他 MCP 服务器、无关设置都不受影响。
+
+注意：**`--remove` 不会卸载包本身** —— 那是 `npm uninstall -g dsh-any-agent`，两件事互相独立：你可以保留包但不注册任何客户端，也可以只注销而不卸载。
+
+事后可自行核验：`claude mcp list`、`codex mcp list`，以及看 `~/.cursor/mcp.json` 和 Zed 设置里的 `context_servers` 键。
+
+**记录的是绝对路径**
+
+`setup` 写进去的是它运行时所处安装目录的**绝对路径**。**如果你移动或删除了那个目录，所有客户端都会报 `CONNECTION_CLOSED`**，直到你在新位置重新跑一遍 `setup`，或者用 `--remove` 把失效条目清掉。
+
+最容易踩到的情况：装到临时目录里试用，然后清理掉 —— 配置还指着那个已经不存在的路径。
+
 **从本地目录安装**
 
 解压到任意位置，把 `command` 指向 `node`、`args` 指向 `<解压目录>/bin/dsh-any-agent.mjs`（见下）。

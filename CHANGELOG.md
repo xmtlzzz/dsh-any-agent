@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `test/removal-scope.mjs` — 24 checks proving unregistering touches only
+  its own entry. Given configs holding unrelated MCP servers, top-level Codex
+  settings (`model`, `approval_policy`, `sandbox_mode`) and Zed settings
+  (`theme`, `vim_mode`, a sibling `context_servers` child), it registers and
+  then removes, and asserts every other value is byte-identical afterwards.
+  Also covers removing something that was never there: no error, no write.
+- README (both languages): a table for install / update / remove / undo, the
+  measured before-after of `--remove` per client, and an explicit note that
+  `--remove` does **not** uninstall the package.
+- `dsh-any-agent-setup --help` now states that only one entry per client is
+  added and exactly that entry is removed, that other MCP servers are never
+  read or rewritten, and that the recorded path is absolute — moving or
+  deleting the installation leaves clients reporting `CONNECTION_CLOSED`
+  until setup is re-run from the new location.
 
 ## [0.1.2] — 2026-10-29
 

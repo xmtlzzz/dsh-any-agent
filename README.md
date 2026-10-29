@@ -147,6 +147,42 @@ Zed          33 -> 33 keys    only context_servers gained a child
 
 The one thing it does modify in place is the JSON formatting of `mcp.json` and `settings.json` (it re-serialises with 2-space indent). Values are preserved; whitespace is not guaranteed to be. A `.bak-dsh-<timestamp>` copy sits beside each file it touched.
 
+**Install / update / remove**
+
+| Task | Command |
+|---|---|
+| Preview what would change | `dsh-any-agent-setup` |
+| Register with every client found | `dsh-any-agent-setup --yes` |
+| Register with just some | `dsh-any-agent-setup --yes --only cursor,zed` |
+| Change the permission tier in place | `dsh-any-agent-setup --yes --permission read-only` |
+| Update after upgrading the package | `dsh-any-agent-setup --yes` (idempotent; only differing entries are rewritten) |
+| Unregister from every client | `dsh-any-agent-setup --remove --yes` |
+| Unregister from just some | `dsh-any-agent-setup --remove --yes --only codex` |
+| Undo one bad write | copy `.bak-dsh-<stamp>` back over the config |
+
+**What `--remove` actually does — measured**
+
+Unregistering touches exactly one key per client and leaves everything else alone. Measured on a real machine, before → after:
+
+```
+Cursor       { keep, dsh-any-agent }  ->  { keep }
+             the hand-written entry survived untouched
+Claude Code  6 servers                ->  5 servers
+             all five originals still listed
+Zed          33 top-level keys        ->  33 keys
+             only context_servers lost its child, now empty
+Codex        our two TOML blocks      ->  removed
+             model, approval_policy, sandbox_mode, node_repl and rea all intact
+```
+
+Nothing outside those entries is read, rewritten or deleted. Your credentials, other MCP servers and unrelated settings are not touched. The package itself is *not* uninstalled by `--remove` — that is `npm uninstall -g dsh-any-agent`, and the two are independent: you can keep the package installed with no clients registered, or unregister without removing it.
+
+To verify by hand afterwards: `claude mcp list`, `codex mcp list`, and inspect `~/.cursor/mcp.json` / the `context_servers` key of Zed's settings.
+
+**The recorded path is absolute**
+
+`setup` writes the absolute path of the installation it ran from. **If you move or delete that directory, every client will fail with `CONNECTION_CLOSED`** until you either re-run `setup` from the new location or `--remove` the stale entries. This bites when you install into a temporary folder to try things out, then clean it up: the configs still point into the void.
+
 **From a local checkout**
 
 Clone or unzip anywhere, then point `command` at `node` and `args` at `<checkout>/bin/dsh-any-agent.mjs` (shown below).
