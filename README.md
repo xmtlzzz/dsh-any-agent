@@ -66,7 +66,7 @@ DSH (DeepSeek Harness) can do all of that — it has file/shell tools, skills, s
 |  |  |
 |---|---|
 | 🔄 **A dead process never kills a conversation** | The identity lives on disk. A crash, an idle reap, even restarting this whole server costs you nothing — the next call transparently resumes it, memory intact (verified across processes). |
-| 🗣️ **You are never stuck waiting** | Steer a conversation mid-flight — **interject** to stop and redirect (converges in well under a second), or **queue** a remark for after the current turn. Interrupting never damages the conversation. |
+| 🗣️ **You are never stuck waiting** | Steer a conversation mid-flight — **interject** to stop and redirect (~100 ms to reach idle, measured over four cancelled turns), or **queue** a remark for after the current turn. Interrupting never damages the conversation. |
 | 📡 **Completion notification, not polling** | Long tasks return instantly with a `run_id`; when the turn ends, a **sentinel file** is written atomically so a background task in *your* host wakes you. No polling, no occupied turn. |
 | 🪟 **Many conversations at once** | `dsh_list(only_running)` shows what's live; `dsh_read` gives cursor-based incremental output. Cycle between them like windows. |
 | 🧠 **Reasoning hidden by default** | You get "thought for N chars / M seconds" statistics instead of context-burning prose — and it is never logged, never written to disk. |
@@ -112,13 +112,31 @@ Then edit `~/.dsh/profiles/dsh-mcp/cordis.patch.yml` and declare your provider a
 
 ### 2. Register the server
 
-**From npm (recommended)**
+**From npm, one command (recommended)**
 
 ```bash
 npm install -g dsh-any-agent
+dsh-any-agent-setup            # detect the clients you have; writes nothing
+dsh-any-agent-setup --yes      # apply
 ```
 
-The `dsh-any-agent` executable is then on your `PATH` and every client below can just call it by name.
+`setup` finds the MCP clients on your machine — **Claude Code, Codex, Cursor, Windsurf, Zed** — and writes the entry into each one it finds, skipping the rest. It is safe by construction:
+
+- **dry-run by default**; `--yes` is required to write anything
+- every file is backed up to `<file>.bak-dsh-<timestamp>` first
+- JSON clients are parsed before and after writing, so a broken config never lands
+- Claude Code and Codex go through their own `mcp add` subcommands rather than a hand-edited file
+- **idempotent** — re-running only changes what differs
+
+```bash
+dsh-any-agent-setup --yes --only cursor,zed     # just these
+dsh-any-agent-setup --yes --permission read-only
+dsh-any-agent-setup --remove --yes               # take it back out
+```
+
+**From a local checkout**
+
+The `dsh-any-agent` executable is on your `PATH` after a global install, so every client below can call it by name. Otherwise point `command` at `node` and `args` at `<checkout>/server/bin/dsh-any-agent.mjs`.
 
 **From a local checkout**
 
@@ -375,7 +393,7 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 
 Every figure in this document is either **printed by a test** or **measured with a command you can re-run**. If you change a number, change it to a measurement — not to an estimate, and never to a plausible-looking value.
 
-This section exists because that rule was violated. An early draft claimed `dsh_send(wait=false)` returned "in ~1 ms" (measured: 81 ms), that interruption converged in "~18 ms" (no test ever produced that figure), and that a conversation costs "~120 MB" (measured: 295–476 MB) — the last one contradicting itself in a single sentence, quoting both "120 MB each" and "three = 428 MB".
+This section exists because that rule was violated. An early draft claimed `dsh_send(wait=false)` returned "in ~1 ms" (measured: 81 ms), that interruption converged in "~18 ms" (no test ever produced that number — `integration.mjs` only asserts `waited_ms` is between 0 and 25 s; four manual samples gave 91/102/105/119 ms), and that a conversation costs "~120 MB" (measured: 295–476 MB) — the last one contradicting itself in a single sentence, quoting both "120 MB each" and "three = 428 MB".
 
 **Three tiers, and how to state each:**
 

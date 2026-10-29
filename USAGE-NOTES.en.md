@@ -81,7 +81,7 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 | You want | Reality |
 |---|---|
 | Token-by-token streaming | ❌ Cannot enter model context (MCP limitation). Callers get per-step results; humans follow stderr logs |
-| Mid-turn steering | ❌ ACP rejects concurrent prompts. `dsh_interject` is the equivalent: cancel + immediately start a new turn (converges in well under a second) |
+| Mid-turn steering | ❌ ACP rejects concurrent prompts. `dsh_interject` is the equivalent: cancel + immediately start a new turn (~100 ms to converge — the `waited_ms` field, four samples gave 91/102/105/119 ms, covering only `session/cancel` through reaching idle) |
 | Paste a screenshot | ❌ ACP advertises `promptCapabilities: {image: false}` |
 | Rename a conversation | ❌ DSH's title subsystem has no external rename API; titles come from the first message |
 | Have the agent ask you questions | ⚠️ `ask_user_question` isn't mounted in the sdk/acp profiles; it won't block waiting for you |

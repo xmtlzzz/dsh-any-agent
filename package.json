@@ -23,7 +23,8 @@
     "orchestration"
   ],
   "bin": {
-    "dsh-any-agent": "bin/dsh-any-agent.mjs"
+    "dsh-any-agent": "bin/dsh-any-agent.mjs",
+    "dsh-any-agent-setup": "bin/setup.mjs"
   },
   "files": [
     "bin/",
@@ -39,6 +40,7 @@
   ],
   "scripts": {
     "start": "node ./bin/dsh-any-agent.mjs",
+    "setup": "node ./bin/setup.mjs",
     "test": "node ./test/run.mjs",
     "test:smoke": "node ./test/smoke.mjs",
     "test:guards": "node ./test/guards.mjs",

@@ -85,13 +85,48 @@ npm install -g dsh-any-agent
 
 ## 3. 接进你的 agent
 
+### 3.0 一条命令搞定（推荐）
+
+本服务自带一个 setup 命令，**自动检测你装了哪些客户端并写进配置**：
+
+```bash
+# 先看它会改什么（默认不写任何文件）
+dsh-any-agent setup
+
+# 确认后真正写入
+dsh-any-agent setup --yes
+
+# 只装某几个 / 换权限档
+dsh-any-agent setup --yes --only cursor,zed
+dsh-any-agent setup --yes --permission read-only
+
+# 反悔了，全部移除
+dsh-any-agent setup --remove --yes
+```
+
+支持的客户端：**Claude Code、Codex、Cursor、Windsurf、Zed**。没装的那些会被跳过，不算失败。
+
+它做的几件保证安全的事：
+
+- **默认 dry-run**，加 `--yes` 才写
+- 每个文件写前备份成 `<file>.bak-dsh-<时间戳>`
+- JSON 类客户端：写入前解析原文件、写后回读校验，坏文件绝不留在磁盘上
+- Claude Code / Codex 走它们自己的 `mcp add` 子命令，不手改数据库
+- **幂等**：重复运行只会更新变化的部分
+
+> 用 npm 全局安装时命令叫 `dsh-any-agent-setup`（或 `npx dsh-any-agent-setup`）。
+
+---
+
+### 3.1 手工配置（setup 不支持你的客户端时）
+
 所有客户端本质上是同一件事：**告诉它去哪里启动这个 stdio 服务**。
 下面按客户端给出现成配置块，直接复制。
 
 > 🔑 **通用要点**：如果 `dsh-any-agent` 不在 `PATH` 上（或你想用指定的 Node），
 > 把 `command` 换成 node 的绝对路径、`args` 换成 `<安装目录>/bin/dsh-any-agent.mjs`。
 
-### 3.1 Claude Code
+#### Claude Code
 
 ```bash
 # 全局安装的情况
@@ -116,7 +151,7 @@ claude mcp list | Select-String dsh-any-agent
 > 命令名不会存在，Claude Code 会报 `CONNECTION_CLOSED`。此时改用绝对路径：
 > `claude mcp add dsh-any-agent -e DSH_BIN=<DSH_BIN> -- node <安装目录>/bin/dsh-any-agent.mjs`
 
-### 3.2 Codex（`~/.codex/config.toml`）
+#### Codex（`~/.codex/config.toml`）
 
 ```toml
 [mcp_servers.dsh-any-agent]
@@ -134,7 +169,7 @@ DSH_MCP_LOG = "silent"
 
 > 从迁移包安装的话，这段由 `install.cmd` 自动写入，不用手抄。
 
-### 3.3 Cursor / Windsurf / Cline / Continue（`mcpServers` 型）
+#### Cursor / Windsurf / Cline / Continue（`mcpServers` 型）
 
 这些客户端用同一套 `mcpServers` 结构。配置文件位置：
 
@@ -158,7 +193,7 @@ DSH_MCP_LOG = "silent"
 }
 ```
 
-### 3.4 Zed（`context_servers` 型，格式不同）
+#### Zed（`context_servers` 型，格式不同）
 
 Zed **不用** `mcpServers`。它的键叫 `context_servers`，且 `command` 是**字符串**而非对象：
 
@@ -181,13 +216,13 @@ Zed **不用** `mcpServers`。它的键叫 `context_servers`，且 `command` 是
 
 > Zed 的远程 MCP 服务器用 `{"url": "...", "headers": {...}}`，但本项目是本地 stdio 服务，用上面的 `command` 形式。
 
-### 3.5 其他任意 MCP 客户端
+#### 其他任意 MCP 客户端
 
 只要能启动 stdio MCP 服务就行。它只实现四个标准方法
 （`initialize` / `ping` / `tools/list` / `tools/call`），
 不依赖任何宿主专有扩展 —— 连协议版本协商到旧版、不发 `notifications/initialized` 的客户端都测过。
 
-### 3.6 装完先验证
+### 3.2 装完先验证
 
 重启客户端，然后确认它发现了服务。各客户端查看方式不同，Codex 是：
 

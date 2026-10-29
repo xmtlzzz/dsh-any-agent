@@ -73,7 +73,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
 - Documentation claims were re-measured before release rather than trusted.
   Three figures did not survive: `dsh_send(wait=false)` was documented as
   returning "in ~1 ms" (measured 81 ms), interruption as converging in
-  "~18 ms" (no test produced it), and a conversation as costing "~120 MB"
+  "~18 ms" (no test produced it; four samples of the `waited_ms` field gave
+  91/102/105/119 ms), and a conversation as costing "~120 MB"
   (measured 295–476 MB, and self-contradictory in the original sentence).
   The README's Tests section now states the rule: every number is either
   printed by a suite or measured with a command the reader can re-run, and

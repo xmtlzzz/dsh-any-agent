@@ -204,7 +204,7 @@
 | 你想要的 | 实际能做到的 |
 |---|---|
 | 逐字流式输出 | ❌ 进不了模型上下文（MCP 固有限制）。调用方拿到的是**分步**结果；人能通过 stderr 日志跟进 |
-| 中途插话让模型即时改向 | ❌ ACP 拒绝并发 prompt。`dsh_interject` 是等价物：**取消 + 立刻开新回合**，历史保留（实测打断收敛在 1 秒内） |
+| 中途插话让模型即时改向 | ❌ ACP 拒绝并发 prompt。`dsh_interject` 是等价物：**取消 + 立刻开新回合**，历史保留（打断收敛约 100ms —— 即 `waited_ms` 字段，四次实测 91/102/105/119ms，只含 `session/cancel` 到 idle） |
 | 给 DSH 看截图 | ❌ ACP 自报 `promptCapabilities: {image: false}` |
 | 给会话改个名字 | ❌ DSH 标题子系统没有对外改名接口，标题一律按首条消息自动生成 |
 | 让 agent 主动问我问题 | ⚠️ `ask_user_question` 工具在 sdk/acp profile 里没挂载，它不会卡住等你 |
