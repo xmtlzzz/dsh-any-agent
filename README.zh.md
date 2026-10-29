@@ -91,7 +91,7 @@ DSH 自带两个可编程入口。`sdk` profile 看着更简单，但它的 JSON
 
 ## 📦 前置要求
 
-- **Node.js ≥ 20**
+- **Node.js ≥ 22.15** —— 服务用 `node:zlib` 的 `zstdDecompressSync` 读 DSH 会话头，这个 API 在 22.15 之前不存在
 - **已安装 DSH**（`@deepseek-ai/dsh`），且 `~/.dsh` 下已有可用的 provider 与凭据（GUI 能正常聊天即可）
 
 > 本服务**不自带** provider 配置，也**从不**接收或保存 API 密钥。

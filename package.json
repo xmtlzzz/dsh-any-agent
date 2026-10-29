@@ -47,7 +47,7 @@
     "test:prune": "node ./test/prune.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.15"
   },
   "repository": {
     "type": "git",

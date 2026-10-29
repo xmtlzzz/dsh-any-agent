@@ -49,7 +49,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node: ['20', '22']
+        # 22 is the floor: src/workspace.mjs imports zstdDecompressSync from
+        # node:zlib, which does not exist before Node 22.15. Node 20 therefore
+        # cannot even load the server -- tested and confirmed by CI failing
+        # with 'server exited code 1' before it answered a single request.
+        node: ['22', '24']
 
     steps:
       - uses: actions/checkout@v4

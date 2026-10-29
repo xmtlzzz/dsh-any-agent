@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tarball reveals: a missing `bin` field, a path without `./`, a missing
   shebang, a `private:true`, test or state paths leaking into `files`.
 - GitHub Actions: four offline suites (smoke, guards, prune,
-  approval-details) across Node 20/22 on Linux and Windows, plus a packaging
+  approval-details) across Node 22/24 on Linux and Windows, plus a packaging
   job that packs, installs into a scratch project, and asserts the tarball
   carries no state, tests or credentials.
 

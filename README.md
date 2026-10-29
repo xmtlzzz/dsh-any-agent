@@ -91,7 +91,7 @@ DSH ships two programmable entry points. The `sdk` profile looks simpler, but it
 
 ## 📦 Requirements
 
-- **Node.js ≥ 20**
+- **Node.js ≥ 22.15** — the server uses `zstdDecompressSync` from `node:zlib` to read DSH session headers, and that API does not exist before 22.15
 - **DSH installed** (`@deepseek-ai/dsh`), with working credentials under `~/.dsh`
 - A DSH **profile named `dsh-mcp`** derived from the shipped `acp` template, containing **your own** provider/model config (this repo deliberately ships no provider config)
 

@@ -58,5 +58,34 @@ const runtimeDeps = Object.keys(pkg.dependencies || {});
 if (runtimeDeps.length === 0) ok('no runtime dependencies');
 else bad('runtime dependencies appeared: ' + runtimeDeps.join(', '));
 
+// engines drifted once already: package.json said >=20 while src/workspace.mjs
+// imported zstdDecompressSync, which only exists from Node 22.15. Users on
+// Node 20 installed a server that could not load. Keep the two in step.
+console.log('\nengines');
+const floor = (pkg.engines && pkg.engines.node) || '';
+const m = /^>=\s*(\d+)\.(\d+)/.exec(floor);
+if (!m) {
+  bad('engines.node is missing or not a >=X.Y floor: ' + JSON.stringify(floor));
+} else {
+  const [major, minor] = [Number(m[1]), Number(m[2])];
+  const needsZstd = /zstdDecompressSync|zstdCompressSync/.test(
+    readFileSync(join(ROOT, 'src', 'workspace.mjs'), 'utf8') +
+    readFileSync(join(ROOT, 'src', 'hub.mjs'), 'utf8'),
+  );
+  // zstd landed in Node 22.15; anything lower cannot load the module graph.
+  const required = needsZstd ? [22, 15] : [0, 0];
+  const okFloor = major > required[0] || (major === required[0] && minor >= required[1]);
+  if (okFloor) ok('engines.node ' + floor + ' satisfies the zstd requirement (>= ' + required.join('.') + ')');
+  else bad('engines.node ' + floor + ' is below the zstd requirement (>= ' + required.join('.') + ')');
+
+  // The running interpreter must actually satisfy the declared floor.
+  const [runMajor, runMinor] = process.versions.node.split('.').map(Number);
+  if (runMajor > major || (runMajor === major && runMinor >= minor)) {
+    ok('running Node ' + process.versions.node + ' satisfies the floor');
+  } else {
+    bad('running Node ' + process.versions.node + ' is below the declared floor ' + floor);
+  }
+}
+
 console.log('\n' + (failures ? failures + ' problem(s) -- do not publish' : 'all checks passed'));
 process.exit(failures ? 1 : 0);
