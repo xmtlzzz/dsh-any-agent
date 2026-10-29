@@ -371,6 +371,30 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 
 > Counts are the numbers each suite prints itself. `smoke`/`prune`/`guards`/`approval-details`/`boundary` run without LLM calls; the rest need a working provider.
 
+### 📏 Numbers in this README must be reproducible
+
+Every figure in this document is either **printed by a test** or **measured with a command you can re-run**. If you change a number, change it to a measurement — not to an estimate, and never to a plausible-looking value.
+
+This section exists because that rule was violated. An early draft claimed `dsh_send(wait=false)` returned "in ~1 ms" (measured: 81 ms), that interruption converged in "~18 ms" (no test ever produced that figure), and that a conversation costs "~120 MB" (measured: 295–476 MB) — the last one contradicting itself in a single sentence, quoting both "120 MB each" and "three = 428 MB".
+
+**Three tiers, and how to state each:**
+
+| Tier | What it means | How to write it |
+|---|---|---|
+| **Tested** | A suite asserts it | Give the number; the suite is the authority |
+| **Measured** | You ran a command | Give the number **and the method**, so a reader can reproduce it |
+| **Estimated** | Derived or bounded | Say so ("roughly", "worst case", "≈") and show the arithmetic |
+
+**Recording a measurement inline.** The memory figures model the pattern — they name the tool, the before/after, and both samples:
+
+```text
+measured 300-480 MB per conversation
+  (Get-Process node: WorkingSet64 summed before vs. after one active
+   conversation reached end_turn; two cold starts gave 476 MB and 295 MB)
+```
+
+**When yours disagrees, say so.** Figures depend on machine, DSH version and load. A measurement outside a documented range is worth an issue — the range is a claim, not decoration.
+
 ## 🔒 The write lock: one writer per conversation at a time
 
 DSH conversations carry a **cross-process write lock**: **it never expires while the holder lives, and no API can take it from a live holder** — so **whoever gets there first decides everything**. This server turns that into "**you can look, we can write**":

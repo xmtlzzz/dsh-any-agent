@@ -70,6 +70,14 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   creates the `dsh-any-agent` / `.cmd` / `.ps1` shims, the server answers
   `initialize` with `serverInfo: dsh-any-agent@0.1.0`, exposes all 11 tools, and
   returns a real model reply with zero bytes on stderr.
+- Documentation claims were re-measured before release rather than trusted.
+  Three figures did not survive: `dsh_send(wait=false)` was documented as
+  returning "in ~1 ms" (measured 81 ms), interruption as converging in
+  "~18 ms" (no test produced it), and a conversation as costing "~120 MB"
+  (measured 295–476 MB, and self-contradictory in the original sentence).
+  The README's Tests section now states the rule: every number is either
+  printed by a suite or measured with a command the reader can re-run, and
+  measured values carry their method.
 
 ### Known limitations
 
