@@ -16,6 +16,8 @@
 🧪 528 项检查全绿 · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT · 💬 开发社区 [linux.do](https://linux.do/)
 
 > 📌 **建议先读 [使用注意事项](USAGE-NOTES.md)** —— 会真正踩到的坑：ACP 模型配置陷阱、**外部 MCP 工具的副作用不受 DSH 沙箱约束**、工作区与 GUI 的注册表缓存、成本控制、以及一张故障速查表。
+>
+> 🆕 **在新机器上部署？** [USAGE-MIGRATION.md](USAGE-MIGRATION.md) 是面向新环境的逐步指引：前置条件、怎么找 `DSH_BIN`、Claude Code / Codex / Cursor / Windsurf / Cline / Zed 的现成配置块，以及首轮对话清单。
 
 ## 📑 目录
 

@@ -16,6 +16,8 @@ An MCP server that drives DSH as a **long-lived agent runtime** instead of wrapp
 🧪 528 checks green · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT · 💬 Community: [linux.do](https://linux.do/)
 
 > 📌 **Read the [Usage Notes](USAGE-NOTES.en.md) first** — the practical gotchas that will actually bite you: the ACP model-config trap, external MCP tools bypassing DSH's sandbox, the workspace/GUI registry cache, cost control, and a troubleshooting table.
+>
+> 🆕 **Setting this up on a fresh machine?** [USAGE-MIGRATION.md](USAGE-MIGRATION.md) is a step-by-step walkthrough for a new environment: prerequisites, how to find your `DSH_BIN`, ready-to-paste config blocks for Claude Code / Codex / Cursor / Windsurf / Cline / Zed, and a first-turn checklist.
 
 ## 📑 Contents
 
