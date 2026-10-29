@@ -8,6 +8,7 @@ name: tests
 #     guards            env-var edge cases            31 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          24 checks
+#     sandbox-guard     real HOME is never a sandbox    18 checks
 #     setup             client config writer          41 checks
 #     removal-scope     --remove only touches its own   24 checks
 #     package-check     publishability                12 checks
@@ -83,6 +84,13 @@ jobs:
       - name: approval-details (credential redaction)
         env: { DSH_MCP_LOG: silent }
         run: node test/approval-details.mjs
+
+      # Guards the sandbox itself, not the writer. A test suite that points its
+      # "sandbox" at the real user profile deletes real data while reporting
+      # green; this suite fails instead.
+      - name: sandbox-guard (real HOME is never a sandbox)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/sandbox-guard.mjs
 
       - name: setup (client config writer)
         env: { DSH_MCP_LOG: silent }

@@ -33,8 +33,13 @@ if (code === 0) {
   code = await run('approval-details.mjs');
 }
 if (code === 0) {
+  // 沙箱守卫先跑：任何把真实 HOME 当沙箱的写法必须立刻失败。
+  // 2026-10-29 的事故就是少了这一条，一段临时脚本把 ~ 当沙箱递归删了。
+  code = await run('sandbox-guard.mjs');
+}
+if (code === 0) {
   // setup 命令改的是别人的客户端配置，必须每次必跑：一个会误写或误删的
-  // setup 比没有 setup 更糟。沙箱在临时 HOME 里，无副作用。
+  // setup 比没有 setup 更糟。沙箱经 sandbox-home.mjs 构造并校验。
   code = await run('setup.mjs');
 }
 if (code === 0) {

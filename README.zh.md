@@ -13,7 +13,7 @@
 
 **任何 MCP 客户端都能用。** 这里没有任何 Codex 或 Claude 专属的东西：服务端只讲标准 MCP over stdio，只用四个标准方法（`initialize`、`ping`、`tools/list`、`tools/call`）。已用一个"原始"客户端验证过——它协商更旧的协议版本、且从不发 `notifications/initialized`。
 
-🧪 528 项检查全绿 · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
+🧪 546 项检查全绿 · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
 
 > 📌 **建议先读 [使用注意事项](USAGE-NOTES.md)** —— 会真正踩到的坑：ACP 模型配置陷阱、**外部 MCP 工具的副作用不受 DSH 沙箱约束**、工作区与 GUI 的注册表缓存、成本控制、以及一张故障速查表。
 >
@@ -440,6 +440,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | `sentinel` | 36 | 完成哨兵：原子性、闩锁语义、多会话并发不串台、被取消也落地、**思考不进文件** |
 | `prune` | 11 | **哨兵留存**：清超期与崩溃残留、留新、清空壳目录、`TTL=0` 关闭清理、且绝不碰同目录的会话注册表（不花 token，每次必跑） |
 | `guards` | 31 | **环境变量守卫**：奇怪的数值一律压到安全侧 —— `IDLE_TTL_MS` 的 `-1`/非法值都当"永不回收"（绝不主动让出写锁）、回收间隔过小压回默认（防空转紧循环）、**失联阈值下限 30 秒**（防别的实例"合法地"抢占并杀掉我们的回合）（不花 token，每次必跑） |
+| `sandbox-guard` | 18 | **测试沙箱自身**：「临时 HOME」如果落到真实用户目录、它的子目录、盘符根目录，或 OS 临时目录之外，一律报错拒绝，绝不被写入和删除。其余套件都通过 `test/sandbox-home.mjs` 拿目录、只销毁自己建的那个（不花 token，每次必跑） |
 | `approval-details` | 24 | **审批审查上下文**：待决审批的快照带命令、理由、cwd 与原始审批 ID —— 不只是一个裸 ID，调用方才能真正裁决；凭据形状的字段与常见内联字面量在结构化上下文和展示标题里都会脱敏。经真实 stdio MCP 端到端验证 |
 | `timeout` | 38 | **超时语义**：`wait=false` 不受 `timeout_ms` 影响、`wait=true` 到期只转后台（不取消/不丢结果、`busy` 不说谎）、`timeout_ms<=0` 一直等、resume 失败会作废进程而不永久卡死、空 prompt 给清晰错误 |
 | `lock` | 79 | **写锁与抢占**：四类持有者判定、`writeMarker` 不覆盖活着的持有者、登记文件损坏/目录缺失等边界；**端到端**两实例抢锁 → 清晰报错 → 拒绝 → `force` 夺锁；**崩溃自动释放锁**、**卡死持有者无 force 自动抢占**；以及"一个回合 = 一个哨兵"的不变量（含内联回合与空闲插话） |
@@ -452,9 +453,15 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | `permission` | 11 | ★ **权限档是否真的生效**（安全属性）：不看我们的返回值（那正是会说谎的地方），而是读**会话自己记录的事实**（投影缓存里的 `permissions.preset` / `sandboxMode`），三档逐一核对且三档记录值互不相同。**这条测试抓到过无声提权**：profile 里 `defaultPreset` 会在会话创建时盖掉 `DSH_PERMISSION_MODE` |
 | `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
 
-**合计 528 项检查，全绿。**（套件内 492 + 验收 36）
+**合计 546 项检查，全绿。**（套件内 510 + 验收 36）
 
-> 数字取各套件自己打印的汇总。`smoke`/`prune`/`guards`/`approval-details`/`boundary` 不调用模型；其余需要可用的 provider。
+> 数字取各套件自己打印的汇总。`smoke`/`prune`/`guards`/`sandbox-guard`/`approval-details`/`boundary` 不调用模型；其余需要可用的 provider。
+
+### 🧯 为什么会有 `sandbox-guard`
+
+2026-10-29 的一次性验证脚本把沙箱路径存进了 **PowerShell** 的 `$home`。`$home` 是只读自动变量，赋值静默失败（脚本设了 `$ErrorActionPreference = 'Continue'`），`$env:USERPROFILE` 照样被改成了那个假路径，于是收尾那句 `Remove-Item $home -Recurse -Force` 落在**真实用户目录**上。那次运行在 120 秒超时被杀在半路，删掉了 `~/.codex`、`~/.cursor`、`~/.claude` 的一部分。
+
+此前所有套件对**写入方**的断言都是真的，缺的是对**沙箱本身**的断言。`sandbox-guard` 就是这条断言：真实 HOME、它的子目录、大小写变体、盘符根目录、`os.tmpdir()` 之外的位置，全部拒绝。现在 `test/sandbox-home.mjs` 是唯一创建与销毁沙箱的地方，`setup`/`removal-scope` 自己不再调用 `mkdtempSync` 或 `rmSync` —— 一旦退回旧写法，套件立刻失败。
 
 ### 📏 本文档里的数字必须可复现
 

@@ -7,11 +7,11 @@
  * 注册再注销，逐字段比对其余部分是否原样。
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { makeSandboxHome, removeSandbox } from './sandbox-home.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SETUP = join(HERE, '..', 'bin', 'setup.mjs');
@@ -23,13 +23,7 @@ const check = (name, cond, detail = '') => {
 };
 
 function sandbox(files) {
-  const home = mkdtempSync(join(tmpdir(), 'dsh-remove-'));
-  for (const [rel, content] of Object.entries(files)) {
-    const p = join(home, rel);
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, content, 'utf8');
-  }
-  return home;
+  return makeSandboxHome('dsh-remove-', files);
 }
 
 const run = (home, args) => spawnSync(process.execPath, [SETUP, ...args], {
@@ -63,7 +57,7 @@ console.log('\n[1] Cursor -- existing servers survive removal untouched');
   check('no other keys appeared', Object.keys(after.mcpServers).sort().join(',') === 'alpha,beta', Object.keys(after.mcpServers).join(','));
   check('exit code is 0', r.status === 0, String(r.status));
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── Codex: 顶层设置与其他 MCP 段必须保留 ────────────────────────────
@@ -106,7 +100,7 @@ console.log('\n[2] Codex -- top-level settings and other MCP sections survive');
   check('file is not empty', after.trim().length > 0, String(after.length));
   check('every original line still present', original.trim().split('\n').every((l) => after.includes(l)));
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── Zed: 其他设置键与 context_servers 的其他子项都要留 ───────────────
@@ -131,7 +125,7 @@ console.log('\n[3] Zed -- unrelated settings and sibling context servers survive
   check('sibling context server survived', JSON.stringify(after.context_servers.other) === JSON.stringify(existing.context_servers.other));
   check('our entry removed', after.context_servers['dsh-any-agent'] === undefined);
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── 移除不存在的条目：不报错、不改文件 ───────────────────────────────
@@ -148,7 +142,7 @@ console.log('\n[4] removing something that is not there is a no-op');
   check('reported not present', /not present/i.test(r.stdout || ''), (r.stdout || '').split('\n').find((l) => /skipped/.test(l)) ?? '');
   check('exit code is 0', r.status === 0, String(r.status));
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 console.log('\n===== removal scope: passed ' + passed + ', failed ' + failed + ' =====');

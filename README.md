@@ -13,7 +13,7 @@ An MCP server that drives DSH as a **long-lived agent runtime** instead of wrapp
 
 **Works with any MCP client.** Nothing here is Codex- or Claude-specific: the server speaks plain MCP over stdio and uses only the four standard methods (`initialize`, `ping`, `tools/list`, `tools/call`). Verified against a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
 
-🧪 528 checks green · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 546 checks green · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 > 📌 **Read the [Usage Notes](USAGE-NOTES.en.md) first** — the practical gotchas that will actually bite you: the ACP model-config trap, external MCP tools bypassing DSH's sandbox, the workspace/GUI registry cache, cost control, and a troubleshooting table.
 >
@@ -420,6 +420,7 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `sentinel` | 36 | completion sentinel: atomicity, latch semantics, per-conversation namespacing under concurrency, cancelled runs still land it, and **reasoning never reaching the file** |
 | `prune` | 11 | **sentinel retention**: prunes over-age and crash-leftover files, keeps fresh ones, removes empty shells, `TTL=0` disables pruning, and never touches the conversation registry beside it (no tokens, runs every time) |
 | `guards` | 31 | **environment-variable guards**: odd numbers always land on the safe side — `IDLE_TTL_MS` values like `-1` or garbage mean "never reap" (never give the write lock away), a too-small reap interval falls back to the default (no busy loop), and the **lost-holder threshold is floored at 30 s** (so another instance cannot "legitimately" preempt and kill our turn) (no tokens, runs every time) |
+| `sandbox-guard` | 18 | **the test sandbox itself**: a "throwaway HOME" that resolves to the real user profile, to the filesystem root, or to anywhere outside the OS temp dir is refused with an error instead of being written to and deleted. Every other suite builds its HOME through `test/sandbox-home.mjs` and can only destroy what it created there (no tokens, runs every time) |
 | `approval-details` | 24 | **approval review context**: the pending-approval snapshot carries the command, reason, cwd and original approval ID — not just a bare ID — so a caller can actually adjudicate; credential-shaped fields and common inline literals are redacted in both the structured context and the displayed title. Verified end-to-end over real stdio MCP |
 | `timeout` | 38 | **timeout semantics**: `wait=false` is unaffected by `timeout_ms`; a `wait=true` expiry merely downgrades to background (turn not cancelled, result not lost, `busy` never lies); `timeout_ms<=0` waits forever; a failed resume invalidates the process instead of wedging the conversation; an empty prompt yields a clear error |
 | `lock` | 79 | **write lock and preemption**: four holder classifications, `writeMarker` never overwriting a live holder, malformed/missing registration edge cases; **end-to-end** with two real MCP instances fighting over one conversation → clear error → refusal → `force` takeover; **a crash releases the lock automatically**, **a wedged holder is preempted without `force`**; plus the "one turn, one sentinel" invariant (inline turns and idle interjects included) |
@@ -432,9 +433,15 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `permission` | 11 | ★ **whether the permission tiers actually take effect** (a safety property): it ignores our own return values (the very thing that used to lie) and reads **the session's own record** (`permissions.preset` / `sandboxMode` in the projection cache), checking all three tiers and that their recorded values differ. **This suite caught a silent privilege escalation**: a `defaultPreset` in the profile overrides `DSH_PERMISSION_MODE` at session creation |
 | `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
 
-**Total: 528 checks, all green.** (492 in-suite + 36 acceptance)
+**Total: 546 checks, all green.** (510 in-suite + 36 acceptance)
 
-> Counts are the numbers each suite prints itself. `smoke`/`prune`/`guards`/`approval-details`/`boundary` run without LLM calls; the rest need a working provider.
+> Counts are the numbers each suite prints itself. `smoke`/`prune`/`guards`/`sandbox-guard`/`approval-details`/`boundary` run without LLM calls; the rest need a working provider.
+
+### 🧯 Why `sandbox-guard` exists
+
+On 2026-10-29 a throwaway verification script stored its sandbox path in a **PowerShell** variable named `$home`. `$home` is a read-only automatic variable, so the assignment failed silently (the script ran with `$ErrorActionPreference = 'Continue'`), `$env:USERPROFILE` was pointed at the sandbox name anyway, and the cleanup line — `Remove-Item $home -Recurse -Force` — resolved to the **real user profile**. The run timed out at 120 s mid-delete, taking part of `~/.codex`, `~/.cursor` and `~/.claude` with it.
+
+Nothing in the test suites was ever green-but-wrong about the *writer*; what was missing was any assertion about the *sandbox*. `sandbox-guard` is that assertion: it refuses the real home, its subdirectories, case variants, the filesystem root, and any path outside `os.tmpdir()`. `test/sandbox-home.mjs` is now the only place a sandbox is created or destroyed, and `setup`/`removal-scope` no longer call `mkdtempSync` or `rmSync` themselves — the suite fails if they go back to doing so.
 
 ### 📏 Numbers in this README must be reproducible
 

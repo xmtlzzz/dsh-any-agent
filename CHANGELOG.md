@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `test/sandbox-home.mjs` + `test/sandbox-guard.mjs` (18 checks) — a test
+  sandbox can no longer point at real user data. The guard refuses the real
+  `home`, its subdirectories, case variants, the filesystem root, and any path
+  outside `os.tmpdir()`; `setup` and `removal-scope` now create and destroy
+  their HOME only through this module and fail if they go back to calling
+  `mkdtempSync`/`rmSync` directly.
 - `test/removal-scope.mjs` — 24 checks proving unregistering touches only
   its own entry. Given configs holding unrelated MCP servers, top-level Codex
   settings (`model`, `approval_policy`, `sandbox_mode`) and Zed settings
@@ -23,6 +29,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read or rewritten, and that the recorded path is absolute — moving or
   deleting the installation leaves clients reporting `CONNECTION_CLOSED`
   until setup is re-run from the new location.
+
+### Fixed
+
+- **A throwaway verification script deleted parts of the operator's real
+  home directory.** Not a bug in `setup` — a bug in the harness used to
+  verify it. The script kept its sandbox path in `$home`, which is a
+  read-only automatic variable in PowerShell; with
+  `$ErrorActionPreference = 'Continue'` the failed assignment was silent, so
+  `$env:USERPROFILE` still pointed at the intended sandbox name while the
+  cleanup line `Remove-Item $home -Recurse -Force` resolved to the real
+  profile. Three runs, each killed by a 120 s timeout mid-delete, removed part
+  of `~/.codex`, `~/.cursor` and `~/.claude` (the package's own config
+  entries survived; user data around them did not).
+
+  Evidence it was a sandbox-escape rather than a write: stray
+  `~/.cursor/mcp.json.bak-dsh-*` files contained the fixture the script had
+  written (`{"mcpServers":{"keep":...}}`), i.e. it was writing to the real
+  profile. `sandbox-guard` now makes that impossible to do silently.
 
 ## [0.1.2] — 2026-10-29
 

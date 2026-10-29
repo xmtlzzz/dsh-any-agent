@@ -14,11 +14,11 @@
  * 全废 —— 所以第 9 组会把写进配置的那条命令真的执行一遍。
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { makeSandboxHome, removeSandbox } from './sandbox-home.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SETUP = join(HERE, '..', 'bin', 'setup.mjs');
@@ -30,15 +30,15 @@ const check = (name, cond, detail = '') => {
   else { console.log('  \u2717 ' + name + (detail ? '  ' + detail : '')); failed++; }
 };
 
-/** A throwaway HOME with the client configs we want present. */
+/**
+ * A throwaway HOME with the client configs we want present.
+ *
+ * 目录的创建与销毁都走 sandbox-home.mjs：那里会拒绝真实 HOME 和临时目录
+ * 之外的位置。2026-10-29 就是少了这道守卫，一段临时脚本的 "沙箱" 实际
+ * 指向了 ~，收尾的递归删除吃掉了 ~/.codex 的一部分。
+ */
 function sandbox(configs = {}) {
-  const home = mkdtempSync(join(tmpdir(), 'dsh-setup-'));
-  for (const [rel, content] of Object.entries(configs)) {
-    const p = join(home, rel);
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, content, 'utf8');
-  }
-  return home;
+  return makeSandboxHome('dsh-setup-', configs);
 }
 
 function runSetup(home, args = []) {
@@ -69,7 +69,7 @@ console.log('\n[1] dry-run writes nothing');
   check('it said nothing was written', /nothing was written/i.test(r.out));
   check('exit code is 0', r.code === 0, String(r.code));
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── 2. --yes 写入，且保留既有条目 ────────────────────────────────────
@@ -88,7 +88,7 @@ console.log('\n[2] --yes writes and preserves what was already there');
   check('a backup was created', backupsIn(join(home, '.cursor')).length === 1);
   check('exit code is 0', r.code === 0, String(r.code));
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── 3. 幂等 ──────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ console.log('\n[3] re-running is idempotent');
   check('second run reports already up to date', /already up to date/i.test(r.out), r.out.split('\n').find((l) => /skipped/.test(l)) ?? '');
   check('exit code is 0', r.code === 0, String(r.code));
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── 4. --remove 只移除自己 ───────────────────────────────────────────
@@ -128,7 +128,7 @@ console.log('\n[4] --remove takes out only our entry');
   check('the other one is untouched', cfg.mcpServers.keep?.command === 'x');
   check('exit code is 0', r.code === 0, String(r.code));
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── 5. 坏 JSON 必须拒绝，且不破坏原文件 ──────────────────────────────
@@ -145,7 +145,7 @@ console.log('\n[5] a corrupt config is refused, not rewritten');
   check('the broken file was left untouched', after === broken);
   check('no backup of a file we never wrote', backupsIn(join(home, '.cursor')).length === 0);
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── 6. 未安装的客户端被跳过 ──────────────────────────────────────────
@@ -159,7 +159,7 @@ console.log('\n[6] a client that is not installed is skipped');
   check('nothing failed', /0 failed/i.test(r.out), r.out.split('\n').find((l) => /Summary/.test(l)) ?? '');
   check('exit code is 0', r.code === 0, String(r.code));
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── 7. Codex 的 TOML 段 ──────────────────────────────────────────────
@@ -184,7 +184,7 @@ console.log('\n[7] Codex TOML block is written, kept idempotent, and removed');
   check('block removed', !removed.includes('[mcp_servers.dsh-any-agent]'));
   check('unrelated block still there', removed.includes('[mcp_servers.other]'));
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── 8. --version / --help 无副作用 ───────────────────────────────────
@@ -200,7 +200,7 @@ console.log('\n[8] --version and --help touch nothing');
   check('neither created a backup', backupsIn(join(home, '.cursor')).length === 0);
   check('the config is unchanged', readFileSync(join(home, '.cursor', 'mcp.json'), 'utf8') === '{"mcpServers":{}}');
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 // ── 9. 写进配置的命令必须真的能启动 ──────────────────────────────────
@@ -235,7 +235,7 @@ console.log('\n[9] the command written into the config actually starts');
     }
   }
 
-  rmSync(home, { recursive: true, force: true });
+  removeSandbox(home);
 }
 
 console.log('\n===== setup regression: passed ' + passed + ', failed ' + failed + ' =====');
