@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.1.2] — 2026-10-29
+
+One-line fix, but it decides whether `dsh-any-agent-setup` can register
+Claude Code on Windows at all.
+
+### Fixed
+
+- **Registration with Claude Code failed on any path containing a space.**
+  `process.execPath` is `C:\Program Files\nodejs\node.exe` on a default
+  Windows install, and setup passed it to the `claude` CLI through a shell
+  without quoting. cmd split the argument:
+
+      Command: C:\Program
+      Args:    Files\nodejs\node.exe D:\...\bin\dsh-any-agent.mjs
+
+  Nothing reported an error. `claude mcp add` exited 0, and the JSON written
+  to the config was correct — the only symptom was `CONNECTION_CLOSED` when
+  Claude Code tried to start the server. Cursor, Zed and Codex were unaffected
+  because they receive a JSON/TOML value rather than a shell argument.
+  Arguments containing whitespace are now quoted.
+
+### Added
+
+- `test/setup.mjs` grew a ninth group that closes the gap which let the above
+  through: it takes the entry setup just wrote, spawns it exactly as a client
+  would, and requires a valid `initialize` response. Every earlier check
+  asserted file contents; none asked whether the command in that file runs.
+  35 → 41 checks.
+
+### Documented
+
+- **What setup does and does not touch**, with before/after counts measured on
+  a machine holding real MCP servers: Cursor 4→5 entries, Codex 2→3 sections,
+  Claude Code 5→6 servers, Zed 33→33 keys, every pre-existing entry unchanged.
+  Also states the one thing that does change: JSON configs are re-serialised,
+  so values are preserved but whitespace is not.
+- **A release checklist**, including the two traps hit while shipping 0.1.0
+  and 0.1.1 — npm returning 202 while the registry still 404s for a minute,
+  and shields.io serving five-minute-stale badges (`license: package not
+  found` is its generic failure text, not a missing licence) — plus the
+  `npm deprecate` step for a broken published version and the fact that it
+  requires interactive OTP and therefore cannot run in CI.
+
 ## [0.1.1] — 2026-10-29
 
 A correctness release. Two of the fixes matter if you are on Node 20 or were
@@ -155,6 +198,7 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/xmtlzzz/dsh-any-agent/releases/tag/v0.1.0
