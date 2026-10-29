@@ -13,29 +13,51 @@ An MCP server that drives DSH as a **long-lived agent runtime** instead of wrapp
 
 **Works with any MCP client.** Nothing here is Codex- or Claude-specific: the server speaks plain MCP over stdio and uses only the four standard methods (`initialize`, `ping`, `tools/list`, `tools/call`). Verified against a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
 
-🧪 504 checks green · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT · 💬 Community: [linux.do](https://linux.do/)
+🧪 528 checks green · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT · 💬 Community: [linux.do](https://linux.do/)
 
 > 📌 **Read the [Usage Notes](USAGE-NOTES.en.md) first** — the practical gotchas that will actually bite you: the ACP model-config trap, external MCP tools bypassing DSH's sandbox, the workspace/GUI registry cache, cost control, and a troubleshooting table.
 
 ## 📑 Contents
 
-- [✨ Why it's different](#-why-its-different) · [⚡ Why not just wrap the DSH CLI](#-why-not-just-wrap-the-dsh-cli)
-- [🚀 Setup](#-setup) · [🧰 Tools](#-tools)
-- [📋 Dispatch then collect](#-workflow-dispatch-then-collect-later) · [🔔 Completion notifications](#-workflow-get-notified-on-completion-no-polling) · [🧵 Many conversations](#-workflow-many-conversations-at-once)
-- [🔐 Permissions](#-permissions) · [🤫 Reasoning](#-reasoning-hidden-by-default) · [🕶️ Logging and privacy](#️-logging-and-privacy)
-- [🔒 The write lock](#-the-write-lock-one-writer-per-conversation-at-a-time) · [🪟 GUI visibility](#-workspace-visibility-in-the-dsh-gui)
-- [⚙️ Environment](#-environment-variables) · [🧪 Tests](#-tests) · [⚠️ Known limitations](#-known-limitations)
+- **Start here** — [The problem](#-the-problem-this-solves) · [Why it's different](#-why-its-different) · [Why not just wrap the DSH CLI](#-why-not-just-wrap-the-dsh-cli) · [Requirements](#-requirements) · [Setup](#-setup)
+- **Using it** — [Tools](#-tools) · [Dispatch then collect](#-workflow-dispatch-then-collect-later) · [Completion notifications](#-workflow-get-notified-on-completion-no-polling) · [Many conversations](#-workflow-many-conversations-at-once)
+- **Behavior** — [Permissions](#-permissions) · [Reasoning](#-reasoning-hidden-by-default) · [Logging and privacy](#-logging-and-privacy) · [Workspace & GUI](#workspace-visibility-in-the-dsh-gui)
+- **Hard parts** — [The write lock](#-the-write-lock-one-writer-per-conversation-at-a-time)
+- **Reference** — [Environment](#-environment-variables) · [Tests](#-tests) · [Known limitations](#-known-limitations) · [Why the old profile name?](#-why-is-the-profile-still-called-dsh-mcp)
 
 
 ```
-Claude / Codex  ──MCP(stdio)──▶  dsh-any-agent
-                                    │ newline-delimited JSON-RPC (ACP)
-                                    ▼
-                            dsh --profile dsh-mcp        ← one long-lived process per conversation
-                                    │
-                                    ├─ DSH's own tools (files, shell, search, skills, subagents, workflows)
-                                    └─ dsh-mcp-client ─▶ your other MCP servers (e.g. IDA Pro)
+  any MCP client                       ← Claude Code, Codex, Cursor, Zed, Cline, your own…
+  (Claude/Codex/Cursor/…)              │
+         │ MCP over stdio              │ newline-delimited JSON-RPC (ACP)
+         ▼                             ▼
+   ┌─────────────┐            ┌──────────────────────────┐
+   │dsh-any-agent│───────────▶│ dsh --profile dsh-mcp    │  one long-lived process
+   └─────────────┘            │                          │  per conversation
+                              └────────────┬─────────────┘
+                                           │
+                              ┌────────────┴─────────────┐
+                              │ DSH's own tools          │ files, shell, search,
+                              │                          │ skills, subagents, workflows
+                              ├──────────────────────────┤
+                              │ dsh-mcp-client           │ → your other MCP servers
+                              └──────────────────────────┘
 ```
+
+## 🎯 The problem this solves
+
+You already have a coding agent in your editor. What you do **not** have is one that can:
+
+- **hand a multi-hour job to another agent and walk away** — then collect the result when it's done;
+- **keep the job alive across restarts** of your editor, your session, your machine's idle reap;
+- **cut in mid-flight** when it's going the wrong way, without destroying the work;
+- **run several of them at once** and switch between them.
+
+DSH (DeepSeek Harness) can do all of that — it has file/shell tools, skills, subagents and workflows — but it is a GUI-first application. Its own `sdk` profile exposes only 3 requests and can't resume, cancel, or answer approvals.
+
+**This server is the missing adapter:** it makes DSH into a *well-behaved background agent* that any MCP client can hire, supervise and collect from.
+
+> Think of it as `&job` — like `&` in a shell, but for an agent.
 
 ## ✨ Why it's different
 
@@ -290,7 +312,9 @@ Silent by default — **not one byte is written**.
 | Variable | Default | Purpose |
 |---|---|---|
 | `DSH_BIN` | auto-detected | Path to `@deepseek-ai/dsh/lib/bin.js` |
-| `DSH_MCP_PROFILE` | `dsh-mcp` | DSH profile to drive |
+| `DSH_MCP_PROFILE` | `dsh-mcp` | DSH profile to drive. ⚠️ The stale name is deliberate — see [Why is the profile still called `dsh-mcp`?](#why-is-the-profile-still-called-dsh-mcp) |
+| `DSH_MCP_BOOTSTRAP` | on | Whether this server may create/sync the DSH profile on first start. `0` makes it drive an existing profile only and never write a file |
+| `DSH_MCP_ROUTE_SOURCE` | unset | Pin where model routes are copied from during bootstrap: a profile name (`desktop`, `web`, …) or `__home__` for `$DSH_HOME/cordis.patch.yml`. Unset = try home → desktop → web → headless → acp |
 | `DSH_MCP_STATE` | `<repo>/.state/conversations.json` | Conversation registry, survives restarts |
 | `DSH_MCP_RUNS_DIR` | `<state file dir>/runs` | Root for async completion sentinels (`<this>/<conversation_id>/<run_id>.json`) |
 | `DSH_MCP_LOCKS_DIR` | `<state file dir>/locks` | Holder registrations for the write lock. ⚠️ **All instances must agree on this value**, or they cannot see each other's registrations and will misread each other as an unidentifiable holder (a GUI) and refuse to preempt |
@@ -305,6 +329,8 @@ Silent by default — **not one byte is written**.
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0` (no timeout) | Wait bound for **`wait=true` only**; on expiry the turn merely moves to the background |
 | `DSH_MCP_APPROVAL_TIMEOUT_MS` | `300000` | How long a pending approval waits |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |
+| `DSH_MCP_REQUEST_TIMEOUT_MS` | `60000` | Per-request timeout on the ACP channel (initialize, session/new, …) |
+| `DSH_MCP_REAP_INTERVAL_MS` | `30000` | How often the idle reaper checks for conversations to reclaim. Values below the safe floor fall back to the default |
 | `DSH_MCP_LOG` | `silent` | `silent` / `info` / `debug` |
 | `DSH_MCP_LOG_STDERR` | unset | `1` forwards DSH's raw stderr |
 
@@ -320,13 +346,14 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 
 | Suite | Checks | Covers |
 |---|---|---|
-| `smoke` | 28 | handshake, tool table, conversation creation, config, registry purity |
+| `smoke` | 29 | handshake, tool table, conversation creation, config, registry purity |
 | `boundary` | 42 | protocol edges (double initialize, malformed lines, unknown method), argument validation, unknown ids, cursor edges, lifecycle idempotence, unicode |
 | `integration` | 30 | resume-with-memory across processes, interrupt, both interject modes |
 | `async` | 16 | fire-and-forget + later collection |
 | `sentinel` | 36 | completion sentinel: atomicity, latch semantics, per-conversation namespacing under concurrency, cancelled runs still land it, and **reasoning never reaching the file** |
 | `prune` | 11 | **sentinel retention**: prunes over-age and crash-leftover files, keeps fresh ones, removes empty shells, `TTL=0` disables pruning, and never touches the conversation registry beside it (no tokens, runs every time) |
 | `guards` | 31 | **environment-variable guards**: odd numbers always land on the safe side — `IDLE_TTL_MS` values like `-1` or garbage mean "never reap" (never give the write lock away), a too-small reap interval falls back to the default (no busy loop), and the **lost-holder threshold is floored at 30 s** (so another instance cannot "legitimately" preempt and kill our turn) (no tokens, runs every time) |
+| `approval-details` | 24 | **approval review context**: the pending-approval snapshot carries the command, reason, cwd and original approval ID — not just a bare ID — so a caller can actually adjudicate; credential-shaped fields and common inline literals are redacted in both the structured context and the displayed title. Verified end-to-end over real stdio MCP |
 | `timeout` | 38 | **timeout semantics**: `wait=false` is unaffected by `timeout_ms`; a `wait=true` expiry merely downgrades to background (turn not cancelled, result not lost, `busy` never lies); `timeout_ms<=0` waits forever; a failed resume invalidates the process instead of wedging the conversation; an empty prompt yields a clear error |
 | `lock` | 79 | **write lock and preemption**: four holder classifications, `writeMarker` never overwriting a live holder, malformed/missing registration edge cases; **end-to-end** with two real MCP instances fighting over one conversation → clear error → refusal → `force` takeover; **a crash releases the lock automatically**, **a wedged holder is preempted without `force`**; plus the "one turn, one sentinel" invariant (inline turns and idle interjects included) |
 | `cycle` | 36 | **the async dispatch lifecycle**: dispatch → collect the sentinel → idle reap → dispatch again, three rounds with no lock error; re-dispatch right on the reap boundary (widening the race); an immediate re-dispatch after `dsh_release`; and an assertion that reaping leaves no unattributable lock (this suite caught the reaper collecting a freshly spawned process as if it were idle) |
@@ -334,12 +361,13 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `capability` | 22 | writing code, running scripts, **spawning its own subagents** (verified on disk via child session headers) |
 | `workspace-effect` | 24 | workspace actually effective when no path is given |
 | `acceptance` | 36 | two folders × two conversations doing a read-only IDA Pro analysis |
-
 | `multi` | 19 | **several instances and non-ASCII paths**: reproduces "two instances share the registry and the later save drops the earlier instance's conversation", then proves **that conversation is recoverable by id alone from the session store and actually usable**; **recovery never silently escalates privileges** (a read-only conversation stays read-only); no `.tmp` residue; and **CJK / emoji workspace paths** create sessions, do real work, and place files in the right directory |
 | `permission` | 11 | ★ **whether the permission tiers actually take effect** (a safety property): it ignores our own return values (the very thing that used to lie) and reads **the session's own record** (`permissions.preset` / `sandboxMode` in the projection cache), checking all three tiers and that their recorded values differ. **This suite caught a silent privilege escalation**: a `defaultPreset` in the profile overrides `DSH_PERMISSION_MODE` at session creation |
 | `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
 
-**Total: 504 checks, all green.** (468 in-suite + 36 acceptance)
+**Total: 528 checks, all green.** (492 in-suite + 36 acceptance)
+
+> Counts are the numbers each suite prints itself. `smoke`/`prune`/`guards`/`approval-details`/`boundary` run without LLM calls; the rest need a working provider.
 
 ## 🔒 The write lock: one writer per conversation at a time
 
@@ -374,6 +402,20 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 6. **No renaming** — DSH's title subsystem has no external rename API (`SessionTitleService.rename` requires a live in-process session). Titles are auto-generated from the first message.
 7. **`session/list` returns only `{sessionId, cwd}` and excludes already-open sessions** — titles are filled in by this server from DSH's projection cache.
 8. **"Never reap" costs memory (measured ~120 MB per conversation)** — that is what buys "the GUI can never take the write lock". Two ways to spend less: ① **`DSH_MCP_MAX_LIVE` (default 8** — over the cap, the least recently used process is reaped → bounded memory, locks still held where it matters); ② set `DSH_MCP_IDLE_TTL_MS` to a millisecond value (at the cost of the lock being takeable). To drop to zero right after a batch of work: **`dsh_release(all=true)`** ✓ (lossless, everything resumes on demand).
+
+## ❓ Why is the profile still called `dsh-mcp`?
+
+Because renaming it would break things that already exist on disk.
+
+When you first start this server it creates a DSH profile under `~/.dsh/profiles/dsh-mcp/`. That directory name is referenced by three other persisted things:
+
+| Persisted identifier | Where | Breaks if renamed |
+|---|---|---|
+| the profile directory | `~/.dsh/profiles/dsh-mcp/` | existing sessions can no longer resolve their provider (`no adapter registered for provider "…"`) |
+| `DSH_MCP_*` environment variables | your client config | every deployment would need editing at once |
+| the `# dsh-mcp:managed` marker line | first line of the generated `cordis.patch.yml` | the bootstrap would stop recognising the file as its own and never sync it again |
+
+So the **product** is `dsh-any-agent`; the **persisted identifiers** keep the old name on purpose. This is a deliberate compatibility decision, not an oversight. If you are setting this up from scratch and want a different profile name, set `DSH_MCP_PROFILE` — the server will use whatever you give it.
 
 ## 💬 Community
 
