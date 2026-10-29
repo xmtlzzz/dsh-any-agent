@@ -1,0 +1,384 @@
+# 🐳 dsh-any-agent
+
+**English** | [中文](README.zh.md)
+
+[![npm version](https://img.shields.io/npm/v/dsh-any-agent.svg)](https://www.npmjs.com/package/dsh-any-agent)
+[![node](https://img.shields.io/node/v/dsh-any-agent.svg)](https://nodejs.org)
+[![license](https://img.shields.io/npm/l/dsh-any-agent.svg)](LICENSE)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
+
+> **Give any MCP client a coding buddy that sticks around** — powered by DeepSeek Harness.
+
+An MCP server that drives DSH as a **long-lived agent runtime** instead of wrapping a CLI. Open a conversation, hand it a goal, and it writes code, runs scripts and spawns its own subagents — while you watch, cut in, and collect the result whenever you like. 🛠️
+
+**Works with any MCP client.** Nothing here is Codex- or Claude-specific: the server speaks plain MCP over stdio and uses only the four standard methods (`initialize`, `ping`, `tools/list`, `tools/call`). Verified against a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
+
+🧪 504 checks green · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT · 💬 Community: [linux.do](https://linux.do/)
+
+> 📌 **Read the [Usage Notes](USAGE-NOTES.en.md) first** — the practical gotchas that will actually bite you: the ACP model-config trap, external MCP tools bypassing DSH's sandbox, the workspace/GUI registry cache, cost control, and a troubleshooting table.
+
+## 📑 Contents
+
+- [✨ Why it's different](#-why-its-different) · [⚡ Why not just wrap the DSH CLI](#-why-not-just-wrap-the-dsh-cli)
+- [🚀 Setup](#-setup) · [🧰 Tools](#-tools)
+- [📋 Dispatch then collect](#-workflow-dispatch-then-collect-later) · [🔔 Completion notifications](#-workflow-get-notified-on-completion-no-polling) · [🧵 Many conversations](#-workflow-many-conversations-at-once)
+- [🔐 Permissions](#-permissions) · [🤫 Reasoning](#-reasoning-hidden-by-default) · [🕶️ Logging and privacy](#️-logging-and-privacy)
+- [🔒 The write lock](#-the-write-lock-one-writer-per-conversation-at-a-time) · [🪟 GUI visibility](#-workspace-visibility-in-the-dsh-gui)
+- [⚙️ Environment](#-environment-variables) · [🧪 Tests](#-tests) · [⚠️ Known limitations](#-known-limitations)
+
+
+```
+Claude / Codex  ──MCP(stdio)──▶  dsh-any-agent
+                                    │ newline-delimited JSON-RPC (ACP)
+                                    ▼
+                            dsh --profile dsh-mcp        ← one long-lived process per conversation
+                                    │
+                                    ├─ DSH's own tools (files, shell, search, skills, subagents, workflows)
+                                    └─ dsh-mcp-client ─▶ your other MCP servers (e.g. IDA Pro)
+```
+
+## ✨ Why it's different
+
+|  |  |
+|---|---|
+| 🔄 **A dead process never kills a conversation** | The identity lives on disk. A crash, an idle reap, even restarting this whole server costs you nothing — the next call transparently resumes it, memory intact (verified across processes). |
+| 🗣️ **You are never stuck waiting** | Steer a conversation mid-flight — **interject** to stop and redirect (~18 ms to converge), or **queue** a remark for after the current turn. Interrupting never damages the conversation. |
+| 📡 **Completion notification, not polling** | Long tasks return instantly with a `run_id`; when the turn ends, a **sentinel file** is written atomically so a background task in *your* host wakes you. No polling, no occupied turn. |
+| 🪟 **Many conversations at once** | `dsh_list(only_running)` shows what's live; `dsh_read` gives cursor-based incremental output. Cycle between them like windows. |
+| 🧠 **Reasoning hidden by default** | You get "thought for N chars / M seconds" statistics instead of context-burning prose — and it is never logged, never written to disk. |
+| 🤫 **Silent by default** | Not one byte on stderr, so nothing pollutes your host's logs. stdout carries the protocol and nothing else. |
+| 🧩 **Capabilities compose** | DSH can mount its own MCP servers (IDA Pro, browsers, your internal tooling), so this is a bridge to a whole toolbox. |
+| 🛡️ **Read-only that really is read-only** | `read-only` sandbox plus auto-denied approvals, for working on untrusted samples. |
+
+## ⚡ Why not just wrap the DSH CLI?
+
+DSH ships two programmable entry points. The `sdk` profile looks simpler, but its JSON-RPC surface has only **3 requests and 4 notifications** — and it lacks three things that make an agent unusable in practice. The `acp` profile (Agent Client Protocol) has all of them. Everything below was verified against DSH `0.1.7-rc.2`.
+
+| Capability | `sdk` profile | `acp` profile (**this project**) |
+|---|---|---|
+| **Resume a conversation** | ❌ no resume method; reusing an id fails with `already exists` | ✅ `session/resume` — verified **across processes** |
+| **Interrupt a running turn** | ❌ only by killing the process | ✅ `session/cancel` — the same path as the user's own stop button |
+| **Answer approval prompts** | ❌ no channel; operations silently fail closed | ✅ `session/request_permission` round-trip |
+| List / close sessions | ❌ none | ✅ `session/list`, `session/close` |
+| Gray vs. black streaming | one message, split by a `type` field | ✅ two separate channels: `agent_thought_chunk` / `agent_message_chunk` |
+| Per-session MCP servers | ❌ process-wide | ✅ `mcpServers` accepted by `session/new` and `session/resume` |
+
+**Core idea: the process is a cache, not the identity.** A conversation's identity is DSH's `sessionId`, persisted under `~/.dsh/sessions`. If the process is reaped, crashes, or the whole MCP server restarts, the next call transparently `session/resume`s it — history intact.
+
+## 📦 Requirements
+
+- **Node.js ≥ 20**
+- **DSH installed** (`@deepseek-ai/dsh`), with working credentials under `~/.dsh`
+- A DSH **profile named `dsh-mcp`** derived from the shipped `acp` template, containing **your own** provider/model config (this repo deliberately ships no provider config)
+
+## 🚀 Setup
+
+### 1. Create the DSH profile
+
+```bash
+dsh dsh-mcp --from-default-profile acp
+```
+
+Then edit `~/.dsh/profiles/dsh-mcp/cordis.patch.yml` and declare your provider and model. Start from [`profile-example/cordis.patch.yml`](profile-example/cordis.patch.yml).
+
+> ⚠️ **Two traps here** (both learned the hard way):
+>
+> 1. **ACP's model does NOT come from `agent-default-model`.** It comes from the `dsh-acp` plugin's own `config.provider` / `config.model`, which the `acp` bundle hard-codes to `deepseek-official`. If you don't override the `acp` row, your sessions silently run on the wrong provider and fail with `no API key for provider route "deepseek-official"`.
+> 2. **ACP's `reasoning_effort` defaults to empty** (= "Provider default"), not to the maximum. This server explicitly sets it to `max` on every `session/new` and after every `session/resume` — because a fresh process does not remember the previous choice.
+
+### 2. Register the server
+
+**From npm (recommended)**
+
+```bash
+npm install -g dsh-any-agent
+```
+
+The `dsh-any-agent` executable is then on your `PATH` and every client below can just call it by name.
+
+**From a local checkout**
+
+Clone or unzip anywhere, then point `command` at `node` and `args` at `<checkout>/server/bin/dsh-any-agent.mjs` (shown below).
+
+---
+
+**Claude Code**
+
+```bash
+# global install
+claude mcp add dsh-any-agent -- dsh-any-agent
+
+# local checkout
+claude mcp add dsh-any-agent -- node /absolute/path/to/server/bin/dsh-any-agent.mjs
+```
+
+**Codex** (`~/.codex/config.toml`)
+
+```toml
+[mcp_servers.dsh-any-agent]
+command = "dsh-any-agent"          # or "node" + path to bin/dsh-any-agent.mjs
+args = []
+startup_timeout_sec = 20.0
+tool_timeout_sec = 120.0
+```
+
+**Generic MCP client** — anything that speaks MCP over stdio:
+
+```json
+{
+  "mcpServers": {
+    "dsh-any-agent": {
+      "command": "dsh-any-agent",
+      "args": []
+    }
+  }
+}
+```
+
+For a local checkout, use `"command": "node"` and `"args": ["/absolute/path/to/server/bin/dsh-any-agent.mjs"]`.
+
+> Cursor, Windsurf, Zed, Cline, Continue and most other clients use this same `mcpServers` shape — if it can launch a stdio MCP server, it works.
+
+### 3. Try it
+
+```bash
+node test/smoke.mjs        # no LLM calls, verifies the whole plumbing
+```
+
+## 🧰 Tools
+
+| Tool | What it does |
+|---|---|
+| `dsh_start` | Create a conversation: workspace, permission tier, approval policy, **reasoning effort (default `max`)**, model |
+| `dsh_send` | Hand it a task. **Defaults to `wait=false`: returns a `run_id` + `sentinel_file` immediately**, the turn runs in the background and the sentinel file notifies you when it's done (recommended). `wait=true` blocks until the turn ends; hitting `timeout_ms` (default `0` = wait forever) **only downgrades to background — the turn is never cancelled and the result is never lost** |
+| `dsh_list` | All conversations with live state: `running` / `idle` / `detached`, elapsed time, current tool, output so far. `only_running=true` for active ones |
+| `dsh_read` | **Cursor-based incremental read** of what a *running* conversation is producing right now |
+| `dsh_get` | Conversation details; with `run_id`, the **final result of that dispatch** (the "collect the result later" entry point) |
+| `dsh_interject` | Interject while it's busy: `interject` = stop and redirect, `queue` = wait for the current turn, then speak. **This round writes a sentinel too**, and the reply carries its `sentinel_file` |
+| `dsh_takeover` | **Preempt the write lock.** The only way out when another DSH process holds it (DSH has no steal API — preempting means killing the holder). It classifies the holder first: our own orphaned child → taken automatically; another live instance → needs `force`; **GUI/unknown → never killed**, reported instead |
+| `dsh_interrupt` | Stop the current turn (the conversation stays healthy) |
+| `dsh_release` | Hand the conversation back (frees the write lock so you can open it in your own DSH GUI). Still resumable |
+| `dsh_approval_decide` | Adjudicate a pending approval (only when `on_approval=ask`) |
+| `dsh_status` | Lightweight status check |
+
+## 📋 Workflow: dispatch, then collect later
+
+MCP tool calls **block**, so `dsh_send` **does not block by default** (`wait=false`): you get a receipt immediately, the turn runs in the background, and the sentinel file wakes you when it finishes. The whole flow:
+
+```text
+1. dsh_send(conversation_id, prompt, wait=false)
+     → { run_id: "run-abc123", background: true }        # returns in ~1 ms
+
+2. …keep working on something else (verified: another conversation ran a full turn meanwhile)…
+
+3. dsh_status(conversation_id)
+     → state=running | elapsed=3.5s | current_tool=pwsh | out=37 chars
+
+4. dsh_read(conversation_id, cursor)                      # peek mid-flight
+     → [me] … | [turn] turn 1 started | [tool] pwsh [in_progress]
+
+5. dsh_get(conversation_id, run_id)                       # collect the result
+     → status=done, elapsed=20.3s, full answer
+```
+
+`run_id` is the receipt. Run records are **memory-only, last 20 kept**; under many concurrent runs old ones get evicted and `dsh_get` will fail — which is exactly why the completion sentinel below carries the result.
+
+## 🔔 Workflow: get notified on completion (no polling)
+
+Besides `run_id`, `wait=false` returns a **`sentinel_file`** path plus **`sentinel_file_posix`** (the Bash/MSYS form — use it directly; hand-converting Windows paths is the easiest way to make your waiter hang until timeout). When the turn ends — **whether it succeeds, fails, or is cancelled** — the service **atomically writes** a small file there containing the final `status` and `result`. So you neither poll nor block: **wait for that file with a background task in your own host (Claude/Codex); the moment it appears, you're woken up.**
+
+```bash
+# sent="$sentinel_file_posix"   ← copy it straight from the tool result
+sent='/d/AI_MCP/DSH_MCP/.state/runs/<conversation_id>/<run_id>.json'
+dl=$(( $(date +%s) + 2100 ))          # 35min safety net so a dead service can't hang you forever
+until [ -f "$sent" ]; do
+  [ "$(date +%s)" -ge "$dl" ] && { echo "TIMEOUT"; exit 1; }
+  sleep 2
+done
+echo "DONE"                            # task exits → host wakes you → read the file to collect
+```
+
+Once the file exists: **read it** for `status` and `result` (preferred — immune to the in-memory window and survives restarts), or use `dsh_get(conversation_id, run_id)`.
+
+Design notes (especially under **concurrent multi-session** use):
+
+- **No cross-talk**: the path is `.state/runs/<conversation_id>/<run_id>.json`, namespaced by conversation. `run_id` sequence numbers are counted per-conversation, so two conversations *can* mint the same `run_id` in the same millisecond — the per-conversation directory keeps them apart. Arm one background task per run; each completes and wakes you independently.
+- **Latch semantics**: the file is written once and kept. Even if the run finishes *before* you arm the waiter, `[ -f ]` is immediately true — you never miss it.
+- **Atomic write**: `tmp` + `rename`; if the file exists its contents are complete. Each run uses its own tmp, so concurrent writes never clobber.
+- **No server push**: the service only answers requests over MCP (it sends no notifications). "Completion notification" is entirely the sentinel file plus your background waiter.
+- **★ No reasoning in the sentinel**: the payload carries the answer and thinking *statistics* only — `result.thinking` is stripped and replaced by `thinking_omitted: true`, because the project's rule is that reasoning never reaches disk. `dsh_get(run_id)` still returns it from memory while the record lives. `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` breaks that guarantee deliberately.
+
+> Cleanup: sentinels contain full answers, so the service **prunes sentinels older than 7 days at startup** (tune with `DSH_MCP_SENTINEL_TTL_MS`; `0` disables). Your waiter should still `rm` the file after consuming it.
+
+## 🧵 Workflow: many conversations at once
+
+```text
+1. dsh_list(only_running=true)
+     - … | id=448b239b… | 🔵 running (9s, tool=pwsh, 40 chars this turn) | cwd=…
+     - … | id=33427096… | 🔵 running (8s, 34 chars this turn)        | cwd=…
+2. dsh_read(id,  cursor=0)      # read the first, note the cursor
+3. dsh_read(id2, cursor=0)      # switch to the second
+4. dsh_read(id,  cursor=<prev>) # switch back, deltas only
+```
+
+## 🤫 Reasoning: hidden by default
+
+DSH separates reasoning from answer text at the model layer, and ACP exposes them as **two independent streams**. This server hides reasoning by default and returns only **statistics** (characters, duration, chunk count) — so the caller knows thinking happened without paying for it in context.
+
+- `reasoning=hide` (default) — content dropped, stats returned
+- `reasoning=marker` / `summary` / `full` — progressively more content (mind your context budget)
+- `dsh_read(include_reasoning=true)` — live reasoning of the *currently running* turn only; it is never buffered and is discarded when the turn ends
+
+## 🔐 Permissions
+
+| Tier | Approval default | Use for |
+|---|---|---|
+| `danger-full-access` (default) | `auto-allow` | Zero friction |
+| `workspace-write` | `auto-allow` | Out-of-workspace operations surface as pending approvals |
+| `read-only` | `auto-deny` | Analyzing untrusted samples (malware, unknown dumps) |
+
+`on_approval` can be `auto-allow`, `auto-deny`, or `ask` (which exposes a pending approval for `dsh_approval_decide` to adjudicate).
+
+## 🪟 Workspace visibility in the DSH GUI
+
+Two different things — don't confuse them:
+
+| | Depends on | Status |
+|---|---|---|
+| **Workspace effectiveness** | the conversation's `cwd` | ✅ Always correct. Process working directory, file placement and sandbox write root all follow it |
+| **GUI grouping** | `sessionIds` in `~/.dsh/storages/workspace.json` | ⚠️ This server registers it, but **the running DSH server caches the registry in memory** — external file edits only take effect after a DSH restart |
+
+Verified experimentally ([`test/workspace-effect.mjs`](test/workspace-effect.mjs)): two conversations in two desktop folders, given **no path at all**, each wrote its file into its own workspace, self-reported the correct working directory, and leaked nothing into the server's cwd / home / temp / the other workspace (24/24 checks).
+
+Maintenance CLI:
+
+```bash
+node bin/dsh-any-agent-workspaces.mjs --list                  # inspect the registry
+node bin/dsh-any-agent-workspaces.mjs --backfill              # register every session found on disk
+node bin/dsh-any-agent-workspaces.mjs --prune-temp            # drop temp-directory entries
+node bin/dsh-any-agent-workspaces.mjs --prune-empty           # drop empty workspaces whose path is gone
+node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # delete test sessions (strict rules)
+```
+
+> ⚠️ Before restarting DSH, **don't touch workspaces in the GUI** — the server will write its in-memory state back over the file.
+
+## 🕶️ Logging and privacy
+
+Silent by default — **not one byte is written**.
+
+1. MCP's **stdout is the protocol channel**; anything mixed in corrupts the stream.
+2. This server is launched by Claude/Codex, so its stderr lands in *their* logs.
+3. DSH's own stderr may carry model output **including reasoning**, so it is never forwarded by default.
+
+| Level | Behavior |
+|---|---|
+| `silent` (default) | nothing at all |
+| `info` | this server's own lifecycle events only — **never any DSH output** |
+| `debug` | more of our own events; still no DSH output |
+| `DSH_MCP_LOG_STDERR=1` | additionally forward DSH's raw stderr (**may contain reasoning**) |
+
+**Reasoning never reaches disk** — with exactly one deliberate exception:
+
+- Not in logs (silent by default), and the state file holds metadata only (id, cwd, permissions, counters) — a smoke-test assertion guards this.
+- **The async completion sentinel does persist the answer** (it must, so a caller can collect offline) but **strips `result.thinking`** and marks `thinking_omitted: true`. A test asserts that even when `reasoning=full` is requested, no reasoning text appears in the sentinel — while `dsh_get(run_id)` still returns it from memory. Set `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` to break this on purpose.
+- Sentinels are pruned after 7 days by default (`DSH_MCP_SENTINEL_TTL_MS`; `0` keeps them forever).
+
+(DSH itself writes its own session log under `~/.dsh/sessions`; that is what makes resume possible and is outside this server's control.)
+
+## ⚙️ Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DSH_BIN` | auto-detected | Path to `@deepseek-ai/dsh/lib/bin.js` |
+| `DSH_MCP_PROFILE` | `dsh-mcp` | DSH profile to drive |
+| `DSH_MCP_STATE` | `<repo>/.state/conversations.json` | Conversation registry, survives restarts |
+| `DSH_MCP_RUNS_DIR` | `<state file dir>/runs` | Root for async completion sentinels (`<this>/<conversation_id>/<run_id>.json`) |
+| `DSH_MCP_LOCKS_DIR` | `<state file dir>/locks` | Holder registrations for the write lock. ⚠️ **All instances must agree on this value**, or they cannot see each other's registrations and will misread each other as an unidentifiable holder (a GUI) and refuse to preempt |
+| `DSH_MCP_LOCK_STALE_MS` | `90000` | How long without a heartbeat before a holder counts as lost (and becomes auto-preemptible by `dsh_takeover`) |
+| `DSH_MCP_IDLE_TTL_MS` | `0` (never reap) | How long a conversation may sit idle before its DSH process is reaped. ★★ **`0` means never reap (the default)**: the server keeps holding the write lock, so **the GUI cannot take it** — opening the conversation there is read-only and still works. Cost: one resident DSH process per conversation (**measured ~120 MB**). Set a millisecond value (e.g. `300000`) to save memory and accept that the lock can be taken |
+| `DSH_MCP_MAX_LIVE` | `8` (≈1 GB) | ★ **How many conversation processes to keep alive at once** (`0` = unlimited). Going over the cap reaps the **least recently used** one (a running turn is never reaped) — "**bounded memory, locks kept where it matters**". Use `4` when memory is tight, `0` on a big machine. To free everything at once: `dsh_release(all=true)` |
+| `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | Cache lifetime for `dsh_list`'s on-disk probe (the probe spawns a DSH process and takes ~1 s) |
+| `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels; `0` disables pruning |
+| `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**) |
+| `DSH_MCP_PERMISSION` | `danger-full-access` | Default tier for `dsh_start` |
+| `DSH_MCP_REASONING_EFFORT` | `max` | Default reasoning effort |
+| `DSH_MCP_PROMPT_TIMEOUT_MS` | `0` (no timeout) | Wait bound for **`wait=true` only**; on expiry the turn merely moves to the background |
+| `DSH_MCP_APPROVAL_TIMEOUT_MS` | `300000` | How long a pending approval waits |
+| `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |
+| `DSH_MCP_LOG` | `silent` | `silent` / `info` / `debug` |
+| `DSH_MCP_LOG_STDERR` | unset | `1` forwards DSH's raw stderr |
+
+## 🧪 Tests
+
+```bash
+node test/run.mjs          # smoke only (no LLM calls)
+node test/run.mjs --all    # everything
+node test/cleanup.mjs      # suite teardown on its own (temp dirs only; --dry-run to preview)
+```
+
+The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, which removes test sessions and workspace registrations **inside the OS temp directory only**. Real project sessions and the repo's `.state/` (your live conversation registry and sentinels) are never touched. To also remove `Desktop\dsh-any-agent-test-*` artifacts, run `node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions` explicitly.
+
+| Suite | Checks | Covers |
+|---|---|---|
+| `smoke` | 28 | handshake, tool table, conversation creation, config, registry purity |
+| `boundary` | 42 | protocol edges (double initialize, malformed lines, unknown method), argument validation, unknown ids, cursor edges, lifecycle idempotence, unicode |
+| `integration` | 30 | resume-with-memory across processes, interrupt, both interject modes |
+| `async` | 16 | fire-and-forget + later collection |
+| `sentinel` | 36 | completion sentinel: atomicity, latch semantics, per-conversation namespacing under concurrency, cancelled runs still land it, and **reasoning never reaching the file** |
+| `prune` | 11 | **sentinel retention**: prunes over-age and crash-leftover files, keeps fresh ones, removes empty shells, `TTL=0` disables pruning, and never touches the conversation registry beside it (no tokens, runs every time) |
+| `guards` | 31 | **environment-variable guards**: odd numbers always land on the safe side — `IDLE_TTL_MS` values like `-1` or garbage mean "never reap" (never give the write lock away), a too-small reap interval falls back to the default (no busy loop), and the **lost-holder threshold is floored at 30 s** (so another instance cannot "legitimately" preempt and kill our turn) (no tokens, runs every time) |
+| `timeout` | 38 | **timeout semantics**: `wait=false` is unaffected by `timeout_ms`; a `wait=true` expiry merely downgrades to background (turn not cancelled, result not lost, `busy` never lies); `timeout_ms<=0` waits forever; a failed resume invalidates the process instead of wedging the conversation; an empty prompt yields a clear error |
+| `lock` | 79 | **write lock and preemption**: four holder classifications, `writeMarker` never overwriting a live holder, malformed/missing registration edge cases; **end-to-end** with two real MCP instances fighting over one conversation → clear error → refusal → `force` takeover; **a crash releases the lock automatically**, **a wedged holder is preempted without `force`**; plus the "one turn, one sentinel" invariant (inline turns and idle interjects included) |
+| `cycle` | 36 | **the async dispatch lifecycle**: dispatch → collect the sentinel → idle reap → dispatch again, three rounds with no lock error; re-dispatch right on the reap boundary (widening the race); an immediate re-dispatch after `dsh_release`; and an assertion that reaping leaves no unattributable lock (this suite caught the reaper collecting a freshly spawned process as if it were idle) |
+| `concurrency` | 31 | three simultaneous conversations + live incremental reads |
+| `capability` | 22 | writing code, running scripts, **spawning its own subagents** (verified on disk via child session headers) |
+| `workspace-effect` | 24 | workspace actually effective when no path is given |
+| `acceptance` | 36 | two folders × two conversations doing a read-only IDA Pro analysis |
+
+| `multi` | 19 | **several instances and non-ASCII paths**: reproduces "two instances share the registry and the later save drops the earlier instance's conversation", then proves **that conversation is recoverable by id alone from the session store and actually usable**; **recovery never silently escalates privileges** (a read-only conversation stays read-only); no `.tmp` residue; and **CJK / emoji workspace paths** create sessions, do real work, and place files in the right directory |
+| `permission` | 11 | ★ **whether the permission tiers actually take effect** (a safety property): it ignores our own return values (the very thing that used to lie) and reads **the session's own record** (`permissions.preset` / `sandboxMode` in the projection cache), checking all three tiers and that their recorded values differ. **This suite caught a silent privilege escalation**: a `defaultPreset` in the profile overrides `DSH_PERMISSION_MODE` at session creation |
+| `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
+
+**Total: 504 checks, all green.** (468 in-suite + 36 acceptance)
+
+## 🔒 The write lock: one writer per conversation at a time
+
+DSH conversations carry a **cross-process write lock**: **it never expires while the holder lives, and no API can take it from a live holder** — so **whoever gets there first decides everything**. This server turns that into "**you can look, we can write**":
+
+| Situation | Outcome |
+|---|---|
+| **This server holds the lock** (the default) | ✅ Opening it in the GUI is **read-only**: you still **see the content**, but you **cannot take the lock**. The default `DSH_MCP_IDLE_TTL_MS=0` (never reap) keeps the lock from ever going free |
+| **You open it in the GUI while the lock is free** | ❌ **The GUI keeps it permanently** (navigating away, waiting and archiving all fail to release it) and this server **can never reconnect** — only restarting `dsh web` helps |
+| **Recommended** | Watch progress with **`dsh_read`** (cursor-based incremental reads) or the **sentinel file**; if you must use the GUI, `dsh_release` first (that interrupts a running turn, so it fits the gaps between tasks) |
+
+**Who holds it** is reported by `dsh_status.lock_holder`; `dsh_takeover` handles the four cases:
+
+| `lock_holder` | Meaning | Action |
+|---|---|---|
+| `self` | this process holds it | nothing to preempt |
+| `stale-mcp` | the holder is **alive but silent** (no heartbeat for 90 s — typically that MCP is wedged) | ✅ `dsh_takeover` **kills and takes over** |
+| `live-mcp` | another **live** dsh-any-agent instance is using it | ⚠️ refused by default; `force=true` takes it |
+| `none` | no registration → most likely **your own DSH GUI** | ❌ **never killed** (GUI conversations live inside the single `dsh web` process, so killing it takes down your whole UI and every GUI conversation with it), reported only |
+
+> **Two measured footnotes.** ① **A crash leaves no orphan lock** — `SIGKILL` the MCP and its children exit with it (their stdio pipe closes), releasing the lock automatically ✓; so `stale-mcp` really means "**alive but wedged**". ② **Several instances**: the registry is last-writer-wins (a later save drops conversations it never saw), but the **session store is authoritative** — any session on disk is recoverable **by id alone**; if you give instances different `DSH_MCP_STATE` files, **point `DSH_MCP_LOCKS_DIR` at one shared directory**, or they cannot see each other's holder registrations.
+>
+> The full measurements (the A/B probe method, the evidence that the GUI opens read-only, why even archiving does not release the lock, and crash-vs-wedge) are in [Usage Notes §3.5–3.12](USAGE-NOTES.en.md).
+
+## ⚠️ Known limitations
+
+1. **No token-level streaming into model context** — an MCP limitation, not DSH's. Callers get per-step results; humans can follow progress via stderr logs.
+2. **True mid-turn steering is impossible** — ACP rejects concurrent prompts (`a prompt is already in flight for this session`). `dsh_interject` is the practical equivalent: cancel, then immediately start a new turn, history preserved.
+3. **Image prompts are unsupported** — ACP advertises `promptCapabilities: {image: false}`.
+4. **Restarting the MCP server takes its children with it** — when this service is restarted or killed, the DSH children it spawned exit too (their stdio is a pipe to us): **in-flight turns are interrupted and no sentinel lands** (judge by inspecting the workspace, don't just wait for the file). The good news: the **write lock is released automatically**, so a restart always gets it back. The service also pushes no MCP notifications; "completion notification" is the sentinel file plus the caller's background waiter.
+5. **A conversation that dies before its first successful turn may never have materialized on disk** — resume then fails with a clear error. Safe after the first message.
+6. **No renaming** — DSH's title subsystem has no external rename API (`SessionTitleService.rename` requires a live in-process session). Titles are auto-generated from the first message.
+7. **`session/list` returns only `{sessionId, cwd}` and excludes already-open sessions** — titles are filled in by this server from DSH's projection cache.
+8. **"Never reap" costs memory (measured ~120 MB per conversation)** — that is what buys "the GUI can never take the write lock". Two ways to spend less: ① **`DSH_MCP_MAX_LIVE` (default 8** — over the cap, the least recently used process is reaped → bounded memory, locks still held where it matters); ② set `DSH_MCP_IDLE_TTL_MS` to a millisecond value (at the cost of the lock being takeable). To drop to zero right after a batch of work: **`dsh_release(all=true)`** ✓ (lossless, everything resumes on demand).
+
+## 💬 Community
+
+This project is announced and discussed on **[linux.do](https://linux.do/)** — usage questions, war stories and suggestions are all welcome there. Issues work too, but you'll usually get a faster answer in the community.
+
+## 📜 License
+
+MIT — see [LICENSE](LICENSE).

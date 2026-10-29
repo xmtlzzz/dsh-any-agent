@@ -1,0 +1,267 @@
+/**
+ * "异步派活 → 等 task → 回头再进" 的锁行为测试（**用户提出的场景**）。
+ *
+ * 疑问：MCP 异步派活后就不再握着「这一轮」的东西了，等调用方回头再来时，
+ * 会不会撞上一个自己留下的锁？更具体地——空闲回收把进程收掉之后，锁释放干净了吗？
+ *
+ * 本文件把这条生命周期跑穿，并且**故意把回收调得极快**来放大竞态窗口：
+ *   [1] 异步派活 → 收哨兵 → 空闲被回收 → 再派活：必须一路无锁错误（连做 3 轮）
+ *   [2] 回收时刻的锁状态：登记必须被删、子进程必须真的死了（不然锁会被"无名持有"）
+ *   [3] 贴着回收窗口立刻重派（放大竞态）：仍必须成功
+ *   [4] 主动 dsh_release → 立刻重派：同样必须成功（stop 必须等进程真退出）
+ *
+ * 全部开销只有几个极短回合（"只回复两个字"级别）。
+ */
+
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-cycle-'));
+const STATE = join(ROOT, 'state.json');
+const LOCKS = join(ROOT, 'locks');
+process.env.DSH_MCP_LOCKS_DIR = LOCKS;
+
+let pass = 0;
+let failCount = 0;
+const check = (name, cond, detail = '') => {
+  if (cond) {
+    pass++;
+    console.log(`  ✓ ${name}`);
+  } else {
+    failCount++;
+    console.log(`  ✗ ${name}${detail ? `\n      ${detail}` : ''}`);
+  }
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const { McpClient } = await import('./mcp-client.mjs');
+const locks = await import('../src/locks.mjs');
+
+/** 把空闲回收调到极快：1 秒空闲就收，400ms 扫一次 —— 放大竞态窗口。 */
+const ENV = {
+  DSH_MCP_STATE: STATE,
+  DSH_MCP_LOCKS_DIR: LOCKS,
+  DSH_MCP_IDLE_TTL_MS: '1000',
+  DSH_MCP_REAP_INTERVAL_MS: '400',
+};
+
+const client = new McpClient({ env: ENV }).start();
+const readMarkerSafe = (id) => {
+  try {
+    return JSON.parse(readFileSync(join(LOCKS, `${id}.json`), 'utf8'));
+  } catch {
+    return null;
+  }
+};
+
+try {
+  await client.initialize();
+  const ws = join(ROOT, 'ws');
+  mkdirSync(ws, { recursive: true });
+  const st = await client.callTool('dsh_start', { cwd: ws, permission: 'danger-full-access' }, 180_000);
+  const conv = st?.structuredContent?.conversation_id;
+  check('会话已建', !!conv, McpClient.text(st).slice(0, 140));
+
+  // ── [1] 三轮"异步派活 → 收哨兵 → 被回收 → 再派活" ───────────
+  console.log('\n[1] ★ 三轮"异步派活 → 收活 → 空闲回收 → 再派活"（必须一路无锁错误）');
+  for (let round = 1; round <= 3; round++) {
+    const send = await client.callTool(
+      'dsh_send',
+      { conversation_id: conv, prompt: `只回复两个字：第${round}轮` },
+      180_000,
+    );
+    const s = send?.structuredContent ?? {};
+    check(`第 ${round} 轮：异步收据 + 哨兵路径`, !!s.run_id && !!s.sentinel_file, JSON.stringify(s).slice(0, 200));
+
+    // 等哨兵（这才是调用方"等 task"的真实姿势）
+    let waited = 0;
+    while (!existsSync(s.sentinel_file) && waited < 300_000) {
+      await sleep(1000);
+      waited += 1000;
+    }
+    check(`第 ${round} 轮：哨兵已落地`, existsSync(s.sentinel_file), `waited=${waited}ms`);
+    const doc = existsSync(s.sentinel_file) ? JSON.parse(readFileSync(s.sentinel_file, 'utf8')) : null;
+    check(`第 ${round} 轮：status=done`, doc?.status === 'done', JSON.stringify(doc?.status));
+
+    // 让它空闲到被回收（TTL=1s + 扫描 0.4s，留足余量）
+    await sleep(3000);
+  }
+
+  console.log('\n[2] 回收之后的锁状态（锁不该被"无名持有"）');
+  // ★ 轮询到收敛再断言：回收是异步的（stop 要等子进程真退出），
+  //   上去就断言会偶发失败 —— 那是测试在抓瞬间，不是产品问题。
+  let orphans = locks.listOrphans();
+  let holder = locks.classifyHolder(conv);
+  for (let i = 0; i < 20 && (orphans.length > 0 || !['none', 'self'].includes(holder.kind)); i++) {
+    await sleep(500);
+    orphans = locks.listOrphans();
+    holder = locks.classifyHolder(conv);
+  }
+  check('★ 没有留下孤儿持有者（已等到收敛）', orphans.length === 0, JSON.stringify(orphans));
+  check('★ 当前 lock_holder = none/self（不是无法归因的状态）', ['none', 'self'].includes(holder.kind), holder.reason);
+  const stNow = await client.callTool('dsh_status', { conversation_id: conv });
+  const lh = stNow?.structuredContent?.lock_holder;
+  check('★ dsh_status 的 lock_holder 是干净的', ['none', 'self'].includes(lh), JSON.stringify(lh));
+
+  // ── [3] 贴着回收窗口立刻重派（放大竞态）──────────────────────
+  console.log('\n[3] ★ 贴着回收窗口立刻重派（放大竞态，连做 3 次）');
+  for (let i = 1; i <= 3; i++) {
+    const r = await client.callTool(
+      'dsh_send',
+      { conversation_id: conv, prompt: `只回复两个字：紧${i}`, wait: true, timeout_ms: 300_000 },
+      360_000,
+    );
+    const t = McpClient.text(r);
+    check(`紧派 ${i}：成功且无锁错误`, r?.structuredContent?.stop_reason === 'end_turn' && !/写锁|占用|already owned/i.test(t), t.slice(0, 260));
+    // 立刻进入下一轮，不给回收留空档
+    await sleep(400);
+  }
+
+  // ── [4] 主动交还后立刻重派 ──────────────────────────────────
+  console.log('\n[4] ★ dsh_release 之后立刻重派（stop 必须等进程真退出）');
+  await client.callTool('dsh_release', { conversation_id: conv }, 60_000);
+  check('交还后登记已删', !existsSync(join(LOCKS, `${conv}.json`)));
+  const after = await client.callTool(
+    'dsh_send',
+    { conversation_id: conv, prompt: '只回复两个字：归还', wait: true, timeout_ms: 300_000 },
+    360_000,
+  );
+  check('★ 交还后立刻重派成功（无锁错误）', after?.structuredContent?.stop_reason === 'end_turn' && !/写锁|占用/i.test(McpClient.text(after)), McpClient.text(after).slice(0, 260));
+  check('拿到答复', /归还/.test(after?.structuredContent?.answer ?? ''), JSON.stringify(after?.structuredContent?.answer));
+
+  // ── [5] ★ TTL=0 = 永不回收（锁不会被腾出来让 GUI 抢走）─────────
+  console.log('\n[5] ★ DSH_MCP_IDLE_TTL_MS=0 → 永不回收（把"锁被别人抢走"这条路堵死）');
+  // 独立实例：TTL=0（永不回收）+ 极快扫描间隔，若语义仍是"立即回收"，子进程会被秒收。
+  const STATE2 = join(ROOT, 'state-ttl0.json');
+  const keep = new McpClient({
+    // 扫描间隔调小，好在几秒内观察到"心跳有没有续"
+    env: { ...ENV, DSH_MCP_STATE: STATE2, DSH_MCP_IDLE_TTL_MS: '0', DSH_MCP_REAP_INTERVAL_MS: '800' },
+  }).start();
+  await keep.initialize();
+  const ws2 = join(ROOT, 'ws-keep');
+  mkdirSync(ws2, { recursive: true });
+  const st2 = await keep.callTool('dsh_start', { cwd: ws2, permission: 'danger-full-access' }, 180_000);
+  const conv2 = st2?.structuredContent?.conversation_id;
+  check('TTL=0 的实例建好会话', !!conv2, McpClient.text(st2).slice(0, 140));
+  const mark2 = readMarkerSafe(conv2);
+  check('它登记了子进程', typeof mark2?.child_pid === 'number', JSON.stringify(mark2));
+  const childPid = mark2?.child_pid;
+
+  // 等得比"回收窗口"长得多（若还在回收，早就该被收掉了）
+  await sleep(4000);
+  check('★ 子进程仍活着（没有被当空闲收掉）', locks.isPidAlive(childPid), `PID ${childPid}`);
+  const stKeep = await keep.callTool('dsh_status', { conversation_id: conv2 });
+  check('★ 会话仍然是 alive（一直握着写锁 → GUI 抢不走）', stKeep?.structuredContent?.alive === true, JSON.stringify(stKeep?.structuredContent?.alive));
+  check('★ lock_holder 仍是 self', stKeep?.structuredContent?.lock_holder === 'self', JSON.stringify(stKeep?.structuredContent?.lock_holder));
+  check('登记还在（别人查得到"锁在我们手上"）', !!readMarkerSafe(conv2), 'marker 存在');
+
+  // ★ 心跳在 TTL=0 模式下也必须继续：心跳一停，别的实例 90 秒后就会把我们判成"卡死"
+  //   并用 dsh_takeover **杀掉我们的子进程**（多实例场景真实风险）。
+  const hb1 = readMarkerSafe(conv2)?.heartbeat_at;
+  await sleep(3500);
+  const hb2 = readMarkerSafe(conv2)?.heartbeat_at;
+  check('★ TTL=0 时心跳仍在续（否则会被别的实例误判成卡死并抢占）', typeof hb2 === 'number' && hb2 > hb1, `${hb1} → ${hb2}`);
+
+  // ★ 正在跑回合时也必须续心跳：旧实现先 `if (c.busy) continue` 再续心跳，
+  //   于是长回合（>90 秒）期间心跳不刷新 → 别的实例可以合法地"抢占"并杀掉这一轮。
+  const hb3 = readMarkerSafe(conv2)?.heartbeat_at;
+  const longRun = await keep.callTool(
+    'dsh_send',
+    { conversation_id: conv2, prompt: '先运行 Start-Sleep -Seconds 4 再回复"长回合完"。' },
+    180_000,
+  );
+  check('长回合已派出（后台）', !!longRun?.structuredContent?.run_id, JSON.stringify(longRun?.structuredContent ?? {}).slice(0, 160));
+  await sleep(3000);
+  const hb4 = readMarkerSafe(conv2)?.heartbeat_at;
+  check('★★ 回合进行中心跳也在续（修掉了"长回合被别的实例误杀"）', typeof hb4 === 'number' && hb4 > hb3, `${hb3} → ${hb4}`);
+  // 等它跑完，避免带着 busy 收尾
+  let waited = 0;
+  while (waited < 120_000) {
+    const st = await keep.callTool('dsh_status', { conversation_id: conv2 });
+    if (st?.structuredContent?.busy === false) break;
+    await sleep(2000);
+    waited += 2000;
+  }
+  check('长回合已结束', true, `waited=${waited}ms`);
+
+  await keep.callTool('dsh_release', { conversation_id: conv2, forget: true }, 60_000);
+  await keep.close();
+
+  // ── [6] ★ 保活上限 MAX_LIVE：内存有界，锁尽量在手 ──────────────
+  console.log('\n[6] ★ DSH_MCP_MAX_LIVE=2 → 超标时回收最久没用过的（内存有界，锁尽量在手）');
+  const cap = new McpClient({
+    env: {
+      ...ENV,
+      DSH_MCP_STATE: join(ROOT, 'state-cap.json'),
+      DSH_MCP_IDLE_TTL_MS: '0', // 永不按空闲回收
+      DSH_MCP_MAX_LIVE: '2', // 但最多保活 2 个
+      DSH_MCP_REAP_INTERVAL_MS: '500',
+    },
+  }).start();
+  await cap.initialize();
+  const wsCap = join(ROOT, 'ws-cap');
+  mkdirSync(wsCap, { recursive: true });
+  const capIds = [];
+  for (let i = 1; i <= 3; i++) {
+    const st = await cap.callTool('dsh_start', { cwd: wsCap, permission: 'danger-full-access' }, 180_000);
+    capIds.push(st?.structuredContent?.conversation_id);
+    await sleep(1300); // 拉开 lastUsedAt，让"最久没用过"是确定的
+  }
+  await sleep(2500); // 等回收周期跑到
+  const alive = [];
+  for (const id of capIds) {
+    const s = await cap.callTool('dsh_status', { conversation_id: id });
+    alive.push(s?.structuredContent?.alive);
+  }
+  console.log(`    三个会话（按创建顺序）alive = ${JSON.stringify(alive)}`);
+  check('★ 最久没用过的那个被回收了', alive[0] === false, JSON.stringify(alive));
+  check('★ 最近用过的两个仍保活（写锁在手 → GUI 抢不走）', alive[1] === true && alive[2] === true, JSON.stringify(alive));
+
+  console.log('\n[7] ★ 用完了想一次性腾内存：dsh_release(all=true)');
+  const rel = await cap.callTool('dsh_release', { all: true }, 120_000);
+  check('★ 一次放掉所有活着的会话进程', rel?.structuredContent?.released === 2, JSON.stringify(rel?.structuredContent));
+  const listed = await cap.callTool('dsh_list', { include_closed: false });
+  check(
+    '放掉之后确实没有活着的进程（内存立刻归零）',
+    (listed?.structuredContent?.conversations ?? []).every((c) => !c.alive),
+    JSON.stringify((listed?.structuredContent?.conversations ?? []).map((c) => c.alive)),
+  );
+
+  // 无损：放掉/被回收的会话照样能 resume 回来接着用
+  const revived = await cap.callTool(
+    'dsh_send',
+    { conversation_id: capIds[0], prompt: '只回复两个字：复活', wait: true, timeout_ms: 300_000 },
+    360_000,
+  );
+  check('★★ 被回收的会话仍能 resume 并用（无损）', revived?.structuredContent?.stop_reason === 'end_turn', McpClient.text(revived).slice(0, 200));
+  check('拿到答复', /复活/.test(revived?.structuredContent?.answer ?? ''), JSON.stringify(revived?.structuredContent?.answer));
+  for (const id of capIds) {
+    try {
+      await cap.callTool('dsh_release', { conversation_id: id, forget: true }, 60_000);
+    } catch {}
+  }
+  await cap.close();
+
+  // ── [8] 收尾 ────────────────────────────────────────────────
+  console.log('\n[8] 收尾');
+  await client.callTool('dsh_release', { conversation_id: conv, forget: true }, 60_000);
+  check('已释放', true);
+} catch (e) {
+  failCount++;
+  console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);
+  console.log(client.stderr.slice(-20).join('\n'));
+} finally {
+  await client.close();
+  for (let i = 0; i < 3; i++) {
+    try {
+      rmSync(ROOT, { recursive: true, force: true });
+      break;
+    } catch {
+      await sleep(700);
+    }
+  }
+}
+
+console.log(`\n===== 异步生命周期锁测试：通过 ${pass}，失败 ${failCount} =====`);
+process.exit(failCount ? 1 : 0);

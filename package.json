@@ -1,0 +1,60 @@
+{
+  "name": "dsh-any-agent",
+  "version": "0.1.0",
+  "description": "Drive DeepSeek Harness (DSH) as a long-lived coding agent from any MCP client — Claude Code, Codex, Cursor, or your own. Resume-aware, interruptible, approval-capable.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Moer2831",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "agent",
+    "coding-agent",
+    "subagent",
+    "claude-code",
+    "codex",
+    "acp",
+    "agent-client-protocol",
+    "ai",
+    "llm",
+    "orchestration"
+  ],
+  "bin": {
+    "dsh-any-agent": "./bin/dsh-any-agent.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "profile-example/",
+    "README.md",
+    "README.zh.md",
+    "USAGE-NOTES.en.md",
+    "USAGE-NOTES.md",
+    "LICENSE",
+    "DESIGN.md"
+  ],
+  "scripts": {
+    "start": "node ./bin/dsh-any-agent.mjs",
+    "test": "node ./test/run.mjs",
+    "test:smoke": "node ./test/smoke.mjs",
+    "test:guards": "node ./test/guards.mjs",
+    "test:prune": "node ./test/prune.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xmtlzzz/dsh-any-agent.git"
+  },
+  "homepage": "https://github.com/xmtlzzz/dsh-any-agent#readme",
+  "bugs": {
+    "url": "https://github.com/xmtlzzz/dsh-any-agent/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
