@@ -16,6 +16,11 @@ name: tests
 # A green run therefore proves the protocol surface, the safety guards and
 # that the tarball is installable -- not end-to-end agent behaviour.
 
+# Note: the repository root IS the package root -- this project lives at
+# <repo>/bin, <repo>/src and so on, with no nested server/ directory. Do not
+# add `working-directory: server`; it does not exist in a fresh checkout and
+# every `run` step fails before the first command executes.
+
 on:
   push:
     branches: [main]
@@ -35,9 +40,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         node: ['20', '22']
-    defaults:
-      run:
-        working-directory: server
 
     steps:
       - uses: actions/checkout@v4
@@ -77,9 +79,6 @@ jobs:
   package:
     name: tarball is publishable and installable
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
