@@ -36,8 +36,18 @@
 
 ### 1.1 确认 DSH 的位置
 
-本服务需要一个明确的 DSH 入口路径。**自动探测只找两处**：npx 缓存、npm 全局安装目录。
-如果你用的是 **DSH 桌面版（Electron）**，探测不到，必须手动指定：
+本服务需要一个 DSH 入口路径。**自动探测只找两处**：npx 缓存、npm 全局安装目录
+（`%APPDATA%\npm\node_modules`、`/usr/local/lib/node_modules`、`/usr/lib/node_modules`）。
+
+**实测结论**：用 `npx @deepseek-ai/dsh` 跑过 DSH 的机器，缓存里就有，**不设 `DSH_BIN` 也能自动找到**
+（已验证：不给 `DSH_BIN` 时握手和建会话都成功）。
+
+但两种情况探测不到，必须手动指定：
+
+- **DSH 桌面版（Electron）** —— 装在 `...\WindowsApps\...\app.asar\dsh\`，探测逻辑不查那里
+- **DSH 装在自定义路径**，或 npx 缓存被清理过
+
+手动找入口文件：
 
 ```powershell
 # 找一下你机器上 DSH 的入口文件
@@ -87,9 +97,24 @@ npm install -g dsh-any-agent
 # 全局安装的情况
 claude mcp add dsh-any-agent -- dsh-any-agent
 
-# 指定 DSH 入口（强烈建议显式给，避免探测失败）
-claude mcp add dsh-any-agent -e DSH_BIN=<DSH_BIN> -- dsh-any-agent
+# 指定 DSH 入口 + 环境变量（-e 必须紧跟服务名，写在 -- 之后会报
+# "missing required argument 'commandOrUrl'"）
+claude mcp add dsh-any-agent -e DSH_BIN=<DSH_BIN> -e DSH_MCP_PERMISSION=workspace-write -- dsh-any-agent
+
+# 加到用户级配置（默认是项目级）
+claude mcp add dsh-any-agent -s user -e DSH_BIN=<DSH_BIN> -- dsh-any-agent
 ```
+
+验证：
+
+```powershell
+claude mcp list | Select-String dsh-any-agent
+# 期望: dsh-any-agent: dsh-any-agent - √ Connected
+```
+
+> ⚠️ **前提**：`dsh-any-agent` 必须在 `PATH` 上。如果你只是在仓库里 `npm install`（不加 `-g`），
+> 命令名不会存在，Claude Code 会报 `CONNECTION_CLOSED`。此时改用绝对路径：
+> `claude mcp add dsh-any-agent -e DSH_BIN=<DSH_BIN> -- node <安装目录>/bin/dsh-any-agent.mjs`
 
 ### 3.2 Codex（`~/.codex/config.toml`）
 
@@ -109,13 +134,13 @@ DSH_MCP_LOG = "silent"
 
 > 从迁移包安装的话，这段由 `install.cmd` 自动写入，不用手抄。
 
-### 3.3 Cursor / Windsurf / Cline / Continue / Zed（JSON 型通用）
+### 3.3 Cursor / Windsurf / Cline / Continue（`mcpServers` 型）
 
-大多数客户端用同一套 `mcpServers` 结构。文件位置各异，通常是：
+这些客户端用同一套 `mcpServers` 结构。配置文件位置：
 
-- Cursor：`~/.cursor/mcp.json` 或项目内 `.cursor/mcp.json`
-- Cline / Continue：客户端设置里的 MCP Servers 面板
-- Zed：`~/.config/zed/settings.json` 的 `context_servers`
+- **Cursor**：`%USERPROFILE%\.cursor\mcp.json`（全局）或项目内 `.cursor/mcp.json`
+- **Windsurf**：`%USERPROFILE%\.codeium\windsurf\mcp_config.json`
+- **Cline / Continue**：客户端设置里的 MCP Servers 面板
 
 ```json
 {
@@ -133,13 +158,36 @@ DSH_MCP_LOG = "silent"
 }
 ```
 
-### 3.4 其他任意 MCP 客户端
+### 3.4 Zed（`context_servers` 型，格式不同）
+
+Zed **不用** `mcpServers`。它的键叫 `context_servers`，且 `command` 是**字符串**而非对象：
+
+```json
+{
+  "context_servers": {
+    "dsh-any-agent": {
+      "command": "dsh-any-agent",
+      "args": [],
+      "env": {
+        "DSH_BIN": "<DSH_BIN>",
+        "DSH_MCP_PERMISSION": "workspace-write"
+      }
+    }
+  }
+}
+```
+
+文件位置：Windows 是 `%APPDATA%\Zed\settings.json`，macOS / Linux 是 `~/.config/zed/settings.json`。
+
+> Zed 的远程 MCP 服务器用 `{"url": "...", "headers": {...}}`，但本项目是本地 stdio 服务，用上面的 `command` 形式。
+
+### 3.5 其他任意 MCP 客户端
 
 只要能启动 stdio MCP 服务就行。它只实现四个标准方法
 （`initialize` / `ping` / `tools/list` / `tools/call`），
 不依赖任何宿主专有扩展 —— 连协议版本协商到旧版、不发 `notifications/initialized` 的客户端都测过。
 
-### 3.5 装完先验证
+### 3.6 装完先验证
 
 重启客户端，然后确认它发现了服务。各客户端查看方式不同，Codex 是：
 

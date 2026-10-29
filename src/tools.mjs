@@ -211,7 +211,7 @@ export const TOOL_DEFS = [
     description:
       '释放会话占用的 DSH 进程（释放写锁，让用户能在自己的 DSH GUI 里打开同一个会话）。' +
       '会话本体留在磁盘上，之后仍可 resume；forget=true 才会从注册表里摘掉。' +
-      '★ 用完了想一次性腾内存就传 all=true（默认"永不回收"下每个会话约 120MB，全放掉即立刻归零，之后随时 resume）。',
+      '★ 用完了想一次性腾内存就传 all=true（默认"永不回收"下每个会话约 300-480MB，全放掉即立刻归零，之后随时 resume）。',
     inputSchema: S(
       {
         conversation_id: CONV_ID,

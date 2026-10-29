@@ -66,7 +66,7 @@ DSH (DeepSeek Harness) can do all of that — it has file/shell tools, skills, s
 |  |  |
 |---|---|
 | 🔄 **A dead process never kills a conversation** | The identity lives on disk. A crash, an idle reap, even restarting this whole server costs you nothing — the next call transparently resumes it, memory intact (verified across processes). |
-| 🗣️ **You are never stuck waiting** | Steer a conversation mid-flight — **interject** to stop and redirect (~18 ms to converge), or **queue** a remark for after the current turn. Interrupting never damages the conversation. |
+| 🗣️ **You are never stuck waiting** | Steer a conversation mid-flight — **interject** to stop and redirect (converges in well under a second), or **queue** a remark for after the current turn. Interrupting never damages the conversation. |
 | 📡 **Completion notification, not polling** | Long tasks return instantly with a `run_id`; when the turn ends, a **sentinel file** is written atomically so a background task in *your* host wakes you. No polling, no occupied turn. |
 | 🪟 **Many conversations at once** | `dsh_list(only_running)` shows what's live; `dsh_read` gives cursor-based incremental output. Cycle between them like windows. |
 | 🧠 **Reasoning hidden by default** | You get "thought for N chars / M seconds" statistics instead of context-burning prose — and it is never logged, never written to disk. |
@@ -191,7 +191,7 @@ MCP tool calls **block**, so `dsh_send` **does not block by default** (`wait=fal
 
 ```text
 1. dsh_send(conversation_id, prompt, wait=false)
-     → { run_id: "run-abc123", background: true }        # returns in ~1 ms
+     → { run_id: "run-abc123", background: true }        # returns without waiting for the turn
 
 2. …keep working on something else (verified: another conversation ran a full turn meanwhile)…
 
@@ -321,8 +321,8 @@ Silent by default — **not one byte is written**.
 | `DSH_MCP_RUNS_DIR` | `<state file dir>/runs` | Root for async completion sentinels (`<this>/<conversation_id>/<run_id>.json`) |
 | `DSH_MCP_LOCKS_DIR` | `<state file dir>/locks` | Holder registrations for the write lock. ⚠️ **All instances must agree on this value**, or they cannot see each other's registrations and will misread each other as an unidentifiable holder (a GUI) and refuse to preempt |
 | `DSH_MCP_LOCK_STALE_MS` | `90000` | How long without a heartbeat before a holder counts as lost (and becomes auto-preemptible by `dsh_takeover`) |
-| `DSH_MCP_IDLE_TTL_MS` | `0` (never reap) | How long a conversation may sit idle before its DSH process is reaped. ★★ **`0` means never reap (the default)**: the server keeps holding the write lock, so **the GUI cannot take it** — opening the conversation there is read-only and still works. Cost: one resident DSH process per conversation (**measured ~120 MB**). Set a millisecond value (e.g. `300000`) to save memory and accept that the lock can be taken |
-| `DSH_MCP_MAX_LIVE` | `8` (≈1 GB) | ★ **How many conversation processes to keep alive at once** (`0` = unlimited). Going over the cap reaps the **least recently used** one (a running turn is never reaped) — "**bounded memory, locks kept where it matters**". Use `4` when memory is tight, `0` on a big machine. To free everything at once: `dsh_release(all=true)` |
+| `DSH_MCP_IDLE_TTL_MS` | `0` (never reap) | How long a conversation may sit idle before its DSH process is reaped. ★★ **`0` means never reap (the default)**: the server keeps holding the write lock, so **the GUI cannot take it** — opening the conversation there is read-only and still works. Cost: one resident DSH process per conversation (**measured 300 MB and 476 MB in two cold starts**). Set a millisecond value (e.g. `300000`) to save memory and accept that the lock can be taken |
+| `DSH_MCP_MAX_LIVE` | `8` (≈2.5–4 GB worst case; see note 8) | ★ **How many conversation processes to keep alive at once** (`0` = unlimited). Going over the cap reaps the **least recently used** one (a running turn is never reaped) — "**bounded memory, locks kept where it matters**". Use `4` when memory is tight, `0` on a big machine. To free everything at once: `dsh_release(all=true)` |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | Cache lifetime for `dsh_list`'s on-disk probe (the probe spawns a DSH process and takes ~1 s) |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels; `0` disables pruning |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**) |
@@ -403,7 +403,7 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 5. **A conversation that dies before its first successful turn may never have materialized on disk** — resume then fails with a clear error. Safe after the first message.
 6. **No renaming** — DSH's title subsystem has no external rename API (`SessionTitleService.rename` requires a live in-process session). Titles are auto-generated from the first message.
 7. **`session/list` returns only `{sessionId, cwd}` and excludes already-open sessions** — titles are filled in by this server from DSH's projection cache.
-8. **"Never reap" costs memory (measured ~120 MB per conversation)** — that is what buys "the GUI can never take the write lock". Two ways to spend less: ① **`DSH_MCP_MAX_LIVE` (default 8** — over the cap, the least recently used process is reaped → bounded memory, locks still held where it matters); ② set `DSH_MCP_IDLE_TTL_MS` to a millisecond value (at the cost of the lock being takeable). To drop to zero right after a batch of work: **`dsh_release(all=true)`** ✓ (lossless, everything resumes on demand).
+8. **"Never reap" costs memory (measured 300–480 MB per conversation)** — that is what buys "the GUI can never take the write lock". Two fresh-start measurements of one active conversation gave 476 MB and 295 MB of added resident memory (the DSH child plus this server); expect the higher figures on a cold process. Two ways to spend less: ① **`DSH_MCP_MAX_LIVE` (default 8** — over the cap, the least recently used process is reaped → bounded memory, locks still held where it matters); ② set `DSH_MCP_IDLE_TTL_MS` to a millisecond value (at the cost of the lock being takeable). To drop to zero right after a batch of work: **`dsh_release(all=true)`** ✓ (lossless, everything resumes on demand).
 
 ## ❓ Why is the profile still called `dsh-mcp`?
 
