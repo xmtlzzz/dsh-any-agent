@@ -159,7 +159,13 @@ const CLIENTS = [
       const { command, args } = launch();
       const envs = [];
       for (const [k, v] of Object.entries(desiredEnv())) envs.push('-e', k + '=' + v);
-      const r = run(['mcp', 'add', NAME, '-s', 'user', ...envs, '--', command, ...args]);
+      // On Windows the child is spawned through cmd (shell: true), so an
+      // argument containing spaces must be quoted or it is split: a command of
+      // "C:\Program Files\nodejs\node.exe" arrives as "C:\Program" plus a
+      // stray "Files\nodejs\node.exe" argument, and Claude Code then fails
+      // to connect with CONNECTION_CLOSED. Quote anything with a space.
+      const quote = (s) => (IS_WIN && /\s/.test(s) ? '"' + s + '"' : s);
+      const r = run(['mcp', 'add', NAME, '-s', 'user', ...envs, '--', quote(command), ...args.map(quote)]);
       if (r.status !== 0) {
         return { error: tried(r).trim().split('\n')[0] || 'claude exited ' + r.status };
       }

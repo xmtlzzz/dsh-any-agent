@@ -134,13 +134,22 @@ dsh-any-agent-setup --yes --permission read-only
 dsh-any-agent-setup --remove --yes               # take it back out
 ```
 
+**What `setup` will and will not touch**
+
+It is additive. Verified against a real machine holding existing MCP servers (Cursor with four, Codex with two, Claude Code with five, Zed with 33 settings keys): every pre-existing entry survived unchanged, nothing was reformatted, and the only diff was one new key per client. Each of those four clients then answered an `initialize` handshake from the command written into its config.
+
+```
+Cursor       4 -> 5 entries   existing entries byte-identical
+Codex        2 -> 3 sections  node_repl and rea bodies unchanged
+Claude Code  5 -> 6 servers   all four originals still listed
+Zed          33 -> 33 keys    only context_servers gained a child
+```
+
+The one thing it does modify in place is the JSON formatting of `mcp.json` and `settings.json` (it re-serialises with 2-space indent). Values are preserved; whitespace is not guaranteed to be. A `.bak-dsh-<timestamp>` copy sits beside each file it touched.
+
 **From a local checkout**
 
-The `dsh-any-agent` executable is on your `PATH` after a global install, so every client below can call it by name. Otherwise point `command` at `node` and `args` at `<checkout>/server/bin/dsh-any-agent.mjs`.
-
-**From a local checkout**
-
-Clone or unzip anywhere, then point `command` at `node` and `args` at `<checkout>/server/bin/dsh-any-agent.mjs` (shown below).
+Clone or unzip anywhere, then point `command` at `node` and `args` at `<checkout>/bin/dsh-any-agent.mjs` (shown below).
 
 ---
 
@@ -462,6 +471,52 @@ When you first start this server it creates a DSH profile under `~/.dsh/profiles
 | the `# dsh-mcp:managed` marker line | first line of the generated `cordis.patch.yml` | the bootstrap would stop recognising the file as its own and never sync it again |
 
 So the **product** is `dsh-any-agent`; the **persisted identifiers** keep the old name on purpose. This is a deliberate compatibility decision, not an oversight. If you are setting this up from scratch and want a different profile name, set `DSH_MCP_PROFILE` — the server will use whatever you give it.
+
+## 📦 Releasing
+
+Checklist for cutting a version. The ordering matters; two of these steps exist because skipping them shipped a broken release.
+
+```bash
+# 1. Bump the version. SERVER_VERSION reads package.json, so nothing else
+#    needs editing -- that duplication used to drift.
+npm version patch --no-git-tag-version
+#    then update CHANGELOG.md by hand: move [Unreleased] into a new section
+
+# 2. Prove it offline (same suites CI runs, no model, no DSH)
+node test/guards.mjs && node test/prune.mjs
+node test/approval-details.mjs && node test/setup.mjs
+node test/package-check.mjs
+
+# 3. Confirm the tarball itself: packs, installs, starts
+npm pack --dry-run
+#    then, in a scratch dir: npm install <tgz> && node_modules/.bin/dsh-any-agent --version
+
+# 4. Tag and push (CI must be green before publishing)
+git add -A && git commit -m "chore: release x.y.z"
+git tag vx.y.z && git push origin main --tags
+
+# 5. Publish
+npm publish
+```
+
+**Do not trust a 404 after publishing.** npm processes new versions asynchronously (`PUT 202`, not `200`). Querying the registry a few seconds later still returns 404 and looks like failure. Confirm success from the local npm debug log first:
+
+```
+grep 'http fetch PUT 202' "$LOCALAPPDATA/npm-cache/_logs/<latest>.log"
+```
+
+then wait a minute or two and check `npm view dsh-any-agent dist-tags`.
+
+**If a published version is broken, deprecate it — do not leave it installable.** `0.1.0` declared `node >=20` while actually requiring 22.15; anyone pinning it got a server that could not start:
+
+```bash
+npm deprecate "dsh-any-agent@0.1.0" \
+  "Node 20 cannot start this version. Upgrade to 0.1.1+ (requires Node >=22.15)."
+```
+
+`deprecate` prints a warning on install without unpublishing, which is the right tool: the tarball stays for anyone already depending on it. Note this needs an interactive OTP — granular access tokens with bypass-2FA are not allowed to perform it (npm restricted that in July 2026), so run it yourself rather than from CI.
+
+**Badges lag.** shields.io caches for five minutes (`max-age=300`), so a fresh publish shows the old version, the old `node` floor, and sometimes `license: package not found` — that last string is shields' generic failure text for a license it could not read, not a missing license. Wait and hard-refresh before assuming the metadata is wrong.
 
 ## 💬 Support
 

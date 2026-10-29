@@ -29,17 +29,24 @@ relying on `dsh-any-agent-setup` to preview before writing.
   path shelled out to `claude mcp add` during the preview, which writes
   immediately. All three paths now return a preview and stop before touching
   disk, and a dry run performs no subprocess that can mutate state.
+- **Claude Code registration broke on paths containing spaces.** On Windows
+  `process.execPath` is `C:\Program Files\nodejs\node.exe`, and the setup
+  command handed it to the `claude` CLI through a shell without quoting, so it
+  was split into `C:\Program` plus a stray `Files\nodejs\node.exe` argument.
+  The written config looked correct and Claude Code reported
+  `CONNECTION_CLOSED`. Every argument is now quoted when it contains a space.
 
 ### Added
 
 - `dsh-any-agent --version` / `--help`, answered before the hub starts, so
   asking for a version spawns no reaper and touches no registry. Same for
   `dsh-any-agent-setup`.
-- `test/setup.mjs` — 35 checks over the client-config writer, run against a
+- `test/setup.mjs` — 41 checks over the client-config writer, run against a
   throwaway HOME: dry run is byte-identical, existing entries survive, writes
   are idempotent, `--remove` takes out only its own entry, a corrupt config is
-  refused rather than rewritten, absent clients are skipped, and the Codex TOML
-  block round-trips.
+  refused rather than rewritten, absent clients are skipped, the Codex TOML
+  block round-trips, and — added after the quoting bug — the command written
+  into the config is spawned for real and must answer `initialize`.
 - `test/package-check.mjs` — catches what only a tarball reveals: a missing
   `bin` field, a path without `./`, a missing shebang, `private:true`, test or
   state paths in `files`, and an `engines` floor that contradicts what the

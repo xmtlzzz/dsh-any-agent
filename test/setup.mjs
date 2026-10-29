@@ -6,6 +6,12 @@
  *
  * 手法：把 HOME / USERPROFILE 指向临时目录，在沙箱里跑真实的 CLI。
  * 不需要 DSH、不需要模型，可以进 CI。
+ *
+ * 除了「文件写对了」，还必须验证「写进去的东西真能启动」。曾经漏掉这一
+ * 条：Windows 上 process.execPath 是 C:\Program Files\nodejs\node.exe，
+ * 经 cmd 传给 claude CLI 时没加引号，被拆成 "C:\Program" + 一个多余参数，
+ * 配置看上去完全正确，客户端却报 CONNECTION_CLOSED。文件断言全绿而功能
+ * 全废 —— 所以第 9 组会把写进配置的那条命令真的执行一遍。
  */
 
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
@@ -193,6 +199,41 @@ console.log('\n[8] --version and --help touch nothing');
   check('--help mentions the flags', /--yes/.test(h.out) && /--remove/.test(h.out));
   check('neither created a backup', backupsIn(join(home, '.cursor')).length === 0);
   check('the config is unchanged', readFileSync(join(home, '.cursor', 'mcp.json'), 'utf8') === '{"mcpServers":{}}');
+
+  rmSync(home, { recursive: true, force: true });
+}
+
+// ── 9. 写进配置的命令必须真的能启动 ──────────────────────────────────
+
+console.log('\n[9] the command written into the config actually starts');
+{
+  const home = sandbox({ '.cursor/mcp.json': '{"mcpServers":{}}' });
+  runSetup(home, ['--yes', '--only', 'cursor']);
+
+  const entry = readJson(join(home, '.cursor', 'mcp.json')).mcpServers['dsh-any-agent'];
+  check('entry has a command', typeof entry?.command === 'string' && entry.command.length > 0, JSON.stringify(entry?.command));
+  check('entry command exists on disk', existsSync(entry.command), entry.command ?? '');
+  check('entry args point at the server entry point', Array.isArray(entry.args) && entry.args.some((a) => a.endsWith('dsh-any-agent.mjs')), JSON.stringify(entry.args));
+
+  // Spawn it exactly as a client would: the command with those args, no shell.
+  // This is the check that was missing when an unquoted "C:\Program Files"
+  // path produced a config that looked right and could not start.
+  if (entry?.command && Array.isArray(entry.args)) {
+    const child = spawnSync(entry.command, entry.args, {
+      input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'setup-test', version: '1' } } }) + '\n',
+      encoding: 'utf8',
+      timeout: 20000,
+      env: { ...process.env, ...entry.env, DSH_MCP_LOG: 'silent' },
+    });
+    const line = (child.stdout || '').split('\n').find((l) => l.includes('"serverInfo"'));
+    check('it answers initialize', Boolean(line), (child.stdout || '').slice(0, 120) || (child.stderr || '').slice(0, 120));
+    if (line) {
+      let info = null;
+      try { info = JSON.parse(line).result?.serverInfo; } catch {}
+      check('serverInfo names dsh-any-agent', info?.name === 'dsh-any-agent', JSON.stringify(info));
+      check('serverInfo carries a version', typeof info?.version === 'string' && /^\d+\.\d+/.test(info.version), JSON.stringify(info?.version));
+    }
+  }
 
   rmSync(home, { recursive: true, force: true });
 }

@@ -149,13 +149,22 @@ dsh-any-agent-setup --yes --permission read-only
 dsh-any-agent-setup --remove --yes               # 全部移除
 ```
 
+**setup 会动什么、不会动什么**
+
+它只做新增。在真正装着别的 MCP 服务器的机器上验证过（Cursor 4 个、Codex 2 个段、Claude Code 5 个、Zed 33 个配置键）：所有既有条目原样保留，没有被重新格式化，唯一的差异是每个客户端多了一个键。之后这四个客户端都用配置里写入的命令真实跑通了一次 `initialize` 握手。
+
+```
+Cursor       4 -> 5 个条目   既有条目逐字节相同
+Codex        2 -> 3 个段     node_repl 与 rea 内容不变
+Claude Code  5 -> 6 个服务   原有四个都还在列表里
+Zed          33 -> 33 个键   只有 context_servers 多了个子项
+```
+
+唯一会就地改动的是 `mcp.json` 和 `settings.json` 的**排版**（会按 2 空格缩进重新序列化）。值不变，但空白格式不保证原样。每个被改的文件旁边都留了 `.bak-dsh-<时间戳>` 备份。
+
 **从本地目录安装**
 
-全局安装后 `dsh-any-agent` 命令就在 `PATH` 上，下面每种客户端都可以直接按名字调用。否则把 `command` 指向 `node`、`args` 指向 `<解压目录>/server/bin/dsh-any-agent.mjs`。
-
-**从本地目录安装**
-
-解压到任意位置，把 `command` 指向 `node`、`args` 指向 `<解压目录>/server/bin/dsh-any-agent.mjs`（见下）。
+解压到任意位置，把 `command` 指向 `node`、`args` 指向 `<解压目录>/bin/dsh-any-agent.mjs`（见下）。
 
 ---
 
@@ -479,6 +488,52 @@ DSH 的会话有**跨进程写锁**：**持有者活着就永不过期，也没�
 | `# dsh-mcp:managed` 标记行 | 生成的 `cordis.patch.yml` 首行 | bootstrap 不再认它是自己写的，从此不再同步 |
 
 所以**产品名**是 `dsh-any-agent`，**持久标识**故意保留旧名。这是刻意的兼容决定，不是漏改。如果你是全新部署、想要别的 profile 名，直接设 `DSH_MCP_PROFILE` —— 服务会照你给的名字用。
+
+## 📦 发布流程
+
+发版清单。顺序有讲究 —— 其中两步是因为跳过它们发过一次坏版本才补上的。
+
+```bash
+# 1. 升版本号。SERVER_VERSION 读的是 package.json，别处不用改
+#    （以前这里有两份数字，漂移过）
+npm version patch --no-git-tag-version
+#    然后手工改 CHANGELOG.md：把 [Unreleased] 变成新版本一节
+
+# 2. 本地跑一遍离线套件（和 CI 相同，不花 token、不需要 DSH）
+node test/guards.mjs && node test/prune.mjs
+node test/approval-details.mjs && node test/setup.mjs
+node test/package-check.mjs
+
+# 3. 确认 tarball 本身：打得出来、装得上、起得来
+npm pack --dry-run
+#    再在临时目录里：npm install <tgz> && node_modules/.bin/dsh-any-agent --version
+
+# 4. 打 tag 并推送（CI 绿了再发）
+git add -A && git commit -m "chore: release x.y.z"
+git tag vx.y.z && git push origin main --tags
+
+# 5. 发布
+npm publish
+```
+
+**发布后看到 404，不要当成失败。** npm 对新版本是异步入库（返回 `PUT 202` 而不是 `200`），几秒后去查 registry 仍然是 404，看起来像没发成功。先确认本地 npm 日志里有这一行：
+
+```
+grep 'http fetch PUT 202' "$LOCALAPPDATA/npm-cache/_logs/<最新的>.log"
+```
+
+然后等一两分钟再查 `npm view dsh-any-agent dist-tags`。
+
+**已发布的版本如果有问题，用 deprecate 而不是放着不管。** `0.1.0` 声明 `node >=20` 但实际需要 22.15，锁版本装它的人会得到一个起不来的服务：
+
+```bash
+npm deprecate "dsh-any-agent@0.1.0" \
+  "Node 20 cannot start this version. Upgrade to 0.1.1+ (requires Node >=22.15)."
+```
+
+`deprecate` 只在安装时打印警告、不删包 —— 这是对的工具：已经依赖它的人仍然能装到那个 tarball。注意这条**需要交互式 OTP**：带 bypass-2FA 的 granular token 不允许执行（npm 2026 年 7 月收紧的），所以要你自己跑，别放在 CI 里。
+
+**徽章有延迟。** shields.io 缓存五分钟（`max-age=300`），所以刚发完会显示旧版本号、旧的 `node` 下限，有时还会显示 `license: package not found` —— 那个字符串是 shields 读不到 license 时的通用失败文案，不是真的没有 license。等一会并强制刷新，再判断元数据是不是错的。
 
 ## 💬 支持
 
