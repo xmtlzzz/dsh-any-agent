@@ -13,7 +13,7 @@
 
 **任何 MCP 客户端都能用。** 这里没有任何 Codex 或 Claude 专属的东西：服务端只讲标准 MCP over stdio，只用四个标准方法（`initialize`、`ping`、`tools/list`、`tools/call`）。已用一个"原始"客户端验证过——它协商更旧的协议版本、且从不发 `notifications/initialized`。
 
-🧪 528 项检查全绿 · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT · 💬 开发社区 [linux.do](https://linux.do/)
+🧪 528 项检查全绿 · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
 
 > 📌 **建议先读 [使用注意事项](USAGE-NOTES.md)** —— 会真正踩到的坑：ACP 模型配置陷阱、**外部 MCP 工具的副作用不受 DSH 沙箱约束**、工作区与 GUI 的注册表缓存、成本控制、以及一张故障速查表。
 >
@@ -436,9 +436,12 @@ DSH 的会话有**跨进程写锁**：**持有者活着就永不过期，也没�
 
 所以**产品名**是 `dsh-any-agent`，**持久标识**故意保留旧名。这是刻意的兼容决定，不是漏改。如果你是全新部署、想要别的 profile 名，直接设 `DSH_MCP_PROFILE` —— 服务会照你给的名字用。
 
-## 💬 社区
+## 💬 支持
 
-本项目的发布与讨论都在 **[linux.do](https://linux.do/)** —— 使用问题、踩坑经验、改进建议都欢迎到那里聊。提 issue 也可以，但在社区里通常回得更快。
+- **Bug、功能请求、部署提问** —— [提 issue](https://github.com/xmtlzzz/dsh-any-agent/issues)，都往这里放
+- **报故障之前** —— 先看 [新环境常见故障表](USAGE-MIGRATION.md) 和 [使用注意事项](USAGE-NOTES.md)，绝大多数部署失败就那么几种原因
+
+单人维护的项目，所以带着**可复现的信息**（具体哪次调用、完整报错原文、DSH 版本）会快很多。
 
 ## 📜 许可
 

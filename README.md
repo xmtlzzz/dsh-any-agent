@@ -13,7 +13,7 @@ An MCP server that drives DSH as a **long-lived agent runtime** instead of wrapp
 
 **Works with any MCP client.** Nothing here is Codex- or Claude-specific: the server speaks plain MCP over stdio and uses only the four standard methods (`initialize`, `ping`, `tools/list`, `tools/call`). Verified against a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
 
-🧪 528 checks green · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT · 💬 Community: [linux.do](https://linux.do/)
+🧪 528 checks green · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 > 📌 **Read the [Usage Notes](USAGE-NOTES.en.md) first** — the practical gotchas that will actually bite you: the ACP model-config trap, external MCP tools bypassing DSH's sandbox, the workspace/GUI registry cache, cost control, and a troubleshooting table.
 >
@@ -419,9 +419,12 @@ When you first start this server it creates a DSH profile under `~/.dsh/profiles
 
 So the **product** is `dsh-any-agent`; the **persisted identifiers** keep the old name on purpose. This is a deliberate compatibility decision, not an oversight. If you are setting this up from scratch and want a different profile name, set `DSH_MCP_PROFILE` — the server will use whatever you give it.
 
-## 💬 Community
+## 💬 Support
 
-This project is announced and discussed on **[linux.do](https://linux.do/)** — usage questions, war stories and suggestions are all welcome there. Issues work too, but you'll usually get a faster answer in the community.
+- **Bug reports, feature requests, setup questions** — [open an issue](https://github.com/xmtlzzz/dsh-any-agent/issues); all of it is welcome there
+- **Before reporting a failure** — check the [troubleshooting table](USAGE-MIGRATION.md) and the [Usage Notes](USAGE-NOTES.en.md); most setup failures are one of a handful of known causes
+
+This is a one-maintainer project, so a clear reproduction (the exact call, the error text, your DSH version) gets a much faster answer than a description.
 
 ## 📜 License
 

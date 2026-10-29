@@ -42,6 +42,9 @@ coverage/
 *.key
 credentials*.json
 .credentials.yaml
+# npm 凭据：_authToken 等同于密码
+.npmrc
+.npmrc.*
 
 # ── 本地工具产物 ────────────────────────────────────────────
 # Birdview 架构快照：含本机绝对路径，属于个人调试产物
