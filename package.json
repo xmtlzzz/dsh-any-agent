@@ -24,7 +24,8 @@
   ],
   "bin": {
     "dsh-any-agent": "bin/dsh-any-agent.mjs",
-    "dsh-any-agent-setup": "bin/setup.mjs"
+    "dsh-any-agent-setup": "bin/setup.mjs",
+    "dsh-any-agent-restore": "bin/restore.mjs"
   },
   "files": [
     "bin/",

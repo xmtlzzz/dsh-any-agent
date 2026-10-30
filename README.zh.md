@@ -13,7 +13,7 @@
 
 **任何 MCP 客户端都能用。** 这里没有任何 Codex 或 Claude 专属的东西：服务端只讲标准 MCP over stdio，只用四个标准方法（`initialize`、`ping`、`tools/list`、`tools/call`）。已用一个"原始"客户端验证过——它协商更旧的协议版本、且从不发 `notifications/initialized`。
 
-🧪 0.3.0 离线 614 项检查全绿（其中 601 项属于客户端注册器套件） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
+🧪 0.3.0 离线 632 项检查全绿（其中 619 项属于客户端注册器套件） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
 
 > 📌 **建议先读 [使用注意事项](USAGE-NOTES.md)** —— 会真正踩到的坑：ACP 模型配置陷阱、**外部 MCP 工具的副作用不受 DSH 沙箱约束**、工作区与 GUI 的注册表缓存、成本控制、以及一张故障速查表。
 >
@@ -192,7 +192,7 @@ Zed          33 -> 33 个键   只有 context_servers 多了个子项
 
 Codex 的 `config.toml` 同理，是按行处理的：其它 `[表]` 及其注释、顶层键（`model`、`approval_policy`、`sandbox_mode` 等）、CRLF 行尾都原样保留 —— `--remove` 只删 `[mcp_servers.dsh-any-agent]` 那两段，其余一律不动。
 
-这些断言的详细覆盖见 [`test/`](test/)（`test/config-safety.mjs` 共 386 项，逐条断言上面每一条）。
+这些断言的详细覆盖见 [`test/`](test/)（`test/config-safety.mjs` 共 403 项，逐条断言上面每一条）。
 
 **在真实 home 上做过只读验证。** 用 `setup --json`（纯计划模式）跑一遍开发机上的真实配置：9 个客户端全部报出，而现存的每份配置都**原封未动** —— size、mtime、SHA-256 全同，没有新增任何 `.bak-dsh-*`，也没有新建任何文件：
 
@@ -224,6 +224,24 @@ Codex 的 `config.toml` 同理，是按行处理的：其它 `[表]` 及其注�
 
 撤销后所有 JSON 仍可解析、`codex mcp list` 仍能正常读取配置，客户端不需要人工修复。
 
+
+**备份与回滚**
+
+注册和删除**都会**在动文件之前先存一份：`<配置文件>.bak-dsh-<时间戳>`，内容就是操作前的原始字节。两个方向都存，因为要退回的状态不同——注册前那份用来「装错了退回原样」，删除前那份用来「删错了装回去」。
+
+每次实际写入后，`--json` 的每个客户端条目里都带 `backup` 字段，直接告诉你备份在哪；人类可读的输出也会在每条下面打印 `backup: <路径>`。
+
+备份散落在各客户端目录里，手动翻文件容易挑错，所以附带一个还原命令：
+
+| 要做的事 | 命令 |
+|---|---|
+| 看有哪些备份（新的在前） | `dsh-any-agent-restore --list` |
+| 退回每个文件最新的那份 | `dsh-any-agent-restore --latest` |
+| 退回某一批次 | `dsh-any-agent-restore --stamp 2026-10-30T01-35` |
+| 退回指定的一份 | `dsh-any-agent-restore --file <备份路径>` |
+| 先看会做什么 | 任意命令加 `--dry-run` |
+
+还原本身也是破坏性操作，所以覆盖之前会把**当前**状态另存为 `.bak-dsh-pre-restore-<时间戳>`——退错了还能再退回来。
 
 **安装 / 更新 / 删除**
 
@@ -507,7 +525,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | `approval-details` | 24 | **审批审查上下文**：待决审批的快照带命令、理由、cwd 与原始审批 ID —— 不只是一个裸 ID，调用方才能真正裁决；凭据形状的字段与常见内联字面量在结构化上下文和展示标题里都会脱敏。经真实 stdio MCP 端到端验证 |
 | `setup` | 41 | **注册 CLI**：预览不写盘、`--remove` 只摘自己那条、没装客户端算跳过不算失败、Codex TOML 段往返、以及把写进配置里的命令真的拉起一次并要求应答 `initialize`（不花 token） |
 | `removal-scope` | 24 | **注销只动自己那条**：给一份装着别的 MCP 服务器、顶层 Codex 设置和 Zed 兄弟设置的配置，注册再注销，断言其余每个值逐字节不变；删一个从没写过的东西 = 无写入、无报错（不花 token） |
-| `config-safety` | 386 | **0.3 这条线的核心性质**，逐客户端验证：预览后文件逐字节不变且不产生 `.bak`；注册再注销后其余条目逐字节还原、键顺序不变、顶层键不丢；4 空格 / 2 空格 / Tab 缩进、单行 JSON、无末尾换行、CRLF、UTF-8 BOM 都能在写入后保留；坏 JSON 与只读文件被拒绝且原文件无损；第二次 `--yes` 空跑不新增备份；每个 `.bak-dsh-<时间戳>` 只出现一次且内容等于写入前字节（不花 token） |
+| `config-safety` | 403 | **0.3 这条线的核心性质**，逐客户端验证：预览后文件逐字节不变且不产生 `.bak`；注册再注销后其余条目逐字节还原、键顺序不变、顶层键不丢；4 空格 / 2 空格 / Tab 缩进、单行 JSON、无末尾换行、CRLF、UTF-8 BOM 都能在写入后保留；坏 JSON 与只读文件被拒绝且原文件无损；第二次 `--yes` 空跑不新增备份；每个 `.bak-dsh-<时间戳>` 只出现一次且内容等于写入前字节（不花 token） |
 | `real-configs` | 66 | **拿真家伙做往返**：把本机**真实**的客户端配置复制进临时目录（18 万字节、含几百个 `projects` 条目与大小写重复键的 `~/.claude.json`，238 行的 Codex TOML，Zed 的完整 `settings.json`），注册再撤销，要求每个文件**逐字节**还原；CI 上没有这些文件时明确打印 `skipped`，绝不假绿（不花 token） |
 | `timeout` | 38 | **超时语义**：`wait=false` 不受 `timeout_ms` 影响、`wait=true` 到期只转后台（不取消/不丢结果、`busy` 不说谎）、`timeout_ms<=0` 一直等、resume 失败会作废进程而不永久卡死、空 prompt 给清晰错误 |
 | `lock` | 79 | **写锁与抢占**：四类持有者判定、`writeMarker` 不覆盖活着的持有者、登记文件损坏/目录缺失等边界；**端到端**两实例抢锁 → 清晰报错 → 拒绝 → `force` 夺锁；**崩溃自动释放锁**、**卡死持有者无 force 自动抢占**；以及"一个回合 = 一个哨兵"的不变量（含内联回合与空闲插话） |
@@ -520,9 +538,9 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | `permission` | 11 | ★ **权限档是否真的生效**（安全属性）：不看我们的返回值（那正是会说谎的地方），而是读**会话自己记录的事实**（投影缓存里的 `permissions.preset` / `sandboxMode`），三档逐一核对且三档记录值互不相同。**这条测试抓到过无声提权**：profile 里 `defaultPreset` 会在会话创建时盖掉 `DSH_PERMISSION_MODE` |
 | `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
 
-**离线那半边是 614 项检查，0.3.0 上全绿** —— `guards` 31、`prune` 11、`approval-details` 24、`sandbox-guard` 18、`setup` 41、`removal-scope` 24、`config-safety` 386、`real-configs` 66、`package-check` 13。九套全部退出码 0，都不需要模型、不需要装 DSH、也不需要 provider。
+**离线那半边是 632 项检查，0.3.0 上全绿** —— `guards` 31、`prune` 11、`approval-details` 24、`sandbox-guard` 18、`setup` 41、`removal-scope` 24、`config-safety` 403、`real-configs` 66、`package-check` 14。九套全部退出码 0，都不需要模型、不需要装 DSH、也不需要 provider。
 
-其中 **601 项属于客户端注册器套件**（`setup`、`removal-scope`、`config-safety`、`real-configs`）—— 0.3 的活其实都在这里。
+其中 **619 项属于客户端注册器套件**（`setup`、`removal-scope`、`config-safety`、`real-configs`）—— 0.3 的活其实都在这里。
 
 需要模型的套件（`smoke` 29、`boundary` 42、`integration` 30、`async` 16、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13）合计 462 项，**完整实测停在 0.1.2** —— 它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。
 

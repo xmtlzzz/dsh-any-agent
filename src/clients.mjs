@@ -42,8 +42,15 @@ export function backupSuffix(stamp = new Date().toISOString().replace(/[:.]/g, '
   return '.bak-dsh-' + stamp;
 }
 
+/**
+ * 备份一个文件，返回备份路径。
+ * 同一毫秒内对同一文件备份两次会撞名：撞了就加序号，绝不覆盖已有备份 ——
+ * 覆盖掉的那一份可能正是用户唯一能回滚到的状态。
+ */
 export function backupFile(file, stamp) {
-  const dst = file + backupSuffix(stamp);
+  const base = file + backupSuffix(stamp);
+  let dst = base;
+  for (let i = 2; existsSync(dst); i++) dst = base + '-' + i;
   copyFileSync(file, dst);
   return dst;
 }
@@ -793,10 +800,18 @@ export function applyClient(plan, ctx, stamp) {
   if (typeof plan.next !== 'string') return plan;
 
   try {
-    if (existsSync(plan.path)) backupFile(plan.path, stamp);
+    // 两个方向都备份：注册前备份，是为了「装错了能退回原样」；
+    // 删除前同样备份，是为了「删错了还能装回来」。备份内容一律是操作前的原始字节。
+    let backup;
+    if (existsSync(plan.path)) backup = backupFile(plan.path, stamp);
     mkdirSync(dirname(plan.path), { recursive: true });
     atomicWrite(plan.path, plan.next);
-    const base = { ...plan, status: remove ? 'removed' : 'applied', summary: remove ? 'entry removed' : 'entry written' };
+    const base = {
+      ...plan,
+      status: remove ? 'removed' : 'applied',
+      summary: remove ? 'entry removed' : 'entry written',
+      backup,
+    };
     // 有的客户端自己维护这份文件（Claude Code 会缓存并回写 ~/.claude.json）。
     // 有 CLI 时用它做一次只读确认，除了状态行不产生任何副作用。
     if (client.verifyCli && which(client.verifyCli)) {

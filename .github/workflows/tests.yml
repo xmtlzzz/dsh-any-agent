@@ -128,6 +128,7 @@ jobs:
           node bin/dsh-any-agent.mjs --version
           node bin/dsh-any-agent.mjs --help > /dev/null
           node bin/setup.mjs --version
+          node bin/restore.mjs --help > /dev/null
 
   package:
     name: tarball installs and starts
@@ -153,6 +154,7 @@ jobs:
           npm install "$tgz" --no-audit --no-fund
           test -x node_modules/.bin/dsh-any-agent
           test -x node_modules/.bin/dsh-any-agent-setup
+          test -x node_modules/.bin/dsh-any-agent-restore
           node_modules/.bin/dsh-any-agent --version
           node_modules/.bin/dsh-any-agent-setup --help > /dev/null
 

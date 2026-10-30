@@ -68,6 +68,21 @@ that collide only by letter case. `package.json` reports `0.3.0`; both
   comments, top-level keys (`model`, `approval_policy`, `sandbox_mode`) and
   CRLF endings are carried over unchanged; `--remove` puts the file back the
   way it was.
+- **`dsh-any-agent-restore`** — a companion CLI for the backups. Setups and
+  removals both leave `<file>.bak-dsh-<stamp>` copies of the pre-operation
+  bytes, which is only useful if you can find the right one and put it back:
+  `--list` shows every copy newest-first, `--latest` / `--stamp` / `--file`
+  restore one, and `--dry-run` previews. A restore backs up the current file
+  as `.bak-dsh-pre-restore-<stamp>` first, so a mistaken restore can itself be
+  undone. Covered by 9 checks in `test/config-safety.mjs`, including
+  recovering a deliberately corrupted config.
+- **Backups can no longer overwrite each other.** Two runs inside the same
+  millisecond produced the same filename, so the second copy silently replaced
+  the first — and the replaced one could be the only state worth going back to.
+  A colliding name now gets a `-2`, `-3` suffix instead.
+- **The backup path is reported.** `--json` gained a `backup` field per client
+  and the human output prints `backup: <path>` under each written entry;
+  before this, a backup was created but you had to guess where it went.
 - **A backup before every write**: `<file>.bak-dsh-<timestamp>`, one per run
   per file, holding the exact pre-write bytes. No backup is left behind by a
   preview.
@@ -153,10 +168,10 @@ that collide only by letter case. `package.json` reports `0.3.0`; both
 
 ### Tests
 
-- **614 offline checks, all green on 0.3.0** — `guards` 31, `prune` 11,
+- **632 offline checks, all green on 0.3.0** — `guards` 31, `prune` 11,
   `approval-details` 24, `sandbox-guard` 18, `setup` 41, `removal-scope`
-  24, `config-safety` 386, `real-configs` 66, `package-check` 13. Every
-  suite exited 0; none needs a model, a DSH install or a provider. **601 of
+  24, `config-safety` 403, `real-configs` 66, `package-check` 14. Every
+  suite exited 0; none needs a model, a DSH install or a provider. **619 of
   those assertions are in the client-registration suites** (`setup`,
   `removal-scope`, `config-safety`, `real-configs`), which is where this
   release's work actually is. The model-backed suites (462 checks) were last
@@ -168,7 +183,7 @@ that collide only by letter case. `package.json` reports `0.3.0`; both
   `config.toml`, Zed's full `settings.json` — registers, then removes, and
   requires every file back byte for byte. Where those files do not exist (CI),
   the suite prints `skipped` explicitly instead of passing vacuously.
-- `test/config-safety.mjs` — **386 checks**, the fixture matrix for the
+- `test/config-safety.mjs` — **403 checks**, the fixture matrix for the
   property this release is about, per client and against a throwaway home: a
   preview leaves every file byte-identical and creates no backup;
   register-then-remove restores every other entry byte-for-byte and leaves no

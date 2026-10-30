@@ -206,14 +206,17 @@ for (const client of clients) {
     finalPlan = { ...plan, status: 'failed', changed: false, summary: 'unexpected error: ' + e.message };
   }
 
-  results.push({
+  const row = {
     id: finalPlan.id,
     label: finalPlan.label,
     path: finalPlan.path,
     status: finalPlan.status,
     summary: finalPlan.summary,
     changed: Boolean(finalPlan.changed),
-  });
+  };
+  // 备份路径必须报出来：用户要回滚时得找得到那一份。
+  if (finalPlan.backup) row.backup = finalPlan.backup;
+  results.push(row);
 
   if (finalPlan.status === 'failed') {
     if (!JSON_OUT) { bang(finalPlan.summary); log(''); }
@@ -221,7 +224,11 @@ for (const client of clients) {
     continue;
   }
   if (finalPlan.changed) {
-    if (!JSON_OUT) { tick(finalPlan.summary); log(''); }
+    if (!JSON_OUT) {
+      tick(finalPlan.summary);
+      if (finalPlan.backup) log('       backup: ' + finalPlan.backup);
+      log('');
+    }
     changed++;
   } else {
     if (!JSON_OUT) { dash('skipped: ' + finalPlan.summary); log(''); }

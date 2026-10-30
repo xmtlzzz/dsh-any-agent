@@ -1444,5 +1444,115 @@ section('[10] 真实 HOME 隔离：本测试没有向真实客户端配置写入
   check('没有沙箱目录残留', HOMES.length === 0, HOMES.join(','));
 });
 
+// ══════════════════════════════════════════════════════════════════════
+// [17] 注册与删除都必须先备份，且备份路径要在 --json 里报出来
+// ══════════════════════════════════════════════════════════════════════
+
+section('[17] 两个方向都留备份：注册前存、删除前也存，路径可查、可回滚', () => {
+  const id = FORMAT_ID || 'cursor';
+  const home = sandbox({});
+  const p = resolvePath(id, home);
+  const container = containerOf(id);
+  if (id === 'codex') {
+    seedText(home, p, 'model = "m"\n\n[mcp_servers.other]\ncommand = "x"\n');
+  } else {
+    seedText(home, p, JSON.stringify({ [container]: { keep: { command: 'x', args: [] } } }, null, 2) + '\n');
+  }
+  const original = readText(p);
+
+  const add = runJson(home, ['--yes', '--only', id]);
+  const addRow = add.json ? (add.json.clients || []).find((c) => c && c.id === id) : null;
+  check(id + ': 注册的 --json 报告了 backup 字段', Boolean(addRow && addRow.backup),
+    addRow ? JSON.stringify(Object.keys(addRow)) : 'no row');
+  if (addRow && addRow.backup) {
+    check(id + ': 注册的备份文件真的存在', existsSync(addRow.backup), addRow.backup);
+    check(id + ': 注册的备份内容等于注册前原文', readText(addRow.backup) === original,
+      diffPreview(original, readText(addRow.backup)));
+  }
+  const registered = readText(p);
+
+  const rm = runJson(home, ['--remove', '--yes', '--only', id]);
+  const rmRow = rm.json ? (rm.json.clients || []).find((c) => c && c.id === id) : null;
+  check(id + ': 删除的 --json 报告了 backup 字段', Boolean(rmRow && rmRow.backup),
+    rmRow ? JSON.stringify(Object.keys(rmRow)) : 'no row');
+  if (rmRow && rmRow.backup) {
+    check(id + ': 删除的备份文件真的存在', existsSync(rmRow.backup), rmRow.backup);
+    check(id + ': 删除的备份内容等于删除前原文（已注册状态）',
+      readText(rmRow.backup) === registered,
+      diffPreview(registered, readText(rmRow.backup)));
+    check(id + ': 删除的备份没有覆盖注册时那份',
+      !addRow || addRow.backup !== rmRow.backup,
+      'both = ' + (rmRow ? rmRow.backup : ''));
+    seedText(home, p, readText(rmRow.backup));
+    check(id + ': 用删除前的备份可以恢复回已注册状态', readText(p) === registered);
+  }
+  dropSandbox(home);
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// [18] dsh-any-agent-restore：备份能真正救回一个被破坏的文件
+// ══════════════════════════════════════════════════════════════════════
+
+section('[18] dsh-any-agent-restore：能把文件退回某一份备份', () => {
+  const id = FORMAT_ID || 'cursor';
+  const home = sandbox({});
+  const p = resolvePath(id, home);
+  const container = containerOf(id);
+  if (id === 'codex') {
+    seedText(home, p, 'model = "m"\n\n[mcp_servers.other]\ncommand = "x"\n');
+  } else {
+    seedText(home, p, JSON.stringify({ [container]: { keep: { command: 'x', args: [] } } }, null, 2) + '\n');
+  }
+  const original = readText(p);
+
+  const restoredBin = join(HERE, '..', 'bin', 'restore.mjs');
+  const restore = (args) => spawnSync(NODE, [restoredBin, ...args, '--home', home], {
+    encoding: 'utf8',
+    timeout: 60000,
+    windowsHide: true,
+    env: { ...process.env, HOME: home, USERPROFILE: home, APPDATA: home, DSH_BIN: FAKE_DSH_BIN, DSH_MCP_LOG: 'silent' },
+  });
+
+  const add = run(home, ['--yes', '--only', id]);
+  check(id + ': 还原测试的前置——注册成功', add.code === 0 && readText(p) !== original,
+    'exit ' + add.code);
+
+  // 模拟一次事故：文件被别的工具写坏了。
+  seedText(home, p, '{ this is broken');
+
+  const dry = restore(['--latest', '--dry-run']);
+  check(id + ': --dry-run 不写盘', readText(p) === '{ this is broken',
+    'exit ' + dry.status + ' text=' + preview(readText(p)));
+
+  const r = restore(['--latest']);
+  check(id + ': 还原退出码 0', r.status === 0, 'exit ' + r.status + ' ' + firstLine(r.stdout + r.stderr));
+  check(id + ': 文件被退回备份状态（不再是被写坏的样子）', readText(p) !== '{ this is broken',
+    preview(readText(p)));
+  const restoredText = readText(p);
+  const parses = id === 'codex' ? restoredText.includes('model') : (() => {
+    try { JSON.parse(restoredText.replace(/^\uFEFF/, '')); return true; } catch { return false; }
+  })();
+  check(id + ': 还原出来的文件是可用的', parses, preview(restoredText));
+
+  // 还原本身也是破坏性操作：必须把「还原前」另存一份，否则退错了就回不去。
+  const safety = readdirSync(dirname(p)).filter((f) => f.includes('.bak-dsh-pre-restore-'));
+  check(id + ': 还原前把当前状态另存了一份', safety.length === 1, safety.join(','));
+  if (safety.length === 1) {
+    check(id + ': 那份另存的内容等于还原前的样子',
+      readText(join(dirname(p), safety[0])) === '{ this is broken',
+      preview(readText(join(dirname(p), safety[0]))));
+  }
+
+  const list = restore(['--list', '--json']);
+  let listed = null;
+  try { listed = JSON.parse(list.stdout); } catch { listed = null; }
+  check(id + ': --list --json 可解析', Boolean(listed && Array.isArray(listed.backups)),
+    preview(list.stdout));
+  check(id + ': --list 至少列出刚才那些备份', Boolean(listed && listed.backups.length >= 2),
+    listed ? String(listed.backups.length) : 'null');
+
+  dropSandbox(home);
+});
+
 console.log('\n===== config safety: passed ' + passed + ', failed ' + failed + ' =====');
 process.exit(failed ? 1 : 0);

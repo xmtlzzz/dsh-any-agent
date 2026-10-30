@@ -13,7 +13,7 @@ An MCP server that drives DSH as a **long-lived agent runtime** instead of wrapp
 
 **Works with any MCP client.** Nothing here is Codex- or Claude-specific: the server speaks plain MCP over stdio and uses only the four standard methods (`initialize`, `ping`, `tools/list`, `tools/call`). Verified against a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
 
-🧪 614 offline checks green on 0.3.0 (601 of them in the client-registration suites) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 632 offline checks green on 0.3.0 (619 of them in the client-registration suites) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 > 📌 **Read the [Usage Notes](USAGE-NOTES.en.md) first** — the practical gotchas that will actually bite you: the ACP model-config trap, external MCP tools bypassing DSH's sandbox, the workspace/GUI registry cache, cost control, and a troubleshooting table.
 >
@@ -177,7 +177,7 @@ What changed since 0.1.x: JSON configs used to be **re-serialised whole** (value
 
 Codex's `config.toml` gets the same treatment line-wise: your other `[tables]` and their comments, the top-level keys (`model`, `approval_policy`, `sandbox_mode`, …) and CRLF endings come back exactly as they were — `--remove` deletes only the two `[mcp_servers.dsh-any-agent]` sections and leaves the rest intact.
 
-The coverage for each of those claims is in [`test/`](test/) (`test/config-safety.mjs` asserts them one by one, 386 checks).
+The coverage for each of those claims is in [`test/`](test/) (`test/config-safety.mjs` asserts them one by one, 403 checks).
 
 **Checked against a real home, read-only.** Running `setup --json` (plan mode) against an actual developer profile reported all nine clients and left every existing config untouched — identical size, mtime and SHA-256, no `.bak-dsh-*` created, no new file created:
 
@@ -209,6 +209,24 @@ Removal is not accepted because it *looks* right: the check is that **taking our
 
 Afterwards every JSON config still parses and `codex mcp list` still reads the file; no client needs hand repair.
 
+
+**Backups and rollback**
+
+Both registering and removing snapshot the file first: `<config>.bak-dsh-<timestamp>`, holding the exact pre-operation bytes. Both directions, because the state you want back differs — the pre-register backup undoes a bad install, the pre-remove backup reinstalls after a bad removal.
+
+After every real write, each client entry in `--json` carries a `backup` field, and the human-readable output prints `backup: <path>` under each written entry.
+
+The copies live next to each client's config, so picking the right one by hand is error-prone. There is a companion command:
+
+| What | Command |
+|---|---|
+| List backups, newest first | `dsh-any-agent-restore --list` |
+| Restore the newest backup per file | `dsh-any-agent-restore --latest` |
+| Restore one batch | `dsh-any-agent-restore --stamp 2026-10-30T01-35` |
+| Restore one specific copy | `dsh-any-agent-restore --file <backup path>` |
+| See what would happen | add `--dry-run` |
+
+A restore is itself destructive, so it copies the **current** file aside as `.bak-dsh-pre-restore-<timestamp>` before overwriting — a restore can be undone.
 
 **Install / update / remove**
 
@@ -487,7 +505,7 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `approval-details` | 24 | **approval review context**: the pending-approval snapshot carries the command, reason, cwd and original approval ID — not just a bare ID — so a caller can actually adjudicate; credential-shaped fields and common inline literals are redacted in both the structured context and the displayed title. Verified end-to-end over real stdio MCP |
 | `setup` | 41 | **the registration CLI**: preview writes nothing, `--remove` takes out only its own entry, an absent client is skipped rather than failed, the Codex TOML block round-trips, and the command recorded in a config is actually spawned and must answer `initialize` (no tokens) |
 | `removal-scope` | 24 | **unregistering touches only its own entry**: configs holding unrelated MCP servers, top-level Codex settings and sibling Zed settings are registered and then removed, asserting every other value is byte-identical; removing something never written is a no-op with no write (no tokens) |
-| `config-safety` | 386 | **the property the 0.3 line is about**, per client: preview leaves files byte-identical with no `.bak`; register-then-remove restores every other entry byte-for-byte, keeps key order and drops no top-level key; 4-space / 2-space / tab indentation, single-line JSON, missing trailing newline, CRLF and a UTF-8 BOM all survive a write; malformed JSON and read-only files are refused without damage; the second `--yes` is a no-op with no new backup; every `.bak-dsh-<stamp>` appears once and equals the pre-write bytes (no tokens) |
+| `config-safety` | 403 | **the property the 0.3 line is about**, per client: preview leaves files byte-identical with no `.bak`; register-then-remove restores every other entry byte-for-byte, keeps key order and drops no top-level key; 4-space / 2-space / tab indentation, single-line JSON, missing trailing newline, CRLF and a UTF-8 BOM all survive a write; malformed JSON and read-only files are refused without damage; the second `--yes` is a no-op with no new backup; every `.bak-dsh-<stamp>` appears once and equals the pre-write bytes (no tokens) |
 | `real-configs` | 66 | **round-trip on the real thing**: copies this machine's actual client configs (an 182693-byte `~/.claude.json` holding hundreds of `projects` entries and case-colliding keys, a 238-line Codex TOML, Zed's full `settings.json`) into a temp dir, registers, then removes, and requires every file back **byte for byte**; prints `skipped` explicitly on CI where those files do not exist, so a missing fixture is never green (no tokens) |
 | `timeout` | 38 | **timeout semantics**: `wait=false` is unaffected by `timeout_ms`; a `wait=true` expiry merely downgrades to background (turn not cancelled, result not lost, `busy` never lies); `timeout_ms<=0` waits forever; a failed resume invalidates the process instead of wedging the conversation; an empty prompt yields a clear error |
 | `lock` | 79 | **write lock and preemption**: four holder classifications, `writeMarker` never overwriting a live holder, malformed/missing registration edge cases; **end-to-end** with two real MCP instances fighting over one conversation → clear error → refusal → `force` takeover; **a crash releases the lock automatically**, **a wedged holder is preempted without `force`**; plus the "one turn, one sentinel" invariant (inline turns and idle interjects included) |
@@ -500,9 +518,9 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `permission` | 11 | ★ **whether the permission tiers actually take effect** (a safety property): it ignores our own return values (the very thing that used to lie) and reads **the session's own record** (`permissions.preset` / `sandboxMode` in the projection cache), checking all three tiers and that their recorded values differ. **This suite caught a silent privilege escalation**: a `defaultPreset` in the profile overrides `DSH_PERMISSION_MODE` at session creation |
 | `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
 
-**The offline half is 614 checks, all green on 0.3.0** — `guards` 31, `prune` 11, `approval-details` 24, `sandbox-guard` 18, `setup` 41, `removal-scope` 24, `config-safety` 386, `real-configs` 66, `package-check` 13. Every suite exited 0; none needs a model, a DSH install or a provider.
+**The offline half is 632 checks, all green on 0.3.0** — `guards` 31, `prune` 11, `approval-details` 24, `sandbox-guard` 18, `setup` 41, `removal-scope` 24, `config-safety` 403, `real-configs` 66, `package-check` 14. Every suite exited 0; none needs a model, a DSH install or a provider.
 
-That is **601 assertions in the client-registration suites alone** (`setup`, `removal-scope`, `config-safety`, `real-configs`), which is where the 0.3 work actually is.
+That is **619 assertions in the client-registration suites alone** (`setup`, `removal-scope`, `config-safety`, `real-configs`), which is where the 0.3 work actually is.
 
 The model-backed suites (`smoke` 29, `boundary` 42, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13) total 462 and were last measured in full for 0.1.2 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`.
 
