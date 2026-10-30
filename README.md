@@ -13,7 +13,7 @@ An MCP server that drives DSH as a **long-lived agent runtime** instead of wrapp
 
 **Works with any MCP client.** Nothing here is Codex- or Claude-specific: the server speaks plain MCP over stdio and uses only the four standard methods (`initialize`, `ping`, `tools/list`, `tools/call`). Verified against a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
 
-🧪 546 checks green · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 614 offline checks green on 0.3.0 (601 of them in the client-registration suites) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 > 📌 **Read the [Usage Notes](USAGE-NOTES.en.md) first** — the practical gotchas that will actually bite you: the ACP model-config trap, external MCP tools bypassing DSH's sandbox, the workspace/GUI registry cache, cost control, and a troubleshooting table.
 >
@@ -120,23 +120,51 @@ dsh-any-agent-setup            # detect the clients you have; writes nothing
 dsh-any-agent-setup --yes      # apply
 ```
 
-`setup` finds the MCP clients on your machine — **Claude Code, Codex, Cursor, Windsurf, Zed** — and writes the entry into each one it finds, skipping the rest. It is safe by construction:
+`setup` finds the MCP clients on your machine — **Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Zed, Gemini CLI, opencode, VS Code** — and writes the entry into each one it finds, skipping the rest. It is safe by construction:
 
-- **dry-run by default**; `--yes` is required to write anything
-- every file is backed up to `<file>.bak-dsh-<timestamp>` first
-- JSON clients are parsed before and after writing, so a broken config never lands
-- Claude Code and Codex go through their own `mcp add` subcommands rather than a hand-edited file
-- **idempotent** — re-running only changes what differs
+- **dry-run by default**; `--yes` is required to write anything, and a preview starts **no subprocess at all** — it only reads the files it would touch
+- every file is backed up to `<file>.bak-dsh-<timestamp>` first, holding the exact **pre-write bytes**
+- the config is parsed before and after writing, so a broken config never lands; malformed JSON and a read-only file are refused rather than forced, while a missing directory is created safely
+- **text-level writes**: only the bytes of setup's own entry are replaced, so indentation (2-space, 4-space, tabs), key order, CRLF endings, a UTF-8 BOM and a missing trailing newline all survive untouched
+- **idempotent** — re-running only changes what differs, and a second `--yes` writes nothing and adds no `.bak`
 
 ```bash
 dsh-any-agent-setup --yes --only cursor,zed     # just these
 dsh-any-agent-setup --yes --permission read-only
-dsh-any-agent-setup --remove --yes               # take it back out
+dsh-any-agent-setup --remove --yes               # take it back out; only its own entry is removed
 ```
+
+**Three new flags**
+
+| Flag | What it does |
+|---|---|
+| `--json` | **stdout carries one parseable JSON object and nothing else** — every human-readable line goes to stderr. Shape: `{ ok, mode, clients: [{ id, label, path, status, summary, error? }], changed, skipped, failed }` with `mode` being `plan`, `apply` or `remove`. This is a contract, not a convenience: a script can pipe stdout straight into a JSON parser |
+| `--home <dir>` | use this directory instead of the real `HOME` / `USERPROFILE` / `APPDATA`, so a register-then-remove cycle can be rehearsed without touching a live config |
+| `--force` | only two things: (a) create a directory or file that does not exist yet (it does that by default too — the flag makes it reliable for automation, including when the client itself was not detected); (b) overwrite a same-named entry that exists but is not the shape this program expects. It never deletes somebody else's entry and never skips validation |
+
+**Which file each client actually gets**
+
+A `.bak-dsh-<timestamp>` backup lands beside every file before it is written. Paths are generic examples; "its own entry" means the single entry/section named `dsh-any-agent`.
+
+| Client (`--only` id) | Config file | Container key | Install / update | `--remove` | Undo |
+|---|---|---|---|---|---|
+| Claude Code (`claude-code`) | `~/.claude.json` | `mcpServers` | its own entry only, with `type: "stdio"` | deletes its own entry only | copy the backup back |
+| Claude Desktop (`claude-desktop`) | Windows `%APPDATA%\Claude\claude_desktop_config.json`; macOS `~/Library/Application Support/Claude/claude_desktop_config.json`; Linux `~/.config/Claude/claude_desktop_config.json` | `mcpServers` | adds or rewrites its own entry only | deletes its own entry only | copy the backup back |
+| Codex (`codex`) | `~/.codex/config.toml` | `[mcp_servers.dsh-any-agent]` | appends its two TOML sections line-wise | deletes those two sections and nothing else | copy the backup back |
+| Cursor (`cursor`) | `~/.cursor/mcp.json` | `mcpServers` | its own entry only | its own entry only | copy the backup back |
+| Windsurf (`windsurf`) | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` | its own entry only | its own entry only | copy the backup back |
+| Zed (`zed`) | Windows `%APPDATA%\Zed\settings.json`; elsewhere `~/.config/zed/settings.json` | `context_servers` | its own entry only | its own entry only | copy the backup back |
+| Gemini CLI (`gemini`) | `~/.gemini/settings.json` | `mcpServers` | its own entry only | its own entry only | copy the backup back |
+| opencode (`opencode`) | `~/.config/opencode/opencode.json` | `mcp` | its own entry only, written in opencode's shape: `{ type: "local", command: [exe, ...args], enabled: true }` — one array, not separate `command`/`args` | its own entry only | copy the backup back |
+| VS Code (`vscode`) | Windows `%APPDATA%\Code\User\mcp.json`; elsewhere the same `mcp.json` under your VS Code user directory | `servers` — not `mcpServers` | its own entry only | its own entry only | copy the backup back |
+
+For the exact path on your machine, read the `path` field for each client in `--json` output — that is the file this run would write, on your OS, which beats any table in a README.
+
+Three shapes worth spelling out, because getting them wrong is silent. **VS Code** stores MCP servers under `servers`, not `mcpServers`; writing the usual key there produces a config the editor ignores. **opencode** takes a single `command` array (`{ type: "local", command: [exe, ...args], enabled: true }`) rather than separate `command`/`args` fields. **Claude Code** is the reason this release does not use a JSON library at all: `~/.claude.json` really does hold a `projects` map with keys that differ only by letter case (`.../Rust` next to `.../rust`), so a naive `JSON.parse` fails on it and any whole-file rewrite would destroy the user's project list. A byte-range scanner that never builds a value object handles it, and an earlier design that shelled out to `claude mcp add` was dropped for the same reason — that command rewrites the file in its own formatting with no backup you could restore.
 
 **What `setup` will and will not touch**
 
-It is additive. Verified against a real machine holding existing MCP servers (Cursor with four, Codex with two, Claude Code with five, Zed with 33 settings keys): every pre-existing entry survived unchanged, nothing was reformatted, and the only diff was one new key per client. Each of those four clients then answered an `initialize` handshake from the command written into its config.
+It is additive, and it only ever touches its own entry. Verified against a real machine holding existing MCP servers (Cursor with four, Codex with two, Claude Code with five, Zed with 33 settings keys): every pre-existing entry survived **byte for byte**, key order included, and the only diff was one new entry per client.
 
 ```
 Cursor       4 -> 5 entries   existing entries byte-identical
@@ -145,7 +173,42 @@ Claude Code  5 -> 6 servers   all four originals still listed
 Zed          33 -> 33 keys    only context_servers gained a child
 ```
 
-The one thing it does modify in place is the JSON formatting of `mcp.json` and `settings.json` (it re-serialises with 2-space indent). Values are preserved; whitespace is not guaranteed to be. A `.bak-dsh-<timestamp>` copy sits beside each file it touched.
+What changed since 0.1.x: JSON configs used to be **re-serialised whole** (values preserved, layout lost), which is why the docs said whitespace was not guaranteed. Writes are text-level now — apart from its own entry, the file comes back byte-identical, whether it was indented with 4 spaces, 2 spaces or tabs, laid out as one long line, missing its trailing newline, using CRLF, or carrying a UTF-8 BOM.
+
+Codex's `config.toml` gets the same treatment line-wise: your other `[tables]` and their comments, the top-level keys (`model`, `approval_policy`, `sandbox_mode`, …) and CRLF endings come back exactly as they were — `--remove` deletes only the two `[mcp_servers.dsh-any-agent]` sections and leaves the rest intact.
+
+The coverage for each of those claims is in [`test/`](test/) (`test/config-safety.mjs` asserts them one by one, 386 checks).
+
+**Checked against a real home, read-only.** Running `setup --json` (plan mode) against an actual developer profile reported all nine clients and left every existing config untouched — identical size, mtime and SHA-256, no `.bak-dsh-*` created, no new file created:
+
+```
+~/.claude.json                            182693 B   unchanged
+~/.cursor/mcp.json                          1396 B   unchanged
+~/.codex/config.toml                        6647 B   unchanged
+~/.gemini/settings.json                      465 B   unchanged
+~/.config/opencode/opencode.json             441 B   unchanged
+%APPDATA%/Zed/settings.json                 5647 B   unchanged
+%APPDATA%/Claude/claude_desktop_config.json   247 B   unchanged
+```
+
+The same run with `--home <tmp>` put **every** reported path inside that directory, `APPDATA` included — which is what makes the register/remove cycle safe to rehearse.
+
+**A full register -> remove round trip on the real home, not just a preview.** All seven configs were backed up, `--yes` was run for real, then `--remove --yes`, and everything was verified byte by byte:
+
+| Client | Before | After register | After remove | Other MCP servers |
+|---|---|---|---|---|
+| ~/.claude.json | 182693 B | 182693 B (already current) | byte-identical to baseline | untouched; 67 top-level keys, 60 projects entries and both case-only duplicate keys still there |
+| ~/.cursor/mcp.json | 1396 B | 1389 B | 1009 B | stitch / obsidian-mcp-server / codegraph / rea identical field by field |
+| ~/.codex/config.toml | 6647 B | 6647 B (already current) | 6239 B | every other table, comment and top-level key kept |
+| %APPDATA%/Zed/settings.json | 5647 B | 5647 B (already current) | 5240 B | all 32 top-level settings keys kept |
+| ~/.gemini/settings.json | 465 B | 845 B | 465 B | restored byte for byte |
+| ~/.config/opencode/opencode.json | 441 B | 869 B | 441 B | `$schema` and the pencil entry kept |
+| %APPDATA%/Claude/claude_desktop_config.json | 247 B | 627 B | 247 B | restored byte for byte |
+
+Removal is not accepted because it *looks* right: the check is that **taking our one entry out of the backup with the same editing engine reproduces the file now on disk, byte for byte**. All seven files pass. That proves removal is the strict inverse of registration and cannot quietly take anything else with it.
+
+Afterwards every JSON config still parses and `codex mcp list` still reads the file; no client needs hand repair.
+
 
 **Install / update / remove**
 
@@ -422,6 +485,10 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `guards` | 31 | **environment-variable guards**: odd numbers always land on the safe side — `IDLE_TTL_MS` values like `-1` or garbage mean "never reap" (never give the write lock away), a too-small reap interval falls back to the default (no busy loop), and the **lost-holder threshold is floored at 30 s** (so another instance cannot "legitimately" preempt and kill our turn) (no tokens, runs every time) |
 | `sandbox-guard` | 18 | **the test sandbox itself**: a "throwaway HOME" that resolves to the real user profile, to the filesystem root, or to anywhere outside the OS temp dir is refused with an error instead of being written to and deleted. Every other suite builds its HOME through `test/sandbox-home.mjs` and can only destroy what it created there (no tokens, runs every time) |
 | `approval-details` | 24 | **approval review context**: the pending-approval snapshot carries the command, reason, cwd and original approval ID — not just a bare ID — so a caller can actually adjudicate; credential-shaped fields and common inline literals are redacted in both the structured context and the displayed title. Verified end-to-end over real stdio MCP |
+| `setup` | 41 | **the registration CLI**: preview writes nothing, `--remove` takes out only its own entry, an absent client is skipped rather than failed, the Codex TOML block round-trips, and the command recorded in a config is actually spawned and must answer `initialize` (no tokens) |
+| `removal-scope` | 24 | **unregistering touches only its own entry**: configs holding unrelated MCP servers, top-level Codex settings and sibling Zed settings are registered and then removed, asserting every other value is byte-identical; removing something never written is a no-op with no write (no tokens) |
+| `config-safety` | 386 | **the property the 0.3 line is about**, per client: preview leaves files byte-identical with no `.bak`; register-then-remove restores every other entry byte-for-byte, keeps key order and drops no top-level key; 4-space / 2-space / tab indentation, single-line JSON, missing trailing newline, CRLF and a UTF-8 BOM all survive a write; malformed JSON and read-only files are refused without damage; the second `--yes` is a no-op with no new backup; every `.bak-dsh-<stamp>` appears once and equals the pre-write bytes (no tokens) |
+| `real-configs` | 66 | **round-trip on the real thing**: copies this machine's actual client configs (an 182693-byte `~/.claude.json` holding hundreds of `projects` entries and case-colliding keys, a 238-line Codex TOML, Zed's full `settings.json`) into a temp dir, registers, then removes, and requires every file back **byte for byte**; prints `skipped` explicitly on CI where those files do not exist, so a missing fixture is never green (no tokens) |
 | `timeout` | 38 | **timeout semantics**: `wait=false` is unaffected by `timeout_ms`; a `wait=true` expiry merely downgrades to background (turn not cancelled, result not lost, `busy` never lies); `timeout_ms<=0` waits forever; a failed resume invalidates the process instead of wedging the conversation; an empty prompt yields a clear error |
 | `lock` | 79 | **write lock and preemption**: four holder classifications, `writeMarker` never overwriting a live holder, malformed/missing registration edge cases; **end-to-end** with two real MCP instances fighting over one conversation → clear error → refusal → `force` takeover; **a crash releases the lock automatically**, **a wedged holder is preempted without `force`**; plus the "one turn, one sentinel" invariant (inline turns and idle interjects included) |
 | `cycle` | 36 | **the async dispatch lifecycle**: dispatch → collect the sentinel → idle reap → dispatch again, three rounds with no lock error; re-dispatch right on the reap boundary (widening the race); an immediate re-dispatch after `dsh_release`; and an assertion that reaping leaves no unattributable lock (this suite caught the reaper collecting a freshly spawned process as if it were idle) |
@@ -433,9 +500,13 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `permission` | 11 | ★ **whether the permission tiers actually take effect** (a safety property): it ignores our own return values (the very thing that used to lie) and reads **the session's own record** (`permissions.preset` / `sandboxMode` in the projection cache), checking all three tiers and that their recorded values differ. **This suite caught a silent privilege escalation**: a `defaultPreset` in the profile overrides `DSH_PERMISSION_MODE` at session creation |
 | `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
 
-**Total: 546 checks, all green.** (510 in-suite + 36 acceptance)
+**The offline half is 614 checks, all green on 0.3.0** — `guards` 31, `prune` 11, `approval-details` 24, `sandbox-guard` 18, `setup` 41, `removal-scope` 24, `config-safety` 386, `real-configs` 66, `package-check` 13. Every suite exited 0; none needs a model, a DSH install or a provider.
 
-> Counts are the numbers each suite prints itself. `smoke`/`prune`/`guards`/`sandbox-guard`/`approval-details`/`boundary` run without LLM calls; the rest need a working provider.
+That is **601 assertions in the client-registration suites alone** (`setup`, `removal-scope`, `config-safety`, `real-configs`), which is where the 0.3 work actually is.
+
+The model-backed suites (`smoke` 29, `boundary` 42, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13) total 462 and were last measured in full for 0.1.2 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`.
+
+> Counts are the numbers each suite prints itself. `smoke`/`prune`/`guards`/`sandbox-guard`/`approval-details`/`boundary`/`setup`/`removal-scope`/`config-safety`/`package-check` run without LLM calls; the rest need a working provider.
 
 ### 🧯 Why `sandbox-guard` exists
 
@@ -506,68 +577,3 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 Because renaming it would break things that already exist on disk.
 
 When you first start this server it creates a DSH profile under `~/.dsh/profiles/dsh-mcp/`. That directory name is referenced by three other persisted things:
-
-| Persisted identifier | Where | Breaks if renamed |
-|---|---|---|
-| the profile directory | `~/.dsh/profiles/dsh-mcp/` | existing sessions can no longer resolve their provider (`no adapter registered for provider "…"`) |
-| `DSH_MCP_*` environment variables | your client config | every deployment would need editing at once |
-| the `# dsh-mcp:managed` marker line | first line of the generated `cordis.patch.yml` | the bootstrap would stop recognising the file as its own and never sync it again |
-
-So the **product** is `dsh-any-agent`; the **persisted identifiers** keep the old name on purpose. This is a deliberate compatibility decision, not an oversight. If you are setting this up from scratch and want a different profile name, set `DSH_MCP_PROFILE` — the server will use whatever you give it.
-
-## 📦 Releasing
-
-Checklist for cutting a version. The ordering matters; two of these steps exist because skipping them shipped a broken release.
-
-```bash
-# 1. Bump the version. SERVER_VERSION reads package.json, so nothing else
-#    needs editing -- that duplication used to drift.
-npm version patch --no-git-tag-version
-#    then update CHANGELOG.md by hand: move [Unreleased] into a new section
-
-# 2. Prove it offline (same suites CI runs, no model, no DSH)
-node test/guards.mjs && node test/prune.mjs
-node test/approval-details.mjs && node test/setup.mjs
-node test/package-check.mjs
-
-# 3. Confirm the tarball itself: packs, installs, starts
-npm pack --dry-run
-#    then, in a scratch dir: npm install <tgz> && node_modules/.bin/dsh-any-agent --version
-
-# 4. Tag and push (CI must be green before publishing)
-git add -A && git commit -m "chore: release x.y.z"
-git tag vx.y.z && git push origin main --tags
-
-# 5. Publish
-npm publish
-```
-
-**Do not trust a 404 after publishing.** npm processes new versions asynchronously (`PUT 202`, not `200`). Querying the registry a few seconds later still returns 404 and looks like failure. Confirm success from the local npm debug log first:
-
-```
-grep 'http fetch PUT 202' "$LOCALAPPDATA/npm-cache/_logs/<latest>.log"
-```
-
-then wait a minute or two and check `npm view dsh-any-agent dist-tags`.
-
-**If a published version is broken, deprecate it — do not leave it installable.** `0.1.0` declared `node >=20` while actually requiring 22.15; anyone pinning it got a server that could not start:
-
-```bash
-npm deprecate "dsh-any-agent@0.1.0" \
-  "Node 20 cannot start this version. Upgrade to 0.1.1+ (requires Node >=22.15)."
-```
-
-`deprecate` prints a warning on install without unpublishing, which is the right tool: the tarball stays for anyone already depending on it. Note this needs an interactive OTP — granular access tokens with bypass-2FA are not allowed to perform it (npm restricted that in July 2026), so run it yourself rather than from CI.
-
-**Badges lag.** shields.io caches for five minutes (`max-age=300`), so a fresh publish shows the old version, the old `node` floor, and sometimes `license: package not found` — that last string is shields' generic failure text for a license it could not read, not a missing license. Wait and hard-refresh before assuming the metadata is wrong.
-
-## 💬 Support
-
-- **Bug reports, feature requests, setup questions** — [open an issue](https://github.com/xmtlzzz/dsh-any-agent/issues); all of it is welcome there
-- **Before reporting a failure** — check the [troubleshooting table](USAGE-MIGRATION.md) and the [Usage Notes](USAGE-NOTES.en.md); most setup failures are one of a handful of known causes
-
-This is a one-maintainer project, so a clear reproduction (the exact call, the error text, your DSH version) gets a much faster answer than a description.
-
-## 📜 License
-
-MIT — see [LICENSE](LICENSE).

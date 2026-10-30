@@ -13,7 +13,7 @@
 
 **任何 MCP 客户端都能用。** 这里没有任何 Codex 或 Claude 专属的东西：服务端只讲标准 MCP over stdio，只用四个标准方法（`initialize`、`ping`、`tools/list`、`tools/call`）。已用一个"原始"客户端验证过——它协商更旧的协议版本、且从不发 `notifications/initialized`。
 
-🧪 546 项检查全绿 · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
+🧪 0.3.0 离线 614 项检查全绿（其中 601 项属于客户端注册器套件） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
 
 > 📌 **建议先读 [使用注意事项](USAGE-NOTES.md)** —— 会真正踩到的坑：ACP 模型配置陷阱、**外部 MCP 工具的副作用不受 DSH 沙箱约束**、工作区与 GUI 的注册表缓存、成本控制、以及一张故障速查表。
 >
@@ -135,23 +135,51 @@ dsh-any-agent-setup            # 检测你装了哪些客户端，不写任何�
 dsh-any-agent-setup --yes      # 真正写入
 ```
 
-`setup` 会找出你机器上的 MCP 客户端 —— **Claude Code、Codex、Cursor、Windsurf、Zed** —— 逐个写进去，没装的跳过。它的安全性是结构性保证的：
+`setup` 会找出你机器上的 MCP 客户端 —— **Claude Code、Claude Desktop、Codex、Cursor、Windsurf、Zed、Gemini CLI、opencode、VS Code** —— 逐个写进去，没装的跳过。它的安全性是结构性保证的：
 
-- **默认 dry-run**，必须加 `--yes` 才写
-- 每个文件写前备份成 `<file>.bak-dsh-<时间戳>`
-- JSON 类客户端写入前后各解析一次，坏配置绝不落盘
-- Claude Code / Codex 走它们自己的 `mcp add` 子命令，不手改文件
-- **幂等**，重复运行只改变有差异的部分
+- **默认 dry-run**，必须加 `--yes` 才写；预览模式下**不启动任何子进程**，只读取它将要触及的那些文件
+- 每个文件写前备份成 `<file>.bak-dsh-<时间戳>`，内容是**写入前的原始字节**
+- 写入前后各解析一次，坏配置绝不落盘；坏 JSON 与只读文件一律拒绝而不是硬写，目录不存在则安全创建
+- **文本级写入**：只替换自己那个条目的字节，缩进（2 空格 / 4 空格 / Tab）、键顺序、CRLF 行尾、UTF-8 BOM、有无末尾换行都原样保留
+- **幂等**，重复运行只改变有差异的部分；第二次 `--yes` 不写盘、不新增 `.bak`
 
 ```bash
 dsh-any-agent-setup --yes --only cursor,zed     # 只装这几个
 dsh-any-agent-setup --yes --permission read-only
-dsh-any-agent-setup --remove --yes               # 全部移除
+dsh-any-agent-setup --remove --yes               # 全部移除，只摘自己那条
 ```
+
+**新增的三个开关**
+
+| 开关 | 作用 |
+|---|---|
+| `--json` | **stdout 只有一个可解析的 JSON 对象，人类可读日志全部走 stderr**。结构：`{ ok, mode, clients: [{ id, label, path, status, summary, error? }], changed, skipped, failed }`，其中 `mode` 取 `plan` / `apply` / `remove`。这是**契约**，不是便利功能：脚本可以把 stdout 直接喂给 JSON 解析器 |
+| `--home <dir>` | 用指定的 home 目录代替真实 `HOME` / `USERPROFILE` / `APPDATA`，注册—注销可以整套演练而不碰真实配置 |
+| `--force` | 只做两件事：(a) 目录或文件不存在时创建它们（默认也会创建，这个开关让它在自动化里、以及检测不到客户端时也照做）；(b) 目标文件里已有同名条目、但形状不是本程序期望的样子时，允许覆盖它。它**绝不删别人的条目**，也**绝不跳过校验** |
+
+**每个客户端到底会碰哪个文件**
+
+写入前一律先落 `.bak-dsh-<时间戳>` 备份。表中路径均为通用示例，「自己那条」指名为 `dsh-any-agent` 的那一个条目 / 那一段。
+
+| 客户端（`--only` 取值） | 配置文件 | 容器键 | 安装 / 更新 | 卸载（`--remove`） | 撤销 |
+|---|---|---|---|---|---|
+| Claude Code（`claude-code`） | `~/.claude.json` | `mcpServers` | 只增 / 改自己那条，且带 `type: "stdio"` | 删掉自己那条 | 把备份复制回去 |
+| Claude Desktop（`claude-desktop`） | Windows `%APPDATA%\Claude\claude_desktop_config.json`；macOS `~/Library/Application Support/Claude/claude_desktop_config.json`；Linux `~/.config/Claude/claude_desktop_config.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
+| Codex（`codex`） | `~/.codex/config.toml` | `[mcp_servers.dsh-any-agent]` | 按行追加自己那两段 TOML | 只删这两段 | 把备份复制回去 |
+| Cursor（`cursor`） | `~/.cursor/mcp.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
+| Windsurf（`windsurf`） | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
+| Zed（`zed`） | Windows `%APPDATA%\Zed\settings.json`；其他平台 `~/.config/zed/settings.json` | `context_servers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
+| Gemini CLI（`gemini`） | `~/.gemini/settings.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
+| opencode（`opencode`） | `~/.config/opencode/opencode.json` | `mcp` | 只增 / 改自己那条，且按 opencode 的形状写：`{ type: "local", command: [exe, ...args], enabled: true }` —— 一个数组，不是分开的 `command`/`args` | 删掉自己那条 | 把备份复制回去 |
+| VS Code（`vscode`） | Windows `%APPDATA%\Code\User\mcp.json`；其他平台是 VS Code 用户目录下的同名 `mcp.json` | `servers` —— **不是** `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
+
+具体路径以 `--json` 输出里每个客户端的 `path` 字段为准 —— 那是本次运行在你这个系统上真正要写的文件，比任何文档都准。
+
+有三种形状值得单独点出来，写错了是**静默失效**。**VS Code** 的 MCP 配置放在 `servers` 下，不是 `mcpServers`；按常见写法写进去，编辑器会直接忽略。**opencode** 用的是**一个** `command` 数组（`{ type: "local", command: [exe, ...args], enabled: true }`），不是分开的 `command`/`args`。**Claude Code** 则是本次发布**完全不用 JSON 库**的原因：`~/.claude.json` 的 `projects` 映射里确实存在**只差大小写**的重复键（`.../Rust` 和 `.../rust` 并存），朴素的 `JSON.parse` 在那里会失败，而任何整份重写都会毁掉用户的项目列表。所以改用按字符区间扫描、**从不构造值对象**的扫描器；早先那版「调 `claude mcp add`」也出于同样理由被放弃 —— 那条命令会用它自己的格式重写整个文件，且不产生我们可以回滚的备份。
 
 **setup 会动什么、不会动什么**
 
-它只做新增。在真正装着别的 MCP 服务器的机器上验证过（Cursor 4 个、Codex 2 个段、Claude Code 5 个、Zed 33 个配置键）：所有既有条目原样保留，没有被重新格式化，唯一的差异是每个客户端多了一个键。之后这四个客户端都用配置里写入的命令真实跑通了一次 `initialize` 握手。
+它只做新增，而且只动自己那一条。在真正装着别的 MCP 服务器的机器上验证过（Cursor 4 个、Codex 2 个段、Claude Code 5 个、Zed 33 个配置键）：所有既有条目**逐字节不变**，键顺序不变，唯一的差异是每个客户端多了一个条目。
 
 ```
 Cursor       4 -> 5 个条目   既有条目逐字节相同
@@ -160,7 +188,42 @@ Claude Code  5 -> 6 个服务   原有四个都还在列表里
 Zed          33 -> 33 个键   只有 context_servers 多了个子项
 ```
 
-唯一会就地改动的是 `mcp.json` 和 `settings.json` 的**排版**（会按 2 空格缩进重新序列化）。值不变，但空白格式不保证原样。每个被改的文件旁边都留了 `.bak-dsh-<时间戳>` 备份。
+和 0.1.x 的区别：过去 JSON 配置是**整份重新序列化**的（值保留、排版丢失），所以「白空格不保证原样」。现在写入是文本级的 —— 除了自己那一条，文件其余部分逐字节相同：4 空格缩进、2 空格缩进、Tab、单行 JSON、没有末尾换行、CRLF 行尾、带 UTF-8 BOM，一律原样。
+
+Codex 的 `config.toml` 同理，是按行处理的：其它 `[表]` 及其注释、顶层键（`model`、`approval_policy`、`sandbox_mode` 等）、CRLF 行尾都原样保留 —— `--remove` 只删 `[mcp_servers.dsh-any-agent]` 那两段，其余一律不动。
+
+这些断言的详细覆盖见 [`test/`](test/)（`test/config-safety.mjs` 共 386 项，逐条断言上面每一条）。
+
+**在真实 home 上做过只读验证。** 用 `setup --json`（纯计划模式）跑一遍开发机上的真实配置：9 个客户端全部报出，而现存的每份配置都**原封未动** —— size、mtime、SHA-256 全同，没有新增任何 `.bak-dsh-*`，也没有新建任何文件：
+
+```
+~/.claude.json                            182693 B   未变
+~/.cursor/mcp.json                          1396 B   未变
+~/.codex/config.toml                        6647 B   未变
+~/.gemini/settings.json                      465 B   未变
+~/.config/opencode/opencode.json             441 B   未变
+%APPDATA%/Zed/settings.json                 5647 B   未变
+%APPDATA%/Claude/claude_desktop_config.json   247 B   未变
+```
+
+同一条命令加 `--home <临时目录>` 时，报出的**每一个** path 都落进了那个目录（`APPDATA` 也跟着走）—— 注册 / 注销整套演练之所以安全，靠的就是这条。
+
+**在真实 home 上做过完整的注册 → 撤销往返（不只是预览）。** 备份全部 7 份配置后，实际执行 `--yes` 再执行 `--remove --yes`，然后逐字节核对：
+
+| 客户端 | 注册前 | 注册后 | 撤销后 | 其它 MCP 服务器 |
+|---|---|---|---|---|
+| ~/.claude.json | 182693 B | 182693 B（原本已是最新） | 逐字节回到基线 | 未动；67 个顶层键、60 个 projects 条目、两个只差大小写的重复键都还在 |
+| ~/.cursor/mcp.json | 1396 B | 1389 B | 1009 B | stitch / obsidian-mcp-server / codegraph / rea 逐字段相同 |
+| ~/.codex/config.toml | 6647 B | 6647 B（原本已是最新） | 6239 B | 其它 `[表]`、注释、顶层键全部保留 |
+| %APPDATA%/Zed/settings.json | 5647 B | 5647 B（原本已是最新） | 5240 B | 32 个顶层设置键全部保留 |
+| ~/.gemini/settings.json | 465 B | 845 B | 465 B | 逐字节还原 |
+| ~/.config/opencode/opencode.json | 441 B | 869 B | 441 B | `$schema` 与 pencil 条目保留 |
+| %APPDATA%/Claude/claude_desktop_config.json | 247 B | 627 B | 247 B | 逐字节还原 |
+
+撤销的验收方式不是「看起来对」，而是**从备份原文里用同一套编辑引擎摘掉 `dsh-any-agent` 这一条，结果必须与磁盘上的当前文件逐字节相同** —— 7 个文件全部通过。这条证明撤销是注册的严格逆运算，不会顺手带走别的东西。
+
+撤销后所有 JSON 仍可解析、`codex mcp list` 仍能正常读取配置，客户端不需要人工修复。
+
 
 **安装 / 更新 / 删除**
 
@@ -442,6 +505,10 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | `guards` | 31 | **环境变量守卫**：奇怪的数值一律压到安全侧 —— `IDLE_TTL_MS` 的 `-1`/非法值都当"永不回收"（绝不主动让出写锁）、回收间隔过小压回默认（防空转紧循环）、**失联阈值下限 30 秒**（防别的实例"合法地"抢占并杀掉我们的回合）（不花 token，每次必跑） |
 | `sandbox-guard` | 18 | **测试沙箱自身**：「临时 HOME」如果落到真实用户目录、它的子目录、盘符根目录，或 OS 临时目录之外，一律报错拒绝，绝不被写入和删除。其余套件都通过 `test/sandbox-home.mjs` 拿目录、只销毁自己建的那个（不花 token，每次必跑） |
 | `approval-details` | 24 | **审批审查上下文**：待决审批的快照带命令、理由、cwd 与原始审批 ID —— 不只是一个裸 ID，调用方才能真正裁决；凭据形状的字段与常见内联字面量在结构化上下文和展示标题里都会脱敏。经真实 stdio MCP 端到端验证 |
+| `setup` | 41 | **注册 CLI**：预览不写盘、`--remove` 只摘自己那条、没装客户端算跳过不算失败、Codex TOML 段往返、以及把写进配置里的命令真的拉起一次并要求应答 `initialize`（不花 token） |
+| `removal-scope` | 24 | **注销只动自己那条**：给一份装着别的 MCP 服务器、顶层 Codex 设置和 Zed 兄弟设置的配置，注册再注销，断言其余每个值逐字节不变；删一个从没写过的东西 = 无写入、无报错（不花 token） |
+| `config-safety` | 386 | **0.3 这条线的核心性质**，逐客户端验证：预览后文件逐字节不变且不产生 `.bak`；注册再注销后其余条目逐字节还原、键顺序不变、顶层键不丢；4 空格 / 2 空格 / Tab 缩进、单行 JSON、无末尾换行、CRLF、UTF-8 BOM 都能在写入后保留；坏 JSON 与只读文件被拒绝且原文件无损；第二次 `--yes` 空跑不新增备份；每个 `.bak-dsh-<时间戳>` 只出现一次且内容等于写入前字节（不花 token） |
+| `real-configs` | 66 | **拿真家伙做往返**：把本机**真实**的客户端配置复制进临时目录（18 万字节、含几百个 `projects` 条目与大小写重复键的 `~/.claude.json`，238 行的 Codex TOML，Zed 的完整 `settings.json`），注册再撤销，要求每个文件**逐字节**还原；CI 上没有这些文件时明确打印 `skipped`，绝不假绿（不花 token） |
 | `timeout` | 38 | **超时语义**：`wait=false` 不受 `timeout_ms` 影响、`wait=true` 到期只转后台（不取消/不丢结果、`busy` 不说谎）、`timeout_ms<=0` 一直等、resume 失败会作废进程而不永久卡死、空 prompt 给清晰错误 |
 | `lock` | 79 | **写锁与抢占**：四类持有者判定、`writeMarker` 不覆盖活着的持有者、登记文件损坏/目录缺失等边界；**端到端**两实例抢锁 → 清晰报错 → 拒绝 → `force` 夺锁；**崩溃自动释放锁**、**卡死持有者无 force 自动抢占**；以及"一个回合 = 一个哨兵"的不变量（含内联回合与空闲插话） |
 | `cycle` | 36 | **异步派活的生命周期**：异步派活 → 收哨兵 → 空闲回收 → 再派活，连做 3 轮必须全程无锁错误；贴着回收窗口立刻重派（放大竞态）；`dsh_release` 后立刻重派；并断言回收后**不留下无法归因的锁**（这条实测抓到过"刚拉起的进程被 reaper 当空闲收掉"的竞态） |
@@ -453,9 +520,13 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | `permission` | 11 | ★ **权限档是否真的生效**（安全属性）：不看我们的返回值（那正是会说谎的地方），而是读**会话自己记录的事实**（投影缓存里的 `permissions.preset` / `sandboxMode`），三档逐一核对且三档记录值互不相同。**这条测试抓到过无声提权**：profile 里 `defaultPreset` 会在会话创建时盖掉 `DSH_PERMISSION_MODE` |
 | `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
 
-**合计 546 项检查，全绿。**（套件内 510 + 验收 36）
+**离线那半边是 614 项检查，0.3.0 上全绿** —— `guards` 31、`prune` 11、`approval-details` 24、`sandbox-guard` 18、`setup` 41、`removal-scope` 24、`config-safety` 386、`real-configs` 66、`package-check` 13。九套全部退出码 0，都不需要模型、不需要装 DSH、也不需要 provider。
 
-> 数字取各套件自己打印的汇总。`smoke`/`prune`/`guards`/`sandbox-guard`/`approval-details`/`boundary` 不调用模型；其余需要可用的 provider。
+其中 **601 项属于客户端注册器套件**（`setup`、`removal-scope`、`config-safety`、`real-configs`）—— 0.3 的活其实都在这里。
+
+需要模型的套件（`smoke` 29、`boundary` 42、`integration` 30、`async` 16、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13）合计 462 项，**完整实测停在 0.1.2** —— 它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。
+
+> 数字取各套件自己打印的汇总，不在这里手抄。`smoke`/`prune`/`guards`/`sandbox-guard`/`approval-details`/`boundary`/`setup`/`removal-scope`/`config-safety`/`package-check` 不调用模型；其余需要可用的 provider。
 
 ### 🧯 为什么会有 `sandbox-guard`
 
@@ -570,25 +641,3 @@ grep 'http fetch PUT 202' "$LOCALAPPDATA/npm-cache/_logs/<最新的>.log"
 ```
 
 然后等一两分钟再查 `npm view dsh-any-agent dist-tags`。
-
-**已发布的版本如果有问题，用 deprecate 而不是放着不管。** `0.1.0` 声明 `node >=20` 但实际需要 22.15，锁版本装它的人会得到一个起不来的服务：
-
-```bash
-npm deprecate "dsh-any-agent@0.1.0" \
-  "Node 20 cannot start this version. Upgrade to 0.1.1+ (requires Node >=22.15)."
-```
-
-`deprecate` 只在安装时打印警告、不删包 —— 这是对的工具：已经依赖它的人仍然能装到那个 tarball。注意这条**需要交互式 OTP**：带 bypass-2FA 的 granular token 不允许执行（npm 2026 年 7 月收紧的），所以要你自己跑，别放在 CI 里。
-
-**徽章有延迟。** shields.io 缓存五分钟（`max-age=300`），所以刚发完会显示旧版本号、旧的 `node` 下限，有时还会显示 `license: package not found` —— 那个字符串是 shields 读不到 license 时的通用失败文案，不是真的没有 license。等一会并强制刷新，再判断元数据是不是错的。
-
-## 💬 支持
-
-- **Bug、功能请求、部署提问** —— [提 issue](https://github.com/xmtlzzz/dsh-any-agent/issues)，都往这里放
-- **报故障之前** —— 先看 [新环境常见故障表](USAGE-MIGRATION.md) 和 [使用注意事项](USAGE-NOTES.md)，绝大多数部署失败就那么几种原因
-
-单人维护的项目，所以带着**可复现的信息**（具体哪次调用、完整报错原文、DSH 版本）会快很多。
-
-## 📜 许可
-
-MIT —— 见 [LICENSE](LICENSE)。

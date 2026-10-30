@@ -46,6 +46,16 @@ if (code === 0) {
   // 卸载的影响范围：只删自己那条，用户既有的 MCP 服务器与无关设置必须原样。
   code = await run('removal-scope.mjs');
 }
+if (code === 0) {
+  // 配置安全矩阵：9 个客户端 × 格式保留 × 只读文件 × 真实 HOME 只读回归。
+  // 这是「注册/删除时不会破坏原有配置」这条承诺的可执行版本，必须每次必跑。
+  code = await run('config-safety.mjs');
+}
+if (code === 0) {
+  // 真实配置往返：本机已装的客户端配置复制进沙箱，注册再撤销必须逐字节还原。
+  // 手工 fixture 证明实现符合假设，这一组证明假设和真实文件一致。
+  code = await run('real-configs.mjs');
+}
 if (code === 0 && all) {
   code = await run('boundary.mjs');
 }

@@ -1,31 +1,45 @@
 #!/usr/bin/env node
 /**
- * dsh-any-agent setup -- wire this server into the MCP clients you already have.
+ * dsh-any-agent setup -- 把本服务注册进你已有的 MCP 客户端。
  *
- *   dsh-any-agent setup                     detect and preview; writes nothing
- *   dsh-any-agent setup --yes               actually write (backs up first)
- *   dsh-any-agent setup --yes --only cursor,zed
- *   dsh-any-agent setup --yes --permission read-only
- *   dsh-any-agent setup --remove --yes      take it back out
+ *   dsh-any-agent-setup                       检测并预览；一个字节都不写
+ *   dsh-any-agent-setup --yes                 真正写入（先备份）
+ *   dsh-any-agent-setup --yes --only cursor,zed
+ *   dsh-any-agent-setup --yes --permission read-only
+ *   dsh-any-agent-setup --json                机器可读的计划
+ *   dsh-any-agent-setup --remove --yes        只把自己那一条摘掉
  *
- * Constraints, each one learned the hard way:
- *   1. Dry-run by default. Touching someone else's config deserves a preview.
- *   2. Every file is backed up to <file>.bak-dsh-<stamp> before it is written.
- *   3. JSON clients: parse the original, build the new object, parse the result
- *      again, and only then write. A half-written config is worse than none.
- *   4. A client that is not installed is skipped, not failed.
- *   5. Claude Code and Codex have their own `mcp` subcommands; prefer them.
+ * 这个脚本会改别人的配置文件，所以下面每一条约束都是硬要求：
+ *
+ *   1) 默认只预览。动别人的配置，先看清要动什么。
+ *   2) 每次写入前留 <file>.bak-dsh-<stamp>；内容等于写入前的原始字节。
+ *   3) JSON 客户端做文本级定点编辑：只替换/插入/删除我们那一个条目所占的
+ *      字符区间。缩进、键顺序、行尾、BOM、有无末尾换行全部原样保留。
+ *      曾经的做法是 JSON.parse 再 JSON.stringify(...,2) 整份重写，
+ *      值虽然对，但会把用户手写的格式全部重排掉。
+ *   4) 删掉最后一条时若容器变空，连容器一起收掉，好让「装一次再卸掉」
+ *      能把文件还原成安装前的样子。
+ *   5) 只读文件、坏 JSON、非对象容器：拒绝并保持原文件不动，绝不写半截。
+ *   6) 计划模式不启动任何会立刻写盘的东西；Claude Code 的预览只做只读探测。
+ *   7) --json 时 stdout 只有一个 JSON 对象，人类日志全部走 stderr。
  */
 
-import { existsSync, readFileSync, writeFileSync, copyFileSync, renameSync, unlinkSync } from 'node:fs';
-import { homedir, platform } from 'node:os';
-import { join, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 
-const NAME = 'dsh-any-agent';
+import {
+  ENTRY_NAME,
+  applyClient,
+  clientList,
+  defaultLaunch,
+  desiredEnv,
+  isPresent,
+  planClient,
+  resolveDirs,
+} from '../src/clients.mjs';
 
-/** Same source of truth as the server: package.json, not a hard-coded copy. */
+/** 版本号以 package.json 为准，避免 npm version 之后这里变旧。 */
 const VERSION = (() => {
   try {
     const here = dirname(fileURLToPath(import.meta.url));
@@ -34,266 +48,207 @@ const VERSION = (() => {
 })();
 
 const argv = process.argv.slice(2);
-if (argv.includes('--version') || argv.includes('-v')) {
-  process.stdout.write(VERSION + '\n');
-  process.exit(0);
-}
-if (argv.includes('--help') || argv.includes('-h')) {
-  process.stdout.write(
-    'dsh-any-agent-setup ' + VERSION + '\n\n' +
-    'Detect installed MCP clients and register ' + NAME + ' with each.\n\n' +
-    'Usage:\n' +
-    '  dsh-any-agent-setup                     preview (writes nothing)\n' +
-    '  dsh-any-agent-setup --yes               apply\n' +
-    '  dsh-any-agent-setup --yes --only a,b    only these clients\n' +
-    '  dsh-any-agent-setup --yes --permission read-only\n' +
-    '  dsh-any-agent-setup --remove --yes      unregister\n\n' +
-    'Clients: Claude Code, Codex, Cursor, Windsurf, Zed.\n' +
-    'Every write is preceded by a .bak-dsh-<timestamp> backup; JSON clients are\n' +
-    'validated before and after writing; re-running is idempotent.\n\n' +
-    'Only one entry per client is added, named "' + NAME + '", and --remove takes\n' +
-    'out exactly that entry. Your other MCP servers are never read, rewritten or\n' +
-    'deleted; the only thing that changes about them is JSON whitespace, since a\n' +
-    'JSON config is re-serialised on write.\n\n' +
-    'NOTE: the path recorded in each client is absolute. If you move or delete\n' +
-    'this installation, those clients will report CONNECTION_CLOSED until you\n' +
-    'run setup again from the new location (or --remove to clean up).\n',
-  );
-  process.exit(0);
-}
-
 const has = (f) => argv.includes(f);
 const val = (f, d) => {
   const i = argv.indexOf(f);
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : d;
 };
 
-const WRITE = has('--yes') || has('-y');
+if (has('--version') || has('-v')) {
+  process.stdout.write(VERSION + '\n');
+  process.exit(0);
+}
+
+const JSON_OUT = has('--json');
+
+if (has('--help') || has('-h')) {
+  const ids = clientList(resolveDirs()).map((c) => c.id).join(', ');
+  process.stdout.write(
+    'dsh-any-agent-setup ' + VERSION + '\n\n' +
+    'Detect installed MCP clients and register ' + ENTRY_NAME + ' with each.\n\n' +
+    'Usage:\n' +
+    '  dsh-any-agent-setup                     preview (writes nothing)\n' +
+    '  dsh-any-agent-setup --yes               apply\n' +
+    '  dsh-any-agent-setup --yes --only a,b    only these clients\n' +
+    '  dsh-any-agent-setup --yes --permission read-only\n' +
+    '  dsh-any-agent-setup --remove --yes      unregister\n' +
+    '  dsh-any-agent-setup --json              machine-readable result on stdout\n' +
+    '  dsh-any-agent-setup --home <dir>        use another home (sandbox/testing)\n' +
+    '  dsh-any-agent-setup --force             create configs even if the client\n' +
+    '                                          is not detected; replace an entry\n' +
+    '                                          whose shape we do not recognise\n\n' +
+    'Clients: ' + ids + '\n\n' +
+    'Scope of the change -- this is the whole promise:\n' +
+    '  * exactly one entry per client, named "' + ENTRY_NAME + '";\n' +
+    '  * --remove takes out exactly that entry, nothing else;\n' +
+    '  * your other MCP servers, top-level settings, comments and indentation\n' +
+    '    are never rewritten -- JSON configs are edited in place as text, so\n' +
+    '    2-space, 4-space, tab, single-line, CRLF and BOM all survive;\n' +
+    '  * Claude Code is edited the same way as the rest: ~/.claude.json is\n' +
+    '    scanned by character range and only our own entry is touched -- that\n' +
+    '    file holds hundreds of project entries and duplicate keys differing\n' +
+    '    only in case, so it is never re-serialised from a parsed object;\n' +
+    '  * every write is preceded by <file>.bak-dsh-<timestamp>.\n\n' +
+    'The path recorded in each client is absolute. If you move or delete this\n' +
+    'installation those clients report CONNECTION_CLOSED until setup is re-run\n' +
+    'from the new location (or --remove to clean up).\n',
+  );
+  process.exit(0);
+}
+// ── 参数 ───────────────────────────────────────────────────────────
+
+const WRITE = (has('--yes') || has('-y')) && !has('--dry-run') && !has('--preview');
 const REMOVE = has('--remove');
-const ONLY = (val('--only', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
+const ONLY = (val('--only', '') || val('--clients', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
 const PERMISSION = val('--permission', 'workspace-write');
+const HOME_OVERRIDE = val('--home');
+const FORCE = has('--force');
+const ALL = has('--all');
 const STAMP = new Date().toISOString().replace(/[:.]/g, '-');
 
-const HOME = homedir();
-const IS_WIN = platform() === 'win32';
-const APPDATA = process.env.APPDATA || join(HOME, 'AppData', 'Roaming');
-
-const log = (s = '') => console.log(s);
+/** 人类可读的日志：--json 时一律走 stderr，别污染 stdout 里的那个对象。 */
+const log = (s = '') => {
+  if (JSON_OUT) process.stderr.write(s + '\n');
+  else process.stdout.write(s + '\n');
+};
 const tick = (s) => log('  OK   ' + s);
 const dash = (s) => log('  ---  ' + s);
 const bang = (s) => log('  FAIL ' + s);
 
-function which(cmd) {
-  const probe = spawnSync(IS_WIN ? 'where' : 'which', [cmd], { encoding: 'utf8', shell: IS_WIN });
-  return probe.status === 0;
-}
+// ── 主流程 ─────────────────────────────────────────────────────────
 
-function desiredEnv() {
-  const env = { DSH_MCP_PERMISSION: PERMISSION, DSH_MCP_LOG: 'silent' };
-  if (process.env.DSH_BIN) env.DSH_BIN = process.env.DSH_BIN;
-  return env;
-}
+const dirs = resolveDirs(HOME_OVERRIDE);
+const clients = clientList(dirs);
+const byId = new Map(clients.map((c) => [c.id, c]));
 
-/** Prefer this package's own entry point; fall back to the PATH command. */
-function launch() {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const sibling = join(here, 'dsh-any-agent.mjs');
-  if (existsSync(sibling)) return { command: process.execPath, args: [sibling], style: 'node + sibling entry' };
-  return { command: NAME, args: [], style: 'PATH command' };
-}
-
-function backup(file) {
-  const dst = file + '.bak-dsh-' + STAMP;
-  copyFileSync(file, dst);
-  return dst;
-}
-
-/** Temp-then-rename so a crash cannot leave a truncated config. */
-function atomicWrite(file, text) {
-  const tmp = file + '.tmp-dsh-' + process.pid;
-  writeFileSync(tmp, text, 'utf8');
-  renameSync(tmp, file);
-}
-
-function parseJson(file) {
-  const raw = readFileSync(file, 'utf8');
-  try {
-    return { json: JSON.parse(raw), raw };
-  } catch (e) {
-    return { error: e.message };
-  }
-}
-
-const CLIENTS = [
-  {
-    id: 'claude',
-    label: 'Claude Code',
-    detect: () => which('claude') && existsSync(join(HOME, '.claude.json')),
-    apply() {
-      const run = (a) => spawnSync('claude', a, { encoding: 'utf8', shell: IS_WIN });
-      const tried = (r) => (((r.stdout || '') + (r.stderr || '')).toLowerCase());
-
-      // Dry-run must not shell out: `claude mcp add` writes immediately, so
-      // previewing by running it would be a write, not a preview.
-      if (!WRITE) {
-        const probe = run(['mcp', 'get', NAME]);
-        const registered = probe.status === 0;
-        if (REMOVE) {
-          return registered
-            ? { preview: 'would be unregistered via \`claude mcp remove\`' }
-            : { skipped: 'not registered' };
-        }
-        return { preview: registered
-          ? 'would be re-registered via \`claude mcp add\` (replacing the existing entry)'
-          : 'would be registered via \`claude mcp add\` (user scope)' };
-      }
-
-      if (REMOVE) {
-        const r = run(['mcp', 'remove', NAME, '-s', 'user']);
-        if (r.status !== 0) {
-          return tried(r).includes('no mcp server named')
-            ? { skipped: 'not registered' }
-            : { error: tried(r).trim().split('\n')[0] || 'claude exited ' + r.status };
-        }
-        return { done: 'removed via \`claude mcp remove\` (user scope)' };
-      }
-
-      // `add` refuses to overwrite, so clear any existing entry first. A
-      // missing entry is the normal path, not an error.
-      const existing = run(['mcp', 'remove', NAME, '-s', 'user']);
-      const hadIt = existing.status === 0;
-
-      const { command, args } = launch();
-      const envs = [];
-      for (const [k, v] of Object.entries(desiredEnv())) envs.push('-e', k + '=' + v);
-      // On Windows the child is spawned through cmd (shell: true), so an
-      // argument containing spaces must be quoted or it is split: a command of
-      // "C:\Program Files\nodejs\node.exe" arrives as "C:\Program" plus a
-      // stray "Files\nodejs\node.exe" argument, and Claude Code then fails
-      // to connect with CONNECTION_CLOSED. Quote anything with a space.
-      const quote = (s) => (IS_WIN && /\s/.test(s) ? '"' + s + '"' : s);
-      const r = run(['mcp', 'add', NAME, '-s', 'user', ...envs, '--', quote(command), ...args.map(quote)]);
-      if (r.status !== 0) {
-        return { error: tried(r).trim().split('\n')[0] || 'claude exited ' + r.status };
-      }
-      return { done: 'registered via \`claude mcp add\` (user scope)' + (hadIt ? ', replacing the old entry' : '') };
-    },
-  },
-  {
-    id: 'codex',
-    label: 'Codex',
-    detect: () => existsSync(join(HOME, '.codex', 'config.toml')),
-    apply() {
-      const cfg = join(HOME, '.codex', 'config.toml');
-      const raw = readFileSync(cfg, 'utf8');
-      const kept = [];
-      let skip = false;
-      const re = new RegExp('^mcp_servers\\.(?:' + NAME + '|"' + NAME + '")(?:\\.|$)');
-      for (const line of raw.split(/\r?\n/)) {
-        const m = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
-        if (m) skip = re.test(m[1]);
-        if (!skip) kept.push(line);
-      }
-      let out = kept.join('\n').trimEnd();
-      if (!REMOVE) {
-        const { command, args } = launch();
-        const envLines = Object.entries(desiredEnv())
-          .map(([k, v]) => k + ' = ' + JSON.stringify(v)).join('\n');
-        out += (out ? '\n\n' : '') +
-          '[mcp_servers.' + NAME + ']\ncommand = ' + JSON.stringify(command) +
-          '\nargs = ' + JSON.stringify(args) +
-          '\nstartup_timeout_sec = 20.0\ntool_timeout_sec = 120.0\n\n' +
-          '[mcp_servers.' + NAME + '.env]\n' + envLines;
-      }
-      out += '\n';
-      if (out === raw) return { skipped: 'already up to date' };
-      if (!WRITE) return { preview: REMOVE ? 'TOML block would be removed' : 'TOML block would be written' };
-      backup(cfg);
-      atomicWrite(cfg, out);
-      return { done: REMOVE ? 'TOML block removed' : 'TOML block written' };
-    },
-  },
-  { id: 'cursor',   label: 'Cursor',   json: () => join(HOME, '.cursor', 'mcp.json'),                        key: 'mcpServers' },
-  { id: 'windsurf', label: 'Windsurf', json: () => join(HOME, '.codeium', 'windsurf', 'mcp_config.json'),     key: 'mcpServers' },
-  { id: 'zed',      label: 'Zed',      json: () => join(IS_WIN ? APPDATA : join(HOME, '.config'), IS_WIN ? join('Zed','settings.json') : join('zed','settings.json')), key: 'context_servers' },
-];
-
-/** Shared reader/writer for the JSON-shaped clients. */
-function applyJson(c) {
-  const file = c.json();
-  const parsed = parseJson(file);
-  if (parsed.error) return { error: 'existing file is not valid JSON (' + parsed.error + ')' };
-
-  const root = (parsed.json && typeof parsed.json === 'object') ? parsed.json : {};
-  const bag = (root[c.key] && typeof root[c.key] === 'object') ? root[c.key] : {};
-
-  if (REMOVE) {
-    if (!Object.prototype.hasOwnProperty.call(bag, NAME)) return { skipped: 'not present' };
-    delete bag[NAME];
+const unknown = ONLY.filter((id) => !byId.has(id));
+if (unknown.length) {
+  const msg = 'unknown client id(s): ' + unknown.join(', ') + ' (known: ' + clients.map((c) => c.id).join(', ') + ')';
+  if (JSON_OUT) {
+    process.stdout.write(JSON.stringify({
+      ok: false, mode: 'error', error: msg, clients: [], changed: 0, skipped: 0, failed: unknown.length,
+    }) + '\n');
   } else {
-    const { command, args } = launch();
-    const next = { command, args, env: desiredEnv() };
-    if (JSON.stringify(bag[NAME]) === JSON.stringify(next)) return { skipped: 'already up to date' };
-    bag[NAME] = next;
+    bang(msg);
   }
-  root[c.key] = bag;
-
-  const text = JSON.stringify(root, null, 2) + '\n';
-  if (text === parsed.raw.trimEnd() + '\n') return { skipped: 'no change' };
-  JSON.parse(text);            // self-check before touching disk
-
-  // Dry-run must stop here. This file used to write unconditionally and only
-  // reported "would write" in the orchestration layer, which meant `setup`
-  // without --yes silently modified every client config it found -- the exact
-  // opposite of what the docs promise.
-  if (!WRITE) return { preview: REMOVE ? 'entry would be removed' : 'entry would be written' };
-
-  backup(file);
-  atomicWrite(file, text);
-  const back = parseJson(file); // self-check after writing
-  if (back.error) return { error: 'wrote a file that no longer parses (' + back.error + '); restore the .bak' };
-  return { done: REMOVE ? 'entry removed' : 'entry written' };
+  process.exit(2);
 }
 
-// --- main -----------------------------------------------------------
+const launch = defaultLaunch();
+const env = desiredEnv(PERMISSION);
+const ctx = { dirs, remove: REMOVE, write: WRITE, launch, env, byId };
 
-const lc = launch();
-log('');
-log(WRITE
-  ? (REMOVE ? 'Removing ' + NAME + ' from MCP clients' : 'Installing ' + NAME + ' into MCP clients')
-  : 'Preview only -- nothing is written. Re-run with --yes to apply.');
-log('  permission : ' + PERMISSION);
-log('  launch     : ' + lc.command + (lc.args.length ? ' ' + lc.args.join(' ') : '') + '   (' + lc.style + ')');
-log('  DSH_BIN    : ' + (process.env.DSH_BIN || '(unset -- auto-detect at runtime)'));
-log('');
+if (!JSON_OUT) {
+  log('');
+  log(WRITE
+    ? (REMOVE ? 'Removing ' + ENTRY_NAME + ' from MCP clients' : 'Installing ' + ENTRY_NAME + ' into MCP clients')
+    : 'Preview only -- nothing is written. Re-run with --yes to apply.');
+  log('  home       : ' + dirs.home);
+  log('  permission : ' + PERMISSION);
+  log('  launch     : ' + launch.command + (launch.args.length ? ' ' + launch.args.join(' ') : '') + '   (' + launch.style + ')');
+  log('  DSH_BIN    : ' + (process.env.DSH_BIN || '(unset -- auto-detect at runtime)'));
+  log('');
+}
 
-let changed = 0, skipped = 0, failed = 0;
+const results = [];
+let changed = 0;
+let skipped = 0;
+let failed = 0;
 
-for (const c of CLIENTS) {
-  if (ONLY.length && !ONLY.includes(c.id)) continue;
+for (const client of clients) {
+  // --json 时仍把每个客户端都报出来，只是标成 filtered：
+  // 调用方拿到的永远是一份完整的清单，而不是「这次碰巧选中的那几个」。
+  if (ONLY.length && !ONLY.includes(client.id)) {
+    if (JSON_OUT) {
+      results.push({
+        id: client.id, label: client.label, path: client.pathOf(dirs),
+        status: 'filtered', summary: 'not selected by --only', changed: false,
+      });
+    }
+    continue;
+  }
 
   let present = false;
-  try { present = c.detect ? c.detect() : existsSync(c.json()); } catch {}
-  log(c.label + (present ? '' : '   (not installed)'));
+  try { present = isPresent(client, dirs); } catch { present = false; }
+  if (!JSON_OUT) log(client.label + (present ? '' : '   (not detected)'));
 
-  if (!present) { dash('skipped: client not found'); skipped++; log(''); continue; }
+  if (!present && !(FORCE || ALL)) {
+    if (!JSON_OUT) { dash('skipped: client not found'); log(''); }
+    results.push({
+      id: client.id, label: client.label, path: client.pathOf(dirs),
+      status: 'skipped', summary: 'client not detected', changed: false,
+    });
+    skipped++;
+    continue;
+  }
+  // 对没装过的客户端做 --remove 毫无意义：既没有文件，也没写过东西。
+  if (!present && REMOVE) {
+    if (!JSON_OUT) { dash('skipped: not present'); log(''); }
+    results.push({
+      id: client.id, label: client.label, path: client.pathOf(dirs),
+      status: 'absent', summary: 'not present', changed: false,
+    });
+    skipped++;
+    continue;
+  }
 
-  let r;
-  try { r = c.apply ? c.apply() : applyJson(c); }
-  catch (e) { r = { error: e.message }; }
+  let plan;
+  try {
+    plan = planClient(client, ctx);
+  } catch (e) {
+    plan = { id: client.id, label: client.label, path: client.pathOf(dirs), status: 'failed', changed: false, summary: e.message };
+  }
 
-  if (r.error) { bang(r.error); failed++; }
-  else if (r.skipped) { dash('skipped: ' + r.skipped); skipped++; }
-  else if (r.preview) { tick(r.preview); changed++; }
-  else { tick(r.done); changed++; }
-  log('');
+  let finalPlan = plan;
+  try {
+    finalPlan = applyClient(plan, ctx, STAMP);
+  } catch (e) {
+    finalPlan = { ...plan, status: 'failed', changed: false, summary: 'unexpected error: ' + e.message };
+  }
+
+  results.push({
+    id: finalPlan.id,
+    label: finalPlan.label,
+    path: finalPlan.path,
+    status: finalPlan.status,
+    summary: finalPlan.summary,
+    changed: Boolean(finalPlan.changed),
+  });
+
+  if (finalPlan.status === 'failed') {
+    if (!JSON_OUT) { bang(finalPlan.summary); log(''); }
+    failed++;
+    continue;
+  }
+  if (finalPlan.changed) {
+    if (!JSON_OUT) { tick(finalPlan.summary); log(''); }
+    changed++;
+  } else {
+    if (!JSON_OUT) { dash('skipped: ' + finalPlan.summary); log(''); }
+    skipped++;
+  }
 }
 
-log('Summary: ' + changed + ' ' + (WRITE ? 'changed' : 'would change') + ', ' + skipped + ' skipped, ' + failed + ' failed');
-if (!WRITE && changed) log('Nothing was written. Re-run with --yes to apply.');
-if (failed) {
-  log('');
-  log('A failure above left no damage: every writer validates the result and keeps');
-  log('a .bak-dsh-* copy beside the file it touched.');
+const ok = failed === 0;
+const summary = {
+  ok,
+  mode: REMOVE ? 'remove' : (WRITE ? 'apply' : 'plan'),
+  clients: results,
+  changed,
+  skipped,
+  failed,
+};
+
+if (JSON_OUT) {
+  process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
+} else {
+  log('Summary: ' + changed + ' ' + (WRITE ? 'changed' : 'would change') + ', ' + skipped + ' skipped, ' + failed + ' failed');
+  if (!WRITE && changed) log('Nothing was written. Re-run with --yes to apply.');
+  if (failed) {
+    log('');
+    log('A failure above left no damage: every writer validates the result and keeps');
+    log('    a .bak-dsh-* copy beside the file it touched.');
+  }
 }
-process.exit(failed ? 1 : 0);
+
+process.exit(ok ? 0 : 1);

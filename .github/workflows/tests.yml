@@ -100,6 +100,25 @@ jobs:
         env: { DSH_MCP_LOG: silent }
         run: node test/removal-scope.mjs
 
+      # 9 个客户端 × 格式保留(2/4 空格、Tab、单行、CRLF、BOM) × 只读文件 ×
+      # 坏 JSON × 幂等 × 真实 HOME 只读回归。用户的底线是「注册/删除只能
+      # 影响自己写的那一条」，这是它的可执行版本。
+      - name: config-safety (in-place edits, format preserved)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/config-safety.mjs
+
+      # 真实客户端配置的往返：跑在 CI runner 上通常是空的，套件会明确打印
+      # skipped 而不是假绿；在开发机上跑才能真正覆盖到真实文件。
+      - name: real-configs (round-trip against real client configs, if any)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/real-configs.mjs
+
+      # 默认分支上是计划模式：跑一遍真实 HOME，只读，证明「预览不写盘」。
+      - name: preview against the real home writes nothing
+        shell: bash
+        env: { DSH_MCP_LOG: silent }
+        run: node bin/setup.mjs --json > /dev/null
+
       - name: package-check (publishability)
         run: node test/package-check.mjs
 

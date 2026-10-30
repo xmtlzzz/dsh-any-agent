@@ -5,10 +5,106 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] — 2026-10-30
+
+**Configuration impact is now a bounded, auditable property.** Registering this
+server with any of nine MCP clients changes exactly one entry per client and
+nothing else — including in configs with comments, CRLF endings, a BOM or keys
+that collide only by letter case. `package.json` reports `0.3.0`; both
+`dsh-any-agent --version` and `dsh-any-agent-setup --version` print it.
 
 ### Added
 
+- **Nine clients, up from five.** `dsh-any-agent-setup` now detects and
+  registers with Claude Code (`claude-code`), Claude Desktop
+  (`claude-desktop`), Codex (`codex`), Cursor (`cursor`), Windsurf
+  (`windsurf`), Zed (`zed`), Gemini CLI (`gemini`), opencode (`opencode`)
+  and VS Code (`vscode`) — these ids are what `--only` and the `--json`
+  output use. A client that is not installed is still skipped, never failed.
+- **Per-client config shapes, written correctly rather than generically.**
+  VS Code keeps MCP servers under `servers` (not `mcpServers`); opencode
+  takes one `command` array (`{ type: "local", command: [exe, ...args],
+  enabled: true }`) instead of separate `command`/`args`; Zed uses
+  `context_servers`; Codex gets the two `[mcp_servers.dsh-any-agent]`
+  sections. Claude Code is now edited like every other JSON client — a
+  text-level `mcpServers` edit of `~/.claude.json` with a `type: "stdio"`
+  entry — rather than registered through `claude mcp add`.
+- **A JSON scanner that does not build a value object.** `~/.claude.json`
+  really does hold a `projects` map with keys differing only in letter case
+  (`.../Rust` next to `.../rust`), which is enough to break a naive
+  `JSON.parse`; rewriting the file wholesale would destroy the user's project
+  list. The scanner walks the text into a tree of byte ranges (tolerating
+  comments and trailing commas, because Zed and VS Code configs allow them),
+  so the case-colliding keys are never materialised — only the range of our
+  own entry is touched.
+- **JSON writes are text-level now: exactly one entry is rewritten, in place.**
+  Earlier versions re-serialised the whole file, so values survived but
+  formatting did not. Setup now locates its own entry in the existing text and
+  replaces only that span, so indentation (2-space, 4-space, tabs), key order,
+  CRLF line endings, a UTF-8 BOM and a missing trailing newline all come back
+  byte-identical apart from the entry itself.
+- `--json` — **stdout is one parseable object and nothing else; every
+  human-readable line moves to stderr.** Shape: `{ ok, mode, clients: [{ id,
+  label, path, status, summary, error? }], changed, skipped, failed }` with
+  `mode` being `plan`, `apply` or `remove`. That split is the contract — a
+  caller can pipe stdout straight into a JSON parser. Exit code still reports
+  failure (`0` / `1`).
+- `--home <dir>` — point setup at a sandbox (or any) home directory instead of
+  the real `HOME`/`USERPROFILE`/`APPDATA`, so registering, re-registering and
+  removing can be exercised without touching a live config.
+- `--force` — exactly two effects: create a missing directory or file (the
+  default does that too; the flag makes it dependable under automation and
+  when the client itself is not detected), and overwrite a same-named entry
+  whose shape is not what this program expects. It never removes another
+  entry and never skips validation.
+
+### Changed
+
+- **The blast radius is now stated as a property, not a promise.** For every
+  client, setup writes one entry named `dsh-any-agent` and `--remove` deletes
+  exactly that entry. Nothing else in the file is re-serialised, re-indented or
+  reordered.
+- **Codex (`config.toml`) is edited line-wise.** Other `[tables]`, their
+  comments, top-level keys (`model`, `approval_policy`, `sandbox_mode`) and
+  CRLF endings are carried over unchanged; `--remove` puts the file back the
+  way it was.
+- **A backup before every write**: `<file>.bak-dsh-<timestamp>`, one per run
+  per file, holding the exact pre-write bytes. No backup is left behind by a
+  preview.
+- **Measured on seven real configs, not fixtures.** Registering added exactly
+  one `dsh-any-agent` entry per client and preserved every pre-existing line —
+  comments, CRLF endings, a 238-line Codex config, the 182693-byte
+  `~/.claude.json` — and a subsequent `--remove` restored all seven files
+  byte for byte.
+- **The round trip was run on the real home, with backups.** `--yes` then
+  `--remove --yes` were executed against the developer machine's actual
+  configs after backing all seven up. Removal is verified as the strict inverse
+  of registration: taking our single entry out of the backup with the same
+  editing engine must reproduce the file then on disk, byte for byte. All seven
+  match. Other MCP servers were unchanged field by field (Cursor still has
+  stitch / obsidian-mcp-server / codegraph / rea), Zed still has all 32
+  top-level settings keys, and `~/.claude.json` still parses with its 67
+  top-level keys, 60 project entries and both case-only duplicate keys.
+  `codex mcp list` reads the file normally afterwards, so nothing needs hand
+  repair.
+- **One deliberate change to an existing entry**: because the launch command is
+  derived from where setup runs, registering from this checkout replaced the
+  bundled `node/node.exe` in the pre-existing Cursor entry with the system
+  `node.exe`. That is the one entry we own; no other server was touched.
+- **Preview mode is a hard guarantee, not a report.** Without `--yes` nothing
+  is written and no subprocess that writes is started. The Claude Code path
+  used to shell out to `claude mcp add`, which writes immediately — and, worse,
+  rewrites `~/.claude.json` in its own formatting with no backup we could
+  restore. It is now a text-level edit like every other client, and a preview
+  is a pure read: no CLI is invoked at all.
+- **`claude mcp get` is used only as a read-only confirmation.** When the
+  `claude` CLI happens to be installed, a completed write is followed by one
+  `claude mcp get` probe and the summary says
+  `(confirmed by claude mcp get)`; if the client has not picked the entry up
+  yet the summary says so instead. The probe never writes.
+- README (both languages): a per-client table of config file paths and exactly
+  what install / update / remove / undo touch, replacing the older "JSON is
+  re-serialised" caveat.
 - `test/sandbox-home.mjs` + `test/sandbox-guard.mjs` (18 checks) — a test
   sandbox can no longer point at real user data. The guard refuses the real
   `home`, its subdirectories, case variants, the filesystem root, and any path
@@ -32,6 +128,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Setup used to reformat a config it was only supposed to add one key to.**
+  The previous writer parsed each JSON client config and re-emitted it with
+  `JSON.stringify(..., null, 2)`, which silently normalised indentation, key
+  order, line endings and the trailing newline of every unrelated entry — the
+  values survived, the formatting did not. Writes now replace only the bytes
+  belonging to setup's own entry, and the invariant is asserted in
+  `test/config-safety.mjs` rather than described in prose.
 - **A throwaway verification script deleted parts of the operator's real
   home directory.** Not a bug in `setup` — a bug in the harness used to
   verify it. The script kept its sandbox path in `$home`, which is a
@@ -47,6 +150,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.cursor/mcp.json.bak-dsh-*` files contained the fixture the script had
   written (`{"mcpServers":{"keep":...}}`), i.e. it was writing to the real
   profile. `sandbox-guard` now makes that impossible to do silently.
+
+### Tests
+
+- **614 offline checks, all green on 0.3.0** — `guards` 31, `prune` 11,
+  `approval-details` 24, `sandbox-guard` 18, `setup` 41, `removal-scope`
+  24, `config-safety` 386, `real-configs` 66, `package-check` 13. Every
+  suite exited 0; none needs a model, a DSH install or a provider. **601 of
+  those assertions are in the client-registration suites** (`setup`,
+  `removal-scope`, `config-safety`, `real-configs`), which is where this
+  release's work actually is. The model-backed suites (462 checks) were last
+  measured in full for 0.1.2 and are re-run with `node test/run.mjs --all`.
+- `test/real-configs.mjs` — **66 checks against real configs rather than
+  fixtures.** It copies this machine's actual client files into a temp
+  directory — the 182693-byte `~/.claude.json` with its hundreds of
+  `projects` entries and case-colliding keys, a 238-line Codex
+  `config.toml`, Zed's full `settings.json` — registers, then removes, and
+  requires every file back byte for byte. Where those files do not exist (CI),
+  the suite prints `skipped` explicitly instead of passing vacuously.
+- `test/config-safety.mjs` — **386 checks**, the fixture matrix for the
+  property this release is about, per client and against a throwaway home: a
+  preview leaves every file byte-identical and creates no backup;
+  register-then-remove restores every other entry byte-for-byte and leaves no
+  top-level key behind; 4-space, 2-space and tab indentation, single-line
+  JSON, a missing trailing newline, CRLF endings and a UTF-8 BOM all survive a
+  write; malformed JSON and a read-only file are refused without damaging the
+  original, while a missing directory is created safely; the second `--yes`
+  is a no-op with no new backup; removing an entry that was never written
+  writes nothing and exits `0`; and every `.bak-dsh-<stamp>` appears once
+  and equals the pre-write bytes.
+- `test/removal-scope.mjs` — 24 checks; `test/setup.mjs` — 41 checks,
+  including spawning the command written into a config and requiring a valid
+  `initialize` answer.
+- **Verified against a real home, read-only.** Running `setup --json` (plan
+  mode) over an operator's actual profile left all seven existing client
+  configs — `~/.claude.json` (182693 B), `~/.cursor/mcp.json` (1396 B),
+  `~/.codex/config.toml` (6647 B), `~/.gemini/settings.json` (465 B),
+  `~/.config/opencode/opencode.json` (441 B), Zed's `settings.json`
+  (5647 B) and Claude Desktop's `claude_desktop_config.json` (247 B) — with
+  identical size, mtime and SHA-256, created no `.bak-dsh-*` file and created
+  no new config. All nine clients were reported. With `--home <tmp>` every
+  reported path moved inside that directory, `APPDATA` included.
 
 ## [0.1.2] — 2026-10-29
 
@@ -237,7 +381,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.2...v0.3.0
 [0.1.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/xmtlzzz/dsh-any-agent/releases/tag/v0.1.0
