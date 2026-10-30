@@ -45,8 +45,20 @@ check('read-only 下放行（不写盘，不需要 ACL 沙箱）',
   homeWorkspaceProblem(home, 'read-only') === null);
 check('普通项目目录放行',
   homeWorkspaceProblem(join(home, 'some-project'), 'workspace-write') === null);
-check('大小写不敏感（Windows）',
-  Boolean(homeWorkspaceProblem(home.toUpperCase(), 'workspace-write')));
+// 大小写是否等价取决于文件系统：Windows / macOS 默认不区分，Linux 区分。
+// 只有确实不区分时，改大小写才仍然指向家目录 —— 在 Linux 上这不是漏洞。
+// 用 realpath 判断不靠谱：Node 在 Windows 上并不规范化大小写，
+// C:\\Users\\xmtlz 与 C:\\USERS\\XMTLZ 会返回各自的原样字符串。
+// 直接按平台判定，并且只在真正不区分大小写的平台上断言。
+{
+  const caseInsensitiveFs = process.platform === 'win32' || process.platform === 'darwin';
+  if (caseInsensitiveFs) {
+    check('不区分大小写的平台上，改大小写也认得出',
+      Boolean(homeWorkspaceProblem(home.toUpperCase(), 'workspace-write')));
+  } else {
+    console.log('  ---  ' + process.platform + ' 区分大小写，改大小写后并不是家目录，相关断言跳过');
+  }
+}
 check('带尾部分隔符也认得出', Boolean(homeWorkspaceProblem(home + sep, 'workspace-write')));
 
 {
