@@ -210,6 +210,10 @@ Removal is not accepted because it *looks* right: the check is that **taking our
 Afterwards every JSON config still parses and `codex mcp list` still reads the file; no client needs hand repair.
 
 
+**Do not use the home directory as `cwd`**
+
+DSH's own ACL sandbox requires its temp directory to be **outside** the workspace. On Windows `%TEMP%` is `C:/Users/<you>/AppData/Local/Temp`, inside the home directory, so `cwd` set to home makes the first shell command fail with `Windows ACL: temp root must be outside the workspace`. `dsh_start` now rejects that combination and names both escapes: a narrower project directory, or `permission=read-only` / `danger-full-access`.
+
 **Backups and rollback**
 
 Both registering and removing snapshot the file first: `<config>.bak-dsh-<timestamp>`, holding the exact pre-operation bytes. Both directions, because the state you want back differs — the pre-register backup undoes a bad install, the pre-remove backup reinstalls after a bad removal.

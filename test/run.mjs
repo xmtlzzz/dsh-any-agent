@@ -52,6 +52,11 @@ if (code === 0) {
   code = await run('config-safety.mjs');
 }
 if (code === 0) {
+  // 工作区与标题的两个真实行为：cwd 选家目录要提前拦住、title_hint 不能被
+  // DSH 自动标题吞掉。纯模块加载，不拉 DSH，归到必跑一档。
+  code = await run('workspace-titles.mjs');
+}
+if (code === 0) {
   // 真实配置往返：本机已装的客户端配置复制进沙箱，注册再撤销必须逐字节还原。
   // 手工 fixture 证明实现符合假设，这一组证明假设和真实文件一致。
   code = await run('real-configs.mjs');

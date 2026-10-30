@@ -9,6 +9,7 @@ name: tests
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          24 checks
 #     sandbox-guard     real HOME is never a sandbox    18 checks
+#     workspace-titles  home cwd guard, title_hint    15 checks
 #     setup             client config writer          41 checks
 #     removal-scope     --remove only touches its own   24 checks
 #     package-check     publishability                12 checks
@@ -106,6 +107,12 @@ jobs:
       - name: config-safety (in-place edits, format preserved)
         env: { DSH_MCP_LOG: silent }
         run: node test/config-safety.mjs
+
+      # 工作区选家目录会被提前拦住（DSH 的 ACL 沙箱要求 temp 在工作区外），
+      # 以及 title_hint 与 DSH 自动标题分成两个字段返回。纯模块加载，不拉 DSH。
+      - name: workspace-titles (home cwd guard, title_hint)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/workspace-titles.mjs
 
       # 真实客户端配置的往返：跑在 CI runner 上通常是空的，套件会明确打印
       # skipped 而不是假绿；在开发机上跑才能真正覆盖到真实文件。

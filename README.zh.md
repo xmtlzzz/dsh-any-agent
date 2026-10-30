@@ -225,6 +225,10 @@ Codex 的 `config.toml` 同理，是按行处理的：其它 `[表]` 及其注�
 撤销后所有 JSON 仍可解析、`codex mcp list` 仍能正常读取配置，客户端不需要人工修复。
 
 
+**cwd 不要选家目录本身**
+
+DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `%TEMP%` 是 `C:/Users/<你>/AppData/Local/Temp`，就在家目录里面，所以 `cwd` 取家目录时，第一条 shell 命令会失败并报 `Windows ACL: temp root must be outside the workspace`。现在 `dsh_start` 会直接拒绝这个组合并给出两条出路：换一个具体项目目录，或改用 `permission=read-only` / `danger-full-access`。
+
 **备份与回滚**
 
 注册和删除**都会**在动文件之前先存一份：`<配置文件>.bak-dsh-<时间戳>`，内容就是操作前的原始字节。两个方向都存，因为要退回的状态不同——注册前那份用来「装错了退回原样」，删除前那份用来「删错了装回去」。

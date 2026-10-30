@@ -48,7 +48,12 @@ export const TOOL_DEFS = [
           enum: APPROVAL_POLICIES,
           description: `审批处理策略。默认 read-only → auto-deny，其余 → ${process.env.DSH_MCP_APPROVAL ?? 'auto-allow'}。ask 会把审批挂起，需用 dsh_approval_decide 裁决。`,
         },
-        title_hint: { type: 'string', description: '可选的标题提示（DSH 的标题由首条消息自动生成，这里只是兜底显示）。' },
+        title_hint: {
+          type: 'string',
+          description:
+            '可读的会话标签。注意 DSH 自己的标题是首条消息的截断前缀（约 13–15 字），会优先显示；' +
+            '这里给的值不会被覆盖，而是在 dsh_get / dsh_start 里作为「标题提示」一并返回。',
+        },
         reasoning_effort: {
           type: 'string',
           enum: REASONING_EFFORTS,
@@ -339,7 +344,8 @@ export function createHandlers(hub) {
         `工作区: ${snap.cwd}`,
         `权限档: ${snap.permission}（审批策略 ${snap.on_approval}）`,
         `思考深度: ${snap.reasoning_effort}`,
-        `对话名: ${snap.title ?? '(DSH 尚未生成，发出第一条消息后自动生成)'}`,
+        `对话名: ${snap.title ?? '(DSH 尚未生成，发出第一条消息后自动生成)'}` +
+        (snap.title_hint && snap.title !== snap.title_hint ? `（你给的标题提示: ${snap.title_hint}）` : ''),
         `工作区登记: ${snap.workspace_registered ? '已写入 DSH 工作区注册表（GUI 里能看到）' : '未登记'}`,
       ];
       if (snap.config_failed?.length) lines.push(`⚠️ 配置未完全套用: ${snap.config_failed.join('; ')}`);
@@ -451,7 +457,9 @@ export function createHandlers(hub) {
       const snap = conv.snapshot();
       let run = null;
       const meta = [];
-      meta.push(`对话名: ${snap.title ?? '(尚未生成)'}（DSH 自动生成）`);
+      // DSH 的自动标题是首条消息的截断前缀，信息量低；调用方给过 title_hint 就一并显示。
+      meta.push(`对话名: ${snap.title ?? '(尚未生成)'}（DSH 自动生成）` +
+        (snap.title_hint && snap.title !== snap.title_hint ? ` / 标题提示: ${snap.title_hint}` : ''));
       meta.push(`工作区: ${snap.cwd}`);
       meta.push(`状态: ${snap.busy ? '忙' : snap.alive ? '空闲(进程活着)' : '未打开(可用 resume 复活)'}`);
       meta.push(`权限档: ${snap.permission} / 审批 ${snap.on_approval}`);

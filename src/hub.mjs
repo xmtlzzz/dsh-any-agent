@@ -23,7 +23,8 @@ import {
   rmSync,
   readdirSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import {
   APPROVAL_POLICIES,
@@ -236,6 +237,13 @@ export class Conversation {
       conversation_id: this.id,
       /** 对话名来自 DSH 的 session/title 事件（自动生成）；未生成时用建会话提示兜底。 */
       title: nativeTitle ?? this.titleHint ?? null,
+      /**
+       * DSH 自动生成的标题是**首条消息的截断前缀**（实测 13–15 个字符，
+       * 例如「这是一次连通性冒烟测试，请」），信息量很低。
+       * 所以调用方给了 title_hint 时，把两者分开返回，由调用方自己选：
+       * 想按 DSH 原生标题认会话就看 title，想要可读标签就看 title_hint。
+       */
+      title_hint: this.titleHint ?? null,
       cwd: this.cwd,
       permission: this.permission,
       on_approval: this.onApproval,
@@ -915,6 +923,43 @@ export function formatReasoning(c, mode) {
 
 // ── 注册表 ────────────────────────────────────────────────────────
 
+/**
+ * 工作区能不能用在家目录本身？
+ *
+ * DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 %TEMP% 是
+ * C:/Users/<name>/AppData/Local/Temp，正好在用户家目录里面，所以把家目录
+ * 当作工作区时，沙箱初始化会失败：
+ *   Windows ACL: temp root must be outside the workspace
+ * 症状出现在第一次起 shell 的时候，看起来像这个服务坏了，其实只是 cwd
+ * 选得太大。read-only 档不写盘、也不起 ACL 沙箱，所以不受影响。
+ *
+ * @returns {string|null} null 表示没问题，否则返回一段可直接抛出的说明。
+ */
+export function homeWorkspaceProblem(cwd, permission) {
+  if (permission === 'read-only') return null;
+  const home = homedir();
+  if (!home) return null;
+  const norm = (p) => {
+    const r = resolve(p);
+    return process.platform === 'win32' ? r.toLowerCase() : r;
+  };
+  if (norm(cwd) !== norm(home)) return null;
+
+  const temp = tmpdir();
+  const tempInside = norm(temp) === norm(home) || norm(temp).startsWith(norm(home) + sep);
+  const lines = ['cwd 不能是用户家目录本身: ' + cwd];
+  if (tempInside) lines.push('  临时目录 ' + temp + ' 就在它里面，');
+  lines.push(
+    '  DSH 的 ACL 沙箱要求临时目录在工作区之外，否则第一次起 shell 就会报:',
+    '    Windows ACL: temp root must be outside the workspace',
+    '',
+    '  换个具体项目目录最省事，或者改权限档：',
+    '    permission=read-only           不写盘，不需要该沙箱',
+    '    permission=danger-full-access  不受该沙箱约束',
+  );
+  return lines.join('\n');
+}
+
 export class Hub {
   constructor({ log } = {}) {
     this.conversations = new Map();
@@ -1145,6 +1190,10 @@ export class Hub {
     if (model && !provider) {
       throw new Error('指定 model 时必须同时给 provider（ACP 的模型标识是 [provider, model] 二元组）');
     }
+    // 家目录当选工作区 → DSH 的 ACL 沙箱起不来，第一次起 shell 才暴露。
+    // 与其让用户以为服务坏了，不如在这里把原因和出路一起说清楚。
+    const homeProblem = homeWorkspaceProblem(cwd, permission);
+    if (homeProblem) throw new Error(homeProblem);
     const proc = new AcpProcess({
       cwd,
       permission,

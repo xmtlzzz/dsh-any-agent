@@ -5,6 +5,40 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Both items below come from actually driving dsh-any-agent from Claude Code,
+not from reading the code.
+
+### Added
+
+- **The home directory is rejected as a working directory, with the reason.**
+  DSH's own ACL sandbox requires its temp directory to be *outside* the
+  workspace. On Windows `%TEMP%` is `C:/Users/<name>/AppData/Local/Temp`, which
+  sits inside the home directory, so choosing `cwd: C:/Users/<name>` made the
+  first shell command fail with
+  `Windows ACL: temp root must be outside the workspace` — several layers away
+  from the cause, and easy to mistake for a broken install. `hub.create` now
+  refuses that combination up front and names both escapes: a narrower project
+  directory, or `permission=read-only` / `danger-full-access`.
+- `snapshot()` now returns `title_hint` alongside `title`. DSH's own title is a
+  truncated prefix of the first message (13–15 characters, e.g.
+  `这是一次连通性冒烟测试，请`), which is fine for identifying a session but
+  useless as a label. A `title_hint` given at `dsh_start` was already stored
+  and already used as a fallback, but never surfaced once DSH produced its
+  own title. Both are now returned, and `dsh_start` / `dsh_get` print the hint
+  next to the native title.
+- `test/workspace-titles.mjs` — 15 checks over both behaviours: the guard's
+  case-insensitive and trailing-separator handling, that `read-only` is still
+  allowed, that the message names the real DSH error and both escapes, and
+  that the two title fields do not overwrite each other.
+
+### Changed
+
+- The `title_hint` tool description now says what actually happens — DSH's
+  generated title wins for display, and the hint is returned separately —
+  instead of the vaguer "fallback display".
+
 ## [0.3.1] — 2026-10-30
 
 0.3.0 could overwrite a client config the user had deliberately made
