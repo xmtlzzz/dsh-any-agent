@@ -99,6 +99,15 @@ function realClientPath(id) {
 /** 兜底猜测（实现没给 path 时用），只为让测试能跑。 */
 const SANDBOX_APPDATA = realClientPath('zed') ? join(realHome(), 'AppData', 'Roaming') : null;
 
+/** 当前身份是否无视文件权限位（CI 的 Linux runner 以 root 运行）。 */
+function isPrivileged() {
+  if (process.platform !== 'win32') {
+    // geteuid 只在 POSIX 上存在；拿不到就按普通用户处理。
+    try { return process.geteuid() === 0; } catch { return false; }
+  }
+  return false;
+}
+
 /** 沙箱里 APPDATA 的位置：真实布局一致时直接用 <home>，否则用 <home>/AppData/Roaming。 */
 function sandboxAppData(home, id) {
   const p = realClientPath(id);
@@ -828,11 +837,9 @@ section('[4] 坏 JSON / 只读 / 空文件 / 缺目录：拒绝或安全创建�
     // 只读位能不能真的挡住写入，取决于运行身份：CI 的 Linux runner 以 root
     // 运行，root 无视文件权限位，0444 照样写得进去。先把这件事测出来，
     // 挡不住就不该断言「必须失败」—— 那不是产品的问题，是环境的问题。
-    let writableDespiteMode = false;
-    try {
-      writeFileSync(p, original, 'utf8');
-      writableDespiteMode = true;
-    } catch { writableDespiteMode = false; }
+    // 用 writeFileSync 探测不行：这个测试进程自己可能也是 root，它写得进去
+    // 不代表 setup 子进程的行为有意义。直接看身份 —— root 无视权限位。
+    const writableDespiteMode = isPrivileged();
     const r = writableDespiteMode ? { code: 0, out: '' } : run(home, ['--yes', '--only', id]);
     const afterText = readText(p);
     const baks = backupsIn(dirname(p));
