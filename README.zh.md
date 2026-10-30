@@ -13,7 +13,7 @@
 
 **任何 MCP 客户端都能用。** 这里没有任何 Codex 或 Claude 专属的东西：服务端只讲标准 MCP over stdio，只用四个标准方法（`initialize`、`ping`、`tools/list`、`tools/call`）。已用一个"原始"客户端验证过——它协商更旧的协议版本、且从不发 `notifications/initialized`。
 
-🧪 0.3.0 离线 632 项检查全绿（其中 619 项属于客户端注册器套件） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
+🧪 0.3.2 离线 660 项检查全绿（其中 619 项属于客户端注册器套件） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
 
 > 📌 **建议先读 [使用注意事项](USAGE-NOTES.md)** —— 会真正踩到的坑：ACP 模型配置陷阱、**外部 MCP 工具的副作用不受 DSH 沙箱约束**、工作区与 GUI 的注册表缓存、成本控制、以及一张故障速查表。
 >
@@ -546,7 +546,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | `permission` | 11 | ★ **权限档是否真的生效**（安全属性）：不看我们的返回值（那正是会说谎的地方），而是读**会话自己记录的事实**（投影缓存里的 `permissions.preset` / `sandboxMode`），三档逐一核对且三档记录值互不相同。**这条测试抓到过无声提权**：profile 里 `defaultPreset` 会在会话创建时盖掉 `DSH_PERMISSION_MODE` |
 | `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
 
-**离线那半边是 632 项检查，0.3.0 上全绿** —— `guards` 31、`prune` 11、`approval-details` 24、`sandbox-guard` 18、`setup` 41、`removal-scope` 24、`config-safety` 403、`real-configs` 66、`package-check` 14。九套全部退出码 0，都不需要模型、不需要装 DSH、也不需要 provider。
+**离线那半边是 660 项检查，0.3.2 上全绿** —— `guards` 31、`prune` 11、`approval-details` 24、`sandbox-guard` 18、`setup` 41、`removal-scope` 24、`config-safety` 403、`real-configs` 66、`package-check` 14、`roots` 12、`workspace-titles` 15。九套全部退出码 0，都不需要模型、不需要装 DSH、也不需要 provider。
 
 其中 **619 项属于客户端注册器套件**（`setup`、`removal-scope`、`config-safety`、`real-configs`）—— 0.3 的活其实都在这里。
 

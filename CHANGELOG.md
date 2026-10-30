@@ -5,50 +5,56 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.2] — 2026-10-30
 
-Both items below come from actually driving dsh-any-agent from Claude Code,
-not from reading the code.
+Two fixes and one feature, all from driving this server from Claude Code
+rather than from reading the code.
 
 ### Added
 
-- **`cwd` is now optional: it defaults to the project the client has open
-  (MCP roots).** The client already knows which folder the user is working in,
-  but nothing asked it. Now `initialize` records the client's `roots`
-  capability, and `dsh_start` without `cwd` sends one `roots/list` request,
-  converting the returned `file://` URI to a path. That makes "DSH works where
-  the client is looking" the default instead of asking every caller to build an
-  absolute path by hand - and removes the common way to land on the home
-  directory by accident. Clients that do not advertise roots, or do not answer
-  in time, fall through to an actionable error rather than a guess: it names
-  the example `cwd` and warns against using the home directory. `projectDir()`
-  is exposed on the server object for callers that want the raw value.
+- **`cwd` is optional and defaults to the project the client has open.** The
+  client already knows which folder the user is working in, but nothing asked
+  it. `initialize` now records the client's `roots` capability, and
+  `dsh_start` without `cwd` sends one `roots/list` request and converts the
+  returned `file://` URI to a path. "DSH works where the client is looking"
+  becomes the default, which also removes the usual way to land on the home
+  directory by building the path by hand. A client that does not advertise
+  roots, or does not answer in time, gets an actionable error naming an example
+  `cwd` — it never guesses a directory. `projectDir()` is exposed on the
+  server object for callers that want the raw value.
 - **The home directory is rejected as a working directory, with the reason.**
   DSH's own ACL sandbox requires its temp directory to be *outside* the
-  workspace. On Windows `%TEMP%` is `C:/Users/<name>/AppData/Local/Temp`, which
-  sits inside the home directory, so choosing `cwd: C:/Users/<name>` made the
-  first shell command fail with
-  `Windows ACL: temp root must be outside the workspace` — several layers away
-  from the cause, and easy to mistake for a broken install. `hub.create` now
-  refuses that combination up front and names both escapes: a narrower project
-  directory, or `permission=read-only` / `danger-full-access`.
-- `snapshot()` now returns `title_hint` alongside `title`. DSH's own title is a
+  workspace. On Windows `%TEMP%` is `C:/Users/<name>/AppData/Local/Temp`,
+  inside the home directory, so `cwd: C:/Users/<name>` made the first shell
+  command fail with `Windows ACL: temp root must be outside the workspace` —
+  several layers away from the cause and easy to mistake for a broken install.
+  The combination is now refused up front, naming both escapes: a narrower
+  project directory, or `permission=read-only` / `danger-full-access`.
+- `snapshot()` returns `title_hint` alongside `title`. DSH's own title is a
   truncated prefix of the first message (13–15 characters, e.g.
-  `这是一次连通性冒烟测试，请`), which is fine for identifying a session but
-  useless as a label. A `title_hint` given at `dsh_start` was already stored
-  and already used as a fallback, but never surfaced once DSH produced its
-  own title. Both are now returned, and `dsh_start` / `dsh_get` print the hint
-  next to the native title.
-- `test/workspace-titles.mjs` — 15 checks over both behaviours: the guard's
-  case-insensitive and trailing-separator handling, that `read-only` is still
-  allowed, that the message names the real DSH error and both escapes, and
-  that the two title fields do not overwrite each other.
+  `这是一次连通性冒烟测试，请`), which is what the GUI shows. `title` is
+  unchanged — it stays the field the GUI reads, so the two agree — and the
+  hint is returned separately rather than replacing it.
 
 ### Changed
 
-- The `title_hint` tool description now says what actually happens — DSH's
-  generated title wins for display, and the hint is returned separately —
-  instead of the vaguer "fallback display".
+- The `title_hint` tool description now states what happens: DSH's generated
+  title wins for display, and the hint is returned alongside it, instead of
+  the vaguer "fallback display".
+
+### Tests
+
+- `test/roots.mjs` — 12 checks over a real stdio handshake: that the server
+  sends `roots/list` when the client advertises it, that an answered root
+  becomes the working directory, that an unsupported client gets the
+  actionable message, and that a nonexistent explicit `cwd` still reports
+  cleanly.
+- `test/workspace-titles.mjs` — 15 checks: the home-directory guard's
+  case-insensitive and trailing-separator handling (asserted only where the
+  filesystem actually has it), that `read-only` is still allowed, and that the
+  two title fields do not overwrite each other.
+- 660 offline checks across eleven suites, green on Ubuntu and Windows for
+  Node 22 and 24.
 
 ## [0.3.1] — 2026-10-30
 

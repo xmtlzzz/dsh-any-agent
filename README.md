@@ -13,7 +13,7 @@ An MCP server that drives DSH as a **long-lived agent runtime** instead of wrapp
 
 **Works with any MCP client.** Nothing here is Codex- or Claude-specific: the server speaks plain MCP over stdio and uses only the four standard methods (`initialize`, `ping`, `tools/list`, `tools/call`). Verified against a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
 
-🧪 632 offline checks green on 0.3.0 (619 of them in the client-registration suites) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 660 offline checks green on 0.3.2 (619 of them in the client-registration suites) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 > 📌 **Read the [Usage Notes](USAGE-NOTES.en.md) first** — the practical gotchas that will actually bite you: the ACP model-config trap, external MCP tools bypassing DSH's sandbox, the workspace/GUI registry cache, cost control, and a troubleshooting table.
 >
@@ -526,7 +526,7 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `permission` | 11 | ★ **whether the permission tiers actually take effect** (a safety property): it ignores our own return values (the very thing that used to lie) and reads **the session's own record** (`permissions.preset` / `sandboxMode` in the projection cache), checking all three tiers and that their recorded values differ. **This suite caught a silent privilege escalation**: a `defaultPreset` in the profile overrides `DSH_PERMISSION_MODE` at session creation |
 | `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
 
-**The offline half is 632 checks, all green on 0.3.0** — `guards` 31, `prune` 11, `approval-details` 24, `sandbox-guard` 18, `setup` 41, `removal-scope` 24, `config-safety` 403, `real-configs` 66, `package-check` 14. Every suite exited 0; none needs a model, a DSH install or a provider.
+**The offline half is 660 checks, all green on 0.3.2** — `guards` 31, `prune` 11, `approval-details` 24, `sandbox-guard` 18, `setup` 41, `removal-scope` 24, `config-safety` 403, `real-configs` 66, `package-check` 14, `roots` 12, `workspace-titles` 15. Every suite exited 0; none needs a model, a DSH install or a provider.
 
 That is **619 assertions in the client-registration suites alone** (`setup`, `removal-scope`, `config-safety`, `real-configs`), which is where the 0.3 work actually is.
 

@@ -1,0 +1,15 @@
+chore: release 0.3.2
+
+Two fixes and a feature, all from driving this server from Claude Code
+rather than reading the code:
+
+- dsh_start without cwd now uses the project the client has open (MCP
+  roots), instead of making every caller build an absolute path by hand.
+- The home directory is refused as cwd up front, with both escapes named:
+  it fails at the first shell command otherwise, with a DSH ACL error that
+  reads like a broken install.
+- snapshot() returns title_hint next to title. title is unchanged on purpose:
+  it stays the field the GUI reads, so dsh_get and the GUI agree.
+
+660 offline checks across eleven suites, green on Ubuntu and Windows for
+Node 22 and 24.
