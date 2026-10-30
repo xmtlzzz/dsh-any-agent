@@ -5,6 +5,42 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-10-30
+
+0.3.0 could overwrite a client config the user had deliberately made
+read-only. Caught by CI on Linux, not on Windows, which is the interesting
+part.
+
+### Fixed
+
+- **A read-only config was silently replaced on POSIX.** Writes go through
+  write-to-temp then `rename`, and `rename` only requires the *directory* to
+  be writable — not the target file. A `chmod 444` `~/.codex/config.toml`
+  was therefore replaced as if the bit were not there. Windows `rename`
+  returns EPERM for a read-only target, so the same code passed on
+  `windows-latest` and failed on `ubuntu-latest`; the bug had been in 0.3.0
+  the whole time. Writability is now checked with `access(W_OK)` before
+  writing, so both platforms refuse.
+- **`--force` never actually overrode anything.** It was parsed, documented
+  and passed to neither the read-only check nor the writer. It now clears the
+  read-only bit, writes, and **restores the original mode** — verified, so it
+  does not leave a file whose permissions were quietly changed.
+
+### Changed
+
+- A file the current identity cannot write to is reported as
+  `config file is read-only, refusing to overwrite it (use --force to
+  override)` rather than a generic write failure, and no backup or temp file
+  is left behind.
+
+### Tests
+
+- 633 offline checks across nine suites, all green, on Ubuntu and Windows for
+  Node 22 and 24. The read-only section now asserts refusal, an untouched
+  file, no stray temp file, and that `--force` writes *and* restores the
+  mode. The root skip remains for hosts where permission bits genuinely do
+  not apply.
+
 ## [0.3.0] — 2026-10-30
 
 **Configuration impact is now a bounded, auditable property.** Registering this

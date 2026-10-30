@@ -1,6 +1,6 @@
 {
   "name": "dsh-any-agent",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Drive DeepSeek Harness (DSH) as a long-lived coding agent from any MCP client — Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Zed, Gemini CLI, opencode, VS Code. Resume-aware, interruptible, approval-capable, and it only ever touches the one config entry it owns.",
   "type": "module",
   "license": "MIT",

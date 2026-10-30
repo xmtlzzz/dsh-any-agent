@@ -1,0 +1,8 @@
+chore: release 0.3.1
+
+0.3.0 could overwrite a client config the user had made read-only, because
+rename only requires the directory to be writable. Fixed in 4da1e1e; this
+release gets the fix to npm, where 0.3.0 is already published with the bug.
+
+Also fixed --force, which was parsed and documented but never reached the
+read-only check or the writer.
