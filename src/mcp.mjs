@@ -39,7 +39,8 @@ DSH 自己有文件读写、shell、搜索、技能、子代理等全套工具�
 - cursor —— dsh_read 的增量游标，用来观察某个会话当前吐出的内容。
 
 【标准流程】
-1. dsh_start(cwd, ...)                        建会话。cwd 必须是**已存在**的绝对路径。
+1. dsh_start(cwd?, ...)                       建会话。cwd 省略时自动用客户端当前打开的项目目录
+                                              （MCP roots）；给了就必须是**已存在**的绝对路径，别传家目录本身。
 2. dsh_send(conversation_id, prompt)          **默认不阻塞**：立刻返回 run_id + sentinel_file。
                                               想原地等结果才传 wait=true。
 3. 之后按需：
@@ -96,16 +97,84 @@ dsh_interject —— 一个回合 = 一个哨兵，没有例外）。dsh_send �
 - 不要把 DSH 内部的工具名（read/pwsh/glob 等）当成本服务的工具——本服务只有 dsh_* 这些。
 - 不要假设回合秒回。长任务请走 wait=false + 事后验收。`;
 
+/**
+ * 把 MCP root 的 file:// URI 转成本地路径。
+ * 只接受 file 协议；其它（http/内嵌工作区等）一律当作“用不了”，
+ * 宁可退回要求显式 cwd，也不要把一个奇怪的字符串当成目录。
+ */
+function fileURLToPathSafe(uri) {
+  try {
+    if (!uri.startsWith('file:')) return null;
+    return fileURLToPath(uri);
+  } catch {
+    return null;
+  }
+}
+
 export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHandlers(hub), log }) {
   const write = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
   let buffer = '';
   let initialized = false;
+  let clientCapabilities = {};
+  let rootsSeq = 0;
+  const pendingRoots = new Map();
+  /** 客户端当前打开的项目目录（来自 MCP roots）。null 表示还没有/不支持。 */
+  let clientRoots = null;
+  let rootsRequested = false;
+
+  /**
+   * 主动向客户端要一次 roots。
+   * 这不是 JSON-RPC 的“请求-响应”对称用法：MCP 的服务端可以反向发请求，
+   * 客户端用同一个 stdout 回响应。所以这里带 id 发出去，再等 onData 收到
+   * 对应 id 的消息来完成 promise。超时/不支持都必须安静降级 —— roots 只是
+   * 一个更聪明的默认值，拿不到就让调用方显式传 cwd。
+   */
+  function requestRoots(timeoutMs = 1500) {
+    if (rootsRequested) return Promise.resolve(clientRoots);
+    rootsRequested = true;
+    const caps = clientCapabilities?.roots;
+    if (!caps) return Promise.resolve(null);
+    const id = 'roots-' + (rootsSeq++);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingRoots.delete(id);
+        resolve(null);
+      }, timeoutMs);
+      timer.unref?.();
+      pendingRoots.set(id, (roots) => {
+        clearTimeout(timer);
+        clientRoots = roots;
+        resolve(roots);
+      });
+      write({ jsonrpc: '2.0', id, method: 'roots/list', params: {} });
+    });
+  }
+
+  /** 从 roots 里挑一个最像“项目目录”的路径。 */
+  function pickRoot(roots) {
+    if (!Array.isArray(roots) || !roots.length) return null;
+    const uris = roots.map((r) => r && typeof r.uri === 'string' ? r.uri : null).filter(Boolean);
+    if (!uris.length) return null;
+    for (const uri of uris) {
+      const asPath = fileURLToPathSafe(uri);
+      if (asPath) return asPath;
+    }
+    return null;
+  }
 
   const ok = (id, result) => write({ jsonrpc: '2.0', id, result });
   const fail = (id, code, message) => write({ jsonrpc: '2.0', id, error: { code, message } });
 
   async function handle(msg) {
     const { id, method, params } = msg;
+
+    // 客户端对我们反向请求（roots/list）的响应：没有 method，只有 result/error。
+    if (method === undefined && pendingRoots.has(id)) {
+      const done = pendingRoots.get(id);
+      pendingRoots.delete(id);
+      done(msg.error ? [] : (msg.result?.roots ?? []));
+      return;
+    }
 
     // 通知（无 id）：不需要回包
     if (id === undefined) {
@@ -116,12 +185,22 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
     switch (method) {
       case 'initialize': {
         const requested = params?.protocolVersion;
+        // 记住客户端声明了哪些能力：有 roots 的客户端（Claude Code / Cursor /
+        // VS Code 等）会告诉我们它当前打开的项目目录，那是 dsh_start 最合理的
+        // 默认 cwd —— 用户在客户端里看到哪个项目，就在这里干活。
+        const caps = params?.capabilities;
+        clientCapabilities = caps && typeof caps === 'object' ? caps : {};
         ok(id, {
           protocolVersion: typeof requested === 'string' ? requested : FALLBACK_PROTOCOL,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
           instructions: INSTRUCTIONS,
         });
+        return;
+      }
+      case 'roots/list': {
+        // 有的客户端会主动问；我们不需要“暴露自己的根”，回空即可。
+        ok(id, { roots: [] });
         return;
       }
       case 'ping':
@@ -189,6 +268,11 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
       process.stdin.on('data', onData);
       process.stdin.on('end', () => log?.debug('[mcp] stdin 结束'));
       return this;
+    },
+    /** 客户端当前打开的项目目录；不支持 roots 的客户端返回 null。 */
+    async projectDir() {
+      const roots = await requestRoots();
+      return pickRoot(roots);
     },
     get initialized() {
       return initialized;

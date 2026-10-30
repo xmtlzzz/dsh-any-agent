@@ -34,7 +34,13 @@ export const TOOL_DEFS = [
       '返回 conversation_id 与对话标题。建好后用 dsh_send 派活。',
     inputSchema: S(
       {
-        cwd: { type: 'string', description: '工作区绝对路径。决定 agent 的工作目录、AGENTS.md/技能的发现范围、以及沙箱可写根。' },
+        cwd: {
+          type: 'string',
+          description:
+            '工作区绝对路径。决定 agent 的工作目录、AGENTS.md/技能的发现范围、以及沙箱可写根。' +
+            '**省略时自动用客户端当前打开的项目目录**（MCP roots），这样客户端里看到哪个项目就在这里干活；' +
+            '客户端不支持 roots 时才会要求你显式传入。别传用户家目录本身 —— 那里会让 DSH 的 ACL 沙箱起不来。',
+        },
         permission: {
           type: 'string',
           enum: PERMISSION_TIERS,
@@ -62,7 +68,8 @@ export const TOOL_DEFS = [
         provider: { type: 'string', description: '模型提供方名（如 deepseek-official）。留空用 profile 默认。' },
         model: { type: 'string', description: '模型名（如 deepseek-flash）。指定时必须同时给 provider。' },
       },
-      ['cwd'],
+      // cwd 不再是必填：有 MCP roots 的客户端会自动带上当前项目目录。
+      [],
     ),
   },
   {
@@ -324,11 +331,30 @@ function backgroundReceipt(hub, conv, res) {
   };
 }
 
-export function createHandlers(hub) {
+/**
+ * @param {object} hub
+ * @param {{projectDir?: () => Promise<string|null>}} [opts]
+ *   projectDir：客户端当前打开的项目目录（MCP roots）。不传 cwd 时用它兜底 ——
+ *   让「在客户端里看到哪个项目，就在哪个项目干活」成为默认行为，而不是让
+ *   调用方每次都自己拼绝对路径（拼错了就落到家目录，撞上 ACL 沙箱那个坑）。
+ */
+export function createHandlers(hub, opts = {}) {
+  const projectDir = typeof opts.projectDir === 'function' ? opts.projectDir : null;
+
   return {
     async dsh_start(args) {
+      let cwd = args.cwd;
+      let cwdSource = cwd ? 'explicit' : null;
+      if (!cwd && projectDir) {
+        // 客户端声明了 roots 才有；拿不到就照旧要求显式传，不猜。
+        const fromClient = await projectDir();
+        if (fromClient) {
+          cwd = fromClient;
+          cwdSource = 'client-root';
+        }
+      }
       const conv = await hub.create({
-        cwd: args.cwd,
+        cwd,
         permission: args.permission ?? DEFAULT_PERMISSION,
         onApproval: args.on_approval,
         titleHint: args.title_hint,
@@ -341,7 +367,7 @@ export function createHandlers(hub) {
       const lines = [
         '已创建会话。',
         `conversation_id: ${snap.conversation_id}`,
-        `工作区: ${snap.cwd}`,
+        `工作区: ${snap.cwd}` + (cwdSource === 'client-root' ? '（取自客户端当前打开的项目）' : ''),
         `权限档: ${snap.permission}（审批策略 ${snap.on_approval}）`,
         `思考深度: ${snap.reasoning_effort}`,
         `对话名: ${snap.title ?? '(DSH 尚未生成，发出第一条消息后自动生成)'}` +

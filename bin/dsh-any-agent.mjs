@@ -53,6 +53,7 @@ const { createLogger } = await import('../src/config.mjs');
 const { Hub } = await import('../src/hub.mjs');
 const { createMcpServer } = await import('../src/mcp.mjs');
 const { listOrphans, pruneDeadMarkers } = await import('../src/locks.mjs');
+const { createHandlers } = await import('../src/tools.mjs');
 
 const log = createLogger();
 
@@ -78,7 +79,9 @@ if (deadMarkers.removed || orphans.length) {
 }
 if (orphans.length) log.info(`[dsh-any-agent] 孤儿持有者会话: ${orphans.map((o) => o.conversation_id).join(', ')}`);
 
-const server = createMcpServer({ hub, log });
+// dsh_start 不传 cwd 时，用客户端当前打开的项目目录（MCP roots）。
+// 这样「客户端里看到哪个项目，DSH 就在哪个项目干活」是默认行为。
+const server = createMcpServer({ hub, log, handlers: createHandlers(hub, { projectDir: () => server.projectDir() }) });
 server.start();
 
 log.info(`[dsh-any-agent] 已启动（注册表载入 ${hub.conversations.size} 个会话，日志级别 ${log.level}）`);

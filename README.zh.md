@@ -225,6 +225,10 @@ Codex 的 `config.toml` 同理，是按行处理的：其它 `[表]` 及其注�
 撤销后所有 JSON 仍可解析、`codex mcp list` 仍能正常读取配置，客户端不需要人工修复。
 
 
+**`cwd` 可以省略：默认用客户端当前打开的项目**
+
+客户端本来就知道用户在哪个目录干活（MCP roots）。现在 `dsh_start` 不传 `cwd` 时，会向客户端发一次 `roots/list`，把返回的 `file://` URI 转成路径直接用。于是「客户端里看到哪个项目，DSH 就在哪个项目干活」成了默认行为，也顺带堵掉了「手拼路径拼到家目录」这条最常见的翻车路径。客户端不声明 roots、或者超时没回，就退回一条能照着改的报错，而不是猜一个目录。
+
 **cwd 不要选家目录本身**
 
 DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `%TEMP%` 是 `C:/Users/<你>/AppData/Local/Temp`，就在家目录里面，所以 `cwd` 取家目录时，第一条 shell 命令会失败并报 `Windows ACL: temp root must be outside the workspace`。现在 `dsh_start` 会直接拒绝这个组合并给出两条出路：换一个具体项目目录，或改用 `permission=read-only` / `danger-full-access`。

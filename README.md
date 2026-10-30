@@ -210,6 +210,10 @@ Removal is not accepted because it *looks* right: the check is that **taking our
 Afterwards every JSON config still parses and `codex mcp list` still reads the file; no client needs hand repair.
 
 
+**`cwd` is optional: it defaults to the project the client has open**
+
+The client already knows which folder the user is working in (MCP roots). `dsh_start` without `cwd` now sends one `roots/list` request and converts the returned `file://` URI into a path, so "DSH works where the client is looking" is the default - which also removes the usual way to end up on the home directory by building the path by hand. A client that does not advertise roots, or does not answer in time, gets an actionable error instead of a guessed directory.
+
 **Do not use the home directory as `cwd`**
 
 DSH's own ACL sandbox requires its temp directory to be **outside** the workspace. On Windows `%TEMP%` is `C:/Users/<you>/AppData/Local/Temp`, inside the home directory, so `cwd` set to home makes the first shell command fail with `Windows ACL: temp root must be outside the workspace`. `dsh_start` now rejects that combination and names both escapes: a narrower project directory, or `permission=read-only` / `danger-full-access`.

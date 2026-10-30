@@ -52,6 +52,11 @@ if (code === 0) {
   code = await run('config-safety.mjs');
 }
 if (code === 0) {
+  // MCP roots：不传 cwd 时用客户端当前打开的项目目录。走真实 stdio 握手，
+  // 不需要 DSH，可以进 CI。
+  code = await run('roots.mjs');
+}
+if (code === 0) {
   // 工作区与标题的两个真实行为：cwd 选家目录要提前拦住、title_hint 不能被
   // DSH 自动标题吞掉。纯模块加载，不拉 DSH，归到必跑一档。
   code = await run('workspace-titles.mjs');

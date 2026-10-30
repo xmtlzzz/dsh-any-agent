@@ -12,6 +12,17 @@ not from reading the code.
 
 ### Added
 
+- **`cwd` is now optional: it defaults to the project the client has open
+  (MCP roots).** The client already knows which folder the user is working in,
+  but nothing asked it. Now `initialize` records the client's `roots`
+  capability, and `dsh_start` without `cwd` sends one `roots/list` request,
+  converting the returned `file://` URI to a path. That makes "DSH works where
+  the client is looking" the default instead of asking every caller to build an
+  absolute path by hand - and removes the common way to land on the home
+  directory by accident. Clients that do not advertise roots, or do not answer
+  in time, fall through to an actionable error rather than a guess: it names
+  the example `cwd` and warns against using the home directory. `projectDir()`
+  is exposed on the server object for callers that want the raw value.
 - **The home directory is rejected as a working directory, with the reason.**
   DSH's own ACL sandbox requires its temp directory to be *outside* the
   workspace. On Windows `%TEMP%` is `C:/Users/<name>/AppData/Local/Temp`, which

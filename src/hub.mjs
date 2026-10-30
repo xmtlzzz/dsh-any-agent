@@ -1171,7 +1171,13 @@ export class Hub {
 
   /** 新建一个会话：拉起进程 + ACP 初始化 + session/new。 */
   async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model } = {}) {
-    if (!cwd) throw new Error('必须提供 cwd（工作区绝对路径）');
+    if (!cwd) {
+      throw new Error(
+        '没有可用的工作目录。你既没传 cwd，客户端也没有提供当前打开的项目（MCP roots）。\n' +
+          '  传一个项目目录即可，例如 cwd: "D:/code/my-project"。\n' +
+          '  不要传用户家目录本身 —— 那会让 DSH 的 ACL 沙箱起不来。',
+      );
+    }
     if (!isAbsolute(cwd)) throw new Error(`cwd 必须是绝对路径: ${cwd}`);
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
       throw new Error(`工作区不存在或不是目录: ${cwd}（请先创建它）`);
