@@ -9,6 +9,7 @@ name: tests
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          24 checks
 #     sandbox-guard     real HOME is never a sandbox    18 checks
+#     commit-script     commit via stdin, no temp    26 checks
 #     roots             cwd from MCP roots            12 checks
 #     workspace-titles  home cwd guard, title_hint    15 checks
 #     setup             client config writer          41 checks
@@ -108,6 +109,11 @@ jobs:
       - name: config-safety (in-place edits, format preserved)
         env: { DSH_MCP_LOG: silent }
         run: node test/config-safety.mjs
+
+      # 提交脚本：信息走 stdin，不落盘。曾经把临时文件卷进发布提交三次。
+      - name: commit-script (message via stdin, no temp file)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/commit-script.mjs
 
       # MCP roots：不传 cwd 时用客户端当前打开的项目目录。真实 stdio 握手，
       # 不需要 DSH 也不需要模型。

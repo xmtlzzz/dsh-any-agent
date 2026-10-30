@@ -52,6 +52,11 @@ if (code === 0) {
   code = await run('config-safety.mjs');
 }
 if (code === 0) {
+  // 提交脚本：信息必须走 stdin，不许落盘。曾经的病根是「先写文件再 -F 那个
+  // 文件」，于是 git add -A 会把临时文件卷进发布提交。
+  code = await run('commit-script.mjs');
+}
+if (code === 0) {
   // MCP roots：不传 cwd 时用客户端当前打开的项目目录。走真实 stdio 握手，
   // 不需要 DSH，可以进 CI。
   code = await run('roots.mjs');

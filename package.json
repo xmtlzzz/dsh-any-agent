@@ -37,7 +37,8 @@
     "USAGE-NOTES.md",
     "USAGE-MIGRATION.md",
     "LICENSE",
-    "DESIGN.md"
+    "DESIGN.md",
+    "scripts/"
   ],
   "scripts": {
     "start": "node ./bin/dsh-any-agent.mjs",
@@ -45,7 +46,8 @@
     "test": "node ./test/run.mjs",
     "test:smoke": "node ./test/smoke.mjs",
     "test:guards": "node ./test/guards.mjs",
-    "test:prune": "node ./test/prune.mjs"
+    "test:prune": "node ./test/prune.mjs",
+    "commit": "node ./scripts/commit.mjs"
   },
   "engines": {
     "node": ">=22.15"
