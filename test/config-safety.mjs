@@ -834,28 +834,37 @@ section('[4] 坏 JSON / 只读 / 空文件 / 缺目录：拒绝或安全创建�
     seedText(home, p, original);
     let madeReadonly = true;
     try { chmodSync(p, 0o444); } catch { madeReadonly = false; }
-    // 只读位能不能真的挡住写入，取决于运行身份：CI 的 Linux runner 以 root
-    // 运行，root 无视文件权限位，0444 照样写得进去。先把这件事测出来，
-    // 挡不住就不该断言「必须失败」—— 那不是产品的问题，是环境的问题。
-    // 用 writeFileSync 探测不行：这个测试进程自己可能也是 root，它写得进去
-    // 不代表 setup 子进程的行为有意义。直接看身份 —— root 无视权限位。
-    const writableDespiteMode = isPrivileged();
-    const r = writableDespiteMode ? { code: 0, out: '' } : run(home, ['--yes', '--only', id]);
+    // 这条曾经在 Linux CI 上红过，而且不是测试的问题：写入用的是
+    // 「先写临时文件再 rename」，rename 只要求目录可写、不要求目标文件可写，
+    // 于是 POSIX 上一个 0444 的配置会被静默覆盖。现在写入前显式检查可写性，
+    // 两个平台行为一致。root 无视权限位，那种环境下这条断言不适用 ——
+    // 但 root 也几乎不会出现在真实用户机器上，所以不因此削弱断言。
+    const privileged = isPrivileged();
+    const r = run(home, ['--yes', '--only', id]);
     const afterText = readText(p);
     const baks = backupsIn(dirname(p));
     const bakText = baks.length ? readText(join(dirname(p), baks[0])) : null;
-    try { chmodSync(p, 0o666); } catch { /* 收尾一定要能删 */ }
 
     check('只读文件：确实置为只读（Windows=只读属性）', madeReadonly);
-    if (writableDespiteMode) {
-      // root（CI 的 Linux runner）下权限位不生效，这条不适用；不要假装通过。
-      console.log('  ---  只读文件：当前身份可无视权限位（root/管理员），跳过「必须拒绝」断言');
+    if (privileged) {
+      console.log('  ---  只读文件：当前身份是 root（无视权限位），跳过「必须拒绝」断言');
     } else {
       check('只读文件：退出码非 0（不能假装成功）', r.code !== 0 && r.code !== null, 'exit ' + r.code);
       check('只读文件：原文件逐字节不变', afterText === original, diffPreview(original, afterText));
+      check('只读文件：若产生备份，备份等于原文', baks.length === 0 || bakText === original, baks.join(','));
+      check('只读文件：没有临时文件残留', tempsIn(dirname(p)).length === 0, tempsIn(dirname(p)).join(','));
+
+      // --force 必须真的能覆盖，并且把权限位还回去，而不是留一个被改了属性的文件。
+      const modeBefore = (statSync(p).mode & 0o777).toString(8);
+      const forced = run(home, ['--yes', '--only', id, '--force']);
+      const forcedText = readText(p);
+      check('只读文件：--force 确实覆盖成功', forced.code === 0 && forcedText !== original,
+        'exit ' + forced.code + ' ' + firstLine(forced.out));
+      check('只读文件：--force 之后权限位被还原',
+        (statSync(p).mode & 0o777).toString(8) === modeBefore,
+        modeBefore + ' -> ' + (statSync(p).mode & 0o777).toString(8));
     }
-    check('只读文件：若产生备份，备份等于原文', baks.length === 0 || bakText === original, baks.join(','));
-    check('只读文件：没有临时文件残留', tempsIn(dirname(p)).length === 0, tempsIn(dirname(p)).join(','));
+    try { chmodSync(p, 0o666); } catch { /* 收尾一定要能删 */ }
     dropSandbox(home);
   }
 

@@ -18,11 +18,15 @@
  */
 
 import {
+  accessSync,
+  chmodSync,
+  constants as fsConstants,
   copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -69,6 +73,27 @@ export function atomicWrite(file, text) {
   } catch (e) {
     try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* 尽力而为 */ }
     throw e;
+  }
+}
+
+/**
+ * 这个文件现在能不能被我们写。
+ *
+ * 为什么不能只靠 rename 的报错：写入是「先写临时文件再 rename」，
+ * 而 rename 只要求**目录**可写，不要求目标文件可写。于是 POSIX 上
+ * 一个 0444 的配置会被静默替换掉 —— 用户明明把它设成只读，我们照写。
+ * Windows 上 rename 撞到只读属性会 EPERM，所以在那边看起来是好的。
+ * 显式查一次写权限，两个平台行为才一致。
+ *
+ * root 无视权限位，access 会返回成功 —— 那是对的，root 确实能写。
+ */
+export function isWritable(file) {
+  if (!existsSync(file)) return true;
+  try {
+    accessSync(file, fsConstants.W_OK);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -799,6 +824,38 @@ export function applyClient(plan, ctx, stamp) {
 
   if (typeof plan.next !== 'string') return plan;
 
+  // 只读文件不覆盖：用户把配置设成只读，通常就是不想让程序动它。
+  // --force 是显式的「我知道，照做」。
+  if (!ctx.force && !isWritable(plan.path)) {
+    return {
+      ...plan,
+      status: 'failed',
+      changed: false,
+      summary: 'config file is read-only, refusing to overwrite it (use --force to override)',
+    };
+  }
+
+  // 只读文件默认不覆盖：用户把它设成只读，通常就是不想让程序动它。
+  // --force 是显式的「我知道，照做」—— 临时去掉只读位，写完再把权限还回去，
+  // 不留一个被悄悄改了属性的文件。
+  let originalMode = null;
+  if (!isWritable(plan.path)) {
+    if (!ctx.force) {
+      return {
+        ...plan,
+        status: 'failed',
+        changed: false,
+        summary: 'config file is read-only, refusing to overwrite it (use --force to override)',
+      };
+    }
+    try {
+      originalMode = statSync(plan.path).mode;
+      chmodSync(plan.path, 0o644);
+    } catch (e) {
+      return { ...plan, status: 'failed', changed: false, summary: 'could not clear the read-only bit: ' + e.message };
+    }
+  }
+
   try {
     // 两个方向都备份：注册前备份，是为了「装错了能退回原样」；
     // 删除前同样备份，是为了「删错了还能装回来」。备份内容一律是操作前的原始字节。
@@ -806,10 +863,13 @@ export function applyClient(plan, ctx, stamp) {
     if (existsSync(plan.path)) backup = backupFile(plan.path, stamp);
     mkdirSync(dirname(plan.path), { recursive: true });
     atomicWrite(plan.path, plan.next);
+    if (originalMode !== null) {
+      try { chmodSync(plan.path, originalMode); } catch { /* 尽力而为 */ }
+    }
     const base = {
       ...plan,
       status: remove ? 'removed' : 'applied',
-      summary: remove ? 'entry removed' : 'entry written',
+      summary: (remove ? 'entry removed' : 'entry written') + (originalMode !== null ? ' (read-only file overridden by --force)' : ''),
       backup,
     };
     // 有的客户端自己维护这份文件（Claude Code 会缓存并回写 ~/.claude.json）。
@@ -825,6 +885,9 @@ export function applyClient(plan, ctx, stamp) {
     }
     return base;
   } catch (e) {
+    if (originalMode !== null) {
+      try { chmodSync(plan.path, originalMode); } catch { /* 尽力而为 */ }
+    }
     return { ...plan, status: 'failed', changed: false, summary: 'write failed: ' + e.message };
   }
 }

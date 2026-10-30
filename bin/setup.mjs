@@ -136,7 +136,7 @@ if (unknown.length) {
 
 const launch = defaultLaunch();
 const env = desiredEnv(PERMISSION);
-const ctx = { dirs, remove: REMOVE, write: WRITE, launch, env, byId };
+const ctx = { dirs, remove: REMOVE, write: WRITE, launch, env, byId, force: FORCE };
 
 if (!JSON_OUT) {
   log('');
