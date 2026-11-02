@@ -15,7 +15,7 @@
 
 </div>
 
-🧪 0.3.3 本机离线 673 项检查全绿（九种客户端配置齐全时 691 项；其中 517 项属于客户端注册器套件，齐全时 535 项） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
+🧪 0.3.4 本机离线 673 项检查全绿（九种客户端配置齐全时 691 项；其中 517 项属于客户端注册器套件，齐全时 535 项） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
 
 一个 MCP 服务端，把 DeepSeek Harness 当作**长驻的编码 agent** 来驱动。开个会话、扔个目标，它自己写代码、跑脚本、派子代理；你随时能看、能插话、能回头验收。
 
@@ -597,7 +597,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | `permission` | 11 | ★ **权限档是否真的生效**（安全属性）：不看我们的返回值（那正是会说谎的地方），而是读**会话自己记录的事实**（投影缓存里的 `permissions.preset` / `sandboxMode`），三档逐一核对且三档记录值互不相同。**这条测试抓到过无声提权**：profile 里 `defaultPreset` 会在会话创建时盖掉 `DSH_PERMISSION_MODE` |
 | `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
 
-**离线套件在九种客户端配置齐全时合计 691 项（本机 5/9 配置时 673 项），0.3.3 上全绿** —— `guards` 31、`prune` 11、`approval-details` 27、`sandbox-guard` 18、`setup` 41、`removal-scope` 24、`config-safety` 404、`real-configs` 66（本机 48）、`package-check` 14、`roots` 12、`workspace-titles` 15、`read-cursor` 10、`sentinel-redaction` 11、`forget-tombstone` 7。全部退出码 0，都不需要模型、不需要装 DSH、也不需要 provider。
+**离线套件在九种客户端配置齐全时合计 691 项（本机 5/9 配置时 673 项），0.3.4 上全绿** —— `guards` 31、`prune` 11、`approval-details` 27、`sandbox-guard` 18、`setup` 41、`removal-scope` 24、`config-safety` 404、`real-configs` 66（本机 48）、`package-check` 14、`roots` 12、`workspace-titles` 15、`read-cursor` 10、`sentinel-redaction` 11、`forget-tombstone` 7。全部退出码 0，都不需要模型、不需要装 DSH、也不需要 provider。
 
 其中 **535 项属于客户端注册器套件**（`setup`、`removal-scope`、`config-safety`、`real-configs`；本机 5/9 配置时 517 项）—— 0.3 的活其实都在这里。
 

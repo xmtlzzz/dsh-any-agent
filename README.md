@@ -15,7 +15,7 @@
 
 </div>
 
-🧪 673 offline checks green on 0.3.3 on this machine (691 when all nine client fixtures exist); 517 of them are in the client-registration suites (535 with all fixtures) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 673 offline checks green on 0.3.4 on this machine (691 when all nine client fixtures exist); 517 of them are in the client-registration suites (535 with all fixtures) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Hand it a goal, let it write code and run scripts, steer it mid-flight, and collect the result when you are ready.
 
@@ -581,7 +581,7 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `permission` | 11 | ★ **whether the permission tiers actually take effect** (a safety property): it ignores our own return values (the very thing that used to lie) and reads **the session's own record** (`permissions.preset` / `sandboxMode` in the projection cache), checking all three tiers and that their recorded values differ. **This suite caught a silent privilege escalation**: a `defaultPreset` in the profile overrides `DSH_PERMISSION_MODE` at session creation |
 | `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
 
-**The offline suites total 691 checks when all nine client fixtures exist (673 on a machine with five), all green on 0.3.3** — `guards` 31, `prune` 11, `approval-details` 27, `sandbox-guard` 18, `setup` 41, `removal-scope` 24, `config-safety` 404, `real-configs` 66 (48 with 5/9), `package-check` 14, `roots` 12, `workspace-titles` 15, `read-cursor` 10, `sentinel-redaction` 11, `forget-tombstone` 7. Every suite exited 0; none needs a model, a DSH install or a provider.
+**The offline suites total 691 checks when all nine client fixtures exist (673 on a machine with five), all green on 0.3.4** — `guards` 31, `prune` 11, `approval-details` 27, `sandbox-guard` 18, `setup` 41, `removal-scope` 24, `config-safety` 404, `real-configs` 66 (48 with 5/9), `package-check` 14, `roots` 12, `workspace-titles` 15, `read-cursor` 10, `sentinel-redaction` 11, `forget-tombstone` 7. Every suite exited 0; none needs a model, a DSH install or a provider.
 
 That is **535 assertions in the client-registration suites alone** (`setup`, `removal-scope`, `config-safety`, `real-configs`; 517 on a machine with five client fixtures), which is where the 0.3 work actually is.
 

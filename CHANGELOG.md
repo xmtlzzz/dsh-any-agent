@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] — 2026-11-02
+
+Docs-only release. No runtime code changed; this publishes the updated
+README (Star History, corrected setup wording) and the website source so the
+npm package page matches the repository. The site is deployed separately at
+<https://dsh-any-agent.xmtlz.dev/>.
+
+### Changed
+
+- README / README.zh: add the Star History chart and keep the measured
+  setup impact-scope note.
+- Website: the release version is read at runtime from npm (fallback:
+  GitHub release/tag) instead of being baked at build time; the CSP allows
+  those endpoints; canonical and Open Graph URLs use the public domain.
+- Website wording now states that copying the model route into the ACP
+  profile needs a YAML parser (js-yaml), that external MCP servers are
+  configured in the DSH profile, and that `setup --yes` writes absolute
+  node/entry paths plus env.
+
 ## [0.3.3] — 2026-11-02
 
 An adversarial audit of the 0.3.2 MCP surface found one safety boundary that
