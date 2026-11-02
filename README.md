@@ -15,7 +15,7 @@
 
 </div>
 
-🧪 815 checks green on 0.3.6 on this machine (851 when all nine client fixtures exist); 519 of them are in the client-registration suites (555 with all fixtures) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 815 checks green on 0.3.7 on this machine (851 when all nine client fixtures exist); 519 of them are in the client-registration suites (555 with all fixtures) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Hand it a goal, let it write code and run scripts, steer it mid-flight, and collect the result when you are ready.
 
@@ -595,11 +595,11 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
 | `reasoning-check` | 8 | **reasoning visibility**: `reasoning=hide` returns no thinking body but non-zero stats; `reasoning=full` returns the text and the rendered section |
 
-**`node test/run.mjs` runs 815 checks on a machine with five client fixtures (851 with all nine)** — smoke 29 + 786 offline checks (822 with nine). Every suite exited 0 on 0.3.6; none needs a provider (smoke needs a DSH install for its session-creation section).
+**`node test/run.mjs` runs 815 checks on a machine with five client fixtures (851 with all nine)** — smoke 29 + 786 offline checks (822 with nine). Every suite exited 0 on 0.3.7; none needs a provider (smoke needs a DSH install for its session-creation section).
 
 That is **519 assertions in the client-registration suites alone** (`setup` 41, `removal-scope` 24, `config-safety` 406, `real-configs` 48; 555 with all nine fixtures), which is where the 0.3 work actually is.
 
-The model-backed suites (`smoke` 29, `boundary` 46, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8) total 474 and were last measured in full on 0.3.6 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
+The model-backed suites (`smoke` 29, `boundary` 46, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8) total 474 and were last measured in full on 0.3.7 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
 
 > Three different totals are intentional: `node test/run.mjs` (815/851), the CI offline job (786/822, no smoke), and the model-backed set (474 nominal). Counts are the numbers each suite prints itself; don't use one number for a different runner.
 

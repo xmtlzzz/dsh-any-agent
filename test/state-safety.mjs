@@ -68,7 +68,7 @@ try {
 
   console.log('\n[3] Hub.load 创建三个目录');
   const hub = new Hub({ log: { info() {}, debug() {} } });
-  hub.load();
+  await hub.load();
   check('状态目录已创建', existsSync(dirname(cfg.STATE_FILE)));
   check('哨兵目录已创建', existsSync(cfg.RUNS_DIR));
   check('锁登记目录已创建', existsSync(join(dirname(cfg.STATE_FILE), 'locks')));

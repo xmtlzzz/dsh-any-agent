@@ -403,7 +403,7 @@ export function createHandlers(hub, opts = {}) {
       if (typeof args.prompt !== 'string' || args.prompt.trim() === '') {
         throw new Error('prompt 不能为空：至少包含一个非空白字符');
       }
-      const conv = hub.get(args.conversation_id);
+      const conv = await hub.get(args.conversation_id);
       const opts = { reasoning: args.reasoning ?? DEFAULT_REASONING };
       if (args.timeout_ms) opts.timeoutMs = args.timeout_ms;
 
@@ -489,7 +489,7 @@ export function createHandlers(hub, opts = {}) {
     },
 
     async dsh_read(args) {
-      const conv = hub.get(args.conversation_id);
+      const conv = await hub.get(args.conversation_id);
       const r = conv.readOut({
         cursor: args.cursor ?? 0,
         includeReasoning: args.include_reasoning === true,
@@ -515,7 +515,7 @@ export function createHandlers(hub, opts = {}) {
     },
 
     async dsh_get(args) {
-      const conv = hub.get(args.conversation_id);
+      const conv = await hub.get(args.conversation_id);
       const snap = conv.snapshot();
       let run = null;
       const meta = [];
@@ -575,7 +575,7 @@ export function createHandlers(hub, opts = {}) {
       if (typeof args.message !== 'string' || args.message.trim() === '') {
         throw new Error('message 不能为空：至少包含一个非空白字符');
       }
-      const conv = hub.get(args.conversation_id);
+      const conv = await hub.get(args.conversation_id);
       const opts = { mode: args.mode ?? 'interject', reasoning: args.reasoning ?? DEFAULT_REASONING };
       if (args.timeout_ms) opts.timeoutMs = args.timeout_ms;
       const r = await conv.interject(args.message, opts);
@@ -600,7 +600,7 @@ export function createHandlers(hub, opts = {}) {
     },
 
     async dsh_interrupt(args) {
-      const conv = hub.get(args.conversation_id);
+      const conv = await hub.get(args.conversation_id);
       const r = await conv.interrupt();
       return { structured: r, text: r.interrupted ? '已发送中断请求。' : `未中断：${r.reason}` };
     },
@@ -620,7 +620,7 @@ export function createHandlers(hub, opts = {}) {
             `\n会话日志都在磁盘上，之后派活会自动 resume；没有一个可释放时 released=0。`,
         };
       }
-      const conv = hub.get(args.conversation_id);
+      const conv = await hub.get(args.conversation_id);
       const r = await conv.close({ forget: args.forget === true });
       return {
         structured: { conversation_id: args.conversation_id, ...r },
@@ -631,19 +631,19 @@ export function createHandlers(hub, opts = {}) {
     },
 
     async dsh_takeover(args) {
-      const conv = hub.get(args.conversation_id);
+      const conv = await hub.get(args.conversation_id);
       const r = await conv.takeover({ force: args.force === true });
       return { structured: r, text: `${r.ok ? '✅' : '❌'} ${r.message}` };
     },
 
     async dsh_approval_decide(args) {
-      const conv = hub.get(args.conversation_id);
+      const conv = await hub.get(args.conversation_id);
       const r = conv.decideApproval(args.approval_id, args.decision);
       return { structured: r, text: `审批 ${r.approval_id} 已裁决为 ${r.decision}。` };
     },
 
     async dsh_status(args) {
-      const conv = hub.get(args.conversation_id);
+      const conv = await hub.get(args.conversation_id);
       const snap = conv.snapshot();
       const run = conv.getRun();
       const bits = [`状态=${snap.state}`, `轮数=${snap.turns}`];

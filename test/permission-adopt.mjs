@@ -55,14 +55,14 @@ try {
   console.log('\n[1] 外部会话没有任何权限记录 → fail-closed');
   seedSession('session-no-record', join(root, 'ws'));
   const hub = new Hub({ log: { info() {}, debug() {} } });
-  const c1 = hub.get('session-no-record');
+  const c1 = await hub.get('session-no-record');
   check('★ 权限档回落 read-only', c1.permission === 'read-only', c1.permission);
   check('审批策略随之 auto-deny', c1.onApproval === 'auto-deny', c1.onApproval);
 
   console.log('\n[2] 会话自己记录 workspace-write → 尊重记录');
   seedSession('session-write-record', join(root, 'ws'));
   seedProj('session-write-record', 'workspace-write');
-  const c2 = hub.get('session-write-record');
+  const c2 = await hub.get('session-write-record');
   check('权限档 = workspace-write', c2.permission === 'workspace-write', c2.permission);
   check('审批策略 = auto-allow', c2.onApproval === 'auto-allow', c2.onApproval);
 
@@ -70,14 +70,14 @@ try {
   seedSession('session-readonly', join(root, 'ws'));
   seedProj('session-readonly', 'read-only');
   seedMeta('session-readonly', 'danger-full-access');
-  const c3 = hub.get('session-readonly');
+  const c3 = await hub.get('session-readonly');
   check('★ 仍为 read-only', c3.permission === 'read-only', c3.permission);
   check('审批策略仍 auto-deny', c3.onApproval === 'auto-deny', c3.onApproval);
 
   console.log('\n[4] 没有投影缓存时，本服务侧车是可信来源');
   seedSession('session-meta-only', join(root, 'ws'));
   seedMeta('session-meta-only', 'workspace-write');
-  const c4 = hub.get('session-meta-only');
+  const c4 = await hub.get('session-meta-only');
   check('权限档取侧车的 workspace-write', c4.permission === 'workspace-write', c4.permission);
 
   console.log('\n[5] 运行期回读核对');

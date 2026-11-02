@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Post-0.3.6 hardening.
+Post-0.3.7 hardening.
+
+## [0.3.7] — 2026-11-02
+
+### Fixed
+
+- **Session-header lookup no longer blocks the event loop.** `Hub.get()`,
+  `Hub.load()` and `pruneStaleTombstones()` now use a streaming
+  `readHeaderAsync()` that stops at the first newline, with a 5 s timeout and
+  1 MiB header cap. Large session logs can no longer stall MCP requests,
+  heartbeat renewal, or approval handling while recovering an unknown
+  conversation. The synchronous reader remains only in the explicit
+  workspace CLI/test-cleanup path.
+- **Website robots policy mirrors Cloudflare Managed content.** The generated
+  `robots.txt` now states `Content-Signal: search=yes, ai-train=no` and
+  disallows GPTBot/ClaudeBot/Google-Extended/CCBot, so non-Cloudflare hosts
+  and the repository agree with the production policy.
+- Website tests now cover the English locale, robots policy, hreflang, CSP
+  hash, and bilingual pages (20 tests).
 
 ## [0.3.6] — 2026-11-02
 
@@ -652,7 +670,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.7...HEAD
+[0.3.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.3...v0.3.4

@@ -15,11 +15,11 @@
  * 或手动执行回填时做一次读-改-写，窗口很小；但仍与 GUI 存在理论上的覆盖可能。
  */
 
-import { copyFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, realpathSync } from 'node:fs';
+import { copyFileSync, createReadStream, readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
-import { zstdDecompressSync } from 'node:zlib';
+import { createZstdDecompress, zstdDecompressSync } from 'node:zlib';
 import { DSH_HOME, REGISTER_WORKSPACE } from './config.mjs';
 
 const WORKSPACE_FILE = join(DSH_HOME, 'storages', 'workspace.json');
@@ -220,7 +220,7 @@ export function registerWorkspace(cwd, sessionId) {
   }
 }
 
-/** 读取一个会话头的第一个 zstd 帧（就是头行）。 */
+/** 读取一个会话头的第一个 zstd 帧（就是头行）。仅用于 CLI/测试清理，不用于 MCP 热路径。 */
 function readHeader(file) {
   try {
     const text = zstdDecompressSync(readFileSync(file)).toString('utf8');
@@ -228,6 +228,58 @@ function readHeader(file) {
   } catch {
     return null;
   }
+}
+
+/**
+ * 异步读取会话头：流式解压，拿到第一行就销毁流。
+ *
+ * 为什么需要它：MCP 服务在 `Hub.get()` 里找回磁盘会话时必须读头；
+ * `readHeader()` 会把整份日志同步解压，超大日志会阻塞事件循环、停掉
+ * 心跳（多实例下可能被误判 stale-mcp）。这里只解到第一个换行，
+ * 不把整份日志读进内存，也不阻塞事件循环。
+ *
+ * 超时/读失败返回 null；调用方按“找不到会话头”处理。
+ */
+export async function readHeaderAsync(file, { timeoutMs = 5000, maxHeaderBytes = 1024 * 1024 } = {}) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let buf = '';
+    let timer = null;
+    const rs = createReadStream(file);
+    const zs = createZstdDecompress();
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      try { rs.destroy(); } catch {}
+      try { zs.destroy(); } catch {}
+      resolve(value);
+    };
+    const parseLine = (line) => {
+      try {
+        const value = JSON.parse(String(line).trim());
+        finish(value && typeof value === 'object' ? value : null);
+      } catch {
+        finish(null);
+      }
+    };
+    timer = setTimeout(() => finish(null), timeoutMs);
+    timer.unref?.();
+    rs.on('error', () => finish(null));
+    zs.on('error', () => finish(null));
+    zs.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      const nl = buf.search(/\r?\n/);
+      if (nl >= 0) parseLine(buf.slice(0, nl));
+      else if (buf.length > maxHeaderBytes) finish(null);
+    });
+    zs.on('end', () => {
+      const line = buf.split(/\r?\n/).find(Boolean);
+      if (line) parseLine(line);
+      else finish(null);
+    });
+    rs.pipe(zs);
+  });
 }
 
 /**
@@ -272,7 +324,7 @@ export function scanSessions() {
  *
  * 会对 id 做形状校验（只允许 UUID / `session-` 前缀那类字符），避免 `..` 之类逃出会话目录。
  */
-export function findSessionHeader(sessionId) {
+export async function findSessionHeader(sessionId) {
   if (typeof sessionId !== 'string' || !/^[A-Za-z0-9._-]{4,80}$/.test(sessionId)) return null;
   if (!existsSync(SESSIONS_ROOT)) return null;
   let buckets;
@@ -284,7 +336,7 @@ export function findSessionHeader(sessionId) {
   for (const bucket of buckets) {
     const f = join(SESSIONS_ROOT, bucket, sessionId, 'session.v4.jsonl.zstd');
     if (!existsSync(f)) continue;
-    const header = readHeader(f);
+    const header = await readHeaderAsync(f);
     if (header?.id === sessionId) return header;
   }
   return null;

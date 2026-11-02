@@ -25,7 +25,7 @@ name: tests
 #     real-configs      real config round-trip        48 checks (5 fixtures)
 #     package-check     publishability                14 checks
 #     package job       pack -> install -> --version
-#     website job       build + 19 site tests + bilingual pages
+#     website job       build + 20 site tests + bilingual pages
 #
 #     These load modules and touch the filesystem: no DSH, no model, no
 #     credentials.

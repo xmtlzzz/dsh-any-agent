@@ -40,6 +40,15 @@ test('English page is a real locale with hreflang alternates and its own canonic
   assert.match(html, /href="\/en\/"/);
 });
 
+test('robots.txt mirrors the Cloudflare Managed AI-crawler policy instead of drifting', async () => {
+  const robots = await readFile(resolve(dist, 'robots.txt'), 'utf8');
+  assert.match(robots, /Content-Signal: search=yes, ai-train=no/);
+  for (const bot of ['GPTBot', 'ClaudeBot', 'Google-Extended', 'CCBot']) {
+    assert.match(robots, new RegExp(`User-agent: ${bot}\\nDisallow: /`));
+  }
+  assert.match(robots, /Sitemap: https:\/\/dsh-any-agent\.xmtlz\.dev\/sitemap\.xml/);
+});
+
 test('The pre-paint theme script is allowed by the CSP hash', async () => {
   const headers = await readFile(resolve(dist, '_headers'), 'utf8');
   assert.match(headers, /script-src 'self' 'sha256-[A-Za-z0-9+/=]+' https:\/\/static\.cloudflareinsights\.com/);

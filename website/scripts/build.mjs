@@ -74,7 +74,19 @@ await Promise.all([
   copyFile(join(root, '../docs/brand/header.jpg'), join(assets, 'hero.jpg')),
   copyFile(join(root, 'src/favicon.svg'), join(assets, 'favicon.svg')),
   writeFile(join(dist, '_headers'), headers),
-  writeFile(join(dist, 'robots.txt'), `User-agent: *\nAllow: /\n${origin ? `Sitemap: ${origin}/sitemap.xml\n` : ''}`),
+  // Source policy for the origin. Cloudflare Managed robots / Content Signals
+  // may be prepended in production; mirror that policy here so non-Cloudflare
+  // hosts and the repository agree instead of drifting.
+  writeFile(
+    join(dist, 'robots.txt'),
+    '# Origin policy. Cloudflare may prepend Managed content in production.\n' +
+      'User-agent: *\nAllow: /\nContent-Signal: search=yes, ai-train=no\n\n' +
+      'User-agent: GPTBot\nDisallow: /\n\n' +
+      'User-agent: ClaudeBot\nDisallow: /\n\n' +
+      'User-agent: Google-Extended\nDisallow: /\n\n' +
+      'User-agent: CCBot\nDisallow: /\n\n' +
+      (origin ? `Sitemap: ${origin}/sitemap.xml\n` : ''),
+  ),
   writeFile(
     join(dist, '404.html'),
     '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>页面未找到 · Page not found · dsh-any-agent</title><link rel="stylesheet" href="/assets/' +

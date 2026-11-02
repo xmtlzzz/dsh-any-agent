@@ -46,7 +46,7 @@ check('墓碑已写入', existsSync(tombstone), tombstone);
 console.log('\n[2] 按 id 查询明确失败（不再复活）');
 let err = null;
 try {
-  hub.get('forget-test');
+  await hub.get('forget-test');
 } catch (e) {
   err = e;
 }
@@ -61,7 +61,7 @@ console.log('\n[4] 删除墓碑 → 回到常规“未知会话”路径');
 rmSync(tombstone, { force: true });
 let err2 = null;
 try {
-  hub.get('forget-test');
+  await hub.get('forget-test');
 } catch (e) {
   err2 = e;
 }

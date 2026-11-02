@@ -134,14 +134,15 @@ function isForgotten(id) {
  * 留着只会让测试/临时会话在 `$DSH_HOME/.dsh-any-agent-forgotten` 里堆积。
  * 会话文件还在的墓碑必须保留 —— 那正是 forget 的效力所在。
  */
-function pruneStaleTombstones() {
+async function pruneStaleTombstones() {
   let removed = 0;
   try {
     if (!existsSync(FORGOTTEN_DIR)) return 0;
     for (const f of readdirSync(FORGOTTEN_DIR)) {
       if (!f.endsWith('.json')) continue;
       const id = f.slice(0, -5);
-      if (findSessionHeader(id)) continue;
+      // 异步读会话头：启动路径不能被大日志的同步解压卡住。
+      if (await findSessionHeader(id)) continue;
       try {
         rmSync(join(FORGOTTEN_DIR, f), { force: true });
         removed++;
@@ -1209,7 +1210,7 @@ export class Hub {
   /** `dsh_list` 磁盘探测的短缓存（探测要 spawn 一个 DSH 进程，实测约 1 秒）。 */
   #probeCache = null;
 
-  load() {
+  async load() {
     // ★ 启动即确认三个关键目录可写。以前"写失败只记 silent 日志"会让服务
     //   看起来正常，但注册表/哨兵/锁登记全部丢失，异步等待永远醒不过来。
     assertWritableDir(dirname(STATE_FILE), '状态目录');
@@ -1234,7 +1235,7 @@ export class Hub {
       }
     }
 
-    const stale = pruneStaleTombstones();
+    const stale = await pruneStaleTombstones();
     if (stale) this.log.info(`[hub] 清理 ${stale} 个失效的 forget 墓碑`);
     if (!existsSync(STATE_FILE)) return;
     try {
@@ -1373,7 +1374,7 @@ export class Hub {
     }
   }
 
-  get(id) {
+  async get(id) {
     // ★ forget 是终态：墓碑存在时，任何按 id 的查询都必须明确失败，
     //   否则 DSH 会话存储里的记录会让它悄悄复活（"forget 不持久"）。
     if (isForgotten(id)) {
@@ -1392,7 +1393,7 @@ export class Hub {
     if (!c) {
       // 最后一道：注册表里没有，但会话可能就在磁盘上 —— 别的实例建的、注册表被并发写覆盖丢的、
       // 或者根本是别的 profile / GUI 建的。**会话存储才是权威，注册表只是缓存。**
-      const header = findSessionHeader(id);
+      const header = await findSessionHeader(id);
       if (header?.cwd) {
         // ★ 权限档必须取自**会话自己的记录**，不能一律套默认值：
         //   一个当初用 read-only 建的会话，若注册表丢了、被我们以默认档接管，
