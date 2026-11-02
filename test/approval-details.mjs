@@ -129,6 +129,18 @@ try {
   await correlatedOutcome;
   correlated.collector = null;
 
+  console.log('\n[3c] closing a conversation cancels and clears pending approvals');
+  const closing = new Conversation({ id: 'approval-close-test', cwd: root, permission: 'workspace-write', onApproval: 'ask' }, hub);
+  const closingOutcome = closing.onPermissionRequest(request());
+  check('pending approval is registered before close', () => assert.equal(closing.snapshot().pending_approvals.length, 1));
+  await closing.close();
+  const closedApproval = await closingOutcome;
+  check('close resolves the approval as cancelled and clears the list', () => {
+    assert.deepEqual(closedApproval, { outcome: { outcome: 'cancelled' } });
+    assert.deepEqual(closing.snapshot().pending_approvals, []);
+    assert.deepEqual(closing.snapshot().pending_approval_details, []);
+  });
+
   console.log('\n[4] actual stdio MCP structuredContent preserves review context');
   const harness = `
     import { Hub, Conversation } from ${JSON.stringify(new URL('../src/hub.mjs', import.meta.url).href)};

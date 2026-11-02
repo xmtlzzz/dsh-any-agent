@@ -24,6 +24,8 @@ import { DSH_HOME, REGISTER_WORKSPACE } from './config.mjs';
 
 const WORKSPACE_FILE = join(DSH_HOME, 'storages', 'workspace.json');
 const SESSIONS_ROOT = join(DSH_HOME, 'sessions');
+/** forget 墓碑目录（存 id+时间，不含内容）；清掉测试会话时一并清掉其墓碑。 */
+const FORGOTTEN_DIR = process.env.DSH_MCP_FORGOTTEN_DIR ?? join(DSH_HOME, '.dsh-any-agent-forgotten');
 
 /** 路径比较用：Windows 下大小写不敏感，且忽略结尾分隔符。 */
 const normPath = (p) => String(p ?? '').replace(/[\\/]+$/, '').toLowerCase();
@@ -328,6 +330,12 @@ export function purgeTestSessions({ dryRun = false, ids = [], tempOnly = false, 
         rmSync(v.dir, { recursive: true, force: true });
       } catch (e) {
         v.error = e.message;
+      }
+      // 会话文件都没了，墓碑也就没有意义：一起清掉，避免测试残留。
+      try {
+        rmSync(join(FORGOTTEN_DIR, `${v.id}.json`), { force: true });
+      } catch {
+        /* 墓碑不存在或删不掉都不影响会话清理 */
       }
     }
     // 清掉因删空而残留的空分桶目录（每个工作区一个桶，空桶会一直堆着）

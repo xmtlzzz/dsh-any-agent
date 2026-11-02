@@ -14,7 +14,7 @@
  *   [5] 中文 / emoji 工作区路径也能正常工作（用户的目录名很不 ASCII）
  */
 
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -45,6 +45,8 @@ const registryHas = (id) => (readRegistry()?.conversations ?? []).some((c) => c.
 
 const A = new McpClient({ env: { DSH_MCP_STATE: STATE } });
 const B = new McpClient({ env: { DSH_MCP_STATE: STATE } });
+/** 本套件创建的会话；收尾只按 id 清理，绝不 tempOnly 一刀切。 */
+const tracked = new Set();
 
 try {
   // A 先起，B 后起 —— 但**都早于**下一步创建会话，这正是"内存落后于磁盘"的成因
@@ -58,6 +60,7 @@ try {
   mkdirSync(wsA, { recursive: true });
   const st1 = await A.callTool('dsh_start', { cwd: wsA, permission: 'danger-full-access' }, 180_000);
   const conv1 = st1?.structuredContent?.conversation_id;
+  if (conv1) tracked.add(conv1);
   check('A 建好会话 conv1', !!conv1, McpClient.text(st1).slice(0, 140));
   check('注册表里此刻有 conv1', registryHas(conv1), JSON.stringify((readRegistry()?.conversations ?? []).map((c) => c.id.slice(0, 8))));
 
@@ -66,6 +69,7 @@ try {
   mkdirSync(wsB, { recursive: true });
   const st2 = await B.callTool('dsh_start', { cwd: wsB, permission: 'danger-full-access' }, 180_000);
   const conv2 = st2?.structuredContent?.conversation_id;
+  if (conv2) tracked.add(conv2);
   check('B 建好会话 conv2', !!conv2, McpClient.text(st2).slice(0, 140));
 
   const lostFromRegistry = !registryHas(conv1);
@@ -102,6 +106,7 @@ try {
   mkdirSync(cjk, { recursive: true });
   const st3 = await B.callTool('dsh_start', { cwd: cjk, permission: 'danger-full-access' }, 180_000);
   const conv3 = st3?.structuredContent?.conversation_id;
+  if (conv3) tracked.add(conv3);
   check('★ 中文+emoji 路径能建会话', !!conv3, McpClient.text(st3).slice(0, 200));
   check('回报的 cwd 与传入一致', st3?.structuredContent?.cwd === cjk, JSON.stringify(st3?.structuredContent?.cwd));
   const r3 = await B.callTool(
@@ -118,14 +123,21 @@ try {
   mkdirSync(ro, { recursive: true });
   const st4 = await B.callTool('dsh_start', { cwd: ro, permission: 'read-only' }, 180_000);
   const conv4 = st4?.structuredContent?.conversation_id;
+  if (conv4) tracked.add(conv4);
   check('建了一个 read-only 会话', !!conv4 && st4?.structuredContent?.permission === 'read-only', JSON.stringify(st4?.structuredContent?.permission));
 
-  // 从注册表里彻底移除（内存 + 文件），然后只凭 id 取回 —— 走兜底路径
-  await B.callTool('dsh_release', { conversation_id: conv4, forget: true }, 60_000);
+  // 模拟“另一实例后写覆盖把这条从注册表抹掉”，然后只凭 id 取回 —— 走兜底路径。
+  // 注意：不能用 forget=true —— 那是**终态墓碑**，会明确拒绝按 id 找回；
+  // 这里要验证的是注册表丢失（last-writer-wins），不是显式遗忘。
+  await B.callTool('dsh_release', { conversation_id: conv4 }, 60_000);
+  const docBefore = readRegistry();
+  docBefore.conversations = (docBefore.conversations ?? []).filter((c) => c.id !== conv4);
+  writeFileSync(STATE, JSON.stringify(docBefore, null, 2), 'utf8');
   check('注册表里已经没有它了', !registryHas(conv4), JSON.stringify((readRegistry()?.conversations ?? []).map((c) => c.id.slice(0, 8))));
   await new Promise((r) => setTimeout(r, 3000)); // 等 DSH 把权限行刷进投影缓存
 
-  const g4 = await B.callTool('dsh_get', { conversation_id: conv4 });
+  // 用 A 取回：A 的内存里没有这个会话，才会走“从会话存储重建”的兜底路径。
+  const g4 = await A.callTool('dsh_get', { conversation_id: conv4 });
   check('兜底取回成功', g4?.isError !== true && g4?.structuredContent?.conversation_id === conv4, McpClient.text(g4).slice(0, 200));
   check(
     '★★ 取回后权限档仍是 read-only（不是默认的 danger-full-access）',
@@ -151,9 +163,10 @@ try {
       await cl.close();
     } catch {}
   }
-  // 顺手清掉这两个实例留下的会话（只删临时目录里的，绝不动真实会话）
+  // 只清本套件自己创建的会话（idsOnly），绝不再用 tempOnly —— 那会误删
+  // 其他进程/测试正在使用的临时工作区会话。
   const { purgeTestSessions } = await import('../src/workspace.mjs');
-  purgeTestSessions({ tempOnly: true });
+  purgeTestSessions({ ids: [...tracked], idsOnly: true });
   for (let i = 0; i < 3; i++) {
     try {
       rmSync(ROOT, { recursive: true, force: true });

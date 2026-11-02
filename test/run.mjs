@@ -41,6 +41,10 @@ if (code === 0) {
   code = await run('sentinel-redaction.mjs');
 }
 if (code === 0) {
+  // forget 墓碑：纯内存，不花 token；守住“forget 之后按 id 查询明确失败”。
+  code = await run('forget-tombstone.mjs');
+}
+if (code === 0) {
   // 沙箱守卫先跑：任何把真实 HOME 当沙箱的写法必须立刻失败。
   // 2026-10-29 的事故就是少了这一条，一段临时脚本把 ~ 当沙箱递归删了。
   code = await run('sandbox-guard.mjs');

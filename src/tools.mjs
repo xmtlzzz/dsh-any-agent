@@ -39,7 +39,7 @@ export const TOOL_DEFS = [
           description:
             '工作区绝对路径。决定 agent 的工作目录、AGENTS.md/技能的发现范围、以及沙箱可写根。' +
             '**省略时自动用客户端当前打开的项目目录**（MCP roots），这样客户端里看到哪个项目就在这里干活；' +
-            '客户端不支持 roots 时才会要求你显式传入。别传用户家目录本身 —— 那里会让 DSH 的 ACL 沙箱起不来。',
+            '客户端不支持 roots、或 roots 为空时才会要求你显式传入。别传用户家目录本身 —— 那里会让 DSH 的 ACL 沙箱起不来。',
         },
         permission: {
           type: 'string',
@@ -226,7 +226,8 @@ export const TOOL_DEFS = [
     name: 'dsh_release',
     description:
       '释放会话占用的 DSH 进程（释放写锁，让用户能在自己的 DSH GUI 里打开同一个会话）。' +
-      '会话本体留在磁盘上，之后仍可 resume；forget=true 才会从注册表里摘掉。' +
+      '会话本体留在磁盘上，之后仍可 resume；**forget=true 会写墓碑**：从注册表移除，此后按 id 查询明确报“已被 forget”' +
+      '（想恢复可按错误里的路径删除墓碑文件，默认在 `$DSH_HOME/.dsh-any-agent-forgotten/<id>.json`）。' +
       '★ 用完了想一次性腾内存就传 all=true（每个会话约 300-480MB；默认 `MAX_LIVE=8` 会回收最久未用者，' +
       'all=true 可立即全部释放，之后随时 resume）。',
     inputSchema: S(

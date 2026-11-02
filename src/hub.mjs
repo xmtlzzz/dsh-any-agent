@@ -41,6 +41,7 @@ import {
   SENTINEL_INCLUDE_REASONING,
   SENTINEL_TTL_MS,
   STATE_FILE,
+  DSH_HOME,
   defaultApprovalPolicy,
 } from './config.mjs';
 import { AcpProcess } from './acp.mjs';
@@ -90,6 +91,60 @@ function readConversationMetaFile(id) {
   } catch {
     return null;
   }
+}
+
+/**
+ * forget 墓碑：`release(forget=true)` 之后，按 id 查询必须**明确失败**，
+ * 而不是从 DSH 会话存储里悄悄复活。墓碑只含 id 与时间，不含任何内容；
+ * 删除 `.state/forgotten/<id>.json` 即可恢复按 id 找回（手动、可审计）。
+ */
+// 墓碑放在 DSH home 下而不是注册表旁边：不同实例即使注册表路径不同，
+// 也应该对同一个会话的 forget 达成一致（forget 是会话级终态，不是注册表级）。
+const FORGOTTEN_DIR = process.env.DSH_MCP_FORGOTTEN_DIR ?? join(DSH_HOME, '.dsh-any-agent-forgotten');
+const forgottenPath = (id) => join(FORGOTTEN_DIR, `${id}.json`);
+
+function writeTombstone(id) {
+  try {
+    mkdirSync(FORGOTTEN_DIR, { recursive: true });
+    const file = forgottenPath(id);
+    const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
+    writeFileSync(tmp, JSON.stringify({ id, forgottenAt: Date.now() }, null, 2), 'utf8');
+    renameSync(tmp, file);
+  } catch {
+    /* 墓碑写失败时 forget 仍从注册表移除；下次 get 可能仍会复活，但不影响主流程 */
+  }
+}
+
+function isForgotten(id) {
+  try {
+    return existsSync(forgottenPath(id));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 启动时清掉“会话文件已经不存在”的墓碑：它们不再阻止任何 resurrection，
+ * 留着只会让测试/临时会话在 `$DSH_HOME/.dsh-any-agent-forgotten` 里堆积。
+ * 会话文件还在的墓碑必须保留 —— 那正是 forget 的效力所在。
+ */
+function pruneStaleTombstones() {
+  let removed = 0;
+  try {
+    if (!existsSync(FORGOTTEN_DIR)) return 0;
+    for (const f of readdirSync(FORGOTTEN_DIR)) {
+      if (!f.endsWith('.json')) continue;
+      const id = f.slice(0, -5);
+      if (findSessionHeader(id)) continue;
+      try {
+        rmSync(join(FORGOTTEN_DIR, f), { force: true });
+        removed++;
+      } catch {}
+    }
+  } catch {
+    /* 清理失败不影响启动 */
+  }
+  return removed;
 }
 
 /** 运行期输出环形缓冲的条目上限（仅内存，超出丢最旧的）。 */
@@ -703,6 +758,14 @@ export class Conversation {
         this.busy = false;
         this.collector = null;
         this.currentTool = null;
+        // 回合结束后，任何仍挂着的审批都已失效：统一取消并清空，避免状态里
+        // 留下一个 dsh_approval_decide 只会回"没有待决审批"的幽灵。
+        for (const [, p] of this.pendingApprovals) {
+          try {
+            p.resolve({ outcome: { outcome: 'cancelled' } });
+          } catch {}
+        }
+        this.pendingApprovals.clear();
         this.pushOut('turn', `第 ${this.currentTurn} 轮结束（${stopReason ?? 'unknown'}）`, {
           phase: 'end',
           stop_reason: stopReason,
@@ -967,10 +1030,21 @@ export class Conversation {
       } catch {}
       await proc.stop();
     }
+    // 回合已经结束/进程正在关闭，任何仍挂着的审批都不再可裁决。
+    for (const [, p] of this.pendingApprovals) {
+      try {
+        p.resolve({ outcome: { outcome: 'cancelled' } });
+      } catch {}
+    }
+    this.pendingApprovals.clear();
     // 进程没了 → 写锁也释放了，登记必须跟着删（否则会把"孤儿持有者"误报给抢占逻辑）
     removeMarker(this.id);
-    if (forget) this.#hub.remove(this.id);
-    else this.#hub.save();
+    if (forget) {
+      // 先写墓碑再从注册表移除：之后按 id 查询会明确报"已 forget"，
+      // 而不是从 DSH 会话存储把它重建回来（否则 forget 形同虚设）。
+      writeTombstone(this.id);
+      this.#hub.remove(this.id);
+    } else this.#hub.save();
     return { closed: true, forgotten: forget };
   }
 }
@@ -1055,11 +1129,14 @@ export class Hub {
   #probeCache = null;
 
   load() {
+    const stale = pruneStaleTombstones();
+    if (stale) this.log.info(`[hub] 清理 ${stale} 个失效的 forget 墓碑`);
     if (!existsSync(STATE_FILE)) return;
     try {
       const doc = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
       for (const s of doc.conversations ?? []) {
         if (!s?.id || !s?.cwd) continue;
+        if (isForgotten(s.id)) continue;
         this.conversations.set(s.id, new Conversation(s, this));
       }
       this.log.info(`[hub] 载入 ${this.conversations.size} 个会话`);
@@ -1182,6 +1259,14 @@ export class Hub {
   }
 
   get(id) {
+    // ★ forget 是终态：墓碑存在时，任何按 id 的查询都必须明确失败，
+    //   否则 DSH 会话存储里的记录会让它悄悄复活（"forget 不持久"）。
+    if (isForgotten(id)) {
+      throw new Error(
+        `会话已被 forget（永久移除）: ${id}\n` +
+          `  它不会再被按 id 自动恢复。确实要恢复的话，删除墓碑文件 ${forgottenPath(id)} 后重试。`,
+      );
+    }
     let c = this.conversations.get(id);
     if (!c) {
       // 多实例常见情形：这个会话是**另一个 dsh-any-agent 实例**刚建的，我们内存里的注册表还没有。
@@ -1259,6 +1344,7 @@ export class Hub {
       const doc = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
       for (const s of doc.conversations ?? []) {
         if (!s?.id || !s?.cwd) continue;
+        if (isForgotten(s.id)) continue;
         if (this.conversations.has(s.id)) continue;
         this.conversations.set(s.id, new Conversation(s, this));
         added++;
@@ -1354,6 +1440,16 @@ export class Hub {
       });
       // 套用会话级配置（思考深度默认 max；ACP 自己的默认是 Provider default）
       conv.lastConfigApplied = await applySessionConfig(proc, res.sessionId, conv.cfg);
+      // ★ 无效的 provider/model 必须 fail fast：旧行为是建出会话、静默回退
+      //   profile 默认模型，调用方以为指定模型已生效。这里在外层 catch 停止进程，
+      //   不注册会话，直接报错（不传 provider/model 才走 profile 默认）。
+      const modelFailure = (conv.lastConfigApplied.failed ?? []).find((f) => String(f).includes('模型='));
+      if (modelFailure) {
+        throw new Error(
+          `指定的 provider/model 无效，会话未创建：${modelFailure}\n` +
+            `  请检查 ${provider}/${model} 是否在 profile 中声明；不传这两个参数可使用 profile 默认模型。`,
+        );
+      }
       // 登记工作区，否则这些会话在你的 DSH GUI 里看不到。
       // ★ 必须容错：registerWorkspace 会写 workspace.json（磁盘满/被占时会抛），
       //   而它在 this.conversations.set 之前 —— 抛出去就会**丢掉这个会话并泄漏进程**。
@@ -1381,6 +1477,7 @@ export class Hub {
     const out = new Map();
     for (const c of this.conversations.values()) {
       if (cwd && c.cwd !== cwd) continue;
+      if (isForgotten(c.id)) continue;
       out.set(c.id, c.snapshot());
     }
     if (!includeClosed) return [...out.values()];
@@ -1413,6 +1510,7 @@ export class Hub {
     }
     for (const s of sessions) {
       if (out.has(s.sessionId)) continue;
+      if (isForgotten(s.sessionId)) continue;
       const meta = readConversationMeta(s.sessionId);
       out.set(s.sessionId, {
         conversation_id: s.sessionId,

@@ -28,6 +28,8 @@ const flag = dryRun ? '[预演] ' : '';
 const log = (s) => console.log(s);
 
 log(`${flag}测试收尾清理（只针对临时目录；不动真实项目与 .state/）\n`);
+log('  ⚠️ tempOnly 会删除**所有 cwd 在系统临时目录下**的会话（含其他进程/测试正在使用的）；');
+log('     不要在并发运行其他测试、或有人正在使用 %TEMP% 工作区时执行。\n');
 
 // 1) 临时目录里的测试会话
 const purged = purgeTestSessions({ dryRun, tempOnly: true });

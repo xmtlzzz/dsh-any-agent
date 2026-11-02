@@ -98,6 +98,17 @@ try {
   const modelNoProv = await client.callTool('dsh_start', { cwd: goodWs, model: 'deepseek-v4.1-flash' });
   check('给了 model 但没给 provider → isError', isErr(modelNoProv) && /provider/.test(txt(modelNoProv)), txt(modelNoProv).slice(0, 140));
 
+  const badProvider = await client.callTool(
+    'dsh_start',
+    { cwd: goodWs, provider: 'no-such-provider-xyz', model: 'deepseek-flash' },
+    120_000,
+  );
+  check(
+    '★ 无效 provider/model → isError（不回退默认模型）',
+    isErr(badProvider) && /provider|模型/.test(txt(badProvider)),
+    txt(badProvider).slice(0, 260),
+  );
+
   // ── 合法建会话 + reasoning_effort=default ─────────────────
   console.log('\n[C] 合法建会话与配置');
   const okStart = await client.callTool('dsh_start', { cwd: goodWs, reasoning_effort: 'default' }, 120_000);

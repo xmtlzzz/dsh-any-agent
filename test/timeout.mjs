@@ -211,7 +211,8 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
-  purgeTestSessions({ tempOnly: true });
+  // idsOnly：只清理本套件创建的会话，不再按 %TEMP% 一刀切。
+  purgeTestSessions({ ids: convs.filter(Boolean), idsOnly: true });
   try {
     rmSync(ROOT, { recursive: true, force: true });
   } catch {}

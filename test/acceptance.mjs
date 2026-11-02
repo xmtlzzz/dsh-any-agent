@@ -16,7 +16,7 @@
  *   DSH_E2E_MODE=preflight node ...     # 预检（1 个会话，先确认只读档下 IDA 通路可用）
  */
 
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
@@ -26,6 +26,30 @@ const DESKTOP = join(homedir(), 'Desktop');
 const FOLDER_A = join(DESKTOP, 'dsh-any-agent-test-A');
 const FOLDER_B = join(DESKTOP, 'dsh-any-agent-test-B');
 const STATE = join(tmpdir(), `dsh-any-agent-e2e-state-${Date.now()}.json`);
+
+/**
+ * 这个套件依赖 DSH profile 里挂载的 IDA Pro MCP（mcp__ida__*）。
+ * 没有挂载时它只能静默退回 pwsh/glob/read，4 个场景全红 —— 那不是产品缺陷。
+ * 前置不满足就明确 skip（并给出去哪加），而不是让 CI 永远红着。
+ */
+const PROFILE = process.env.DSH_MCP_PROFILE ?? 'dsh-mcp';
+const patchFiles = [
+  join(homedir(), '.dsh', 'cordis.patch.yml'),
+  join(homedir(), '.dsh', 'profiles', PROFILE, 'cordis.patch.yml'),
+];
+const hasIda = patchFiles.some((p) => {
+  try {
+    return existsSync(p) && /ida/i.test(readFileSync(p, 'utf8'));
+  } catch {
+    return false;
+  }
+});
+if (!hasIda && process.env.DSH_E2E_FORCE !== '1') {
+  console.log('\nacceptance: skipped — no IDA MCP configured in the DSH profile.');
+  console.log('  Add mcp__ida__* to the profile (or set DSH_E2E_FORCE=1 to run anyway).');
+  console.log('\n===== acceptance: skipped (0 checks) =====');
+  process.exit(0);
+}
 
 /** 写入类 IDA 工具：只读分析里一律不该出现。 */
 const IDA_WRITE_TOOLS = [
