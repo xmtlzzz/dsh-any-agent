@@ -1413,9 +1413,11 @@ export class Hub {
       onPermissionRequest: () => ({ outcome: { outcome: 'cancelled' } }),
     });
     proc.start();
+    let createdSessionId = null;
     try {
       await proc.initialize();
       const res = await proc.request('session/new', { cwd, mcpServers: [] });
+      createdSessionId = res.sessionId;
       const conv = new Conversation(
         {
           id: res.sessionId,
@@ -1467,6 +1469,10 @@ export class Hub {
       );
       return conv;
     } catch (e) {
+      // 失败路径也要清掉写锁登记：session/new 可能已经成功、登记已写入，
+      // 但会话最终没有注册（例如无效 provider/model 被 fail-fast）。留下 marker
+      // 会被 dsh_list/dsh_takeover 误报成“孤儿持有者”，也会在 locks 目录里积垃圾。
+      if (createdSessionId) removeMarker(createdSessionId);
       await proc.stop().catch(() => {});
       throw e;
     }

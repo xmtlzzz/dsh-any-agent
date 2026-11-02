@@ -553,7 +553,7 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | Suite | Checks | Covers |
 |---|---|---|
 | `smoke` | 29 | handshake, tool table, conversation creation, config, registry purity |
-| `boundary` | 45 | protocol edges (double initialize, malformed lines, unknown method), argument validation (including read-only + permissive approval rejection and unknown provider/model), unknown ids, cursor edges, lifecycle idempotence, unicode |
+| `boundary` | 46 | protocol edges (double initialize, malformed lines, unknown method), argument validation (including read-only + permissive approval rejection, unknown provider/model, and no stale write-lock marker on a failed create), unknown ids, cursor edges, lifecycle idempotence, unicode |
 | `integration` | 30 | resume-with-memory across processes, interrupt, both interject modes |
 | `async` | 16 | fire-and-forget + later collection |
 | `sentinel` | 36 | completion sentinel: atomicity, latch semantics, per-conversation namespacing under concurrency, cancelled runs still land it, and **reasoning never reaching the file** |
@@ -583,7 +583,7 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 
 That is **535 assertions in the client-registration suites alone** (`setup`, `removal-scope`, `config-safety`, `real-configs`; 517 on a machine with five client fixtures), which is where the 0.3 work actually is.
 
-The model-backed suites (`smoke` 29, `boundary` 45, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13) total 465 and were last measured in full for 0.1.2 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
+The model-backed suites (`smoke` 29, `boundary` 46, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13) total 466 and were last measured in full for 0.1.2 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
 
 > Counts are the numbers each suite prints itself. `smoke`/`prune`/`guards`/`sandbox-guard`/`approval-details`/`boundary`/`setup`/`removal-scope`/`config-safety`/`package-check`/`read-cursor`/`sentinel-redaction`/`forget-tombstone` run without LLM calls; the rest need a working provider.
 

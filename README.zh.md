@@ -569,7 +569,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | 套件 | 检查数 | 覆盖 |
 |---|---|---|
 | `smoke` | 29 | 握手、工具表、建会话、配置、注册表纯净性 |
-| `boundary` | 45 | 协议边界（重复 initialize、脏行、未知方法）、参数校验（含 read-only + 宽松审批必须拒绝、未知 provider/model）、未知 id、游标边界、生命周期幂等、unicode |
+| `boundary` | 46 | 协议边界（重复 initialize、脏行、未知方法）、参数校验（含 read-only + 宽松审批必须拒绝、未知 provider/model、失败创建不留下写锁登记）、未知 id、游标边界、生命周期幂等、unicode |
 | `integration` | 30 | 跨进程 resume 与记忆、中断、两种插话 |
 | `async` | 16 | fire-and-forget + 事后验收 |
 | `sentinel` | 36 | 完成哨兵：原子性、闩锁语义、多会话并发不串台、被取消也落地、**思考不进文件** |
@@ -599,7 +599,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 
 其中 **535 项属于客户端注册器套件**（`setup`、`removal-scope`、`config-safety`、`real-configs`；本机 5/9 配置时 517 项）—— 0.3 的活其实都在这里。
 
-需要模型的套件（`smoke` 29、`boundary` 45、`integration` 30、`async` 16、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13）合计 465 项，**完整实测停在 0.1.2** —— 它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**。
+需要模型的套件（`smoke` 29、`boundary` 46、`integration` 30、`async` 16、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13）合计 466 项，**完整实测停在 0.1.2** —— 它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**。
 
 > 数字取各套件自己打印的汇总，不在这里手抄。`smoke`/`prune`/`guards`/`sandbox-guard`/`approval-details`/`boundary`/`setup`/`removal-scope`/`config-safety`/`package-check`/`read-cursor`/`sentinel-redaction`/`forget-tombstone` 不调用模型；其余需要可用的 provider。
 

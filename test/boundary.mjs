@@ -4,7 +4,7 @@
  * 覆盖：MCP 协议边界、工具参数校验、生命周期幂等性、未知 id、脏输入。
  */
 
-import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,6 +98,8 @@ try {
   const modelNoProv = await client.callTool('dsh_start', { cwd: goodWs, model: 'deepseek-v4.1-flash' });
   check('给了 model 但没给 provider → isError', isErr(modelNoProv) && /provider/.test(txt(modelNoProv)), txt(modelNoProv).slice(0, 140));
 
+  const locksDir = join(tmpdir(), 'locks');
+  const locksBefore = existsSync(locksDir) ? readdirSync(locksDir).length : 0;
   const badProvider = await client.callTool(
     'dsh_start',
     { cwd: goodWs, provider: 'no-such-provider-xyz', model: 'deepseek-flash' },
@@ -107,6 +109,12 @@ try {
     '★ 无效 provider/model → isError（不回退默认模型）',
     isErr(badProvider) && /provider|模型/.test(txt(badProvider)),
     txt(badProvider).slice(0, 260),
+  );
+  const locksAfter = existsSync(locksDir) ? readdirSync(locksDir).length : 0;
+  check(
+    '★ 失败路径不留下写锁登记',
+    locksAfter === locksBefore,
+    `${locksBefore} -> ${locksAfter}（${locksDir}）`,
   );
 
   // ── 合法建会话 + reasoning_effort=default ─────────────────
