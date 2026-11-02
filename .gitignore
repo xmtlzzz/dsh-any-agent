@@ -54,5 +54,6 @@ credentials*.json
 # 本机导出的快照（含会话正文，绝不入库）
 state/
 
-# 官网源码与 Cloudflare 部署文件仅保留在本地
-/website/
+# 官网源码与部署配置纳入版本控制，仅忽略生成产物和本地缓存
+/website/dist/
+/website/.wrangler/

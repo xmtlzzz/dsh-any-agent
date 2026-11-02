@@ -1,0 +1,57 @@
+# dsh-any-agent 官网
+
+中文静态官网，使用现有品牌头图和浏览器本地演示介绍项目。包含异步派活、中途改向、断线恢复、多会话并行、安装配置与常见问题。支持明暗主题、暂停/单步播放、减少动态效果与键盘切换。
+
+## 本地开发
+
+需要 Node.js 22 或以上，无需安装前端依赖。
+
+```bash
+cd website
+npm run dev
+```
+
+预览地址为 `http://127.0.0.1:8770`。修改源码后重新执行构建或重启预览。
+
+```bash
+npm run check
+npm run build
+```
+
+`dist/` 是可独立托管的静态产物；构建从 `../docs/brand/header.jpg` 复制品牌图，从项目 `package.json` 读取版本号。JS/CSS 使用内容哈希文件名。
+
+## Cloudflare Workers 部署
+
+使用 Cloudflare Workers Static Assets，不需要数据库、API 密钥或后台服务。已有 Wrangler 登录时：
+
+```bash
+npm run deploy
+```
+
+Wrangler 版本固定为 `4.125.0`，目标名称在 `wrangler.jsonc` 中。首次运行可能下载该版本。后续可在 Cloudflare 控制台为此 Worker 添加自定义域名。
+
+当前部署地址：<https://dsh-any-agent-site.xmtlzloveasuka.workers.dev>。
+
+`site.config.json` 保存官网地址，用于生成 canonical、Open Graph 图片绝对地址和 sitemap。绑定自定义域名后，更新这个文件并重新构建部署；也可在构建时用 `SITE_URL` 覆盖：
+
+```powershell
+$env:SITE_URL = 'https://your-domain.example'
+npm run build
+```
+
+Cloudflare Workers Git 集成可将根目录设为 `website`，构建命令设为 `npm run build`，部署命令设为 `npx wrangler@4.125.0 deploy`。
+
+## Cloudflare Pages（可选）
+
+同一份 `dist/` 也可以直接部署到 Pages。Git 集成的根目录为 `website`，构建命令为 `npm run build`，输出目录为 `dist`。
+
+## 内容与演示
+
+- 页面内容：`src/index.html`
+- 视觉样式：`src/style.css`
+- 演示场景与状态：`src/demo.mjs`
+- 播放控制、复制配置与主题：`src/app.mjs`
+
+演示不连接访客本机的 DSH，不调用模型，也不修改文件。示例状态是说明工作流的演示数据。进程中断场景明确区分了“会话可恢复”和“当前回合已中断”。
+
+参考 Magpie 官网的可切换场景、连线和动态状态演示方式；页面代码与产品叙事均针对 dsh-any-agent 编写。形象及生图来源见项目 `docs/brand/README.md`。

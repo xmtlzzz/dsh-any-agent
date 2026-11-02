@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0a101c">
+  <title>dsh-any-agent — 让编码搭子，长期共事</title>
+  <meta name="description" content="从任何 MCP 客户端驱动 DeepSeek Harness：异步派活、中途插话、恢复会话、多任务并行。开源、零运行时依赖，给长任务一个可监督的编码搭子。">
+  <meta property="og:title" content="dsh-any-agent — 让编码搭子，长期共事">
+  <meta property="og:description" content="把长任务交出去，把掌控留在手里。任意 MCP 客户端 × DeepSeek Harness。">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="{{OG_IMAGE}}">
+  <meta name="twitter:card" content="summary_large_image">
+  {{CANONICAL}}
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="{{STYLE}}">
+  <script type="module" src="{{APP}}"></script>
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+<svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+  <symbol id="whale" viewBox="0 0 32 32"><path fill="currentColor" d="M25 13c1-4 3-6 6-6-1 4-2 6-5 7 0 8-7 13-15 11C4 24 1 20 2 15c1-5 6-8 12-7 5 1 7 4 8 8 2 0 3-1 3-3Z"/><path d="M4 18c3 5 10 6 15 2" fill="none" stroke="var(--logo-cut,#0a101c)" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="14" r="1.2" fill="var(--logo-cut,#0a101c)"/><path d="M14 5c0-2 1-3 3-3M14 5c-1-2-3-2-4-2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+  <symbol id="arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M15 5V4H4v11h1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+  <symbol id="github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.1.68-.22.68-.48v-1.86c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.89 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.64-1.33-2.22-.25-4.56-1.11-4.56-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.6 9.6 0 0 1 12 6.82c.85 0 1.7.12 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></symbol>
+  <symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4 19 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+</defs></svg>
+
+<header class="header"><nav class="nav wrap" aria-label="主导航">
+  <a class="brand" href="#" aria-label="dsh-any-agent 首页"><svg><use href="#whale"/></svg><span>dsh-any-agent</span></a>
+  <div class="nav-links"><a href="#capabilities">功能</a><a href="#playground">交互演示</a><a href="#install">快速开始</a><a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/README.zh.md" target="_blank" rel="noopener noreferrer">文档 <span>↗</span></a></div>
+  <div class="nav-actions"><button id="theme-toggle" class="icon-button" type="button" aria-label="切换明暗主题"><svg><use href="#sun"/></svg></button><a class="github-nav" href="https://github.com/xmtlzzz/dsh-any-agent" target="_blank" rel="noopener noreferrer"><svg><use href="#github"/></svg><span>GitHub</span><span>↗</span></a></div>
+</nav></header>
+
+<main id="main">
+<section class="hero wrap">
+  <a class="release-pill" href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer"><span class="pulse-dot"></span> OPEN SOURCE <span class="pill-divider"></span> v{{VERSION}} <span>↗</span></a>
+  <h1>把长任务交出去，<br><span>把掌控留在手里。</span></h1>
+  <p class="hero-description">给任何 MCP 客户端，一个能长期共事的编码搭子。<br class="desktop-break">交给 DeepSeek Harness 执行，你随时看进度、改方向、收结果。</p>
+  <div class="hero-actions"><a class="button primary" href="#install">开始使用 <svg><use href="#arrow"/></svg></a><a class="button secondary" href="#playground"><span class="play-triangle">▶</span> 看它怎么工作</a></div>
+  <p class="hero-meta"><span>MIT 开源</span><i></i><span>零运行时依赖</span><i></i><span>标准 MCP over stdio</span></p>
+  <div class="hero-flow" aria-label="任意 MCP 客户端通过 dsh-any-agent 连接 DeepSeek Harness"><span><b>⌘</b> 你的 MCP 客户端</span><span class="flow-arrow">⟶</span><span class="flow-center"><svg><use href="#whale"/></svg>dsh-any-agent</span><span class="flow-arrow">⟶</span><span><b>✦</b> DeepSeek Harness</span></div>
+</section>
+
+<section class="playground-section wrap" id="playground" aria-labelledby="playground-title">
+  <div class="section-kicker"><span class="tiny-label">THE WORKFLOW, ALIVE</span><span class="demo-tag"><span></span> 浏览器交互演示</span></div>
+  <h2 id="playground-title" class="sr-only">试试长期共事的四种方式</h2>
+  <div class="scenario-tabs" role="tablist" aria-label="选择演示场景">
+    <button type="button" role="tab" id="tab-dispatch" aria-controls="demo-panel" aria-selected="true" data-scenario="dispatch"><span>01</span> 异步派活</button>
+    <button type="button" role="tab" id="tab-interject" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scenario="interject"><span>02</span> 中途改向</button>
+    <button type="button" role="tab" id="tab-resume" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scenario="resume"><span>03</span> 断线恢复</button>
+    <button type="button" role="tab" id="tab-parallel" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scenario="parallel"><span>04</span> 多会话并行</button>
+  </div>
+  <div class="demo-shell" id="demo-panel" role="tabpanel" aria-labelledby="tab-dispatch">
+    <div class="window-bar"><div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div><span><svg><use href="#whale"/></svg> dsh-any-agent <span class="window-slash">/</span> workspace</span><span class="local-label">LOCAL RUNTIME</span></div>
+    <div class="workspace-grid">
+      <aside class="client-panel"><p class="panel-label">从你熟悉的客户端出发</p>
+        <div class="client-switcher" role="group" aria-label="选择 MCP 客户端"><button type="button" data-client="Codex" aria-pressed="true"><span class="client-logo codex-logo">⌘</span><span>Codex</span><span class="client-selected">↗</span></button><button type="button" data-client="Claude Code" aria-pressed="false"><span class="client-logo claude-logo">✳</span><span>Claude Code</span><span class="client-selected">↗</span></button><button type="button" data-client="Cursor" aria-pressed="false"><span class="client-logo cursor-logo">◈</span><span>Cursor</span><span class="client-selected">↗</span></button></div>
+        <div class="connection-track"><span></span><div class="connection-line"><i></i></div><code>MCP / stdio</code></div>
+        <div class="runtime-node"><div class="runtime-icon"><svg><use href="#whale"/></svg></div><strong>DeepSeek Harness</strong><span>你的长驻编码搭子</span><small id="runtime-state"><i></i> 待命</small></div>
+        <div class="identity-card"><span>SESSION ID</span><code>conv-app</code><small id="identity-note">会话身份 · 始终保留</small></div>
+      </aside>
+      <div class="task-panel"><div class="task-panel-header"><div><span class="panel-label">当前会话</span><h3 id="conversation-title">配置加载器重构</h3></div><span class="status-badge" id="status-badge" data-status="idle"><i></i> 待命</span></div>
+        <div class="task-goal"><span>任务目标</span><p id="task-goal">重构配置加载器，补齐回归测试。</p></div>
+        <div class="demo-story"><div class="step-number" id="step-number">01</div><div><h4 id="frame-title">在项目里，认识你的新搭子</h4><p id="frame-detail">一个会话，一份可恢复的工作上下文。</p></div></div>
+        <div class="tool-card"><div class="tool-heading"><span class="tool-dot"></span><code id="tool-name">dsh_start</code><span id="tool-client">Codex → DSH</span></div><pre><code id="tool-code">{ cwd: "/workspace/app" }</code></pre></div>
+        <div class="job-stack" id="job-stack" hidden><button type="button" data-job="0" aria-pressed="true"><span><i></i> 实现</span><div><b></b></div><small>0%</small></button><button type="button" data-job="1" aria-pressed="false"><span><i></i> 测试</span><div><b></b></div><small>0%</small></button><button type="button" data-job="2" aria-pressed="false"><span><i></i> 文档</span><div><b></b></div><small>0%</small></button></div>
+        <div class="progress-row"><span id="progress-label">等待派活</span><span id="progress-percent">0%</span></div><div class="progress-track" id="progress-track" role="progressbar" aria-label="演示任务进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill"></div></div>
+        <div class="receipt-row"><span><span id="receipt-icon">○</span> <span id="receipt-label">等待回执</span></span><button class="inline-action" id="context-action" type="button" hidden>插话：先补测试 <span>↗</span></button><code id="receipt-value">conversation_id: conv-app</code></div>
+      </div>
+    </div>
+    <div class="event-log"><span class="log-label">EVENT LOG</span><div id="event-log" aria-label="演示事件记录"><p><span>00:00</span> 创建会话 conv-app · 工作区 /workspace/app</p></div><span class="log-indicator" aria-hidden="true"></span></div>
+    <div class="demo-footer"><div class="timeline" id="timeline" role="group" aria-label="演示步骤"></div><div class="playback-controls"><button type="button" id="replay" aria-label="重新开始演示">↺ <span>重播</span></button><button type="button" id="play-pause" aria-pressed="false"><span id="play-icon">Ⅱ</span> <span id="play-label">暂停</span></button><button type="button" id="next-step">下一步 <span>→</span></button></div></div>
+  </div>
+  <div class="scenario-explanation"><h3 id="scenario-summary">把任务交出去，你的工作继续。</h3><p id="scenario-description">拿到回执就能离开。进度随时可读，回合结束后，哨兵文件带回完整结果。</p></div>
+  <p class="demo-disclosure">演示数据仅在浏览器内运行，不会连接本机 DSH 或修改文件。</p>
+</section>
+
+<section class="clients-section wrap" aria-label="支持的客户端"><p>用你习惯的工具，接一个更耐心的搭子。</p><div class="client-cloud"><span>✳ Claude Code</span><span>⌘ Codex</span><span>◈ Cursor</span><span>≋ Windsurf</span><span>⌁ Zed</span><span>✧ Gemini CLI</span><span>▣ VS Code</span><span>＋ 任意 MCP 客户端</span></div></section>
+
+<section class="capabilities-section wrap" id="capabilities">
+  <div class="section-heading"><div><span class="tiny-label">BUILT FOR THE LONG RUN</span><h2>从一次调用，<br>到长期共事。</h2></div><p>把「会话」作为单位，而不是包一条命令。<br>DSH 的能力，由你熟悉的客户端来调度。</p></div>
+  <div class="feature-grid">
+    <article class="feature-card"><span class="feature-index">01 / PERSISTENCE</span><div class="mini-persist" aria-hidden="true"><span class="process-chip">process A <i>×</i></span><div class="persist-wire"></div><span class="disk-chip">sessionId <b>✓</b></span><div class="persist-wire"></div><span class="process-chip">process B <i>↗</i></span></div><h3>进程是缓存，会话有身份</h3><p>已落盘的对话可跨进程恢复。下次调用自动 resume，延续上下文，不必从头介绍项目。</p><code>session/resume</code></article>
+    <article class="feature-card"><span class="feature-index">02 / OBSERVABILITY</span><div class="mini-output" aria-hidden="true"><div><span>cursor 12</span><span>+ 6 entries</span></div><i></i><i></i><i></i><b>cursor 18 <span>→</span></b></div><h3>只看新进展，不重复读历史</h3><p>运行状态轻量查询，输出按游标增量读取。思考内容默认隐藏，只返回统计。</p><code>dsh_read · dsh_status</code></article>
+    <article class="feature-card"><span class="feature-index">03 / COMPOSABILITY</span><div class="mini-tools" aria-hidden="true"><span>⌘ Shell</span><span>▤ Files</span><span>✦ Skills</span><span>⑂ Subagents</span><span>⌁ Workflows</span><span>↗ Other MCPs</span></div><h3>接进来的，是整个工具箱</h3><p>写代码、跑脚本、用技能、派子代理。DSH 还可连接其他 MCP 服务，把已有工具组合起来。</p><code>DSH native tools + MCP</code></article>
+  </div>
+  <div class="principles-row"><div><span>✓</span><p><strong>配置只改自己那一项</strong><small>注册前预览，写入前备份，重复执行保持幂等。</small></p></div><div><span>✓</span><p><strong>权限和审批，明确选择</strong><small>支持只读、工作区写入和完整访问；按需开启 ask。</small></p></div><div><span>✓</span><p><strong>协议干净，默认静默</strong><small>stdout 专用于协议，默认不输出运行日志。</small></p></div></div>
+</section>
+
+<section class="install-section" id="install"><div class="wrap install-grid"><div class="install-copy"><span class="tiny-label">GET YOUR BUDDY READY</span><h2>几条命令，<br>开始长期合作。</h2><p>你需要 Node.js ≥ 22.15，以及已经配置好可用模型和凭据的 DeepSeek Harness。</p><p>首次启动会从本机 DSH 配置准备专用 ACP profile，凭据继续由 DSH 管理。</p><a class="text-link" href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-MIGRATION.md" target="_blank" rel="noopener noreferrer">新机器部署指引 <svg><use href="#arrow"/></svg></a><a class="text-link" href="https://www.npmjs.com/package/dsh-any-agent" target="_blank" rel="noopener noreferrer">在 npm 上查看 <svg><use href="#arrow"/></svg></a></div>
+  <div class="install-card"><div class="install-card-top"><span class="terminal-prompt">&gt;_</span><span>安装并注册</span><span>01 — 03</span></div>
+    <div class="install-step"><span>01</span><div><h3>安装 MCP 服务</h3><div class="command-row"><code>npm install -g dsh-any-agent</code><button type="button" class="copy-button" data-copy="npm install -g dsh-any-agent" aria-label="复制安装命令"><svg><use href="#copy"/></svg></button></div></div></div>
+    <div class="install-step"><span>02</span><div><h3>先看看会改哪些配置</h3><div class="command-row"><code>dsh-any-agent-setup</code><button type="button" class="copy-button" data-copy="dsh-any-agent-setup" aria-label="复制预览命令"><svg><use href="#copy"/></svg></button></div><p>只读取配置，不写入任何文件。</p></div></div>
+    <div class="install-step"><span>03</span><div><h3>确认后，注册到客户端</h3><div class="command-row"><code>dsh-any-agent-setup --yes</code><button type="button" class="copy-button" data-copy="dsh-any-agent-setup --yes" aria-label="复制注册命令"><svg><use href="#copy"/></svg></button></div><p>重新连接 MCP 服务，开始给 DSH 派活。</p></div></div>
+    <div class="install-card-note"><span>↳</span> 自动检测常见客户端，只修改名为 dsh-any-agent 的配置条目。</div>
+  </div>
+  <details class="manual-config"><summary>想手工接入？查看客户端配置 <span>＋</span></summary><div class="manual-content"><div class="config-tabs" role="tablist" aria-label="选择手工配置客户端"><button type="button" role="tab" aria-selected="true" aria-controls="config-panel" id="config-tab-codex" data-config="codex">Codex</button><button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="config-panel" id="config-tab-claude" data-config="claude">Claude Code</button><button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="config-panel" id="config-tab-generic" data-config="generic">通用 MCP</button></div><div class="config-code" id="config-panel" role="tabpanel" aria-labelledby="config-tab-codex"><div><span id="config-path">~/.codex/config.toml</span><button type="button" class="copy-button" id="copy-config" aria-label="复制客户端配置"><svg><use href="#copy"/></svg></button></div><pre><code id="config-code">[mcp_servers.dsh-any-agent]
+command = "dsh-any-agent"
+args = []
+startup_timeout_sec = 20.0
+tool_timeout_sec = 120.0</code></pre></div></div></details>
+</div></section>
+
+<section class="faq-section wrap" id="faq"><div><span class="tiny-label">GOOD QUESTIONS</span><h2>开始前，你可能想知道。</h2></div><div class="faq-list">
+  <details><summary>它和直接调用 DSH 命令行有什么不同？<span>＋</span></summary><p>本项目通过 ACP 驱动长驻的 DSH 会话，支持恢复历史、中断回合、处理审批，以及先派活后收结果。对客户端暴露的是会话与任务，而不是一组逐条执行的 shell 命令。</p></details>
+  <details><summary>编辑器关闭，或者进程崩溃，任务会怎样？<span>＋</span></summary><p>已经落盘的会话可在下次调用时恢复；进行中的回合会随服务或子进程退出而中断，未完成的哨兵也可能不会写入。恢复后应先核对工作区，再重新派活。首次成功回合之前的会话可能尚未落盘。</p></details>
+  <details><summary>需要指定的编辑器、模型或 API 服务吗？<span>＋</span></summary><p>任何能够启动 stdio MCP 服务的客户端都可以接入。模型路由复用你已有的 DSH 配置，本项目不附带模型凭据，也不代售模型服务。模型调用费用按你使用的服务计算。</p></details>
+  <details><summary>如何控制写入权限和审批？<span>＋</span></summary><p>可选 read-only、workspace-write 和 danger-full-access，默认是完整访问。需要待决审批时，在建会话时显式设置 on_approval=ask。外部 MCP 工具的副作用不受 DSH 沙箱约束，使用前请阅读<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.md" target="_blank" rel="noopener noreferrer">使用注意事项</a>。</p></details>
+  <details><summary>可以同时在 DSH 的 GUI 里操作同一个会话吗？<span>＋</span></summary><p>同一会话同时只有一个写者。服务持锁时，可以用 dsh_read 查看进展；需要在 GUI 接手时，在回合空闲后调用 dsh_release 释放写锁。不要让多个客户端同时写同一会话。</p></details>
+  <details><summary>网页上的演示会实际运行任务吗？<span>＋</span></summary><p>这里是用于说明工作流的浏览器本地交互演示，不连接你的计算机，不调用模型。安装并配置 MCP 服务后，才可以在自己的客户端中真实派活。</p></details>
+</div></section>
+
+<section class="closing-section wrap"><div class="closing-copy"><span class="tiny-label">A CODING BUDDY THAT STICKS AROUND.</span><h2>下一项长任务，<br>一起做完。</h2><p>它吃白饭，也写代码。你掌方向，它跑长途。</p><div><a href="#install" class="button primary">接上你的编码搭子 <svg><use href="#arrow"/></svg></a><a href="https://github.com/xmtlzzz/dsh-any-agent" class="button secondary" target="_blank" rel="noopener noreferrer"><svg><use href="#github"/></svg> GitHub</a></div></div><div class="closing-art"><img src="/assets/hero.jpg" alt="蓝发鲸鱼娘一边吃白米饭，一边陪你在编程桌前工作" width="1983" height="793" loading="lazy" decoding="async"></div></section>
+</main>
+<footer class="footer wrap"><div class="brand footer-brand"><svg><use href="#whale"/></svg><span>dsh-any-agent</span></div><p>为长期共事而生。Powered by DeepSeek Harness.</p><div><a href="https://github.com/xmtlzzz/dsh-any-agent" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/README.zh.md" target="_blank" rel="noopener noreferrer">文档 ↗</a><a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a><span>© {{YEAR}}</span></div></footer>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<noscript><div class="noscript-note">交互演示需要 JavaScript。安装说明和文档链接仍可使用。</div></noscript>
+</body>
+</html>
