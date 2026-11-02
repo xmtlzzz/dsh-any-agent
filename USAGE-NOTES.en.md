@@ -38,7 +38,7 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 
 **2.5 Run records are memory-only, last 20.** An old `run_id` eventually returns `unknown run_id`. Persist important results yourself, drain `dsh_read` (also memory, bounded to 500 entries), or — best with `wait=false` — **collect from the completion sentinel file**, which carries the result, is immune to the in-memory window, and survives restarts.
 
-**2.6 Sentinel files consume disk.** They are a *latch*: written once and kept so a late waiter never misses one, so they don't vanish on their own. The service **prunes sentinels older than 7 days at startup** (`DSH_MCP_SENTINEL_TTL_MS`, `0` disables); have your waiter `rm` after consuming. Sentinels **contain no reasoning** — `result.thinking` is stripped and flagged `thinking_omitted`.
+**2.6 Sentinel files consume disk.** They are a *latch*: written once and kept so a late waiter never misses one, so they don't vanish on their own. The service **prunes sentinels older than 7 days at startup** (`DSH_MCP_SENTINEL_TTL_MS`, `0` disables); have your waiter `rm` after consuming. Sentinels **contain no reasoning** — `result.thinking` is stripped and a boolean `thinking_omitted` is always present. They also carry usage and **credential-redacted tool inputs**, so treat them as sensitive files.
 
 ## 3. Concurrency and lifecycle
 
@@ -98,9 +98,11 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 
 **7.1 Silent by default** — not one byte. MCP's stdout is the protocol channel, and stderr lands in Claude/Codex's logs.
 
-**7.2 Reasoning never reaches disk — with one deliberate exception.** It is not logged, and the state file holds metadata only. Only `dsh_read(include_reasoning=true)` returns live reasoning of the currently running turn, discarded when it ends.
+**7.2 This server never writes reasoning to its own disk artifacts — with one deliberate exception.** It is not logged, and the state file holds metadata only. Only `dsh_read(include_reasoning=true)` returns live reasoning of the currently running turn, discarded when it ends.
 
-**The exception: the async completion sentinel.** It must persist the *answer* (so a caller can collect offline), but `result.thinking` is **stripped** and replaced by `thinking_omitted: true` — even when `reasoning=full` was requested, no reasoning text appears in the file (a test guards this), while `dsh_get(run_id)` still returns it from memory. `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` breaks this on purpose.
+**The exception: the async completion sentinel.** It must persist the *answer* (so a caller can collect offline), and it also carries usage and credential-redacted tool inputs, but `result.thinking` is **stripped** and replaced by a boolean `thinking_omitted` (`true` when removed, `false` when there was none) — even when `reasoning=full` was requested, no reasoning text appears in the file (a test guards this), while `dsh_get(run_id)` still returns it from memory. `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` breaks this on purpose.
+
+> ⚠️ **DSH's own session log (`~/.dsh/sessions/**/session.v4.jsonl.zstd`) contains the full reasoning text**, even with `reasoning=hide`. That is DSH's storage (what makes resume possible) and is outside this server's control; the guarantee above covers *this server's* logs, sentinels and registry only.
 
 **7.3 Be careful with `DSH_MCP_LOG_STDERR=1`** — it forwards DSH's raw stderr, which may contain reasoning. Local debugging only.
 

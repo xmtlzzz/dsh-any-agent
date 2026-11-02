@@ -60,6 +60,38 @@ import {
 const now = () => Date.now();
 const NOOP_LOG = { info: () => {}, debug: () => {}, dshStderr: () => {} };
 
+/**
+ * 会话元数据侧车（`.state/meta/<id>.json`）。
+ *
+ * 为什么需要：`forget=true` 只从注册表移除；之后按 id 查询时，`Hub.get()` 会从
+ * DSH 会话存储重建会话（这是多实例恢复的刻意设计）。但 DSH 的会话记录里**没有**
+ * 本服务选择的 `onApproval` / `reasoning_effort` / `title_hint` / 轮数，
+ * 重建就会悄悄回落到默认值（实测 auto-allow→ask、low→max）。这个侧车保存
+ * **仅元数据**（不含任何对话/思考正文），让重建后仍与原会话一致。
+ */
+const META_DIR = join(dirname(STATE_FILE), 'meta');
+const metaFilePath = (id) => join(META_DIR, `${id}.json`);
+
+function writeConversationMeta(conv) {
+  try {
+    mkdirSync(META_DIR, { recursive: true });
+    const file = metaFilePath(conv.id);
+    const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
+    writeFileSync(tmp, JSON.stringify(conv.toMeta(), null, 2), 'utf8');
+    renameSync(tmp, file);
+  } catch {
+    /* 元数据侧车只是辅助信息，写失败不影响主流程 */
+  }
+}
+
+function readConversationMetaFile(id) {
+  try {
+    return JSON.parse(readFileSync(metaFilePath(id), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 /** 运行期输出环形缓冲的条目上限（仅内存，超出丢最旧的）。 */
 const MAX_OUT_ENTRIES = 500;
 /** 记录用户发话时的截断长度（避免一条把缓冲撑爆）。 */
@@ -149,11 +181,21 @@ async function applySessionConfig(proc, sessionId, cfg) {
  * 默认剥离以维持"思考不落盘"的保证，并留下 thinking_omitted 标记，
  * 免得调用方以为字段是意外丢失的。
  */
-function sanitizeResultForSentinel(result) {
+export function sanitizeResultForSentinel(result) {
   if (!result || typeof result !== 'object') return result ?? null;
   if (SENTINEL_INCLUDE_REASONING) return result;
   const { thinking, ...rest } = result;
-  return thinking ? { ...rest, thinking_omitted: true } : rest;
+  // 工具输入里会有完整命令、路径，甚至写入的文件内容。哨兵会保留 7 天，
+  // 所以按审批上下文同一套规则脱敏（密钥/令牌/密码类字段与常见内联字面量）。
+  if (Array.isArray(rest.tools_used)) {
+    rest.tools_used = rest.tools_used.map((t) => {
+      if (!t || typeof t !== 'object') return t;
+      const { input, ...meta } = t;
+      return input === undefined ? meta : { ...meta, input: sanitizeApprovalContext(input) };
+    });
+  }
+  // 始终给出布尔值：调用方才能区分“思考被剥离”与“本来没有思考”。
+  return { ...rest, thinking_omitted: Boolean(thinking) };
 }
 
 export class Conversation {
@@ -194,6 +236,8 @@ export class Conversation {
      */
     this.out = [];
     this.outSeq = 0;
+    /** 输出缓冲的**修订号**：每次追加（含合并进已有条目）都 +1，供游标式增量读使用。 */
+    this.outRev = 0;
     this.turnOutChars = 0;
     this.currentTurn = 0;
     this.turnStartedAt = 0;
@@ -227,6 +271,11 @@ export class Conversation {
       model: this.cfg.model,
       workspace: this.workspace,
     };
+  }
+
+  /** 侧车元数据：与注册表同字段，但独立落盘，forget 之后仍可恢复。 */
+  toMeta() {
+    return { version: 1, ...this.toState() };
   }
 
   /** 合规的公开快照（含磁盘上的元信息）。 */
@@ -495,11 +544,33 @@ export class Conversation {
 
   async onPermissionRequest(params) {
     const options = params?.options ?? [];
-    const toolCall = params?.toolCall ?? {};
+    const rawToolCall = params?.toolCall ?? {};
+    // 真实 DSH 的 request_permission 只带 toolCallId，不带 rawInput；
+    // 同一 toolCallId 的参数通常已经在 tool_call 更新里记录过，按 id 关联回来，
+    // 否则审批详情里没有命令/路径，调用方无法裁决。
+    const known = this.collector?.tools?.get(rawToolCall.toolCallId) ?? null;
+    const toolCall = known
+      ? {
+          ...rawToolCall,
+          name: rawToolCall.name ?? known.name,
+          title: rawToolCall.title ?? known.title,
+          kind: rawToolCall.kind ?? known.kind,
+          rawInput: rawToolCall.rawInput ?? rawToolCall.input ?? known.input,
+          locations: rawToolCall.locations ?? known.locations,
+        }
+      : rawToolCall;
     const desc = sanitizeApprovalContext(String(toolCall.title ?? toolCall.name ?? toolCall.toolCallId ?? '未知操作'));
     const allowId = pickOption(options, 'allow');
     const rejectId = pickOption(options, 'reject');
 
+    // ★ read-only 是硬边界：即使会话被旧版本/显式参数配成 auto-allow，
+    //   这里也绝不放行任何审批 —— DSH 会借审批把 sandbox 提权到可写。
+    if (this.permission === 'read-only') {
+      this.#hub.log.info(`[conv ${this.id}] read-only 强制拒绝审批: ${desc}`);
+      return rejectId
+        ? { outcome: { outcome: 'selected', optionId: rejectId } }
+        : { outcome: { outcome: 'cancelled' } };
+    }
     if (this.onApproval === 'auto-allow') {
       this.#hub.log.info(`[conv ${this.id}] 审批放行: ${desc}`);
       return allowId
@@ -764,17 +835,24 @@ export class Conversation {
     if (last && last.kind === kind && last.turn === this.currentTurn && text) {
       last.text += text;
       last.at = now();
+      // ★ 合并进已有条目也必须推进修订号。否则游标已经读过这条的调用方
+      //   会永远看不到后续追加的正文（旧实现用 seq 当游标，seq 不变 = 漏读）。
+      last.rev = ++this.outRev;
     } else {
-      this.out.push({ seq: ++this.outSeq, kind, turn: this.currentTurn, text: text ?? '', at: now(), ...extra });
+      this.out.push({ seq: ++this.outSeq, rev: ++this.outRev, kind, turn: this.currentTurn, text: text ?? '', at: now(), ...extra });
       if (this.out.length > MAX_OUT_ENTRIES) this.out.shift();
     }
     if (kind === 'text') this.turnOutChars += text?.length ?? 0;
   }
 
-  /** 读输出：游标式增量。返回 seq > cursor 的条目 + 新游标。 */
+  /** 读输出：**按修订号**的游标式增量。条目被追加时会再次返回（按 seq 替换全文）。 */
   readOut({ cursor = 0, includeReasoning = false, limit = 200 } = {}) {
-    const entries = this.out.filter((e) => e.seq > cursor).slice(0, limit);
-    const next = entries.length ? entries[entries.length - 1].seq : cursor;
+    const cur = Number.isFinite(cursor) ? cursor : 0;
+    // limit 必须清洗：负数会被 slice 解释成“从头到尾少一条”，0 会让调用方原地空转。
+    const n = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), MAX_OUT_ENTRIES)) : 200;
+    const revOf = (e) => (typeof e.rev === 'number' ? e.rev : e.seq);
+    const entries = this.out.filter((e) => revOf(e) > cur).slice(0, n);
+    const next = entries.length ? revOf(entries[entries.length - 1]) : cur;
     const res = {
       conversation_id: this.id,
       state: this.state(),
@@ -782,9 +860,9 @@ export class Conversation {
       current_tool: this.currentTool,
       entries,
       cursor: next,
-      has_more: this.out.some((e) => e.seq > next),
+      has_more: this.out.some((e) => revOf(e) > next),
       /** 缓冲被环形覆盖时会为 true，表示你错过了中间一段。 */
-      gap: entries.length > 0 && this.out.length > 0 && this.out[0].seq > cursor + 1,
+      gap: entries.length > 0 && this.out.length > 0 && revOf(this.out[0]) > cur + 1,
     };
     // 思考内容只在显式要求时、且只针对"当前正在跑的回合"返回；不保留、不进缓冲
     if (includeReasoning && this.collector?.reasoning) {
@@ -824,24 +902,27 @@ export class Conversation {
     return this.runs.length ? this.runs[this.runs.length - 1] : null;
   }
 
-  /** 等到当前回合结束（不忙则立即返回 true；超时返回 false）。 */
+  /** 等到当前回合结束（不忙则立即返回 true；`timeoutMs <= 0` 一直等；超时返回 false）。 */
   async waitIdle(timeoutMs = 30 * 60 * 1000) {
     if (!this.busy) return true;
     return await new Promise((resolve) => {
       let settled = false;
+      let timer = null;
       const done = () => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         resolve(true);
       };
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        const i = this.idleWaiters.indexOf(done);
-        if (i >= 0) this.idleWaiters.splice(i, 1);
-        resolve(false);
-      }, timeoutMs);
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          const i = this.idleWaiters.indexOf(done);
+          if (i >= 0) this.idleWaiters.splice(i, 1);
+          resolve(false);
+        }, timeoutMs);
+      }
       this.idleWaiters.push(done);
     });
   }
@@ -868,7 +949,8 @@ export class Conversation {
     if (mode === 'interject') {
       this.proc?.notify('session/cancel', { sessionId: this.id });
     }
-    const idle = await this.waitIdle();
+    // 排队等待的时长跟随调用方的 timeout_ms（0 = 一直等），不再固定 30 分钟。
+    const idle = await this.waitIdle(timeoutMs);
     const waited = now() - t0;
     if (!idle) throw new Error('等待当前回合结束超时，插话未发送');
     const r = await this.prompt(message, { reasoning, timeoutMs });
@@ -1000,6 +1082,9 @@ export class Hub {
       const tmp = `${STATE_FILE}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
       writeFileSync(tmp, JSON.stringify(doc, null, 2), 'utf8');
       renameSync(tmp, STATE_FILE);
+      // 侧车元数据独立于注册表：forget 移除注册表条目后仍然保留，
+      // 让按 id 重建的会话不会丢掉审批策略/思考深度/标题/轮数。
+      for (const c of this.conversations.values()) writeConversationMeta(c);
     } catch (e) {
       this.log.info(`[hub] 状态保存失败: ${e.message}`);
     }
@@ -1113,18 +1198,39 @@ export class Hub {
         //   一个当初用 read-only 建的会话，若注册表丢了、被我们以默认档接管，
         //   resume 时 DSH_PERMISSION_MODE 会把档位写进会话 —— 等于**悄悄提权**。
         const meta = readConversationMeta(id);
+        const persisted = readConversationMetaFile(id);
         const recordedPreset = meta?.permissions?.preset;
-        const permission = PERMISSION_TIERS.includes(recordedPreset) ? recordedPreset : DEFAULT_PERMISSION;
+        const recordedPermission = PERMISSION_TIERS.includes(recordedPreset) ? recordedPreset : null;
+        // 安全优先：会话记录说 read-only 就绝不能被侧车“提升”为可写档。
+        const permission =
+          recordedPermission === 'read-only'
+            ? 'read-only'
+            : PERMISSION_TIERS.includes(persisted?.permission)
+              ? persisted.permission
+              : (recordedPermission ?? DEFAULT_PERMISSION);
         const recordedApproval = meta?.permissions?.approval;
-        const onApproval = APPROVAL_POLICIES.includes(recordedApproval)
-          ? recordedApproval
-          : defaultApprovalPolicy(permission);
+        let onApproval = APPROVAL_POLICIES.includes(persisted?.onApproval)
+          ? persisted.onApproval
+          : APPROVAL_POLICIES.includes(recordedApproval)
+            ? recordedApproval
+            : defaultApprovalPolicy(permission);
+        if (permission === 'read-only' && onApproval !== 'auto-deny') onApproval = 'auto-deny';
         c = new Conversation(
           {
             id,
-            cwd: header.cwd,
+            cwd: persisted?.cwd ?? header.cwd,
             permission,
             onApproval,
+            titleHint: persisted?.titleHint ?? null,
+            reasoningEffort: REASONING_EFFORTS.includes(persisted?.reasoningEffort)
+              ? persisted.reasoningEffort
+              : DEFAULT_REASONING_EFFORT,
+            provider: persisted?.provider ?? null,
+            model: persisted?.model ?? null,
+            createdAt: persisted?.createdAt,
+            lastUsedAt: persisted?.lastUsedAt,
+            turnCount: persisted?.turnCount,
+            workspace: persisted?.workspace ?? null,
           },
           this,
         );
@@ -1166,6 +1272,8 @@ export class Hub {
 
   remove(id) {
     this.conversations.delete(id);
+    // 注意：**不删侧车元数据**。forget 的语义是“从注册表移除”，
+    // 之后按 id 重建（多实例恢复）时，侧车让审批策略/思考深度/标题/轮数不漂移。
     this.save();
   }
 
@@ -1179,8 +1287,11 @@ export class Hub {
       );
     }
     if (!isAbsolute(cwd)) throw new Error(`cwd 必须是绝对路径: ${cwd}`);
-    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
-      throw new Error(`工作区不存在或不是目录: ${cwd}（请先创建它）`);
+    if (!existsSync(cwd)) {
+      throw new Error(`工作区不存在或不是目录: ${cwd}（请先创建这个目录）`);
+    }
+    if (!statSync(cwd).isDirectory()) {
+      throw new Error(`工作区不存在或不是目录: ${cwd}（这是一个文件路径，请传目录）`);
     }
     if (!PERMISSION_TIERS.includes(permission)) {
       throw new Error(`permission 必须是 ${PERMISSION_TIERS.join(' | ')} 之一`);
@@ -1188,6 +1299,14 @@ export class Hub {
     const policy = onApproval ?? defaultApprovalPolicy(permission);
     if (!APPROVAL_POLICIES.includes(policy)) {
       throw new Error(`on_approval 必须是 ${APPROVAL_POLICIES.join(' | ')} 之一`);
+    }
+    // ★ read-only 是硬边界：显式 auto-allow/ask 会放行 DSH 的 sandbox 提权，
+    //   实测能把文件写进工作区而会话记录仍显示 read-only。直接拒绝这个组合。
+    if (permission === 'read-only' && policy !== 'auto-deny') {
+      throw new Error(
+        'permission=read-only 强制要求 on_approval=auto-deny（或不传）。' +
+          ' auto-allow/ask 会放行 DSH 的 sandbox 提权，使只读档失效。',
+      );
     }
     const effort = reasoningEffort ?? DEFAULT_REASONING_EFFORT;
     if (!REASONING_EFFORTS.includes(effort)) {

@@ -33,6 +33,14 @@ if (code === 0) {
   code = await run('approval-details.mjs');
 }
 if (code === 0) {
+  // dsh_read 游标语义：纯内存，不花 token；守住“合并追加后增量必须能看到全文”。
+  code = await run('read-cursor.mjs');
+}
+if (code === 0) {
+  // 哨兵落盘脱敏：纯内存，不花 token；守住“思考永不进哨兵、工具输入先脱敏”。
+  code = await run('sentinel-redaction.mjs');
+}
+if (code === 0) {
   // 沙箱守卫先跑：任何把真实 HOME 当沙箱的写法必须立刻失败。
   // 2026-10-29 的事故就是少了这一条，一段临时脚本把 ~ 当沙箱递归删了。
   code = await run('sandbox-guard.mjs');

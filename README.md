@@ -374,9 +374,9 @@ node test/smoke.mjs          # no LLM calls, verifies the whole plumbing
 | `dsh_start` | Create a conversation: workspace, permission tier, approval policy, **reasoning effort (default `max`)**, model |
 | `dsh_send` | Hand it a task. **Defaults to `wait=false`: returns a `run_id` + `sentinel_file` immediately**, the turn runs in the background and the sentinel file notifies you when it's done (recommended). `wait=true` blocks until the turn ends; hitting `timeout_ms` (default `0` = wait forever) **only downgrades to background — the turn is never cancelled and the result is never lost** |
 | `dsh_list` | All conversations with live state: `running` / `idle` / `detached`, elapsed time, current tool, output so far. `only_running=true` for active ones |
-| `dsh_read` | **Cursor-based incremental read** of what a *running* conversation is producing right now |
-| `dsh_get` | Conversation details; with `run_id`, the **final result of that dispatch** (the "collect the result later" entry point) |
-| `dsh_interject` | Interject while it's busy: `interject` = stop and redirect, `queue` = wait for the current turn, then speak. **This round writes a sentinel too**, and the reply carries its `sentinel_file` |
+| `dsh_read` | **Cursor-based incremental read** of what a *running* conversation is producing right now. The cursor is a **revision number**: an entry whose text grew since your last read reappears — match it by `seq` and replace its text, don't append again |
+| `dsh_get` | Conversation details; with `run_id`, the **final result of that dispatch** (the "collect the result later" entry point). Run records live in memory (last 20) — use the sentinel file after a restart |
+| `dsh_interject` | Interject while it's busy: `interject` = stop and redirect, `queue` = wait for the current turn, then speak. **This round writes a sentinel too**, and the reply carries its `sentinel_file`. On an idle conversation it behaves like `wait=true` and **blocks until the turn ends** |
 | `dsh_takeover` | **Preempt the write lock.** The only way out when another DSH process holds it (DSH has no steal API — preempting means killing the holder). It classifies the holder first: our own orphaned child → taken automatically; another live instance → needs `force`; **GUI/unknown → never killed**, reported instead |
 | `dsh_interrupt` | Stop the current turn (the conversation stays healthy) |
 | `dsh_release` | Hand the conversation back (frees the write lock so you can open it in your own DSH GUI). Still resumable |
@@ -428,7 +428,7 @@ Design notes (especially under **concurrent multi-session** use):
 - **Latch semantics**: the file is written once and kept. Even if the run finishes *before* you arm the waiter, `[ -f ]` is immediately true — you never miss it.
 - **Atomic write**: `tmp` + `rename`; if the file exists its contents are complete. Each run uses its own tmp, so concurrent writes never clobber.
 - **No server push**: the service only answers requests over MCP (it sends no notifications). "Completion notification" is entirely the sentinel file plus your background waiter.
-- **★ No reasoning in the sentinel**: the payload carries the answer and thinking *statistics* only — `result.thinking` is stripped and replaced by `thinking_omitted: true`, because the project's rule is that reasoning never reaches disk. `dsh_get(run_id)` still returns it from memory while the record lives. `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` breaks that guarantee deliberately.
+- **★ No reasoning in the sentinel**: the payload carries the answer, thinking *statistics*, usage and (credential-redacted) tool inputs, but never reasoning text — `result.thinking` is stripped and replaced by a boolean `thinking_omitted` (`true` when reasoning was removed, `false` when there was none), because this server's rule is that reasoning never reaches its own disk artifacts. `dsh_get(run_id)` still returns it from memory while the record lives. `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` breaks that guarantee deliberately. Note that **DSH's own session log does contain reasoning** — see [Logging and privacy](#️-logging-and-privacy).
 
 > Cleanup: sentinels contain full answers, so the service **prunes sentinels older than 7 days at startup** (tune with `DSH_MCP_SENTINEL_TTL_MS`; `0` disables). Your waiter should still `rm` the file after consuming it.
 
@@ -440,7 +440,7 @@ Design notes (especially under **concurrent multi-session** use):
      - … | id=33427096… | 🔵 running (8s, 34 chars this turn)        | cwd=…
 2. dsh_read(id,  cursor=0)      # read the first, note the cursor
 3. dsh_read(id2, cursor=0)      # switch to the second
-4. dsh_read(id,  cursor=<prev>) # switch back, deltas only
+4. dsh_read(id,  cursor=<prev>) # switch back; entries that grew since <prev> reappear (match by seq)
 ```
 
 ## 🤫 Reasoning: hidden by default
@@ -451,6 +451,8 @@ DSH separates reasoning from answer text at the model layer, and ACP exposes the
 - `reasoning=marker` / `summary` / `full` — progressively more content (mind your context budget)
 - `dsh_read(include_reasoning=true)` — live reasoning of the *currently running* turn only; it is never buffered and is discarded when the turn ends
 
+> ⚠️ This server never writes reasoning to its own logs, state file or sentinels — but **DSH's own session log (`~/.dsh/sessions/**/session.v4.jsonl.zstd`) does contain the full reasoning text**, even when `reasoning=hide`. That is DSH's storage (it is what makes resume possible) and is outside this server's control; account for it when analyzing sensitive data.
+
 ## 🔐 Permissions
 
 | Tier | Approval default | Use for |
@@ -460,6 +462,8 @@ DSH separates reasoning from answer text at the model layer, and ACP exposes the
 | `read-only` | `auto-deny` | Analyzing untrusted samples (malware, unknown dumps) |
 
 `on_approval` can be `auto-allow`, `auto-deny`, or `ask` (which exposes a pending approval for `dsh_approval_decide` to adjudicate).
+
+**`read-only` is enforced, not merely a default**: it always runs with `auto-deny`; passing `auto-allow` or `ask` for a read-only conversation is rejected at `dsh_start`, and the approval layer refuses any permission request from a read-only conversation. Without that, DSH can ask for a `sandbox_permissions` escalation and a permissive approval policy would let the write through (found by the adversarial audit).
 
 ## 🪟 Workspace visibility in the DSH GUI
 
@@ -499,13 +503,13 @@ Silent by default — **not one byte is written**.
 | `debug` | more of our own events; still no DSH output |
 | `DSH_MCP_LOG_STDERR=1` | additionally forward DSH's raw stderr (**may contain reasoning**) |
 
-**Reasoning never reaches disk** — with exactly one deliberate exception:
+**This server never writes reasoning to disk** — with exactly one deliberate exception:
 
-- Not in logs (silent by default), and the state file holds metadata only (id, cwd, permissions, counters) — a smoke-test assertion guards this.
-- **The async completion sentinel does persist the answer** (it must, so a caller can collect offline) but **strips `result.thinking`** and marks `thinking_omitted: true`. A test asserts that even when `reasoning=full` is requested, no reasoning text appears in the sentinel — while `dsh_get(run_id)` still returns it from memory. Set `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` to break this on purpose.
+- Not in logs (silent by default). The state file and the per-conversation metadata sidecars under `.state/meta/` hold metadata only (id, cwd, permissions, counters, title hint) — a smoke-test assertion guards the registry.
+- **The async completion sentinel persists the answer, usage and tool inputs** (it must, so a caller can collect offline) but **strips `result.thinking`** and always reports `thinking_omitted` (true when reasoning was removed, false when there was none). Tool inputs are passed through the same credential redaction as approvals, but the sentinel still contains commands and file contents — treat it as sensitive. A test asserts that even when `reasoning=full` is requested, no reasoning text appears in the sentinel — while `dsh_get(run_id)` still returns it from memory. Set `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` to break this on purpose.
 - Sentinels are pruned after 7 days by default (`DSH_MCP_SENTINEL_TTL_MS`; `0` keeps them forever).
 
-(DSH itself writes its own session log under `~/.dsh/sessions`; that is what makes resume possible and is outside this server's control.)
+> ⚠️ **DSH writes its own session log under `~/.dsh/sessions` and that log contains the full reasoning text** (even with `reasoning=hide`). It is what makes resume possible and is outside this server's control. The absolute "reasoning never reaches disk" claim applies to *this server's* artifacts only.
 
 ## ⚙️ Environment variables
 

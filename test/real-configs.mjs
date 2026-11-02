@@ -104,6 +104,14 @@ for (const s of seeded) console.log('  ' + s.id.padEnd(15) + ' <- ' + s.src);
 
 const ids = seeded.map((s) => s.id).join(',');
 
+/**
+ * “配置里还有我们的条目吗”——必须按**条目键**判断，不能做裸子串匹配：
+ * 真实 ~/.claude.json 里本来就有 `xmtlzzz/dsh-any-agent`（githubRepoPaths）
+ * 和 `.../code/dsh-any-agent`（项目路径），裸 includes 会误报（实测 2 项假失败）。
+ */
+const mentionsOurEntry = (id, text) =>
+  id === 'codex' ? /\[mcp_servers\.dsh-any-agent\]/.test(text) : /"dsh-any-agent"\s*:/.test(text);
+
 // 基线：真机上通常已经有我们这一条（用户装过）。先摘干净，那才是「用户原本的样子」。
 console.log('\n[1] 先摘掉可能存在的旧条目，得到用户原本的样子');
 {
@@ -111,9 +119,9 @@ console.log('\n[1] 先摘掉可能存在的旧条目，得到用户原本的样�
   check('清理运行退出码 0', r.status === 0, 'exit ' + r.status + ' ' + preview(r.stdout + r.stderr));
   for (const s of seeded) {
     s.baseline = readFileSync(s.dst, 'utf8');
-    const mentionsUs = s.baseline.includes('dsh-any-agent');
+    const mentionsUs = mentionsOurEntry(s.id, s.baseline);
     check(s.id + ': 基线里已经没有我们这一条', !mentionsUs,
-      mentionsUs ? 'still mentions dsh-any-agent' : '');
+      mentionsUs ? 'still mentions our entry key' : '');
   }
 }
 
@@ -162,7 +170,7 @@ console.log('\n[3] 撤销：必须逐字节还原成用户原本的样子');
     const back = readFileSync(s.dst, 'utf8');
     check(s.id + ': 逐字节还原', back === s.baseline,
       back.length + ' vs ' + s.baseline.length);
-    check(s.id + ': 不再提到我们', !back.includes('dsh-any-agent'));
+    check(s.id + ': 不再提到我们', !mentionsOurEntry(s.id, back));
   }
 }
 

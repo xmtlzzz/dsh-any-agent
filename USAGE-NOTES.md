@@ -72,7 +72,7 @@
 ### 2.6 哨兵文件会占磁盘
 - **现象**：`.state/runs/<会话id>/` 下文件越攒越多，每个都含完整正文。
 - **原因**：哨兵是**闩锁**——写一次并保留，晚到的等待方才能不漏，所以它不会自己消失。
-- **对策**：服务**启动时会清掉超过 7 天的**（`DSH_MCP_SENTINEL_TTL_MS` 调，`0` 关闭）。等待任务消费后顺手 `rm` 更干净。哨兵**不含思考内容**（`result.thinking` 被剥掉并标 `thinking_omitted`）。
+- **对策**：服务**启动时会清掉超过 7 天的**（`DSH_MCP_SENTINEL_TTL_MS` 调，`0` 关闭）。等待任务消费后顺手 `rm` 更干净。哨兵**不含思考内容**（`result.thinking` 被剥掉，并始终给出布尔 `thinking_omitted`）；它还会包含用量与**已按审批规则脱敏的工具输入**，仍应按敏感文件对待。
 
 ---
 
@@ -233,10 +233,12 @@
 ### 7.1 默认完全静默
 本服务默认**一个字节都不输出**。这不是洁癖：MCP 的 stdout 是协议通道（混东西进去会破坏报文），而 stderr 会进 Claude/Codex 的日志。
 
-### 7.2 思考内容不落盘（有一个**刻意留下**的例外）
-不写日志；状态文件只有元数据（id / cwd / 权限 / 计数）。只有 `dsh_read(include_reasoning=true)` 才会返回**当前正在跑那一轮**的实时思考，回合结束即丢弃。
+### 7.2 本服务不把思考写进自己的落盘物（有一个**刻意留下**的例外）
+不写日志；状态文件与侧车只有元数据（id / cwd / 权限 / 计数）。只有 `dsh_read(include_reasoning=true)` 才会返回**当前正在跑那一轮**的实时思考，回合结束即丢弃。
 
-**例外：异步完成哨兵。** 它必须把**正文**写进文件（否则调用方无法离线收活），但 `result.thinking` 会被**剥掉**并置 `thinking_omitted: true` —— 即使你请求了 `reasoning=full`，哨兵里也不会出现思考文本（有测试专门守着这一点），同一 run 在内存里仍能看到它。要刻意打破这条保证，设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1`。
+**例外：异步完成哨兵。** 它必须把**正文**写进文件（否则调用方无法离线收活），载荷还包含用量与（已脱敏的）工具输入，但 `result.thinking` 会被**剥掉**并给出布尔 `thinking_omitted`（剥离了为 true，本来没有为 false）—— 即使你请求了 `reasoning=full`，哨兵里也不会出现思考文本（有测试专门守着这一点），同一 run 在内存里仍能看到它。要刻意打破这条保证，设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1`。
+
+> ⚠️ **DSH 自己的会话日志 `~/.dsh/sessions/**/session.v4.jsonl.zstd` 含完整 reasoning**（即使 `reasoning=hide` 也照存）。那是 DSH 的存储、resume 的依据，不在本服务控制范围内；上面的“不落盘”只适用于本服务自己的日志/哨兵/注册表。
 
 ### 7.3 `DSH_MCP_LOG_STDERR=1` 要谨慎
 它会转发 DSH 子进程的原始 stderr，**其中可能包含思考内容**。只在本地排障时临时开。

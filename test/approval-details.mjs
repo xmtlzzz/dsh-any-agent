@@ -108,6 +108,27 @@ try {
     assert.deepEqual(conv.snapshot().pending_approval_details, []);
   });
 
+  console.log('\n[3b] real DSH payload: correlate toolCallId with the recorded tool_call update');
+  // 真实 DSH 的 session/request_permission 只带 toolCallId，不带 rawInput。
+  // 参数通常在先前的 tool_call 更新里，必须按 id 关联回来，否则审批上下文为空。
+  const correlated = new Conversation({ id: 'approval-correlated-test', cwd: root, permission: 'workspace-write', onApproval: 'ask' }, hub);
+  correlated.collector = {
+    tools: new Map([
+      ['call-correlated', { name: 'pwsh', title: 'Run correlated probe', kind: 'execute', input: { command: 'node ./correlated.cjs', justification: 'seen in tool_call update' } }],
+    ]),
+  };
+  const correlatedOutcome = correlated.onPermissionRequest({ toolCall: { toolCallId: 'call-correlated' }, options });
+  const correlatedSnap = correlated.snapshot();
+  const correlatedDetail = correlatedSnap.pending_approval_details[0];
+  check('missing rawInput is filled from the recorded tool_call update', () => {
+    assert.equal(correlatedDetail.input.command, 'node ./correlated.cjs');
+    assert.equal(correlatedDetail.reason, 'seen in tool_call update');
+    assert.deepEqual([correlatedDetail.tool, correlatedDetail.kind], ['pwsh', 'execute']);
+  });
+  correlated.decideApproval(correlatedSnap.pending_approvals[0], 'deny');
+  await correlatedOutcome;
+  correlated.collector = null;
+
   console.log('\n[4] actual stdio MCP structuredContent preserves review context');
   const harness = `
     import { Hub, Conversation } from ${JSON.stringify(new URL('../src/hub.mjs', import.meta.url).href)};

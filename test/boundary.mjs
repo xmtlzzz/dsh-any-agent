@@ -78,6 +78,20 @@ try {
   const badAppr = await client.callTool('dsh_start', { cwd: goodWs, on_approval: 'maybe' });
   check('非法 on_approval → isError', isErr(badAppr) && /on_approval/.test(txt(badAppr)), txt(badAppr).slice(0, 140));
 
+  // ★ read-only 是硬边界：显式 auto-allow/ask 会放行 DSH 的 sandbox 提权。
+  const roAllow = await client.callTool('dsh_start', { cwd: goodWs, permission: 'read-only', on_approval: 'auto-allow' });
+  check(
+    '★ read-only + auto-allow → isError（只读强制 auto-deny）',
+    isErr(roAllow) && /read-only/.test(txt(roAllow)) && /auto-deny/.test(txt(roAllow)),
+    txt(roAllow).slice(0, 240),
+  );
+  const roAsk = await client.callTool('dsh_start', { cwd: goodWs, permission: 'read-only', on_approval: 'ask' });
+  check(
+    '★ read-only + ask → isError（只读强制 auto-deny）',
+    isErr(roAsk) && /auto-deny/.test(txt(roAsk)),
+    txt(roAsk).slice(0, 240),
+  );
+
   const badEffort = await client.callTool('dsh_start', { cwd: goodWs, reasoning_effort: 'ultra' });
   check('非法 reasoning_effort → isError', isErr(badEffort) && /reasoning_effort/.test(txt(badEffort)), txt(badEffort).slice(0, 140));
 
