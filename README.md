@@ -1,50 +1,49 @@
-# 🐳 dsh-any-agent
+<div align="center">
 
-**English** | [中文](README.zh.md)
+<img src="https://raw.githubusercontent.com/xmtlzzz/dsh-any-agent/main/docs/brand/header.jpg" width="100%" alt="dsh-any-agent — a blue-haired chibi whale-girl eating white rice beside a coding laptop">
 
-[![npm version](https://img.shields.io/npm/v/dsh-any-agent.svg)](https://www.npmjs.com/package/dsh-any-agent)
-[![node](https://img.shields.io/node/v/dsh-any-agent.svg)](https://nodejs.org)
-[![license](https://img.shields.io/npm/l/dsh-any-agent.svg)](LICENSE)
-[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
+**Give any MCP client a coding buddy that sticks around.**
 
-> **Give any MCP client a coding buddy that sticks around** — powered by DeepSeek Harness.
+**English** · [简体中文](README.zh.md)
 
-An MCP server that drives DSH as a **long-lived agent runtime** instead of wrapping a CLI. Open a conversation, hand it a goal, and it writes code, runs scripts and spawns its own subagents — while you watch, cut in, and collect the result whenever you like. 🛠️
+[![npm version](https://img.shields.io/npm/v/dsh-any-agent.svg?style=flat-square)](https://www.npmjs.com/package/dsh-any-agent)
+[![node](https://img.shields.io/node/v/dsh-any-agent.svg?style=flat-square)](https://nodejs.org)
+[![license](https://img.shields.io/npm/l/dsh-any-agent.svg?style=flat-square)](LICENSE)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
 
-**Works with any MCP client.** Nothing here is Codex- or Claude-specific: the server speaks plain MCP over stdio and uses only the four standard methods (`initialize`, `ping`, `tools/list`, `tools/call`). Verified against a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
+[Quick start](#quick-start) · [Features](#-why-its-different) · [Tools](#-tools) · [Usage notes](USAGE-NOTES.en.md) · [Changelog](CHANGELOG.md)
 
-🧪 660 offline checks green on 0.3.2 (619 of them in the client-registration suites) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+</div>
 
-> 📌 **Read the [Usage Notes](USAGE-NOTES.en.md) first** — the practical gotchas that will actually bite you: the ACP model-config trap, external MCP tools bypassing DSH's sandbox, the workspace/GUI registry cache, cost control, and a troubleshooting table.
->
-> 🆕 **Setting this up on a fresh machine?** [USAGE-MIGRATION.md](USAGE-MIGRATION.md) is a step-by-step walkthrough for a new environment: prerequisites, how to find your `DSH_BIN`, ready-to-paste config blocks for Claude Code / Codex / Cursor / Windsurf / Cline / Zed, and a first-turn checklist.
+An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Hand it a goal, let it write code and run scripts, steer it mid-flight, and collect the result when you are ready.
 
-## 📑 Contents
+**Claude Code · Claude Desktop · Codex · Cursor · Windsurf · Zed · Gemini CLI · opencode · VS Code** — or any client that speaks MCP over stdio.
 
+## Quick start
+
+Requires **Node.js ≥ 22.15** and **DSH installed with a working model route and credentials**. See [Requirements](#-requirements) for details.
+
+```bash
+npm install -g dsh-any-agent
+dsh-any-agent-setup
+dsh-any-agent-setup --yes
+```
+
+The second command previews the changes; `--yes` applies them. Reconnect your client's MCP server, then ask your agent to start a DSH conversation in your project, dispatch a task, and collect the result. The [dispatch workflow](#-workflow-dispatch-then-collect-later) shows the tool sequence.
+
+> **Before your first task:** read the [Usage Notes](USAGE-NOTES.en.md), especially the model-config and external-MCP permission boundaries. External MCP tools bypass DSH's sandbox. For a fresh machine, follow the [migration guide](USAGE-MIGRATION.md).
+
+<details>
+<summary>Full contents</summary>
+
+- **Quick start** — [Install and connect](#quick-start) · [Changelog](CHANGELOG.md)
 - **Start here** — [The problem](#-the-problem-this-solves) · [Why it's different](#-why-its-different) · [Why not just wrap the DSH CLI](#-why-not-just-wrap-the-dsh-cli) · [Requirements](#-requirements) · [Setup](#-setup)
 - **Using it** — [Tools](#-tools) · [Dispatch then collect](#-workflow-dispatch-then-collect-later) · [Completion notifications](#-workflow-get-notified-on-completion-no-polling) · [Many conversations](#-workflow-many-conversations-at-once)
-- **Behavior** — [Permissions](#-permissions) · [Reasoning](#-reasoning-hidden-by-default) · [Logging and privacy](#-logging-and-privacy) · [Workspace & GUI](#workspace-visibility-in-the-dsh-gui)
+- **Behavior** — [Permissions](#-permissions) · [Reasoning](#-reasoning-hidden-by-default) · [Logging and privacy](#-logging-and-privacy) · [Workspace & GUI](#-workspace-visibility-in-the-dsh-gui)
 - **Hard parts** — [The write lock](#-the-write-lock-one-writer-per-conversation-at-a-time)
 - **Reference** — [Environment](#-environment-variables) · [Tests](#-tests) · [Known limitations](#-known-limitations) · [Why the old profile name?](#-why-is-the-profile-still-called-dsh-mcp)
 
-
-```
-  any MCP client                       ← Claude Code, Codex, Cursor, Zed, Cline, your own…
-  (Claude/Codex/Cursor/…)              │
-         │ MCP over stdio              │ newline-delimited JSON-RPC (ACP)
-         ▼                             ▼
-   ┌─────────────┐            ┌──────────────────────────┐
-   │dsh-any-agent│───────────▶│ dsh --profile dsh-mcp    │  one long-lived process
-   └─────────────┘            │                          │  per conversation
-                              └────────────┬─────────────┘
-                                           │
-                              ┌────────────┴─────────────┐
-                              │ DSH's own tools          │ files, shell, search,
-                              │                          │ skills, subagents, workflows
-                              ├──────────────────────────┤
-                              │ dsh-mcp-client           │ → your other MCP servers
-                              └──────────────────────────┘
-```
+</details>
 
 ## 🎯 The problem this solves
 
@@ -63,7 +62,7 @@ DSH (DeepSeek Harness) can do all of that — it has file/shell tools, skills, s
 
 ## ✨ Why it's different
 
-|  |  |
+| Capability | What you get |
 |---|---|
 | 🔄 **A dead process never kills a conversation** | The identity lives on disk. A crash, an idle reap, even restarting this whole server costs you nothing — the next call transparently resumes it, memory intact (verified across processes). |
 | 🗣️ **You are never stuck waiting** | Steer a conversation mid-flight — **interject** to stop and redirect (~100 ms to reach idle, measured over four cancelled turns), or **queue** a remark for after the current turn. Interrupting never damages the conversation. |
@@ -89,36 +88,62 @@ DSH ships two programmable entry points. The `sdk` profile looks simpler, but it
 
 **Core idea: the process is a cache, not the identity.** A conversation's identity is DSH's `sessionId`, persisted under `~/.dsh/sessions`. If the process is reaped, crashes, or the whole MCP server restarts, the next call transparently `session/resume`s it — history intact.
 
+<details>
+<summary>How the clients, server and DSH connect</summary>
+
+```
+  any MCP client                       ← Claude Code, Codex, Cursor, Zed, Cline, your own…
+  (Claude/Codex/Cursor/…)              │
+         │ MCP over stdio              │ newline-delimited JSON-RPC (ACP)
+         ▼                             ▼
+   ┌─────────────┐            ┌──────────────────────────┐
+   │dsh-any-agent│───────────▶│ dsh --profile dsh-mcp    │  one long-lived process
+   └─────────────┘            │                          │  per conversation
+                              └────────────┬─────────────┘
+                                           │
+                              ┌────────────┴─────────────┐
+                              │ DSH's own tools          │ files, shell, search,
+                              │                          │ skills, subagents, workflows
+                              ├──────────────────────────┤
+                              │ dsh-mcp-client           │ → your other MCP servers
+                              └──────────────────────────┘
+```
+
+**MCP compatibility.** The server uses only `initialize`, `ping`, `tools/list` and `tools/call`. It has also been verified with a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
+
+</details>
+
 ## 📦 Requirements
 
 - **Node.js ≥ 22.15** — the server uses `zstdDecompressSync` from `node:zlib` to read DSH session headers, and that API does not exist before 22.15
 - **DSH installed** (`@deepseek-ai/dsh`), with working credentials under `~/.dsh`
-- A DSH **profile named `dsh-mcp`** derived from the shipped `acp` template, containing **your own** provider/model config (this repo deliberately ships no provider config)
+- A working provider/model route in your local DSH configuration. The server prepares its `dsh-mcp` ACP profile automatically from that route; no provider config or credentials are bundled.
 
 ## 🚀 Setup
 
-### 1. Create the DSH profile
+### 1. Prepare the DSH profile
+
+On first launch, the server prepares a `dsh-mcp` profile from the shipped ACP template and copies the model route from your existing DSH configuration. Credentials stay with DSH. Use `DSH_MCP_ROUTE_SOURCE` to choose a source profile, or `DSH_MCP_BOOTSTRAP=0` to manage the profile yourself. See [Environment variables](#-environment-variables).
+
+<details>
+<summary>Manual profile setup and ACP configuration details</summary>
 
 ```bash
-dsh dsh-mcp --from-default-profile acp
+dsh --profile dsh-mcp --from-default-profile acp
 ```
 
-Then edit `~/.dsh/profiles/dsh-mcp/cordis.patch.yml` and declare your provider and model. Start from [`profile-example/cordis.patch.yml`](profile-example/cordis.patch.yml).
+Then edit `~/.dsh/profiles/dsh-mcp/cordis.patch.yml`, remove its `# dsh-mcp:managed` marker if present, and declare your provider and model. Start from [`profile-example/cordis.patch.yml`](profile-example/cordis.patch.yml).
 
 > ⚠️ **Two traps here** (both learned the hard way):
 >
 > 1. **ACP's model does NOT come from `agent-default-model`.** It comes from the `dsh-acp` plugin's own `config.provider` / `config.model`, which the `acp` bundle hard-codes to `deepseek-official`. If you don't override the `acp` row, your sessions silently run on the wrong provider and fail with `no API key for provider route "deepseek-official"`.
 > 2. **ACP's `reasoning_effort` defaults to empty** (= "Provider default"), not to the maximum. This server explicitly sets it to `max` on every `session/new` and after every `session/resume` — because a fresh process does not remember the previous choice.
 
+</details>
+
 ### 2. Register the server
 
-**From npm, one command (recommended)**
-
-```bash
-npm install -g dsh-any-agent
-dsh-any-agent-setup            # detect the clients you have; writes nothing
-dsh-any-agent-setup --yes      # apply
-```
+Run the three commands in [Quick start](#quick-start), then reconnect your client. For a manual configuration, expand the client examples below.
 
 `setup` finds the MCP clients on your machine — **Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Zed, Gemini CLI, opencode, VS Code** — and writes the entry into each one it finds, skipping the rest. It is safe by construction:
 
@@ -133,6 +158,9 @@ dsh-any-agent-setup --yes --only cursor,zed     # just these
 dsh-any-agent-setup --yes --permission read-only
 dsh-any-agent-setup --remove --yes               # take it back out; only its own entry is removed
 ```
+
+<details>
+<summary>Advanced flags and client configuration paths</summary>
 
 **Three new flags**
 
@@ -161,6 +189,11 @@ A `.bak-dsh-<timestamp>` backup lands beside every file before it is written. Pa
 For the exact path on your machine, read the `path` field for each client in `--json` output — that is the file this run would write, on your OS, which beats any table in a README.
 
 Three shapes worth spelling out, because getting them wrong is silent. **VS Code** stores MCP servers under `servers`, not `mcpServers`; writing the usual key there produces a config the editor ignores. **opencode** takes a single `command` array (`{ type: "local", command: [exe, ...args], enabled: true }`) rather than separate `command`/`args` fields. **Claude Code** is the reason this release does not use a JSON library at all: `~/.claude.json` really does hold a `projects` map with keys that differ only by letter case (`.../Rust` next to `.../rust`), so a naive `JSON.parse` fails on it and any whole-file rewrite would destroy the user's project list. A byte-range scanner that never builds a value object handles it, and an earlier design that shelled out to `claude mcp add` was dropped for the same reason — that command rewrites the file in its own formatting with no backup you could restore.
+
+</details>
+
+<details>
+<summary>Registration checks and round-trip verification</summary>
 
 **What `setup` will and will not touch**
 
@@ -209,6 +242,7 @@ Removal is not accepted because it *looks* right: the check is that **taking our
 
 Afterwards every JSON config still parses and `codex mcp list` still reads the file; no client needs hand repair.
 
+</details>
 
 **`cwd` is optional: it defaults to the project the client has open**
 
@@ -249,6 +283,9 @@ A restore is itself destructive, so it copies the **current** file aside as `.ba
 | Unregister from just some | `dsh-any-agent-setup --remove --yes --only codex` |
 | Undo one bad write | copy `.bak-dsh-<stamp>` back over the config |
 
+<details>
+<summary>What removal changes: verification details</summary>
+
 **What `--remove` actually does — measured**
 
 Unregistering touches exactly one key per client and leaves everything else alone. Measured on a real machine, before → after:
@@ -268,9 +305,14 @@ Nothing outside those entries is read, rewritten or deleted. Your credentials, o
 
 To verify by hand afterwards: `claude mcp list`, `codex mcp list`, and inspect `~/.cursor/mcp.json` / the `context_servers` key of Zed's settings.
 
+</details>
+
 **The recorded path is absolute**
 
 `setup` writes the absolute path of the installation it ran from. **If you move or delete that directory, every client will fail with `CONNECTION_CLOSED`** until you either re-run `setup` from the new location or `--remove` the stale entries. This bites when you install into a temporary folder to try things out, then clean it up: the configs still point into the void.
+
+<details>
+<summary>Manual client configuration: Claude Code, Codex and generic MCP</summary>
 
 **From a local checkout**
 
@@ -314,6 +356,8 @@ tool_timeout_sec = 120.0
 For a local checkout, use `"command": "node"` and `"args": ["/absolute/path/to/server/bin/dsh-any-agent.mjs"]`.
 
 > Cursor, Windsurf, Zed, Cline, Continue and most other clients use this same `mcpServers` shape — if it can launch a stdio MCP server, it works.
+
+</details>
 
 ### 3. Try it
 
@@ -468,7 +512,7 @@ Silent by default — **not one byte is written**.
 | Variable | Default | Purpose |
 |---|---|---|
 | `DSH_BIN` | auto-detected | Path to `@deepseek-ai/dsh/lib/bin.js` |
-| `DSH_MCP_PROFILE` | `dsh-mcp` | DSH profile to drive. ⚠️ The stale name is deliberate — see [Why is the profile still called `dsh-mcp`?](#why-is-the-profile-still-called-dsh-mcp) |
+| `DSH_MCP_PROFILE` | `dsh-mcp` | DSH profile to drive. ⚠️ The stale name is deliberate — see [Why is the profile still called `dsh-mcp`?](#-why-is-the-profile-still-called-dsh-mcp) |
 | `DSH_MCP_BOOTSTRAP` | on | Whether this server may create/sync the DSH profile on first start. `0` makes it drive an existing profile only and never write a file |
 | `DSH_MCP_ROUTE_SOURCE` | unset | Pin where model routes are copied from during bootstrap: a profile name (`desktop`, `web`, …) or `__home__` for `$DSH_HOME/cordis.patch.yml`. Unset = try home → desktop → web → headless → acp |
 | `DSH_MCP_STATE` | `<repo>/.state/conversations.json` | Conversation registry, survives restarts |

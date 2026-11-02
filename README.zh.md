@@ -1,50 +1,49 @@
-# 🐳 dsh-any-agent
+<div align="center">
 
-[English](README.md) | **中文**
+<img src="https://raw.githubusercontent.com/xmtlzzz/dsh-any-agent/main/docs/brand/header.jpg" width="100%" alt="dsh-any-agent：蓝发鲸鱼娘捧着白米饭，坐在深蓝色编程桌前">
 
-[![npm version](https://img.shields.io/npm/v/dsh-any-agent.svg)](https://www.npmjs.com/package/dsh-any-agent)
-[![node](https://img.shields.io/node/v/dsh-any-agent.svg)](https://nodejs.org)
-[![license](https://img.shields.io/npm/l/dsh-any-agent.svg)](LICENSE)
-[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
+**给任何 MCP 客户端配一个能长期共事的编码搭子。**
 
-> **给任何 MCP 客户端配一个"能长期共事的编码搭子"** —— 背后是 DeepSeek Harness。
+[English](README.md) · **简体中文**
 
-一个 MCP 服务端：把 DSH 当作**长驻的 agent 运行时**来驱动，而不是包一层命令行。开个会话、扔个目标，它自己写代码、跑脚本、派子代理；你随时能看、能插话、能回头验收。🛠️
+[![npm version](https://img.shields.io/npm/v/dsh-any-agent.svg?style=flat-square)](https://www.npmjs.com/package/dsh-any-agent)
+[![node](https://img.shields.io/node/v/dsh-any-agent.svg?style=flat-square)](https://nodejs.org)
+[![license](https://img.shields.io/npm/l/dsh-any-agent.svg?style=flat-square)](LICENSE)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
 
-**任何 MCP 客户端都能用。** 这里没有任何 Codex 或 Claude 专属的东西：服务端只讲标准 MCP over stdio，只用四个标准方法（`initialize`、`ping`、`tools/list`、`tools/call`）。已用一个"原始"客户端验证过——它协商更旧的协议版本、且从不发 `notifications/initialized`。
+[快速开始](#快速开始) · [主要优势](#-主要优势) · [工具](#-工具) · [使用注意事项](USAGE-NOTES.md) · [更新日志](CHANGELOG.md)
 
-🧪 0.3.2 离线 660 项检查全绿（其中 619 项属于客户端注册器套件） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
+</div>
 
-> 📌 **建议先读 [使用注意事项](USAGE-NOTES.md)** —— 会真正踩到的坑：ACP 模型配置陷阱、**外部 MCP 工具的副作用不受 DSH 沙箱约束**、工作区与 GUI 的注册表缓存、成本控制、以及一张故障速查表。
->
-> 🆕 **在新机器上部署？** [USAGE-MIGRATION.md](USAGE-MIGRATION.md) 是面向新环境的逐步指引：前置条件、怎么找 `DSH_BIN`、Claude Code / Codex / Cursor / Windsurf / Cline / Zed 的现成配置块，以及首轮对话清单。
+一个 MCP 服务端，把 DeepSeek Harness 当作**长驻的编码 agent** 来驱动。开个会话、扔个目标，它自己写代码、跑脚本、派子代理；你随时能看、能插话、能回头验收。
 
-## 📑 目录
+**Claude Code · Claude Desktop · Codex · Cursor · Windsurf · Zed · Gemini CLI · opencode · VS Code**，以及任何支持 MCP over stdio 的客户端。
 
+## 快速开始
+
+需要 **Node.js ≥ 22.15**，并且**已安装 DSH、配置好可用的模型路由与凭据**。详见[前置要求](#-前置要求)。
+
+```bash
+npm install -g dsh-any-agent
+dsh-any-agent-setup
+dsh-any-agent-setup --yes
+```
+
+第二条命令只预览，加 `--yes` 才会写入配置。重新连接客户端的 MCP 服务，然后让你的 agent 在当前项目中开启 DSH 会话、派活、收结果。[先派活，回头验收](#-用法先派活回头再验收)展示了完整的工具调用顺序。
+
+> **第一次派活前：** 先读[使用注意事项](USAGE-NOTES.md)，尤其是模型配置与外部 MCP 的权限边界。**外部 MCP 工具的副作用不受 DSH 沙箱约束。** 新机器部署可按[迁移指引](USAGE-MIGRATION.md)逐步操作。
+
+<details>
+<summary>展开完整目录</summary>
+
+- **快速开始** —— [安装并连接](#快速开始) · [更新日志](CHANGELOG.md)
 - **先看这里** —— [解决什么问题](#-解决什么问题) · [主要优势](#-主要优势) · [为什么不是包一层](#-为什么不是直接把-dsh-包一层) · [前置要求](#-前置要求) · [安装配置](#-安装配置)
 - **怎么用** —— [工具](#-工具) · [先派活回头验收](#-用法先派活回头再验收) · [跑完自动通知](#-用法跑完自动通知不轮询) · [多会话并发](#-用法同时控制多个会话)
 - **行为** —— [权限](#-权限) · [思考内容](#-思考内容默认隐藏) · [日志与隐私](#-日志与隐私) · [工作区与 GUI](#-会话在-dsh-gui-里的可见性)
 - **难点** —— [写锁](#-写锁一个会话同一时刻只有一个写者)
 - **参考** —— [环境变量](#-环境变量) · [测试](#-测试) · [已知限制](#-已知限制) · [为什么还叫旧 profile 名？](#-为什么-profile-还叫-dsh-mcp)
 
-
-```
-  任意 MCP 客户端                    ← Claude Code、Codex、Cursor、Zed、Cline、你自己写的…
-  (Claude/Codex/Cursor/…)            │
-         │ MCP over stdio            │ 换行分隔 JSON-RPC（ACP）
-         ▼                           ▼
-   ┌─────────────┐          ┌──────────────────────────┐
-   │dsh-any-agent│─────────▶│ dsh --profile dsh-mcp    │  每个会话一个长驻进程
-   └─────────────┘          │                          │
-                            └────────────┬─────────────┘
-                                         │
-                            ┌────────────┴─────────────┐
-                            │ DSH 自带工具             │ 文件/shell/搜索/
-                            │                          │ 技能/子代理/workflow
-                            ├──────────────────────────┤
-                            │ dsh-mcp-client           │ → 你自己的其他 MCP 服务器
-                            └──────────────────────────┘
-```
+</details>
 
 ## 🎯 解决什么问题
 
@@ -63,7 +62,7 @@ DSH（DeepSeek Harness）本身**全都能做** —— 它有文件/shell 工具
 
 ## ✨ 主要优势
 
-|  |  |
+| 能力 | 你能得到什么 |
 |---|---|
 | 🔄 **进程死了对话也不丢** | 对话身份在磁盘上。进程崩溃、被空闲回收、甚至整个服务重启，都不影响继续——下次调用自动 `resume`，记忆完整（跨进程实测）。 |
 | 🗣️ **不用傻等** | 回合跑偏了能**插话改口**（约 100ms 收敛到 idle，四次打断实测），或**排队**等这轮跑完再说；打断后会话不损坏。 |
@@ -89,6 +88,31 @@ DSH 自带两个可编程入口。`sdk` profile 看着更简单，但它的 JSON
 
 **核心思想：进程只是缓存，不是身份。** 对话的身份是 DSH 的 `sessionId`，落盘在 `~/.dsh/sessions`。进程被回收、崩溃、甚至整个 MCP 服务重启，下一次调用都会自动 `session/resume` 把它接回来，历史完整保留。
 
+<details>
+<summary>客户端、服务端与 DSH 是怎样连接的</summary>
+
+```
+  任意 MCP 客户端                    ← Claude Code、Codex、Cursor、Zed、Cline、你自己写的…
+  (Claude/Codex/Cursor/…)            │
+         │ MCP over stdio            │ 换行分隔 JSON-RPC（ACP）
+         ▼                           ▼
+   ┌─────────────┐          ┌──────────────────────────┐
+   │dsh-any-agent│─────────▶│ dsh --profile dsh-mcp    │  每个会话一个长驻进程
+   └─────────────┘          │                          │
+                            └────────────┬─────────────┘
+                                         │
+                            ┌────────────┴─────────────┐
+                            │ DSH 自带工具             │ 文件/shell/搜索/
+                            │                          │ 技能/子代理/workflow
+                            ├──────────────────────────┤
+                            │ dsh-mcp-client           │ → 你自己的其他 MCP 服务器
+                            └──────────────────────────┘
+```
+
+**MCP 兼容性。** 服务端只使用 `initialize`、`ping`、`tools/list`、`tools/call` 四个标准方法。已用一个协商旧版协议、从不发送 `notifications/initialized` 的原始客户端验证。
+
+</details>
+
 ## 📦 前置要求
 
 - **Node.js ≥ 22.15** —— 服务用 `node:zlib` 的 `zstdDecompressSync` 读 DSH 会话头，这个 API 在 22.15 之前不存在
@@ -112,6 +136,9 @@ DSH 自带两个可编程入口。`sdk` profile 看着更简单，但它的 JSON
 
 想要的来源不是自动挑的那个，可设 `DSH_MCP_ROUTE_SOURCE=desktop`（或 `__home__`）；彻底关掉自动同步则设 `DSH_MCP_BOOTSTRAP=0`。
 
+<details>
+<summary>手工维护 profile 与 ACP 配置细节（可选）</summary>
+
 ### 1b. 手工维护（可选）
 
 ```bash
@@ -125,15 +152,11 @@ dsh --profile dsh-mcp --from-default-profile acp
 > 1. **ACP 的模型不走 `agent-default-model`**，而是读 `dsh-acp` 插件自己的 `config.provider` / `config.model` —— 而 `acp` bundle 把它硬编码成了 `deepseek-official`。不覆盖 `acp` 这一行，会话会静默跑在错误的 provider 上，报 `no API key for provider route "deepseek-official"`。
 > 2. **ACP 的 `reasoning_effort` 默认是空串**（= "Provider default"），不是最大档。本服务在每次 `session/new` 以及每次 `session/resume` 之后都会显式设成 `max` —— 因为新进程不会记住上一次的选择。
 
+</details>
+
 ### 2. 注册 MCP 服务
 
-**从 npm 安装，一条命令（推荐）**
-
-```bash
-npm install -g dsh-any-agent
-dsh-any-agent-setup            # 检测你装了哪些客户端，不写任何文件
-dsh-any-agent-setup --yes      # 真正写入
-```
+执行[快速开始](#快速开始)中的三条命令，再重新连接客户端。需要手工配置时，可展开下方的客户端示例。
 
 `setup` 会找出你机器上的 MCP 客户端 —— **Claude Code、Claude Desktop、Codex、Cursor、Windsurf、Zed、Gemini CLI、opencode、VS Code** —— 逐个写进去，没装的跳过。它的安全性是结构性保证的：
 
@@ -148,6 +171,9 @@ dsh-any-agent-setup --yes --only cursor,zed     # 只装这几个
 dsh-any-agent-setup --yes --permission read-only
 dsh-any-agent-setup --remove --yes               # 全部移除，只摘自己那条
 ```
+
+<details>
+<summary>高级开关与各客户端的配置路径</summary>
 
 **新增的三个开关**
 
@@ -176,6 +202,11 @@ dsh-any-agent-setup --remove --yes               # 全部移除，只摘自己�
 具体路径以 `--json` 输出里每个客户端的 `path` 字段为准 —— 那是本次运行在你这个系统上真正要写的文件，比任何文档都准。
 
 有三种形状值得单独点出来，写错了是**静默失效**。**VS Code** 的 MCP 配置放在 `servers` 下，不是 `mcpServers`；按常见写法写进去，编辑器会直接忽略。**opencode** 用的是**一个** `command` 数组（`{ type: "local", command: [exe, ...args], enabled: true }`），不是分开的 `command`/`args`。**Claude Code** 则是本次发布**完全不用 JSON 库**的原因：`~/.claude.json` 的 `projects` 映射里确实存在**只差大小写**的重复键（`.../Rust` 和 `.../rust` 并存），朴素的 `JSON.parse` 在那里会失败，而任何整份重写都会毁掉用户的项目列表。所以改用按字符区间扫描、**从不构造值对象**的扫描器；早先那版「调 `claude mcp add`」也出于同样理由被放弃 —— 那条命令会用它自己的格式重写整个文件，且不产生我们可以回滚的备份。
+
+</details>
+
+<details>
+<summary>注册器检查与注册、撤销的往返验证</summary>
 
 **setup 会动什么、不会动什么**
 
@@ -224,6 +255,7 @@ Codex 的 `config.toml` 同理，是按行处理的：其它 `[表]` 及其注�
 
 撤销后所有 JSON 仍可解析、`codex mcp list` 仍能正常读取配置，客户端不需要人工修复。
 
+</details>
 
 **`cwd` 可以省略：默认用客户端当前打开的项目**
 
@@ -264,6 +296,9 @@ DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `
 | 只从某几个移除 | `dsh-any-agent-setup --remove --yes --only codex` |
 | 撤销某次误写 | 把 `.bak-dsh-<时间戳>` 复制回原文件 |
 
+<details>
+<summary>移除操作的实测记录</summary>
+
 **`--remove` 到底动了什么 —— 实测**
 
 注销只删掉每个客户端里的**那一个键**，其余一概不碰。在真机上测得的前后对比：
@@ -285,11 +320,16 @@ Codex        我们的两个 TOML 段        ->  已移除
 
 事后可自行核验：`claude mcp list`、`codex mcp list`，以及看 `~/.cursor/mcp.json` 和 Zed 设置里的 `context_servers` 键。
 
+</details>
+
 **记录的是绝对路径**
 
 `setup` 写进去的是它运行时所处安装目录的**绝对路径**。**如果你移动或删除了那个目录，所有客户端都会报 `CONNECTION_CLOSED`**，直到你在新位置重新跑一遍 `setup`，或者用 `--remove` 把失效条目清掉。
 
 最容易踩到的情况：装到临时目录里试用，然后清理掉 —— 配置还指着那个已经不存在的路径。
+
+<details>
+<summary>手工配置客户端：Claude Code、Codex 与通用 MCP</summary>
 
 **从本地目录安装**
 
@@ -333,6 +373,8 @@ tool_timeout_sec = 120.0
 本地目录安装时改用 `"command": "node"` 和 `"args": ["/绝对路径/server/bin/dsh-any-agent.mjs"]`。
 
 > Cursor、Windsurf、Zed、Cline、Continue 等大部分客户端都吃同一套 `mcpServers` 结构——只要能拉起 stdio MCP 服务，就能用。
+
+</details>
 
 ### 3. 自检
 
