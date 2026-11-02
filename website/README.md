@@ -18,7 +18,7 @@ npm run check
 npm run build
 ```
 
-`dist/` 是可独立托管的静态产物；构建从 `../docs/brand/header.jpg` 复制品牌图，从项目 `package.json` 读取版本号。JS/CSS 使用内容哈希文件名。
+`dist/` 是可独立托管的静态产物；构建从 `../docs/brand/header.jpg` 复制品牌图。页面在运行时从 npm latest 读取版本号（失败时回退 GitHub release/tag），构建不再把版本写死进页面；`src/release.mjs` 负责同步，`src/_headers` 的 CSP `connect-src` 放行这些端点。JS/CSS 使用内容哈希文件名。
 
 ## Cloudflare Workers 部署
 
@@ -30,7 +30,7 @@ npm run deploy
 
 Wrangler 版本固定为 `4.125.0`，目标名称在 `wrangler.jsonc` 中。首次运行可能下载该版本。后续可在 Cloudflare 控制台为此 Worker 添加自定义域名。
 
-当前部署地址：<https://dsh-any-agent-site.xmtlzloveasuka.workers.dev>。
+当前部署地址：<https://dsh-any-agent.xmtlz.dev/>（Workers 直连：<https://dsh-any-agent-site.xmtlzloveasuka.workers.dev>）。
 
 `site.config.json` 保存官网地址，用于生成 canonical、Open Graph 图片绝对地址和 sitemap。绑定自定义域名后，更新这个文件并重新构建部署；也可在构建时用 `SITE_URL` 覆盖：
 

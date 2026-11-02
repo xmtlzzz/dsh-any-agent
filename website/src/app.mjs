@@ -1,4 +1,5 @@
 import { scenarios, getFrame, advance, isFinished, statusNames } from './demo.mjs';
+import { fetchLatestVersion } from './release.mjs';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -64,7 +65,7 @@ function render() {
   $('#progress-fill').style.width = `${progress}%`;
   $('#progress-track').setAttribute('aria-valuenow', String(progress));
   $('#progress-track').classList.toggle('done', status === 'done');
-  $('#identity-note').textContent = frame.preserved ? '同一会话 · 历史已保留' : frame.persisted ? 'sessionId 已落盘 · 可恢复' : '会话身份 · 始终保留';
+  $('#identity-note').textContent = frame.preserved ? '同一会话 · 历史已保留' : frame.persisted ? 'sessionId 已落盘 · 可恢复' : '会话身份 · 已落盘保留';
   $('.identity-card code').textContent = mode === 'parallel' ? ['conv-app', 'conv-test', 'conv-docs'][selectedJob] : 'conv-app';
   $('.receipt-row').classList.toggle('received', Boolean(frame.sentinel));
   $('#receipt-icon').textContent = frame.collected ? '✓' : frame.sentinel ? '●' : step ? '↳' : '○';
@@ -147,3 +148,11 @@ async function copy(text, button) {
 $$('[data-copy]').forEach(button => button.addEventListener('click', () => copy(button.dataset.copy, button)));
 $('#copy-config').addEventListener('click', event => copy(configs[config].code, event.currentTarget));
 render();
+
+// 版本号运行时同步：npm latest → GitHub release → GitHub tag；失败时保持 v—，绝不写死。
+fetchLatestVersion().then(({ version, source }) => {
+  const target = $('#release-version');
+  if (!target) return;
+  target.textContent = version ? `v${version}` : 'v—';
+  target.dataset.source = source;
+});
