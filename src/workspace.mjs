@@ -329,22 +329,33 @@ export function scanSessions() {
  *
  * 会对 id 做形状校验（只允许 UUID / `session-` 前缀那类字符），避免 `..` 之类逃出会话目录。
  */
-export async function findSessionHeader(sessionId) {
-  if (typeof sessionId !== 'string' || !/^[A-Za-z0-9._-]{4,80}$/.test(sessionId)) return null;
-  if (!existsSync(SESSIONS_ROOT)) return null;
+export async function findSessionHeaderStatus(sessionId) {
+  if (typeof sessionId !== 'string' || !/^[A-Za-z0-9._-]{4,80}$/.test(sessionId)) {
+    return { status: 'missing', header: null, reason: 'id 形状非法' };
+  }
+  if (!existsSync(SESSIONS_ROOT)) return { status: 'missing', header: null, reason: '会话目录不存在' };
   let buckets;
   try {
     buckets = readdirSync(SESSIONS_ROOT);
-  } catch {
-    return null;
+  } catch (e) {
+    return { status: 'error', header: null, reason: `会话目录不可读: ${e.message}` };
   }
   for (const bucket of buckets) {
     const f = join(SESSIONS_ROOT, bucket, sessionId, 'session.v4.jsonl.zstd');
     if (!existsSync(f)) continue;
     const header = await readHeaderAsync(f);
-    if (header?.id === sessionId) return header;
+    if (header?.id === sessionId) return { status: 'found', header, file: f };
+    if (header === null) {
+      // 文件存在但头读不出来（超时/损坏/IO）：不能当成“会话不存在”，
+      // 否则 forget 墓碑会被误删、按 id 查询也会误报未知会话。
+      return { status: 'error', header: null, reason: `无法读取会话头: ${f}`, file: f };
+    }
   }
-  return null;
+  return { status: 'missing', header: null, reason: '会话文件不存在' };
+}
+
+export async function findSessionHeader(sessionId) {
+  return (await findSessionHeaderStatus(sessionId)).header;
 }
 
 /**

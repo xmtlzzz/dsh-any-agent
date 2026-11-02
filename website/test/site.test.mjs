@@ -60,8 +60,10 @@ test('The pre-paint theme script is allowed by the CSP hash', async () => {
 test('Unknown routes have a real error page and metadata points to the selected brand asset', async () => {
   const notFound = await readFile(resolve(dist, '404.html'), 'utf8');
   assert.match(notFound, /href="\/"/);
-  assert.match(html, /property="og:image" content="(?:https:\/\/[^\"]+)?\/assets\/hero\.jpg"/);
-  const image = await readFile(resolve(dist, 'assets/hero.jpg'));
+  const heroName = assets.find((n) => /^hero\.[a-f0-9]{10}\.jpg$/.test(n));
+  assert.ok(heroName, 'hashed hero asset exists');
+  assert.match(html, new RegExp(`property="og:image" content="(?:https:\\/\\/[^"]+)?\\/assets\\/${heroName.replace('.', '\\.')}"`));
+  const image = await readFile(resolve(dist, 'assets', heroName));
   assert.equal(image[0], 0xff); assert.equal(image[1], 0xd8);
   assert.ok(image.length < 400_000);
 });
@@ -83,5 +85,5 @@ test('CSP allows the runtime version endpoints and canonical uses the public dom
   const headers = await readFile(resolve(dist, '_headers'), 'utf8');
   assert.match(headers, /connect-src 'self' https:\/\/registry\.npmjs\.org https:\/\/api\.github\.com https:\/\/cloudflareinsights\.com/);
   assert.match(html, /<link rel="canonical" href="https:\/\/dsh-any-agent\.xmtlz\.dev\/">/);
-  assert.match(html, /property="og:image" content="https:\/\/dsh-any-agent\.xmtlz\.dev\/assets\/hero\.jpg"/);
+  assert.match(html, /property="og:image" content="https:\/\/dsh-any-agent\.xmtlz\.dev\/assets\/hero\.[a-f0-9]{10}\.jpg"/);
 });

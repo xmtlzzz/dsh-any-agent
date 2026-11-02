@@ -1600,6 +1600,11 @@ section('[18] dsh-any-agent-restore：能把文件退回某一份备份', () => 
   check(id + ': --list 至少列出刚才那些备份', Boolean(listed && listed.backups.length >= 2),
     listed ? String(listed.backups.length) : 'null');
 
+  // 连续执行 --latest 不应把上一次的 pre-restore 安全副本当成“最新备份”再撤回去。
+  const again = restore(['--latest']);
+  check(id + ': 重复 --latest 不会撤销上一次还原', again.status === 0 && readText(p) === restoredText,
+    'exit ' + again.status + ' ' + preview(readText(p)));
+
   dropSandbox(home);
 });
 

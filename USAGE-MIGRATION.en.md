@@ -113,8 +113,10 @@ when creating a session if you want `dsh_approval_decide` to adjudicate them.
 
 `read-only` is a hard boundary at this layer: `read-only + auto-allow/ask` is
 rejected, and the server reads back the session's recorded permission tier
-after create/resume. External MCP tools mounted in DSH are outside DSH's
-sandbox; read `USAGE-NOTES.en.md` before using them with untrusted data.
+after create/resume. If the projection cache has no record within the DSH
+flush window, read-only **fails closed** instead of relying on approvals.
+External MCP tools mounted in DSH are outside DSH's sandbox; read
+`USAGE-NOTES.en.md` before using them with untrusted data.
 
 ## 6. Verify
 
@@ -155,6 +157,6 @@ not rewritten by an upgrade; run `dsh-any-agent-setup` again only if you want
 to refresh the entry or permission env. `dsh-any-agent-restore` can restore a
 client config from a `.bak-dsh-*` backup.
 
-For the full Chinese guide, environment-variable reference, write-lock
-measurements and website deployment notes, see `USAGE-MIGRATION.md`,
-`README.md` and `USAGE-NOTES.en.md`.
+For the full Chinese guide, environment-variable reference and write-lock
+measurements, see `USAGE-MIGRATION.md`, `README.md` and `USAGE-NOTES.en.md`.
+Website build/deploy notes live in `website/README.md`.

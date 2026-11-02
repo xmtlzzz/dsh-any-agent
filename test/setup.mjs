@@ -14,8 +14,9 @@
  * 全废 —— 所以第 9 组会把写进配置的那条命令真的执行一遍。
  */
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { chmodSync, readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { platform } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { makeSandboxHome, removeSandbox } from './sandbox-home.mjs';
@@ -242,6 +243,28 @@ console.log('\n[9] the command written into the config actually starts');
     }
   }
 
+  removeSandbox(home);
+}
+
+// ── 10. 参数校验与权限位保留 ──────────────────────────────────────
+
+console.log('\n[10] invalid --permission is rejected; file mode is preserved');
+{
+  const home = sandbox({ '.cursor/mcp.json': '{"mcpServers":{}}\n' });
+  const p = join(home, '.cursor', 'mcp.json');
+  const before = readFileSync(p, 'utf8');
+  const bad = runSetup(home, ['--yes', '--only', 'cursor', '--permission', 'read_only']);
+  check('invalid permission exits non-zero', bad.code === 2, 'exit ' + bad.code + ' ' + bad.out.split('\n')[0]);
+  check('invalid permission writes nothing', readFileSync(p, 'utf8') === before);
+  check('invalid permission creates no backup', backupsIn(join(home, '.cursor')).length === 0);
+
+  let modeOk = true;
+  if (platform() !== 'win32') {
+    chmodSync(p, 0o600);
+    runSetup(home, ['--yes', '--only', 'cursor']);
+    modeOk = (statSync(p).mode & 0o777) === 0o600;
+  }
+  check('POSIX mode is preserved by setup (Windows: n/a)', modeOk, 'expected 0600');
   removeSandbox(home);
 }
 

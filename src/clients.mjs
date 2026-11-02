@@ -89,11 +89,22 @@ export function pruneBackups(file) {
  * 任何一步失败都必须删掉临时文件 —— 曾经有版本在 rename 失败后
  * 把 mcp.json.tmp-dsh-<pid> 留在了客户端目录里。
  */
-export function atomicWrite(file, text) {
+export function atomicWrite(file, text, { mode } = {}) {
+  // 尽量保留原文件权限：POSIX 上 0600 的客户端配置不能因为一次 setup 变成 0644。
+  let originalMode = mode;
+  if (originalMode === undefined) {
+    try { originalMode = statSync(file).mode; } catch { originalMode = null; }
+  }
   const tmp = file + '.tmp-dsh-' + process.pid + '-' + Math.random().toString(36).slice(2, 8);
   try {
-    writeFileSync(tmp, text, 'utf8');
+    writeFileSync(tmp, text, {
+      encoding: 'utf8',
+      ...(originalMode === null ? {} : { mode: originalMode & 0o7777 }),
+    });
     renameSync(tmp, file);
+    if (originalMode !== null) {
+      try { chmodSync(file, originalMode & 0o7777); } catch { /* 尽力而为 */ }
+    }
   } catch (e) {
     try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* 尽力而为 */ }
     throw e;

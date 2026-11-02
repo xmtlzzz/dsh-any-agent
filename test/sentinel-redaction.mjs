@@ -7,6 +7,8 @@
  *   2) 工具输入按审批上下文同一套规则脱敏（密钥类字段 + 常见内联字面量）。
  */
 
+import { spawnSync } from 'node:child_process';
+
 process.env.DSH_MCP_SENTINEL_INCLUDE_REASONING = '';
 const { sanitizeResultForSentinel } = await import('../src/hub.mjs');
 
@@ -67,7 +69,29 @@ check('answer 里的 password 被替换', !String(body.answer).includes('hunter2
 check('error 里的 Bearer 被替换', !String(body.error).includes('sk-ERRORLEAK12345'), String(body.error));
 check('title 里的 api_key 被替换', !String(body.title).includes('sk-TITLELEAK12345'), String(body.title));
 
-console.log('\n[4] 非对象/空值安全');
+console.log('\n[4] INCLUDE_REASONING=1 仍必须脱敏');
+{
+  const hubURL = new URL('../src/hub.mjs', import.meta.url).href;
+  const script =
+    `const { sanitizeResultForSentinel } = await import(${JSON.stringify(hubURL)});\n` +
+    'console.log(JSON.stringify(sanitizeResultForSentinel({' +
+    "answer: 'token sk-INCLUDELEAK12345', thinking: 'THINK_KEEP'," +
+    "tools_used: [{ name: 'pwsh', input: { apiKey: 'sk-TOOLLEak12345' } }]" +
+    '})));';
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    env: { ...process.env, DSH_MCP_SENTINEL_INCLUDE_REASONING: '1' },
+  });
+  let value = null;
+  try { value = JSON.parse(String(r.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop()); } catch {}
+  check('INCLUDE_REASONING=1 时保留 thinking', value?.thinking === 'THINK_KEEP', JSON.stringify(value));
+  check('★ 但 answer 仍然脱敏', !String(value?.answer).includes('sk-INCLUDELEAK12345'), String(value?.answer));
+  check('★ 工具输入仍然脱敏', value?.tools_used?.[0]?.input?.apiKey === '[REDACTED]', JSON.stringify(value?.tools_used));
+  check('thinking_omitted=false', value?.thinking_omitted === false, String(value?.thinking_omitted));
+}
+
+console.log('\n[5] 非对象/空值安全');
 check('null 原样返回', sanitizeResultForSentinel(null) === null);
 check('字符串原样返回', sanitizeResultForSentinel('x') === 'x');
 

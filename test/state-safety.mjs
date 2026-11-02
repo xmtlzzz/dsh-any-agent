@@ -108,7 +108,7 @@ try {
   const stopped = [];
   const fake = (id, busy) => {
     const c = new Conversation({ id, cwd: root, permission: 'read-only', onApproval: 'auto-deny' }, hub2);
-    c.proc = { alive: true, stop: async () => { stopped.push(id); } };
+    c.proc = { alive: true, stop: async () => { stopped.push(id); return true; } };
     c.busy = busy;
     hub2.conversations.set(id, c);
     return c;
@@ -121,6 +121,25 @@ try {
   const r2 = await hub2.releaseAll({ force: true });
   check('force=true 才停 busy', r2.released === 1 && stopped.includes('release-busy-2'), JSON.stringify({ r2, stopped }));
   check('返回值区分 released 与 skipped_busy', Array.isArray(r1.skipped_busy) && Array.isArray(r2.skipped_busy));
+
+  console.log('\n[7] 锁登记 spawned_at 不跨子进程复用');
+  const { writeMarker, markerPath } = await import('../src/locks.mjs');
+  writeMarker('marker-spawn-test', { childPid: 11111, cwd: root });
+  const m1 = JSON.parse(readFileSync(markerPath('marker-spawn-test'), 'utf8'));
+  await new Promise((r) => setTimeout(r, 5));
+  writeMarker('marker-spawn-test', { childPid: 22222, cwd: root });
+  const m2 = JSON.parse(readFileSync(markerPath('marker-spawn-test'), 'utf8'));
+  check('★ 子进程 PID 变化时 spawned_at 重置', typeof m2.spawned_at === 'number' && m2.spawned_at > m1.spawned_at, `${m1.spawned_at} -> ${m2.spawned_at}`);
+  writeMarker('marker-spawn-test', { childPid: 22222, cwd: root });
+  const m3 = JSON.parse(readFileSync(markerPath('marker-spawn-test'), 'utf8'));
+  check('同一子进程时沿用 spawned_at', m3.spawned_at === m2.spawned_at, `${m2.spawned_at} -> ${m3.spawned_at}`);
+
+  console.log('\n[8] workspace_changed 用快照内容比较');
+  const { sameWorkspaceSnapshot } = await import('../src/hub.mjs');
+  const snapA = { changed_files: 1, entries: [' M a.js'] };
+  check('相同 entries 视为未变化', sameWorkspaceSnapshot(snapA, { changed_files: 1, entries: [' M a.js'] }));
+  check('不同 entries 视为变化', !sameWorkspaceSnapshot(snapA, { changed_files: 1, entries: [' M b.js'] }));
+  check('都为空视为未变化', sameWorkspaceSnapshot(null, null));
 } catch (e) {
   failed++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

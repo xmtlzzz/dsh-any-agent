@@ -37,6 +37,10 @@ if (code === 0) {
   code = await run('read-cursor.mjs');
 }
 if (code === 0) {
+  // 行式 UTF-8 解码：守住“chunk 边界不能把中文/emoji 截成 U+FFFD”。
+  code = await run('line-decoder.mjs');
+}
+if (code === 0) {
   // 哨兵落盘脱敏：纯内存，不花 token；守住“思考永不进哨兵、工具输入先脱敏”。
   code = await run('sentinel-redaction.mjs');
 }

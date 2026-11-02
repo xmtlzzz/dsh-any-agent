@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process';
 import { ensureProfile } from './bootstrap.mjs';
 import { DSH_PROFILE, PKG_VERSION, REQUEST_TIMEOUT_MS, resolveDshBin } from './config.mjs';
+import { LineDecoder } from './line-decoder.mjs';
 
 /** ACP 协议版本（@agentclientprotocol/sdk 的 v1）。 */
 const PROTOCOL_VERSION = 1;
@@ -25,7 +26,8 @@ export class AcpProcess {
   #child = null;
   #nextId = 1;
   #pending = new Map();
-  #buf = '';
+  #lineDecoder = new LineDecoder();
+  #errDecoder = new LineDecoder();
   #stderrTail = [];
   #stopping = false;
   #log = NOOP_LOG;
@@ -100,7 +102,7 @@ export class AcpProcess {
     this.#child.stdout.on('error', streamError);
     this.#child.stderr.on('error', streamError);
     this.#child.stderr.on('data', (d) => {
-      for (const line of d.toString('utf8').split(/\r?\n/)) {
+      for (const line of this.#errDecoder.push(d)) {
         if (!line.trim()) continue;
         this.#stderrTail.push(line.trim());
         if (this.#stderrTail.length > STDERR_TAIL_LINES) this.#stderrTail.shift();
@@ -124,11 +126,7 @@ export class AcpProcess {
   }
 
   #onData(chunk) {
-    this.#buf += chunk.toString('utf8');
-    let idx;
-    while ((idx = this.#buf.indexOf('\n')) !== -1) {
-      const line = this.#buf.slice(0, idx);
-      this.#buf = this.#buf.slice(idx + 1);
+    for (const line of this.#lineDecoder.push(chunk)) {
       if (!line.trim()) continue;
       let msg;
       try {
@@ -258,7 +256,7 @@ export class AcpProcess {
   /** 优雅收尾：close 由调用方负责，这里只关 stdin（DSH 绑定 stdin EOF → 有界退出）。 */
   async stop({ graceMs = 3000, killWaitMs = 5000 } = {}) {
     const child = this.#child;
-    if (!child) return;
+    if (!child) return true;
     this.#stopping = true;
     try {
       child.stdin.end();
@@ -273,7 +271,7 @@ export class AcpProcess {
         });
       });
     // 1) 先给它体面退出的机会（stdin EOF → DSH 有界退出）
-    if (await waitExit(graceMs)) return;
+    if (await waitExit(graceMs)) return true;
     // 2) 超时则强杀，**并且等它真的退出**。
     //    ★ 旧实现 kill() 之后立刻 resolve —— 于是调用方会在"子进程还活着、还握着写锁"
     //      的时候继续往下走：删掉登记、再 spawn 新进程去 resume，就会撞上一个**无法归因的锁**
@@ -282,6 +280,6 @@ export class AcpProcess {
     try {
       child.kill();
     } catch {}
-    await waitExit(killWaitMs);
+    return await waitExit(killWaitMs);
   }
 }

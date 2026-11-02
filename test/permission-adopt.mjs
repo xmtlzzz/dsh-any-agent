@@ -95,9 +95,21 @@ try {
   check('错误信息点明 defaultPreset', /defaultPreset/.test(String(mismatch?.message)), String(mismatch?.message));
 
   const c7 = new Conversation({ id: 'session-no-proj', cwd: join(root, 'ws'), permission: 'read-only', onApproval: 'auto-deny' }, hub);
-  const got7 = await c7.verifyPermissionRecorded({ attempts: 1, delayMs: 0 });
-  check('投影缓存缺失时不假失败（返回 null）', got7 === null, String(got7));
+  let requiredErr = null;
+  try { await c7.verifyPermissionRecorded({ attempts: 1, delayMs: 0 }); } catch (e) { requiredErr = e; }
+  check('★ read-only 读不到权限记录时 fail-closed', Boolean(requiredErr), 'no error');
+  check('错误信息说明拒绝原因', /无法.*确认.*read-only|read-only.*拒绝/.test(String(requiredErr?.message)), String(requiredErr?.message));
   check('permissionVerified = false', c7.permissionVerified === false, String(c7.permissionVerified));
+
+  const c8 = new Conversation({ id: 'session-no-proj-write', cwd: join(root, 'ws'), permission: 'workspace-write', onApproval: 'auto-allow' }, hub);
+  const got8 = await c8.verifyPermissionRecorded({ attempts: 1, delayMs: 0 });
+  check('非只读档缓存缺失时仍返回 null', got8 === null, String(got8));
+
+  console.log('\n[6] 并发接管同一磁盘会话只构造一个 Conversation');
+  seedSession('session-adopt-race', join(root, 'ws'));
+  const [a, b] = await Promise.all([hub.get('session-adopt-race'), hub.get('session-adopt-race')]);
+  check('★ 两次并发 get 返回同一个对象', a === b, `${a?.id} / ${b?.id}`);
+  check('注册表里只有一个实例', hub.conversations.get('session-adopt-race') === a, String(hub.conversations.size));
 } catch (e) {
   failed++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

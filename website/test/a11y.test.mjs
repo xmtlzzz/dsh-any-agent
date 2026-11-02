@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 
@@ -74,6 +74,15 @@ test('Tablists expose aria-selected and a tabpanel target', () => {
       assert.match(match[0], /\baria-controls="[^"]+"/);
     }
   }
+});
+
+test('Language switching remains reachable on mobile', async () => {
+  const styleName = (await readdir(resolve(dist, 'assets'))).find((n) => /^style\.[a-f0-9]{10}\.css$/.test(n));
+  assert.ok(styleName, 'hashed stylesheet exists');
+  const css = await readFile(resolve(dist, 'assets', styleName), 'utf8');
+  assert.doesNotMatch(css, /\.nav-links a:last-child\s*\{[^}]*display\s*:\s*none/);
+  assert.match(pages.zh, /href="\/en\/"/);
+  assert.match(pages.en, /href="\/"/);
 });
 
 test('Internal anchors resolve to an existing id', () => {

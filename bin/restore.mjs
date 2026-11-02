@@ -108,9 +108,13 @@ if (wantFile) {
     process.exit(1);
   }
 } else {
-  // 每个文件只取最新的一份。
+  // 每个文件只取最新的一份；但排除本工具自己写的 pre-restore 安全副本，
+  // 否则连续两次 --latest 会把上一次还原再撤回去。
   const byTarget = new Map();
-  for (const b of all) if (!byTarget.has(b.target)) byTarget.set(b.target, b);
+  for (const b of all) {
+    if (b.stamp.startsWith('pre-restore-')) continue;
+    if (!byTarget.has(b.target)) byTarget.set(b.target, b);
+  }
   chosen = [...byTarget.values()];
 }
 

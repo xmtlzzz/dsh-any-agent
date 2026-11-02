@@ -5,40 +5,42 @@ name: tests
 # This project's suite has two halves, and only one of them can run here.
 #
 #   OFFLINE (runs in CI)
+#     smoke             protocol (16 checks without DSH)
+#     line-decoder      UTF-8 chunk boundaries          4 checks
 #     guards            env-var edge cases            31 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          27 checks
 #     read-cursor       dsh_read revision cursor      10 checks
-#     sentinel-redaction sentinel disk hygiene        15 checks
-#     forget-tombstone  forget is terminal             7 checks
+#     sentinel-redaction sentinel disk hygiene        19 checks
+#     forget-tombstone  forget is terminal            10 checks
 #     bootstrap-profile zero-dependency bootstrap     24 checks
 #     workspace-safety  data-loss boundaries          23 checks
-#     permission-adopt  no silent privilege escalation 13 checks
-#     state-safety      state/sentinel/lock storage   21 checks
-#     sandbox-guard     real HOME is never a sandbox    18 checks
+#     permission-adopt  no silent privilege escalation 17 checks
+#     state-safety      state/sentinel/lock storage   26 checks
+#     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     roots             cwd from MCP roots            12 checks
 #     workspace-titles  home cwd guard, title_hint    15 checks
-#     setup             client config writer          41 checks
+#     setup             client config writer          45 checks
 #     removal-scope     --remove only touches its own   24 checks
-#     config-safety     in-place edits, format        406 checks
+#     config-safety     in-place edits, format        407 checks
 #     real-configs      real config round-trip        48 checks (5 fixtures)
 #     package-check     publishability                14 checks
 #     package job       pack -> install -> --version
-#     website job       build + 28 site/a11y tests + bilingual pages
+#     website job       build + 29 site/a11y tests + bilingual pages
 #
 #     These load modules and touch the filesystem: no DSH, no model, no
 #     credentials.
 #
 #   NEEDS DSH (does NOT run in CI)
-#     smoke, boundary, integration, async, sentinel, timeout, lock, cycle,
+#     boundary, integration, async, sentinel, timeout, lock, cycle,
 #     concurrency, capability, workspace-effect, acceptance, multi,
-#     permission, list
+#     permission, list, reasoning-check
 #
-#     Each spawns a real DSH process. smoke is only partly protocol: its
-#     sections 1-2 (handshake, tool table) pass without DSH, then it calls
-#     dsh_start and fails with 'DSH CLI entry not found'. Run locally:
-#         npm test -- --all
+#     Each spawns a real DSH process. smoke is in the offline job: it runs
+#     handshake/tools/list/unknown-tool checks and skips session sections when
+#     DSH is absent. Full model suites: `npm run test:all` locally, or the
+#     model-suites workflow with a self-hosted DSH runner.
 #
 # A green run means the protocol surface is intact, the safety guards hold,
 # and the tarball installs. It does not mean agent behaviour was exercised.
@@ -89,6 +91,14 @@ jobs:
         run: |
           if command -v dsh > /dev/null 2>&1; then echo 'dsh unexpectedly present'; exit 1; fi
           echo 'no dsh on PATH, as expected'
+
+      - name: smoke (protocol; skips DSH session sections on this runner)
+        env: { DSH_MCP_LOG: silent, DSH_BIN: '/fake/never/used.js' }
+        run: node test/smoke.mjs
+
+      - name: line-decoder (multi-byte UTF-8 chunk boundaries)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/line-decoder.mjs
 
       - name: guards (environment-variable edge cases)
         env: { DSH_MCP_LOG: silent }

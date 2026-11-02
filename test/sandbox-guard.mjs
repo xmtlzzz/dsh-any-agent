@@ -74,7 +74,7 @@ console.log('\n[5] the other suites go through this guard');
 {
   // 这些套件以前各自手写 sandbox()，也就是事故里那种写法。
   // 现在必须都从 sandbox-home.mjs 取目录、并用 removeSandbox 销毁。
-  for (const f of ['setup.mjs', 'removal-scope.mjs']) {
+  for (const f of ['setup.mjs', 'removal-scope.mjs', 'real-configs.mjs']) {
     const p = join(HERE, f);
     const src = existsSync(p) ? readFileSync(p, 'utf8') : '';
     check(f + ' imports the guard', src.includes('./sandbox-home.mjs'), p);

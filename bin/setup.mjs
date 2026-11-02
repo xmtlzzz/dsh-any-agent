@@ -38,6 +38,7 @@ import {
   planClient,
   resolveDirs,
 } from '../src/clients.mjs';
+import { PERMISSION_TIERS } from '../src/config.mjs';
 
 /** 版本号以 package.json 为准，避免 npm version 之后这里变旧。 */
 const VERSION = (() => {
@@ -114,6 +115,11 @@ const log = (s = '') => {
 const tick = (s) => log('  OK   ' + s);
 const dash = (s) => log('  ---  ' + s);
 const bang = (s) => log('  FAIL ' + s);
+
+if (!PERMISSION_TIERS.includes(PERMISSION)) {
+  log(`--permission 必须是 ${PERMISSION_TIERS.join(' | ')} 之一；收到: ${JSON.stringify(PERMISSION)}`);
+  process.exit(2);
+}
 
 // ── 主流程 ─────────────────────────────────────────────────────────
 

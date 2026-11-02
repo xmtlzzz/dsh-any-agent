@@ -6,7 +6,7 @@
  * 删除 `.state/forgotten/<id>.json` 才恢复按 id 找回。
  */
 
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -43,6 +43,27 @@ await conv.close({ forget: true });
 check('注册表里已移除', !hub.conversations.has('forget-test'));
 check('墓碑已写入', existsSync(tombstone), tombstone);
 
+console.log('\n[1b] 会话文件在但头读不出来：墓碑必须保留');
+{
+  const sessionDir = join(root, 'dsh-home', 'sessions', 'bucket', 'forget-test');
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(join(sessionDir, 'session.v4.jsonl.zstd'), Buffer.from('not-a-zstd-frame'));
+  await hub.load();
+  check('★ 会话头损坏时不删除 forget 墓碑', existsSync(tombstone), tombstone);
+  // 故意保留损坏会话文件：后面的 [1c] 再 load 时，forget-test 仍应是 error 而不是 missing。
+}
+
+console.log('\n[1c] 会话文件确实不存在：启动清理才删除墓碑');
+{
+  const gone = new Conversation({ id: 'prune-missing', cwd: root, permission: 'workspace-write', onApproval: 'auto-allow' }, hub);
+  hub.conversations.set(gone.id, gone);
+  await gone.close({ forget: true });
+  const goneTomb = join(root, 'dsh-home', '.dsh-any-agent-forgotten', 'prune-missing.json');
+  check('prune-missing 墓碑已写入', existsSync(goneTomb), goneTomb);
+  await hub.load();
+  check('会话文件不存在时墓碑被清理', !existsSync(goneTomb), goneTomb);
+}
+
 console.log('\n[2] 按 id 查询明确失败（不再复活）');
 let err = null;
 try {
@@ -59,6 +80,8 @@ check('内存列表为空', !listed.some((c) => c.conversation_id === 'forget-te
 
 console.log('\n[4] 删除墓碑 → 回到常规“未知会话”路径');
 rmSync(tombstone, { force: true });
+// 移除 [1b] 故意留下的损坏会话文件，回到“文件确实不存在”的常规路径。
+rmSync(join(root, 'dsh-home', 'sessions', 'bucket', 'forget-test'), { recursive: true, force: true });
 let err2 = null;
 try {
   await hub.get('forget-test');

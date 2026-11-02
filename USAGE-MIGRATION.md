@@ -294,13 +294,13 @@ codex mcp list      # 应看到 dsh-any-agent ... enabled
 
 ### 权限档怎么选
 
-`DSH_MCP_PERMISSION` 默认 `danger-full-access`（零摩擦）。建议按用途改：
+服务端未设置 `DSH_MCP_PERMISSION` 时默认 `danger-full-access`；`setup --yes` 默认写入 **`workspace-write`**。建议按用途改：
 
 | 档位 | 适用于 |
 |---|---|
 | `danger-full-access` | 自己的项目，追求速度 |
-| `workspace-write` | **推荐默认**，越界操作会变成待批审批 |
-| `read-only` | 分析不信任的样本（配合 `DSH_MCP_APPROVAL=auto-deny`） |
+| `workspace-write` | **setup 默认**；DSH 沙箱限制可写范围，越界请求默认 auto-allow，传 `on_approval=ask` 才挂起审批 |
+| `read-only` | 分析不信任的样本（强制 `on_approval=auto-deny`） |
 
 `DSH_MCP_APPROVAL` 三选一：`auto-allow` / `auto-deny` / `ask`。
 `ask` 时待决审批会出现在 `dsh_status` 里，用 `dsh_approval_decide` 裁决。

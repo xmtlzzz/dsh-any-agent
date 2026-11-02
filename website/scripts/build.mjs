@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, copyFile, readdir, unlink } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist'), assets = join(dist, 'assets');
 await mkdir(assets, { recursive: true });
 // Clean only known generated assets, never a computed recursive directory.
-for (const name of await readdir(assets)) if (/^(?:app|demo|release|style)\.[a-f0-9]{10}\.(?:mjs|css)$/.test(name)) await unlink(join(assets, name));
+for (const name of await readdir(assets)) if (/^(?:app|demo|release|style)\.[a-f0-9]{10}\.(?:mjs|css)$/.test(name) || /^(?:hero|favicon)\.[a-f0-9]{10}\.(?:jpg|svg)$/.test(name)) await unlink(join(assets, name));
 const hash = value => createHash('sha256').update(value).digest('hex').slice(0, 10);
 const base64 = value => createHash('sha256').update(value).digest('base64');
 const demo = await readFile(join(root, 'src/demo.mjs'), 'utf8');
@@ -19,6 +19,10 @@ const app = (await readFile(join(root, 'src/app.mjs'), 'utf8'))
   .replace("'./release.mjs'", `'./${releaseName}'`);
 const appName = `app.${hash(app)}.mjs`;
 const css = await readFile(join(root, 'src/style.css'), 'utf8'), cssName = `style.${hash(css)}.css`;
+const hero = await readFile(join(root, '../docs/brand/header.jpg'));
+const heroName = `hero.${hash(hero)}.jpg`;
+const favicon = await readFile(join(root, 'src/favicon.svg'));
+const faviconName = `favicon.${hash(favicon)}.svg`;
 const pkg = JSON.parse(await readFile(join(root, '../package.json'), 'utf8'));
 const site = JSON.parse(await readFile(join(root, 'site.config.json'), 'utf8'));
 const configuredURL = process.env.SITE_URL || site.url;
@@ -39,7 +43,9 @@ function render(template, lang) {
     YEAR: String(new Date().getFullYear()),
     STYLE: `/assets/${cssName}`,
     APP: `/assets/${appName}`,
-    OG_IMAGE: `${origin}/assets/hero.jpg`,
+    HERO: `/assets/${heroName}`,
+    ICON: `/assets/${faviconName}`,
+    OG_IMAGE: `${origin}/assets/${heroName}`,
     CANONICAL_URL: pageURL,
     CANONICAL: canonical,
     HREFLANG: hreflang,
@@ -71,8 +77,8 @@ await Promise.all([
   writeFile(join(assets, cssName), css),
   writeFile(join(dist, 'index.html'), render(zhTemplate, 'zh')),
   writeFile(join(dist, 'en/index.html'), render(enTemplate, 'en')),
-  copyFile(join(root, '../docs/brand/header.jpg'), join(assets, 'hero.jpg')),
-  copyFile(join(root, 'src/favicon.svg'), join(assets, 'favicon.svg')),
+  writeFile(join(assets, heroName), hero),
+  writeFile(join(assets, faviconName), favicon),
   writeFile(join(dist, '_headers'), headers),
   // Source policy for the origin. Cloudflare Managed robots / Content Signals
   // may be prepended in production; mirror that policy here so non-Cloudflare

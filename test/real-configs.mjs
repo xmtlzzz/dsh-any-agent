@@ -17,11 +17,12 @@
  * 只读真实 HOME —— 所有写入都发生在临时目录里。
  */
 
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir, homedir, platform } from 'node:os';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { homedir, platform } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { makeSandboxHome, removeSandbox } from './sandbox-home.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SETUP = join(HERE, '..', 'bin', 'setup.mjs');
@@ -70,9 +71,9 @@ const TARGETS = {
   vscode: ['app', 'Code/User/mcp.json'],
 };
 
-const home = mkdtempSync(join(tmpdir(), 'dsh-realcfg-'));
+const home = makeSandboxHome('dsh-realcfg-');
 const appData = join(home, 'AppData', 'Roaming');
-const cleanup = () => { try { rmSync(home, { recursive: true, force: true, maxRetries: 3 }); } catch { /* best effort */ } };
+const cleanup = () => { try { removeSandbox(home); } catch { /* best effort */ } };
 
 const run = (args) => spawnSync(NODE, [SETUP, ...args, '--home', home], {
   encoding: 'utf8',

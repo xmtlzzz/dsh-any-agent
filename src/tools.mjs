@@ -292,7 +292,7 @@ function renderSendResult(r) {
   }
   const tools = (r.tools_used ?? []).map((t) => t.name ?? t.title).filter(Boolean);
   if (tools.length) meta.push(`工具=[${[...new Set(tools)].join(', ')}]`);
-  if (r.workspace_changed) meta.push(`工作区有改动(${r.diff_stat?.changed_files ?? '?'} 个文件)`);
+  if (r.workspace_changed) meta.push(`本轮工作区状态发生变化(当前共 ${r.diff_stat?.changed_files ?? '?'} 个文件有改动)`);
   lines.push('');
   lines.push(`[${meta.join(' · ')}]`);
 
@@ -611,11 +611,14 @@ export function createHandlers(hub, opts = {}) {
       if (args.all === true) {
         const r = await hub.releaseAll({ force: args.force === true });
         return {
-          structured: { released: r.released, conversations: r.conversations, skipped_busy: r.skipped_busy },
+          structured: { released: r.released, conversations: r.conversations, skipped_busy: r.skipped_busy, failed: r.failed },
           text:
             `已释放 ${r.released} 个空闲会话进程（写锁让出，内存回收）。` +
             (r.skipped_busy.length
               ? `\n跳过 ${r.skipped_busy.length} 个正在跑回合的会话；要连它们一起停掉请传 force=true。`
+              : '') +
+            (r.failed.length
+              ? `\n⚠️ ${r.failed.length} 个会话的进程未确认退出，写锁登记已保留；可稍后用 dsh_status/dsh_takeover 处理。`
               : '') +
             `\n会话日志都在磁盘上，之后派活会自动 resume；没有一个可释放时 released=0。`,
         };

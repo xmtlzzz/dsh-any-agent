@@ -7,7 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Post-0.3.8 hardening.
+Post-0.3.9 hardening.
+
+## [0.3.9] — 2026-11-02
+
+### Security / robustness
+
+- **UTF-8 stream framing is lossless.** MCP and ACP now use a shared
+  `LineDecoder` backed by `StringDecoder`, so a multi-byte Chinese/emoji
+  character split across stream chunks is no longer silently replaced by
+  U+FFFD. Covers both input prompts and DSH output.
+- **Concurrent adoption of the same disk session is deduplicated.** `Hub.get`
+  now shares one in-flight `findSessionHeader`/adoption promise per id and
+  rechecks the registry, preventing two Conversation objects (and the
+  unreachable child/write-lock leak that followed).
+- **`read-only` runtime verification fails closed.** It waits up to ~10s
+  (covering DSH's projection-cache flush window); if no recorded permission is
+  available, the call is refused instead of relying on an approval layer that
+  a danger sandbox may never invoke.
+- **`spawned_at` is reset when the child PID changes.** PID-reuse protection no
+  longer rejects takeover of a legitimate restarted child.
+- **`forget` tombstones survive unreadable session headers.** Header read is
+  three-state (found / missing / error); only a genuinely missing session file
+  prunes a tombstone.
+- **`DSH_MCP_SENTINEL_INCLUDE_REASONING=1` no longer disables redaction.**
+  Thinking is kept, but answer/error/title/tool inputs are still sanitized.
+- **`close`/`releaseAll`/`shutdown` keep lock registrations until the child is
+  confirmed dead.** If stop times out, the registration is retained so
+  takeover can still attribute the orphan; `forget` is refused while the child
+  is alive.
+- setup preserves the target file's mode (e.g. 0600) and rejects an invalid
+  `--permission` with exit code 2.
+- `restore --latest` excludes its own `pre-restore-*` safety copies, so running
+  it twice no longer undoes the first restore.
+
+### Behavior
+
+- `workspace_changed` compares git-status entry snapshots instead of object
+  identity; output now says "workspace state changed" rather than claiming a
+  per-turn file count.
+- `dsh_takeover` prefers a live `known_child_pid` when the marker points at a
+  dead child.
+
+### Website
+
+- Mobile navigation keeps the language switch visible; the footer also carries
+  a language link.
+- `hero.jpg` and `favicon.svg` are content-hashed; all `/assets/*` can stay
+  immutable.
+- Light-theme muted/faint/accent colors were darkened to meet WCAG AA on the
+  surfaces they are used on.
+
+### Docs / tests
+
+- README/Chinese README/USAGE-MIGRATION: workspace-write approval semantics,
+  setup's `workspace-write` default, Zed `context_servers`, English npm publish
+  step, current route/limit links.
+- New `line-decoder` suite (4), expanded sentinel redaction (19), tombstone
+  pruning (10), permission adoption (17), state/lock safety (26), sandbox guard
+  (21), setup (45), config-safety (407). Offline total 843 / 879 with nine
+  client fixtures; website 29.
 
 ## [0.3.8] — 2026-11-02
 
@@ -696,7 +755,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.8...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.9...HEAD
+[0.3.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.5...v0.3.6

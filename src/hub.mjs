@@ -51,7 +51,7 @@ import {
 } from './config.mjs';
 import { AcpProcess } from './acp.mjs';
 import { readConversationMeta } from './titles.mjs';
-import { registerWorkspace, findSessionHeader } from './workspace.mjs';
+import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
 import {
   LOCKS_DIR,
   classifyHolder,
@@ -134,7 +134,7 @@ function isForgotten(id) {
  * 留着只会让测试/临时会话在 `$DSH_HOME/.dsh-any-agent-forgotten` 里堆积。
  * 会话文件还在的墓碑必须保留 —— 那正是 forget 的效力所在。
  */
-async function pruneStaleTombstones() {
+async function pruneStaleTombstones(log = NOOP_LOG) {
   let removed = 0;
   try {
     if (!existsSync(FORGOTTEN_DIR)) return 0;
@@ -142,7 +142,13 @@ async function pruneStaleTombstones() {
       if (!f.endsWith('.json')) continue;
       const id = f.slice(0, -5);
       // 异步读会话头：启动路径不能被大日志的同步解压卡住。
-      if (await findSessionHeader(id)) continue;
+      // ★ 只有确认会话文件不存在时才删墓碑；读超时/损坏时保留，
+      //   否则一次慢盘/挂载异常就会让 forget 失效。
+      const found = await findSessionHeaderStatus(id);
+      if (found.status === 'found' || found.status === 'error') {
+        if (found.status === 'error') log.info(`[hub] 墓碑 ${id} 暂不清理：${found.reason}`);
+        continue;
+      }
       try {
         rmSync(join(FORGOTTEN_DIR, f), { force: true });
         removed++;
@@ -247,8 +253,9 @@ async function applySessionConfig(proc, sessionId, cfg) {
  */
 export function sanitizeResultForSentinel(result) {
   if (!result || typeof result !== 'object') return result ?? null;
-  if (SENTINEL_INCLUDE_REASONING) return result;
   const { thinking, ...rest } = result;
+  // ★ 即使 DSH_MCP_SENTINEL_INCLUDE_REASONING=1，也只额外保留 thinking；
+  //   answer/error/title/tools_used 仍然必须脱敏（以前这个开关会跳过整段清洗）。
   // 正文/错误/标题同样可能夹带密钥；哨兵是落盘副本，统一套脱敏。
   for (const key of ['answer', 'error', 'title']) {
     if (typeof rest[key] === 'string') rest[key] = sanitizeApprovalContext(rest[key], key);
@@ -264,7 +271,9 @@ export function sanitizeResultForSentinel(result) {
     });
   }
   // 始终给出布尔值：调用方才能区分“思考被剥离”与“本来没有思考”。
-  return { ...rest, thinking_omitted: Boolean(thinking) };
+  const out = { ...rest, thinking_omitted: Boolean(thinking) && !SENTINEL_INCLUDE_REASONING };
+  if (SENTINEL_INCLUDE_REASONING && thinking !== undefined) out.thinking = thinking;
+  return out;
 }
 
 export class Conversation {
@@ -462,9 +471,10 @@ export class Conversation {
       //   当成持锁者（表现为"上一代子进程还活着并握着锁"），于是每次失败都误报锁冲突 ——
       //   更糟的是旧代码没有 lastChildPid 兜底，会把这种自伤报成"多半是你自己的 GUI"，
       //   而 dsh_takeover 对 none 又拒绝接管，会话就卡住了（test/cycle.mjs 实测抓到）。
-      await proc.stop().catch(() => {});
-      // 只删**自己的**登记（removeMarker 会校验 token）；别人的登记必须留着当线索
-      removeMarker(this.id);
+      const stopped = await proc.stop().catch(() => false);
+      // 只删**自己的**登记（removeMarker 会校验 token）；进程没确认退出时保留登记，
+      // 让 classifyHolder/takeover 仍能归因。
+      if (stopped) removeMarker(this.id);
       // 写锁冲突是最常见也最需要"说人话"的失败：DSH 的 SessionAlreadyOwnedError 会被
       // ACP 包成 -32603 "Internal error"，只说这句调用方根本不知道该怎么办。
       if (isLeaseError(e.message)) {
@@ -500,11 +510,14 @@ export class Conversation {
    *
    * 为什么不能只信入参：DSH profile 里的 `permission.defaultPreset` 会在
    * session/new 时覆盖 `DSH_PERMISSION_MODE`（test/permission.mjs 实测抓到过
-   * read-only 被静默提升）。投影缓存可能稍后才刷盘，所以短轮询；读不到时
-   * 不阻断（read-only 仍有审批层的硬拒绝兜底），但读到不一致就立刻失败。
+   * read-only 被静默提升）。投影缓存可能稍后才刷盘；read-only 必须 fail-closed：
+   * 等待至少一个刷盘周期，仍读不到就拒绝继续，不能依赖“审批层兜底”
+   * （danger sandbox 下根本不会产生审批请求）。
    */
-  async verifyPermissionRecorded({ attempts = 6, delayMs = 250 } = {}) {
-    for (let i = 0; i < attempts; i++) {
+  async verifyPermissionRecorded({ attempts, delayMs = 250 } = {}) {
+    // read-only 需要覆盖 DSH 约 5 秒的投影缓存刷新周期；其它档位保持较短等待。
+    const tries = Number.isFinite(attempts) ? attempts : this.permission === 'read-only' ? 40 : 6;
+    for (let i = 0; i < tries; i++) {
       const meta = readConversationMeta(this.id);
       const recorded = meta?.permissions?.preset;
       if (recorded) {
@@ -519,11 +532,18 @@ export class Conversation {
         this.permissionVerified = true;
         return recorded;
       }
-      if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, delayMs));
     }
     this.permissionVerified = false;
+    if (this.permission === 'read-only') {
+      throw new Error(
+        `无法在 ${(tries * delayMs) / 1000}s 内确认会话实际为 read-only（投影缓存无权限记录）。\n` +
+          '  为避免 profile 的 defaultPreset 把只读会话静默提升为完全访问，本次调用已拒绝。\n' +
+          '  请确认 DSH 会话存储可读，或稍后重试；非只读档位不受此限制。',
+      );
+    }
     this.#hub.log.info(
-      `[conv ${this.id}] 投影缓存里暂时没有权限记录，跳过运行期核对（read-only 仍由审批层强制拒绝）`,
+      `[conv ${this.id}] 投影缓存里暂时没有权限记录，跳过运行期核对（非只读档）`,
     );
     return null;
   }
@@ -565,7 +585,8 @@ export class Conversation {
     report.holder_kind = holder.kind;
     report.holder = holder.marker;
     // 登记可能已随回收被删，但"我们自己的残留子进程"仍可归因（见 locks.classifyHolder）
-    const killTarget = holder.marker?.child_pid ?? holder.known_child_pid ?? null;
+    const markerChild = holder.marker?.child_pid ?? null;
+    const killTarget = isPidAlive(markerChild) ? markerChild : (holder.known_child_pid ?? markerChild);
 
     if (holder.kind === 'none' || !holder.childAlive) {
       report.message =
@@ -857,7 +878,7 @@ export class Conversation {
           },
           tools_used: [...c.tools.values()],
           usage: c.usage,
-          workspace_changed: before !== after,
+          workspace_changed: !sameWorkspaceSnapshot(before, after),
           diff_stat: after,
           elapsed_ms: now() - t0,
         };
@@ -1092,11 +1113,12 @@ export class Conversation {
   async close({ forget = false } = {}) {
     const proc = this.proc;
     this.proc = null;
+    let stopped = true;
     if (proc?.alive) {
       try {
         await proc.request('session/close', { sessionId: this.id }, 10_000);
       } catch {}
-      await proc.stop();
+      stopped = await proc.stop().catch(() => false);
     }
     // 回合已经结束/进程正在关闭，任何仍挂着的审批都不再可裁决。
     for (const [, p] of this.pendingApprovals) {
@@ -1105,16 +1127,30 @@ export class Conversation {
       } catch {}
     }
     this.pendingApprovals.clear();
-    // 进程没了 → 写锁也释放了，登记必须跟着删（否则会把"孤儿持有者"误报给抢占逻辑）
-    removeMarker(this.id);
+    // 只有确认进程退出后才删登记；否则把登记留着，让 takeover/classifyHolder
+    // 还能把这个仍握着写锁的孤儿归因出来。
+    if (stopped) removeMarker(this.id);
+    else {
+      this.#hub.log.info(`[conv ${this.id}] 进程未能确认退出，保留写锁登记以便后续归因`);
+      // 进程还活着时不能 forget：墓碑会让按 id 查询直接失败，而活着的进程
+      // 仍握着写锁，之后连 takeover 都无法归因/接管。
+      if (forget) return { closed: false, forgotten: false, error: '进程未能确认退出，拒绝 forget' };
+    }
     if (forget) {
       // 先写墓碑再从注册表移除：之后按 id 查询会明确报"已 forget"，
       // 而不是从 DSH 会话存储把它重建回来（否则 forget 形同虚设）。
       writeTombstone(this.id);
       this.#hub.remove(this.id);
     } else this.#hub.save();
-    return { closed: true, forgotten: forget };
+    return { closed: stopped, forgotten: forget, ...(stopped ? {} : { error: '进程未能确认退出，登记已保留' }) };
   }
+}
+
+/** 两次 git status 快照是否表示同一组工作区变更。 */
+export function sameWorkspaceSnapshot(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return JSON.stringify(a.entries ?? []) === JSON.stringify(b.entries ?? []);
 }
 
 /** 收集当前工作区的 git 变更摘要（非 git 目录返回 null）。 */
@@ -1207,6 +1243,8 @@ export class Hub {
   }
 
   #reaper;
+  /** 同一 id 的磁盘接管 in-flight Promise，防止并发请求各自构造一个 Conversation。 */
+  #adopting = new Map();
   /** `dsh_list` 磁盘探测的短缓存（探测要 spawn 一个 DSH 进程，实测约 1 秒）。 */
   #probeCache = null;
 
@@ -1235,7 +1273,7 @@ export class Hub {
       }
     }
 
-    const stale = await pruneStaleTombstones();
+    const stale = await pruneStaleTombstones(this.log);
     if (stale) this.log.info(`[hub] 清理 ${stale} 个失效的 forget 墓碑`);
     if (!existsSync(STATE_FILE)) return;
     try {
@@ -1391,9 +1429,25 @@ export class Hub {
       c = this.conversations.get(id);
     }
     if (!c) {
+      // 同一个磁盘态会话的并发查询共用一次 adopt，避免各自构造 Conversation。
+      const inflight = this.#adopting.get(id);
+      if (inflight) {
+        await inflight;
+        c = this.conversations.get(id);
+      }
+    }
+    if (!c) {
       // 最后一道：注册表里没有，但会话可能就在磁盘上 —— 别的实例建的、注册表被并发写覆盖丢的、
       // 或者根本是别的 profile / GUI 建的。**会话存储才是权威，注册表只是缓存。**
-      const header = await findSessionHeader(id);
+      let release;
+      const gate = new Promise((resolve) => { release = resolve; });
+      this.#adopting.set(id, gate);
+      try {
+      const found = await findSessionHeaderStatus(id);
+      if (found.status === 'error') {
+        throw new Error(`无法读取会话 ${id} 的会话头：${found.reason}`);
+      }
+      const header = found.header;
       if (header?.cwd) {
         // ★ 权限档必须取自**会话自己的记录**，不能一律套默认值：
         //   一个当初用 read-only 建的会话，若注册表丢了、被我们以默认档接管，
@@ -1441,6 +1495,10 @@ export class Hub {
         this.conversations.set(id, c);
         this.save();
         this.log.info(`[hub] 从会话存储吸收了 ${id}（注册表里没有，但磁盘上有；权限档沿用 ${permission}）`);
+      }
+      } finally {
+        this.#adopting.delete(id);
+        release();
       }
     }
     if (!c) {
@@ -1593,8 +1651,8 @@ export class Hub {
       // 失败路径也要清掉写锁登记：session/new 可能已经成功、登记已写入，
       // 但会话最终没有注册（例如无效 provider/model 被 fail-fast）。留下 marker
       // 会被 dsh_list/dsh_takeover 误报成“孤儿持有者”，也会在 locks 目录里积垃圾。
-      if (createdSessionId) removeMarker(createdSessionId);
-      await proc.stop().catch(() => {});
+      const stopped = await proc.stop().catch(() => false);
+      if (createdSessionId && stopped) removeMarker(createdSessionId);
       throw e;
     }
   }
@@ -1732,8 +1790,8 @@ export class Hub {
           // ★ 顺序要紧：**先确认子进程真的退出（写锁真的释放），再删登记**。
           //   反过来的话，一旦它没死透，锁的持有者就变成"无登记的未知进程" ——
           //   既报不清是谁，连 dsh_takeover 都会拒绝（判成 none）。
-          await proc.stop().catch(() => {});
-          removeMarker(c.id);
+          const stopped = await proc.stop().catch(() => false);
+          if (stopped) removeMarker(c.id);
         }
       } catch (e) {
         this.log.info(`[hub] 回收周期异常（已忽略，下个周期继续）: ${e.message}`);
@@ -1751,6 +1809,7 @@ export class Hub {
   async releaseAll({ force = false } = {}) {
     const released = [];
     const skippedBusy = [];
+    const failed = [];
     for (const c of this.conversations.values()) {
       if (!c.proc?.alive) continue;
       // ★ 默认不打断正在跑的回合：all=true 是"腾内存"，不是"取消任务"。
@@ -1761,12 +1820,18 @@ export class Hub {
       }
       const proc = c.proc;
       c.proc = null;
-      await proc.stop().catch(() => {});
-      removeMarker(c.id);
-      released.push(c.id);
+      const stopped = await proc.stop().catch(() => false);
+      if (stopped) {
+        removeMarker(c.id);
+        released.push(c.id);
+      } else {
+        // 进程没确认退出：保留登记，让 takeover 还能归因这个孤儿。
+        failed.push(c.id);
+        this.log.info(`[hub] 释放 ${c.id} 时进程未确认退出，保留写锁登记`);
+      }
     }
     this.save();
-    return { released: released.length, conversations: released, skipped_busy: skippedBusy };
+    return { released: released.length, conversations: released, skipped_busy: skippedBusy, failed };
   }
 
   async shutdown() {
@@ -1775,9 +1840,10 @@ export class Hub {
     for (const c of this.conversations.values()) {
       const proc = c.proc;
       c.proc = null;
-      await proc?.stop().catch(() => {});
-      // 子进程停了，锁就释放了；登记也要删，否则下个实例会把我们看成"孤儿持有者"
-      removeMarker(c.id);
+      const stopped = await proc?.stop().catch(() => false);
+      // 只有确认子进程退出、锁真的释放后才删登记；否则留给下个实例归因。
+      if (stopped) removeMarker(c.id);
+      else this.log.info(`[hub] 关闭 ${c.id} 时进程未确认退出，保留写锁登记`);
     }
     this.save();
   }

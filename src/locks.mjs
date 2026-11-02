@@ -106,7 +106,12 @@ export function writeMarker(conversationId, { childPid, cwd }) {
     mcp_token: MCP_TOKEN,
     child_pid: childPid ?? null,
     cwd: cwd ?? null,
-    spawned_at: prev?.spawned_at ?? now,
+    // 只有同一个子进程才沿用旧启动时间；子进程换了（PID 变化）必须重置，
+    // 否则 PID 复用保护会把新进程误判成“复用旧 PID”而拒绝 takeover。
+    spawned_at:
+      prev && prev.child_pid === childPid && Number.isFinite(prev.spawned_at)
+        ? prev.spawned_at
+        : now,
     heartbeat_at: now,
   });
   return true;

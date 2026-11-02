@@ -2,9 +2,9 @@
 
 > 目标：做一个 MCP Server，让 **Codex / Claude Code** 能调用 **DeepSeek Harness (DSH)** 当"外包工程师"——写代码、搭脚手架、跑任务，并且 DSH 自己还能挂它自己的 MCP。
 >
-> 本文只谈**功能与接口**，不写实现代码；其中 M2/M3 工具（`dsh_rename` 等）是分期计划，不是当前 0.3.8 的缺失功能。技术判断最初基于 DSH 0.1.7-rc.2，当前验证基线是 **DSH 0.2.1-rc.5**（见 §2 证据）。
+> 本文只谈**功能与接口**，不写实现代码；其中 M2/M3 工具（`dsh_rename` 等）是分期计划，不是当前 0.3.9 的缺失功能。技术判断最初基于 DSH 0.1.7-rc.2，当前验证基线是 **DSH 0.2.1-rc.5**（见 §2 证据）。
 
-## 当前实现状态（0.3.8）
+## 当前实现状态（0.3.9）
 
 当前对外暴露 11 个工具，均已实现并有回归：
 
@@ -439,7 +439,7 @@ Profile = `~/.dsh/profiles/<name>/`，由 `package.json` 的 `dsh.profile.bundle
 `dsh_start` / `dsh_send` / `dsh_list` / `dsh_get` / `dsh_release` + 专用 profile 脚手架（provider/model/权限/标题 LLM）+ 思考默认隐藏 + Windows 拉起方式 + 进程池与空闲回收。
 
 **M2（把它变成好用的"外包工程师"）**
-`dsh_diff`、计划模式、`dsh_read` 游标增量、progress/log 通知、审批**报告**（G3，注意不可应答）、脱敏、`dsh_search`（需先开 `session-query-sqlite` 的 `openAt`，默认 `never` 时全文搜索直接报 `SESSION_QUERY_SEARCH_DISABLED`）、resources/prompts。
+`dsh_diff`、计划模式、`dsh_read` 游标增量、progress/log 通知、审批**可应答**（G3 已由 `dsh_approval_decide` 实现）、脱敏、`dsh_search`（需先开 `session-query-sqlite` 的 `openAt`，默认 `never` 时全文搜索直接报 `SESSION_QUERY_SEARCH_DISABLED`）、resources/prompts。
 
 **M3（能力面与体验）**
 MCP 服务器增删查（F2）、插件与技能管理、`dsh_doctor`、分叉/回滚、可选 TUI 伴生进程。
@@ -451,9 +451,9 @@ MCP 服务器增删查（F2）、插件与技能管理、`dsh_doctor`、分叉/�
 | # | 问题 | 我的建议 |
 |---|---|---|
 | Q1 | 会话空间：与用户 GUI 共用 `~/.dsh`（历史统一、但会抢写锁）还是独立 `DSH_HOME`（隔离、但要另配凭据）？ | 默认共用，提供 `--dsh-home` 覆盖；MCP 起的会话打标记便于过滤 |
-| Q2 | 空闲回收 TTL 默认值？（太长会占锁让用户打不开，太短会反复重启丢上下文） | 5 分钟，且 `dsh_release` 可显式交还 |
+| Q2 | 空闲回收 TTL 默认值？（太长会占锁让用户打不开，太短会反复重启丢上下文） | ✅ **已定：默认 `0` = 永不回收**（`dsh_release` 可显式交还；显式设非零值才回收） |
 | Q3 | **中断怎么做？** SDK 协议没有 cancel，且杀进程 = 永久失去该会话（约束 6） | 强烈倾向 ②：写个极小 DSH 插件补 `session/interrupt`。① 已排除——headless 无法接管 web 建的会话 |
-| Q4 | 默认权限档给哪一档？ | ✅ **已定：默认 `danger-full-access`，其余可选。** 成因几经变化：SDK 协议没有审批通道时中间档等于废档（越界操作静默失败）；**改用 ACP 后 `session/request_permission` 让中间档复活**，所以现在是"默认最省事 + 需要时可收窄"，而不是被迫只留一档。`read-only` 留给分析不信任样本的场景。注意 `approval.policy: never` 的语义是"每次询问都确定性拒绝"（不是自动放行），它只在 `danger-full-access` 下无副作用——因为沙箱根本不产生询问 |
+| Q4 | 默认权限档给哪一档？ | ✅ **已定：服务端裸默认 `danger-full-access`；`setup` 写入 `workspace-write`；其余可选。** 成因几经变化：SDK 协议没有审批通道时中间档等于废档（越界操作静默失败）；**改用 ACP 后 `session/request_permission` 让中间档复活**，所以现在是"默认最省事 + 需要时可收窄"，而不是被迫只留一档。`read-only` 留给分析不信任样本的场景。注意 `approval.policy: never` 的语义是"每次询问都确定性拒绝"（不是自动放行），它只在 `danger-full-access` 下无副作用——因为沙箱根本不产生询问 |
 | Q5 | 会话 id 是否直接采用 DSH 原生 `session-<uuid>`？ | ✅ 已定：采用。实测语义 = 全新 id 落成磁盘会话 id（磁盘/标题/GUI 全对齐）；已存在的 id 直接报错。故**每个会话只在首次 prompt 生成一次 id，之后仅在本进程内复用** |
 | Q6 | 首版面向 Codex 还是 Claude Code？（两者 MCP 能力不同：progress/log 通知、resources、prompts 支持度有差异） | 先保 Codex 的保守子集（tools 即可），Claude 的增强能力渐进加 |
 | Q7 | 要不要把 `session-title-llm` 打开（每个会话多一次小 LLM 调用换更好的标题）？ | 打开，标题质量对"列表里找对话"影响很大 |
@@ -468,7 +468,7 @@ MCP 服务器增删查（F2）、插件与技能管理、`dsh_doctor`、分叉/�
 | 位置 | 内容 |
 |---|---|
 | [`src/`](src) | 实现：ACP 客户端、会话池与注册表、工具层、MCP 服务端、工作区登记 |
-| [`test/`](test) | 可复跑的测试套件（冒烟 / 边界 / 集成 / 异步 / 并发 / 能力 / 工作区有效性 / 验收），合计 229 项检查 |
+| [`test/`](test) | 可复跑的测试套件；当前基线见 README（0.3.9：离线 843 项、官网 29 项，模型套件另计）。本文件是历史设计稿，不再重复抄写计数 |
 | [`README.md`](README.md) / [`README.zh.md`](README.zh.md) | 使用文档（英文 / 中文） |
 | [`profile-example/cordis.patch.yml`](profile-example/cordis.patch.yml) | DSH profile 补丁层模板（含两个必踩的坑的说明） |
 

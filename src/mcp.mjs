@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHandlers, TOOL_DEFS } from './tools.mjs';
 import { DEFAULT_PERMISSION } from './config.mjs';
+import { LineDecoder } from './line-decoder.mjs';
 
 const SERVER_NAME = 'dsh-any-agent';
 /**
@@ -117,7 +118,7 @@ function fileURLToPathSafe(uri) {
 
 export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHandlers(hub), log }) {
   const write = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
-  let buffer = '';
+  const lineDecoder = new LineDecoder();
   let initialized = false;
   let clientCapabilities = {};
   let rootsSeq = 0;
@@ -251,11 +252,7 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
   }
 
   function onData(chunk) {
-    buffer += chunk.toString('utf8');
-    let idx;
-    while ((idx = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 1);
+    for (const line of lineDecoder.push(chunk)) {
       if (!line.trim()) continue;
       let msg;
       try {

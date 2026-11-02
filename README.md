@@ -15,7 +15,7 @@
 
 </div>
 
-🧪 815 checks green on 0.3.8 on this machine (851 when all nine client fixtures exist); 519 of them are in the client-registration suites (555 with all fixtures) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 843 checks green on 0.3.9 on this machine (879 when all nine client fixtures exist); 524 of them are in the client-registration suites (560 with all fixtures) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Hand it a goal, let it write code and run scripts, steer it mid-flight, and collect the result when you are ready.
 
@@ -214,7 +214,7 @@ What changed since 0.1.x: JSON configs used to be **re-serialised whole** (value
 
 Codex's `config.toml` gets the same treatment line-wise: your other `[tables]` and their comments, the top-level keys (`model`, `approval_policy`, `sandbox_mode`, …) and CRLF endings come back exactly as they were — `--remove` deletes only the two `[mcp_servers.dsh-any-agent]` sections and leaves the rest intact.
 
-The coverage for each of those claims is in [`test/`](test/) (`test/config-safety.mjs` asserts them one by one, 406 checks).
+The coverage for each of those claims is in [`test/`](test/) (`test/config-safety.mjs` asserts them one by one, 407 checks).
 
 **Checked against a real home, read-only.** Running `setup --json` (plan mode) against an actual developer profile reported all nine clients and left every existing config untouched — identical size, mtime and SHA-256, no `.bak-dsh-*` created, no new file created:
 
@@ -359,7 +359,7 @@ tool_timeout_sec = 120.0
 
 For a local checkout, use `"command": "node"` and `"args": ["/absolute/path/to/server/bin/dsh-any-agent.mjs"]`.
 
-> Cursor, Windsurf, Zed, Cline, Continue and most other clients use this same `mcpServers` shape — if it can launch a stdio MCP server, it works.
+> Cursor, Windsurf, Cline, Continue and most other clients use this same `mcpServers` shape — if it can launch a stdio MCP server, it works. Zed is the exception: it uses `context_servers` (shown above).
 
 </details>
 
@@ -432,7 +432,7 @@ Design notes (especially under **concurrent multi-session** use):
 - **Latch semantics**: the file is written once and kept. Even if the run finishes *before* you arm the waiter, `[ -f ]` is immediately true — you never miss it.
 - **Atomic write**: `tmp` + `rename`; if the file exists its contents are complete. Each run uses its own tmp, so concurrent writes never clobber.
 - **No server push**: the service only answers requests over MCP (it sends no notifications). "Completion notification" is entirely the sentinel file plus your background waiter.
-- **★ No reasoning in the sentinel**: the payload carries the answer, thinking *statistics*, usage and (credential-redacted) tool inputs, but never reasoning text — `result.thinking` is stripped and replaced by a boolean `thinking_omitted` (`true` when reasoning was removed, `false` when there was none), because this server's rule is that reasoning never reaches its own disk artifacts. `dsh_get(run_id)` still returns it from memory while the record lives. `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` breaks that guarantee deliberately. Note that **DSH's own session log does contain reasoning** — see [Logging and privacy](#️-logging-and-privacy).
+- **★ No reasoning in the sentinel**: the payload carries the answer, thinking *statistics*, usage and (credential-redacted) tool inputs, but never reasoning text — `result.thinking` is stripped and replaced by a boolean `thinking_omitted` (`true` when reasoning was removed, `false` when there was none), because this server's rule is that reasoning never reaches its own disk artifacts. `dsh_get(run_id)` still returns it from memory while the record lives. `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` breaks that guarantee deliberately. Note that **DSH's own session log does contain reasoning** — see [Logging and privacy](#-logging-and-privacy).
 
 > Cleanup: sentinels contain full answers, so the service **prunes sentinels older than 7 days at startup** (tune with `DSH_MCP_SENTINEL_TTL_MS`; `0` disables). Your waiter should still `rm` the file after consuming it.
 
@@ -461,13 +461,13 @@ DSH separates reasoning from answer text at the model layer, and ACP exposes the
 
 | Tier | Approval default | Use for |
 |---|---|---|
-| `danger-full-access` (default) | `auto-allow` | Zero friction |
-| `workspace-write` | `auto-allow` | Out-of-workspace operations surface as pending approvals |
+| `danger-full-access` (raw server default) | `auto-allow` | Zero friction; `setup` writes `workspace-write` by default |
+| `workspace-write` | `auto-allow` | Writes are limited to the workspace by DSH's sandbox; out-of-workspace requests are auto-allowed unless you pass `on_approval=ask` |
 | `read-only` | `auto-deny` | Analyzing untrusted samples (malware, unknown dumps) |
 
 `on_approval` can be `auto-allow`, `auto-deny`, or `ask` (which exposes a pending approval for `dsh_approval_decide` to adjudicate).
 
-**`read-only` is enforced, not merely a default**: it always runs with `auto-deny`; passing `auto-allow` or `ask` for a read-only conversation is rejected at `dsh_start`, and the approval layer refuses any permission request from a read-only conversation. Without that, DSH can ask for a `sandbox_permissions` escalation and a permissive approval policy would let the write through (found by the adversarial audit).
+**`read-only` is enforced, not merely a default**: it always runs with `auto-deny`; passing `auto-allow` or `ask` for a read-only conversation is rejected at `dsh_start`, and the approval layer refuses any permission request from a read-only conversation. After create/resume the server reads back the session's recorded tier; for read-only it **fails closed** if the projection cache has no permission record within the DSH flush window, rather than relying on the approval layer alone. Without that, a profile `defaultPreset` plus a permissive approval policy could let a write through (found by the adversarial audit).
 
 ## 🪟 Workspace visibility in the DSH GUI
 
@@ -530,12 +530,12 @@ Silent by default — **not one byte is written**.
 | `DSH_MCP_FORGOTTEN_DIR` | `$DSH_HOME/.dsh-any-agent-forgotten` | Tombstones written by `dsh_release(forget=true)` |
 | `DSH_MCP_RUNS_DIR` | `<state file dir>/runs` | Root for async completion sentinels (`<this>/<conversation_id>/<run_id>.json`) |
 | `DSH_MCP_LOCKS_DIR` | `<state file dir>/locks` | Holder registrations for the write lock. ⚠️ **All instances must agree on this value**, or they cannot see each other's registrations and will misread each other as an unidentifiable holder (a GUI) and refuse to preempt |
-| `DSH_MCP_LOCK_STALE_MS` | `90000` | How long without a heartbeat before a holder counts as lost (and becomes auto-preemptible by `dsh_takeover`) |
+| `DSH_MCP_LOCK_STALE_MS` | `90000` (3× `REAP_INTERVAL_MS`, floor 30 s) | How long without a heartbeat before a holder counts as lost (and becomes auto-preemptible by `dsh_takeover`); changing the reap interval changes the derived default |
 | `DSH_MCP_IDLE_TTL_MS` | `0` (never reap) | How long a conversation may sit idle before its DSH process is reaped. ★★ **`0` means never reap (the default)**: the server keeps holding the write lock, so **the GUI cannot take it** — opening the conversation there is read-only and still works. Cost: one resident DSH process per conversation (**measured 300 MB and 476 MB in two cold starts**). Set a millisecond value (e.g. `300000`) to save memory and accept that the lock can be taken |
 | `DSH_MCP_MAX_LIVE` | `8` (≈2.5–4 GB worst case; see note 8) | ★ **How many conversation processes to keep alive at once** (`0` = unlimited). Going over the cap reaps the **least recently used** one (a running turn is never reaped) — "**bounded memory, locks kept where it matters**". Use `4` when memory is tight, `0` on a big machine. To free idle conversations at once: `dsh_release(all=true)` (busy turns are skipped unless `force=true`) |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | Cache lifetime for `dsh_list`'s on-disk probe (the probe spawns a DSH process and takes ~1 s) |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels; `0` disables pruning |
-| `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**) |
+| `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**); answer/error/title/tool inputs are still credential-redacted |
 | `DSH_MCP_PERMISSION` | `danger-full-access` | Default tier for `dsh_start` |
 | `DSH_MCP_REASONING_EFFORT` | `max` | Default reasoning effort |
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0` (no timeout) | Wait bound for **`wait=true` only**; on expiry the turn merely moves to the background |
@@ -570,18 +570,19 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `sentinel` | 36 | completion sentinel: atomicity, latch semantics, per-conversation namespacing under concurrency, cancelled runs still land it, and **reasoning never reaching the file** |
 | `prune` | 11 | **sentinel retention**: prunes over-age and crash-leftover files, keeps fresh ones, removes empty shells, `TTL=0` disables pruning, and never touches the conversation registry beside it (no tokens, runs every time) |
 | `guards` | 31 | **environment-variable guards**: odd numbers always land on the safe side — `IDLE_TTL_MS` values like `-1` or garbage mean "never reap" (never give the write lock away), a too-small reap interval falls back to the default (no busy loop), and the **lost-holder threshold is floored at 30 s** (so another instance cannot "legitimately" preempt and kill our turn) (no tokens, runs every time) |
-| `sandbox-guard` | 18 | **the test sandbox itself**: a "throwaway HOME" that resolves to the real user profile, to the filesystem root, or to anywhere outside the OS temp dir is refused with an error instead of being written to and deleted. Every other suite builds its HOME through `test/sandbox-home.mjs` and can only destroy what it created there (no tokens, runs every time) |
+| `sandbox-guard` | 21 | **the test sandbox itself**: a "throwaway HOME" that resolves to the real user profile, to the filesystem root, or to anywhere outside the OS temp dir is refused with an error instead of being written to and deleted. Every other suite builds its HOME through `test/sandbox-home.mjs` and can only destroy what it created there (no tokens, runs every time) |
 | `approval-details` | 27 | **approval review context**: the pending-approval snapshot carries the command, reason, cwd and original approval ID — not just a bare ID — so a caller can actually adjudicate; missing `rawInput` is correlated from the earlier `tool_call` update by ID; credential-shaped fields and common inline literals are redacted; closing a conversation cancels pending approvals. Verified end-to-end over real stdio MCP |
+| `line-decoder` | 4 | **UTF-8 line framing**: multi-byte characters split across MCP/ACP stream chunks are preserved (no U+FFFD), including CRLF and EOF-without-newline (no tokens) |
 | `read-cursor` | 10 | **`dsh_read` cursor semantics**: text appended to an already-read entry is delivered again (revision cursor, match by `seq`), and `limit` is clamped to 1..500 so `0`/negative cannot spin or drop the tail (no tokens) |
-| `sentinel-redaction` | 15 | **sentinel disk hygiene**: `result.thinking` is stripped, `thinking_omitted` is always a boolean, and `answer`/`error`/`title`/`tools_used[].input` all pass the same credential redaction as approvals (no tokens) |
-| `forget-tombstone` | 7 | **`forget` is terminal**: `release(forget=true)` writes a tombstone, by-id lookups fail with a recovery path, lists exclude it, and deleting the tombstone restores the normal unknown-session path (no tokens) |
+| `sentinel-redaction` | 19 | **sentinel disk hygiene**: `result.thinking` is stripped, `thinking_omitted` is always a boolean, and `answer`/`error`/`title`/`tools_used[].input` all pass the same credential redaction as approvals (no tokens) |
+| `forget-tombstone` | 10 | **`forget` is terminal**: `release(forget=true)` writes a tombstone, by-id lookups fail with a recovery path, lists exclude it, and deleting the tombstone restores the normal unknown-session path (no tokens) |
 | `bootstrap-profile` | 24 | **first-start profile works in the published zero-dependency form**: copies routing with the built-in YAML subset parser, strips `apiKey`/`headers`/literal secrets, never writes `defaultPreset`, is idempotent, and leaves a user-maintained profile byte-identical (no tokens) |
 | `workspace-safety` | 23 | **data-loss boundaries**: `isTempPath` is segment-aware (`tmpdir()+'Suffix'` and `/tmpfoo` are *not* temp), a corrupt `workspace.json` is never overwritten, an unreadable session root never wipes `sessionIds`, and automatic cleanup deletes only test-created sessions (no tokens) |
-| `permission-adopt` | 13 | **no silent privilege escalation**: adopting an external session with no permission record fails closed to `read-only`; a recorded `read-only` cannot be promoted by the sidecar; the runtime read-back rejects a recorded/requested mismatch (no tokens) |
-| `state-safety` | 21 | **state/sentinel/lock storage**: defaults live under `$DSH_HOME/.dsh-any-agent`, an unwritable directory fails startup loudly, sentinel write failures return `null` + `sentinel_error`, and bad numeric env values land on the safe side (no tokens) |
-| `setup` | 41 | **the registration CLI**: preview writes nothing, `--remove` takes out only its own entry, an absent client is skipped rather than failed, the Codex TOML block round-trips, and the command recorded in a config is actually spawned and must answer `initialize` (no tokens). It never invokes `claude mcp get` — that CLI rewrites `~/.claude.json` |
+| `permission-adopt` | 17 | **no silent privilege escalation**: adopting an external session with no permission record fails closed to `read-only`; a recorded `read-only` cannot be promoted by the sidecar; the runtime read-back rejects a recorded/requested mismatch (no tokens) |
+| `state-safety` | 26 | **state/sentinel/lock storage**: defaults live under `$DSH_HOME/.dsh-any-agent`, an unwritable directory fails startup loudly, sentinel write failures return `null` + `sentinel_error`, and bad numeric env values land on the safe side (no tokens) |
+| `setup` | 45 | **the registration CLI**: preview writes nothing, `--remove` takes out only its own entry, an absent client is skipped rather than failed, the Codex TOML block round-trips, and the command recorded in a config is actually spawned and must answer `initialize` (no tokens). It never invokes `claude mcp get` — that CLI rewrites `~/.claude.json` |
 | `removal-scope` | 24 | **unregistering touches only its own entry**: configs holding unrelated MCP servers, top-level Codex settings and sibling Zed settings are registered and then removed, asserting every other value is byte-identical; removing something never written is a no-op with no write (no tokens) |
-| `config-safety` | 406 | **the property the 0.3 line is about**, per client: preview leaves files byte-identical with no `.bak`; register-then-remove restores every other entry byte-for-byte, keeps key order and drops no top-level key; 4-space / 2-space indentation, single-line JSON, missing trailing newline, CRLF and a UTF-8 BOM all survive a write; malformed JSON and read-only files are refused without damage; the second `--yes` is a no-op with no new backup; every `.bak-dsh-<stamp>` appears once and equals the pre-write bytes; a `claude` on PATH is never invoked (no tokens) |
+| `config-safety` | 407 | **the property the 0.3 line is about**, per client: preview leaves files byte-identical with no `.bak`; register-then-remove restores every other entry byte-for-byte, keeps key order and drops no top-level key; 4-space / 2-space indentation, single-line JSON, missing trailing newline, CRLF and a UTF-8 BOM all survive a write; malformed JSON and read-only files are refused without damage; the second `--yes` is a no-op with no new backup; every `.bak-dsh-<stamp>` appears once and equals the pre-write bytes; a `claude` on PATH is never invoked (no tokens) |
 | `real-configs` | 84 (66 with 7/9, 48 with 5/9 fixtures) | **round-trip on the real thing**: copies this machine's actual client configs (an 182693-byte `~/.claude.json` holding hundreds of `projects` entries and case-colliding keys, a 238-line Codex TOML, Zed's full `settings.json`) into a temp dir, registers, then removes, and requires every file back **byte for byte**; entry-presence is checked by key (not a bare substring), and missing fixtures are reported as skipped rather than green (no tokens) |
 | `commit-script` | 26 | commit messages go through stdin, never a temp file that `git add -A` could capture (no tokens) |
 | `roots` | 12 | `dsh_start` without `cwd` asks the client for MCP roots; a client without roots gets an actionable error (no tokens) |
@@ -599,13 +600,13 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
 | `reasoning-check` | 8 | **reasoning visibility**: `reasoning=hide` returns no thinking body but non-zero stats; `reasoning=full` returns the text and the rendered section |
 
-**`node test/run.mjs` runs 815 checks on a machine with five client fixtures (851 with all nine)** — smoke 29 + 786 offline checks (822 with nine). Every suite exited 0 on 0.3.8; none needs a provider (smoke skips its session-creation sections when DSH is absent).
+**`node test/run.mjs` runs 843 checks on a machine with five client fixtures (879 with all nine)** — smoke 29 + 814 offline checks (850 with nine). Every suite exited 0 on 0.3.9; none needs a provider (smoke skips its session-creation sections when DSH is absent).
 
-That is **519 assertions in the client-registration suites alone** (`setup` 41, `removal-scope` 24, `config-safety` 406, `real-configs` 48; 555 with all nine fixtures), which is where the 0.3 work actually is.
+That is **524 assertions in the client-registration suites alone** (`setup` 45, `removal-scope` 24, `config-safety` 407, `real-configs` 48; 560 with all nine fixtures), which is where the 0.3 work actually is.
 
-The model-backed suites (`smoke` 29, `boundary` 46, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8) total 474 and were last measured in full on 0.3.8 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
+The model-backed suites (`smoke` 29, `boundary` 46, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8) total 474 and were last measured in full on 0.3.9 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
 
-> Three different totals are intentional: `node test/run.mjs` (815/851), the CI offline job (786/822, no smoke), and the model-backed set (474 nominal). Counts are the numbers each suite prints itself; don't use one number for a different runner.
+> Three different totals are intentional: `node test/run.mjs` (843/879), the CI offline job (nominal 814/850, no smoke; hosted runners without client fixtures skip real-configs' 48 checks), and the model-backed set (474 nominal). Counts are the numbers each suite prints itself; don't use one number for a different runner.
 
 ### 🧯 Why `sandbox-guard` exists
 
@@ -669,7 +670,7 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 5. **A conversation that dies before its first successful turn may never have materialized on disk** — resume then fails with a clear error. Safe after the first message.
 6. **No renaming** — DSH's title subsystem has no external rename API (`SessionTitleService.rename` requires a live in-process session). Titles are auto-generated from the first message.
 7. **`session/list` returns only `{sessionId, cwd}` and excludes already-open sessions** — titles are filled in by this server from DSH's projection cache.
-8. **"Never reap" costs memory (measured 300–480 MB per conversation)** — that is what buys "the GUI can never take the write lock". Two fresh-start measurements of one active conversation gave 476 MB and 295 MB of added resident memory (the DSH child plus this server); expect the higher figures on a cold process. Two ways to spend less: ① **`DSH_MCP_MAX_LIVE` (default 8** — over the cap, the least recently used process is reaped → bounded memory, locks still held where it matters); ② set `DSH_MCP_IDLE_TTL_MS` to a millisecond value (at the cost of the lock being takeable). To drop to zero right after a batch of work: **`dsh_release(all=true)`** ✓ (releases idle conversations; busy turns are skipped and keep running — pass `force=true` to interrupt them too. Everything resumes on demand).
+8. **"Never reap" costs memory (measured 300–480 MB per conversation)** — within the `MAX_LIVE` window that is what buys "the GUI cannot take the write lock". Two fresh-start measurements of one active conversation gave 476 MB and 295 MB of added resident memory (the DSH child plus this server); expect the higher figures on a cold process. Two ways to spend less: ① **`DSH_MCP_MAX_LIVE` (default 8** — over the cap, the least recently used process is reaped → bounded memory, locks still held where it matters); ② set `DSH_MCP_IDLE_TTL_MS` to a millisecond value (at the cost of the lock being takeable). To drop to zero right after a batch of work: **`dsh_release(all=true)`** ✓ (releases idle conversations; busy turns are skipped and keep running — pass `force=true` to interrupt them too. Everything resumes on demand).
 
 ## ❓ Why is the profile still called `dsh-mcp`?
 
@@ -705,6 +706,13 @@ npm pack --dry-run
 # 4. Tag and push (wait for CI before publishing).
 git add -A && git commit -m "chore: release x.y.z"
 git tag vx.y.z && git push origin main --tags
+
+# 5. Publish to npm and verify.
+npm publish --access public
+npm view dsh-any-agent version
+# A 404 right after publish is usually propagation, not failure: npm returns
+# 202 and the registry can lag briefly. Confirm the local npm log shows the
+# version before retrying.
 ```
 
 ## Star History
