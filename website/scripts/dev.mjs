@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { dirname, resolve, extname, sep } from 'node:path';
+import { dirname, resolve, extname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const build = spawnSync(process.execPath, [resolve(root, 'scripts/build.mjs')], { stdio: 'inherit' });
@@ -11,8 +11,10 @@ const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
-    const path = resolve(dist, '.' + decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname));
+    let path = resolve(dist, '.' + decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname));
     if (path !== dist && !path.startsWith(dist + sep)) { res.writeHead(403); res.end(); return; }
+    // Directory URLs such as /en/ serve their index.html (the production host does this too).
+    if ((await stat(path)).isDirectory()) path = join(path, 'index.html');
     if (!(await stat(path)).isFile()) throw Error('Not found');
     res.writeHead(200, { 'Content-Type': types[extname(path)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(await readFile(path));

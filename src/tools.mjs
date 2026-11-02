@@ -459,9 +459,13 @@ export function createHandlers(hub, opts = {}) {
         if (c.turns != null) bits.push(`轮数=${c.turns}`);
         return `- ${bits.join(' | ')}`;
       };
+      const probe = hub.lastProbe ?? { ok: null, error: null, cached: false };
+      const probeNote = probe.ok === false
+        ? `\n\n⚠️ 磁盘会话探测失败：${probe.error}\n   上面只列出本服务已打开的会话；磁盘上未打开的会话可能没显示。`
+        : '';
       const text = items.length
         ? `${items.length} 个会话（其中 ${running} 个正在跑）：\n${items.map(describe).join('\n')}`
-        : '(没有会话)';
+        : probe.ok === false ? '(本服务没有已打开的会话；磁盘探测失败)' : '(没有会话)';
       // 孤儿锁持有者：上一代 MCP 崩了但它的 DSH 子进程还活着握着写锁 —— 不主动报出来，
       // 用户只会在下一次撞上"被占用"时才发现。这里顺手提示，并给出可执行的动作。
       const orphans = listOrphans();
@@ -471,8 +475,16 @@ export function createHandlers(hub, opts = {}) {
           '\n→ 用 dsh_takeover 抢占即可（这些是本服务自己的残留，抢占是安全的）。'
         : '';
       return {
-        structured: { count: items.length, running, conversations: items, orphan_holders: orphans },
-        text: text + orphanNote,
+        structured: {
+          count: items.length,
+          running,
+          conversations: items,
+          orphan_holders: orphans,
+          probe_ok: probe.ok,
+          probe_error: probe.error ?? null,
+          probe_cached: probe.cached === true,
+        },
+        text: text + probeNote + orphanNote,
       };
     },
 
@@ -508,7 +520,12 @@ export function createHandlers(hub, opts = {}) {
       let run = null;
       const meta = [];
       // DSH 的自动标题是首条消息的截断前缀，信息量低；调用方给过 title_hint 就一并显示。
-      meta.push(`对话名: ${snap.title ?? '(尚未生成)'}（DSH 自动生成）` +
+      const titleKind = snap.title_source === 'native'
+        ? 'DSH 自动生成'
+        : snap.title_source === 'title_hint'
+          ? '来自 title_hint（DSH 尚未生成标题）'
+          : '尚未生成';
+      meta.push(`对话名: ${snap.title ?? '(尚未生成)'}（${titleKind}）` +
         (snap.title_hint && snap.title !== snap.title_hint ? ` / 标题提示: ${snap.title_hint}` : ''));
       meta.push(`工作区: ${snap.cwd}`);
       meta.push(`状态: ${snap.busy ? '忙' : snap.alive ? '空闲(进程活着)' : '未打开(可用 resume 复活)'}`);
@@ -641,11 +658,14 @@ export function createHandlers(hub, opts = {}) {
       if (snap.lock_holder && snap.lock_holder !== 'self') {
         const hint =
           snap.lock_holder === 'stale-mcp'
-            ? '（本服务残留的孤儿，可 dsh_takeover 抢占）'
+            ? '（本服务残留/卡死的持有者，可 dsh_takeover 抢占）'
             : snap.lock_holder === 'live-mcp'
               ? '（另一个活着的 dsh-any-agent 实例在用；要夺需 dsh_takeover(force=true)）'
-              : '（多半是你自己的 DSH GUI 正开着它；本服务不会去杀它）';
+              : snap.lock_conflict
+                ? '（最近撞过锁：多半是你自己的 DSH GUI 正开着它；本服务不会去杀它）'
+                : '（没有本服务的持锁登记；空闲/已释放时也会是 none，只有在撞锁时才可能是 GUI）';
         bits.push(`写锁=${snap.lock_holder}${hint}`);
+        if (snap.lock_holder_reason) bits.push(`   判定：${snap.lock_holder_reason}`);
       }
       // ★ 撞过锁就把"谁占用 + 怎么解"讲清楚。实测：GUI 点开一次就会长期持有写锁
       //   （切走、等十几分钟都不释放），所以这条信息必须持久可见，而不是一闪而过的报错。
@@ -669,6 +689,7 @@ export function createHandlers(hub, opts = {}) {
           pending_approval_details: snap.pending_approval_details,
           turns: snap.turns,
           lock_holder: snap.lock_holder,
+          lock_holder_reason: snap.lock_holder_reason,
           lock_conflict: snap.lock_conflict,
           run: run
             ? {

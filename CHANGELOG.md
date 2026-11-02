@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Post-0.3.6 hardening.
+
+## [0.3.6] — 2026-11-02
+
 Post-0.3.5 hardening (remaining completeness-audit items).
+
+### Fixed
+
+- `dsh_status` now reports `lock_holder_reason` and no longer calls `none`
+  "your GUI" when the conversation is simply idle/released; the GUI hint is
+  only shown after an actual lock conflict.
+- `dsh_get` reports `title_source` (`native` / `title_hint` / `null`) and no
+  longer labels a `title_hint` fallback as "DSH generated".
+- `dsh_read` caps a single output entry at 200k characters (keeps the tail)
+  so one runaway tool output cannot grow the in-memory buffer without bound.
+- `dsh_list` exposes `probe_ok` / `probe_error` / `probe_cached`; a failed
+  on-disk probe is no longer indistinguishable from "no sessions".
+- MCP clients that send `notifications/roots/list_changed` now invalidate the
+  cached project directory and re-request `roots/list`.
+- Client config backups rotate (default 20 per file, `DSH_MCP_BACKUP_KEEP`);
+  `dsh-any-agent-restore` writes atomically and preserves the target mode.
+- The shared `workspace.json` writer keeps a `<file>.bak-dsh` last-known-good
+  copy before replacing it.
+- `dsh_takeover` now compares the child's OS start time with the registration
+  before sending SIGKILL; a mismatched PID (reuse) is refused.
+- Website: full English page at `/en/`, hreflang alternates, bilingual sitemap,
+  JSON-LD, Cloudflare Insights domains in CSP, and a pre-paint theme script
+  (CSP sha256) so light-system users no longer see a dark flash.
+
+### Known residual items
+
+- Cloudflare Managed robots.txt / Content Signals are dashboard-managed; the
+  repository documents the split instead of trying to override them.
+- Session-log header decompression is still synchronous; it is bounded by the
+  fact that only the header is parsed, but a very large log can still block
+  the event loop briefly. A fully async reader needs a broader refactor of
+  `Hub.get`/`findSessionHeader`.
 
 ## [0.3.5] — 2026-11-02
 
@@ -616,7 +652,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.2...v0.3.3

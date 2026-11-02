@@ -16,10 +16,10 @@
  * （后缀 .bak-dsh-pre-restore-<stamp>），退错了还能再退回来。
  */
 
-import { copyFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
-import { backupFile, clientList, resolveDirs, ENTRY_NAME } from '../src/clients.mjs';
+import { atomicWrite, backupFile, clientList, resolveDirs, ENTRY_NAME } from '../src/clients.mjs';
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -127,7 +127,11 @@ for (const b of chosen) {
     try {
       // 还原也是破坏性操作：先把「现在」也存一份。
       if (existsSync(b.target)) row.safety = backupFile(b.target, 'pre-restore-' + stamp);
-      copyFileSync(b.file, b.target);
+      // tmp + rename：崩溃时不会留下半截配置；还原后保留原文件的权限位。
+      let mode = null;
+      try { mode = statSync(b.target).mode; } catch {}
+      atomicWrite(b.target, readFileSync(b.file, 'utf8'));
+      if (mode !== null) { try { chmodSync(b.target, mode); } catch {} }
     } catch (e) {
       row.action = 'failed';
       row.error = e.message;

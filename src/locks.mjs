@@ -27,6 +27,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, renameSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { STATE_FILE, REAP_INTERVAL_MS, numEnv } from './config.mjs';
@@ -220,14 +221,51 @@ export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
  * 杀掉一个 DSH 子进程。**只允许对 classification 判定为 `stale-mcp` / `live-mcp(force)`
  * 的、由本 MCP 登记过的进程调用** —— 调用方负责先做分类。
  */
-export function killHolderChild(pid) {
+export function killHolderChild(pid, { expectedSpawnedAt } = {}) {
   if (!pid || !isPidAlive(pid)) return { killed: false, reason: '进程已经不在了' };
+  // ★ PID 会被复用。抢占是"杀进程"这种不可逆动作，所以先核对启动时间：
+  //   登记时间与 OS 记录的启动时间差太多 → 这已经不是当初登记的那个进程，拒绝杀。
+  if (Number.isFinite(expectedSpawnedAt)) {
+    const actual = processStartTime(pid);
+    if (Number.isFinite(actual) && Math.abs(actual - expectedSpawnedAt) > 10 * 60 * 1000) {
+      return {
+        killed: false,
+        reason:
+          `PID ${pid} 的启动时间与登记不符（登记 ${new Date(expectedSpawnedAt).toISOString()}，` +
+          `实际 ${new Date(actual).toISOString()}），疑似 PID 已被复用，拒绝杀。`,
+      };
+    }
+  }
   try {
     process.kill(pid, 'SIGKILL');
   } catch (e) {
     return { killed: false, reason: `杀不掉: ${e.message}` };
   }
   return { killed: true, reason: `已向 PID ${pid} 发送 SIGKILL` };
+}
+
+/**
+ * 读取进程启动时间（毫秒时间戳）。拿不到时返回 null（调用方按旧行为处理）。
+ * Windows 用 PowerShell 的 Get-Process.StartTime；POSIX 用 ps -o lstart=。
+ * 只在 takeover 这种低频、不可逆动作前调用，不在热路径上。
+ */
+export function processStartTime(pid) {
+  if (!pid) return null;
+  try {
+    const args =
+      process.platform === 'win32'
+        ? ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${Number(pid)} -ErrorAction SilentlyContinue).StartTime.ToUniversalTime().ToString('o')`]
+        : ['-o', 'lstart=', '-p', String(pid)];
+    const r = spawnSync(process.platform === 'win32' ? 'powershell' : 'ps', args, {
+      encoding: 'utf8',
+      timeout: 3000,
+      windowsHide: true,
+    });
+    const t = Date.parse(String(r.stdout || '').trim());
+    return Number.isFinite(t) ? t : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

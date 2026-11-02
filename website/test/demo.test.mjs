@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scenarios, getFrame, advance, isFinished } from '../src/demo.mjs';
+import { scenarios, scenariosEn, statusNames, statusNamesEn, getFrame, advance, isFinished } from '../src/demo.mjs';
 
 test('Every workflow ends with a completed, collected result and clamps at its final frame', () => {
   for (const [mode, scenario] of Object.entries(scenarios)) {
@@ -41,6 +41,20 @@ test('Invalid workflow state cannot silently display misleading content', () => 
   assert.throws(() => getFrame('unknown', 0), RangeError);
   for (const value of [-1, 6, 1.5, NaN]) assert.throws(() => getFrame('dispatch', value), RangeError);
 });
+test('English demo mirrors every scenario, frame count, and status label', () => {
+  assert.deepEqual(Object.keys(scenariosEn), Object.keys(scenarios));
+  assert.deepEqual(Object.keys(statusNamesEn), Object.keys(statusNames));
+  for (const mode of Object.keys(scenarios)) {
+    assert.equal(scenariosEn[mode].frames.length, scenarios[mode].frames.length, mode);
+    assert.ok(scenariosEn[mode].label && scenariosEn[mode].summary && scenariosEn[mode].description);
+    assert.ok(scenariosEn[mode].frames.every(f => f.title && f.detail && f.log));
+  }
+  assert.equal(statusNamesEn.done, 'Done');
+  assert.equal(getFrame('dispatch', 0, scenariosEn).title.startsWith('Meet'), true);
+  assert.equal(advance('dispatch', 0, scenariosEn), 1);
+  assert.equal(isFinished('dispatch', scenariosEn.dispatch.frames.length - 1, scenariosEn), true);
+});
+
 test('Demo snippets use the real MCP argument and response keys', () => {
   const frames = Object.values(scenarios).flatMap(s => s.frames);
   const interject = frames.filter(f => f.tool === 'dsh_interject');

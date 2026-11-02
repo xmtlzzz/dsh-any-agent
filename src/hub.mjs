@@ -155,6 +155,8 @@ function pruneStaleTombstones() {
 
 /** 运行期输出环形缓冲的条目上限（仅内存，超出丢最旧的）。 */
 const MAX_OUT_ENTRIES = 500;
+/** 单条输出正文的字符上限；超出保留尾部，避免一条超长输出把内存撑爆。 */
+const MAX_OUT_TEXT = 200_000;
 /** 记录用户发话时的截断长度（避免一条把缓冲撑爆）。 */
 const MAX_PROMPT_ECHO = 4000;
 /** 保留的回合记录条数（run 结果含正文，所以只留最近若干条，仅内存）。 */
@@ -350,10 +352,15 @@ export class Conversation {
   snapshot() {
     const meta = readConversationMeta(this.id);
     const nativeTitle = meta?.title ?? null;
+    const holder = this.proc?.alive
+      ? { kind: 'self', reason: '本进程持有该会话的写锁' }
+      : classifyHolder(this.id, { knownChildPid: this.lastChildPid });
     return {
       conversation_id: this.id,
       /** 对话名来自 DSH 的 session/title 事件（自动生成）；未生成时用建会话提示兜底。 */
       title: nativeTitle ?? this.titleHint ?? null,
+      /** native = DSH 自动标题；title_hint = 建会话时给的提示；null = 还没有名字。 */
+      title_source: nativeTitle ? 'native' : this.titleHint ? 'title_hint' : null,
       /**
        * DSH 自动生成的标题是**首条消息的截断前缀**（实测 13–15 个字符，
        * 例如「这是一次连通性冒烟测试，请」），信息量很低。
@@ -390,8 +397,13 @@ export class Conversation {
         approval_id: approvalId,
         ...pending.params.details,
       })),
-      /** 不在本进程手里时，写锁在谁手上（none=多半是你自己的 GUI / stale-mcp=可抢占的孤儿 / live-mcp=另一个实例）。 */
-      lock_holder: this.proc?.alive ? 'self' : classifyHolder(this.id, { knownChildPid: this.lastChildPid }).kind,
+      /**
+       * 不在本进程手里时，写锁在谁手上：
+       * self / stale-mcp / live-mcp / none。none 只表示"没有本服务可识别的持有者"，
+       * 可能是空闲/已释放，也可能被 GUI 持有；原因见 lock_holder_reason。
+       */
+      lock_holder: holder.kind,
+      lock_holder_reason: holder.reason ?? null,
       /** ★ 最近一次"撞写锁"的持久记录。
        *  只报一次错是不够的：撞锁往往**一次就长期成立**（实测：在 GUI 里点开一次，
        *  dsh web 会一直持有写锁，切走/等待都不释放），所以要把"谁占用、怎么解"留在状态里，
@@ -569,7 +581,7 @@ export class Conversation {
     }
 
     // 3) 杀 + 重试（内核在持有者进程退出时释放信号量）
-    const kill = killHolderChild(killTarget);
+    const kill = killHolderChild(killTarget, { expectedSpawnedAt: holder.marker?.spawned_at });
     report.killed_pid = killTarget;
     report.kill = kill;
     if (!kill.killed) {
@@ -949,14 +961,15 @@ export class Conversation {
   /** 追加一条输出记录；同类相邻文本会合并，避免每个 token 一条。 */
   pushOut(kind, text, extra = {}) {
     const last = this.out[this.out.length - 1];
+    const cap = (s) => (s.length > MAX_OUT_TEXT ? `…[已截断，保留尾部 ${MAX_OUT_TEXT} 字]…\n${s.slice(-MAX_OUT_TEXT)}` : s);
     if (last && last.kind === kind && last.turn === this.currentTurn && text) {
-      last.text += text;
+      last.text = cap(last.text + text);
       last.at = now();
       // ★ 合并进已有条目也必须推进修订号。否则游标已经读过这条的调用方
       //   会永远看不到后续追加的正文（旧实现用 seq 当游标，seq 不变 = 漏读）。
       last.rev = ++this.outRev;
     } else {
-      this.out.push({ seq: ++this.outSeq, rev: ++this.outRev, kind, turn: this.currentTurn, text: text ?? '', at: now(), ...extra });
+      this.out.push({ seq: ++this.outSeq, rev: ++this.outRev, kind, turn: this.currentTurn, text: cap(text ?? ''), at: now(), ...extra });
       if (this.out.length > MAX_OUT_ENTRIES) this.out.shift();
     }
     if (kind === 'text') this.turnOutChars += text?.length ?? 0;
@@ -1183,6 +1196,8 @@ export class Hub {
   constructor({ log } = {}) {
     this.conversations = new Map();
     this.log = log ?? NOOP_LOG;
+    /** 最近一次 dsh_list 磁盘探测的结果：{ok, error, cached, at}。 */
+    this.lastProbe = { ok: null, error: null, cached: false, at: 0 };
     const rawApprovalTimeout = Number(process.env.DSH_MCP_APPROVAL_TIMEOUT_MS ?? 5 * 60 * 1000);
     // 空串会变成 0 / NaN → setTimeout(0) 会把 ask 审批立刻取消；统一回落到 5 分钟。
     this.approvalTimeoutMs =
@@ -1591,7 +1606,10 @@ export class Hub {
       if (isForgotten(c.id)) continue;
       out.set(c.id, c.snapshot());
     }
-    if (!includeClosed) return [...out.values()];
+    if (!includeClosed) {
+      this.lastProbe = { ok: null, error: null, cached: false, at: now() };
+      return [...out.values()];
+    }
 
     // 磁盘探测要 spawn 一个 DSH 进程（实测约 1 秒），所以同 cwd 的结果缓存一小段时间，
     // 避免"连着列几次会话"就反复拉进程。
@@ -1603,7 +1621,9 @@ export class Hub {
 
     const probeCwd = cwd ?? [...this.conversations.values()][0]?.cwd ?? process.cwd();
     let sessions = cached;
-    if (!sessions) {
+    if (cached) {
+      this.lastProbe = { ok: true, error: null, cached: true, at: this.#probeCache.at };
+    } else if (!sessions) {
       let proc = null;
       try {
         proc = new AcpProcess({ cwd: probeCwd, permission: 'read-only' });
@@ -1612,9 +1632,12 @@ export class Hub {
         const res = await proc.request('session/list', cwd ? { cwd } : {});
         sessions = res?.sessions ?? [];
         this.#probeCache = { key: cacheKey, at: now(), sessions };
+        this.lastProbe = { ok: true, error: null, cached: false, at: this.#probeCache.at };
       } catch (e) {
         this.log.info(`[hub] session/list 探测失败: ${e.message}`);
         sessions = []; // 失败不缓存，下次重试
+        // ★ 调用方必须能区分"没有别的会话"和"探测失败"，否则会以为会话丢了。
+        this.lastProbe = { ok: false, error: e.message, cached: false, at: now() };
       } finally {
         await proc?.stop().catch(() => {});
       }

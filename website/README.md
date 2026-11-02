@@ -1,6 +1,6 @@
 # dsh-any-agent 官网
 
-中文静态官网，使用现有品牌头图和浏览器本地演示介绍项目。包含异步派活、中途改向、断线恢复、多会话并行、安装配置与常见问题。支持明暗主题、暂停/单步播放、减少动态效果与键盘切换。
+中英双语静态官网（`/` 与 `/en/`，带 hreflang），使用现有品牌头图和浏览器本地演示介绍项目。包含异步派活、中途改向、断线恢复、多会话并行、安装配置与常见问题。支持明暗主题、暂停/单步播放、减少动态效果与键盘切换。
 
 ## 本地开发
 
@@ -41,13 +41,20 @@ npm run build
 
 Cloudflare Workers Git 集成可将根目录设为 `website`，构建命令设为 `npm run build`，部署命令设为 `npx wrangler@4.125.0 deploy`。
 
+### 部署侧行为（不在仓库中）
+
+- Cloudflare Web Analytics 可能自动注入 `https://static.cloudflareinsights.com/beacon.min.js`；`src/_headers` 的 CSP 已放行该脚本与 `https://cloudflareinsights.com` 上报域。若关闭 Web Analytics，不会注入，CSP 放行也不产生影响。
+- Cloudflare 的 Managed robots.txt / Content Signals 在**控制台**管理，会在源站 `robots.txt` 之前追加内容；仓库里的 `dist/robots.txt` 只是源站策略。修改 AI 抓取策略后请同时在控制台与仓库记录中核对。
+- 主题在首屏前由内联脚本恢复（CSP 使用构建时生成的 sha256 哈希），避免浅色系统用户先看到深色页面。
+
 ## Cloudflare Pages（可选）
 
 同一份 `dist/` 也可以直接部署到 Pages。Git 集成的根目录为 `website`，构建命令为 `npm run build`，输出目录为 `dist`。
 
 ## 内容与演示
 
-- 页面内容：`src/index.html`
+- 中文页面：`src/index.html`
+- English page: `src/index.en.html`
 - 视觉样式：`src/style.css`
 - 演示场景与状态：`src/demo.mjs`
 - 播放控制、复制配置与主题：`src/app.mjs`

@@ -22,7 +22,7 @@ export const scenarios = {
       frame('中止当前回合，历史保留', '通过 ACP 的取消路径结束当前回合，不销毁会话。', 'dsh_interject', '{ conversation_id: "conv-app",\n  mode: "interject",\n  message: "先补回归测试，再继续重构" }', 'interrupted', 38, 'run-001 已取消 · conversation_id 保持不变', { preserved: true }),
       frame('带着上下文，按新方向继续', '同一会话开启新回合，之前的工作仍在。', '新回合 run-002', 'history → preserved\nnext → write regression tests', 'running', 62, 'run-002 · 先补回归测试', { preserved: true }),
       frame('先验证，再重构', '测试成为这轮工作的第一步。', 'shell · edit', 'node --test test/config.test.mjs\n// 基线确认后继续修改实现', 'running', 86, '基线已验证 · 继续重构', { preserved: true }),
-      frame('新的结果，也有自己的回执', '每一轮独立验收，不混淆中止与完成。', 'sentinel_file', '.state/runs/conv-app/run-002.json\n{ "status": "done", "result": "…" }', 'done', 100, 'run-002 完成 · 新哨兵已写入', { preserved: true, sentinel: true, collected: true }),
+      frame('新的结果，也有自己的回执', '每一轮独立验收，不混淆中止与完成。', 'sentinel_file', '~/.dsh/.dsh-any-agent/runs/conv-app/run-002.json\n{ "status": "done", "result": "…" }', 'done', 100, 'run-002 完成 · 新哨兵已写入', { preserved: true, sentinel: true, collected: true }),
     ],
   },
   resume: {
@@ -50,12 +50,63 @@ export const scenarios = {
     ],
   },
 };
-export function getFrame(mode, index) {
-  const scenario = scenarios[mode];
+export const scenariosEn = {
+  dispatch: {
+    label: 'Async dispatch', summary: 'Hand off the task. Your work continues.',
+    description: 'Leave with a receipt. Progress is always readable, and when the turn ends the sentinel file brings the full result.',
+    frames: [
+      frame('Meet your new buddy in the project', 'One session, one recoverable working context.', 'dsh_start', '{ cwd: "/workspace/app" }', 'idle', 0, 'Created session conv-app · workspace /workspace/app'),
+      frame('Dispatch and get a receipt immediately', 'Do not wait for the task; your client can continue with other work.', 'dsh_send', '{ conversation_id: "conv-app",\n  prompt: "Refactor the config loader and add regression tests",\n  wait: false }', 'running', 12, 'Receipt run-001 · background: true'),
+      frame('It works; you do not have to watch', 'DSH reads files, edits code, and runs scripts.', 'files · shell', 'read src/config.mjs\nedit src/config.mjs\nnode --test test/config.test.mjs', 'running', 43, 'Read config module · writing implementation and tests'),
+      frame('Need progress? Read only what is new', 'Cursor-based increments keep the whole history out of context.', 'dsh_read', '{ conversation_id: "conv-app",\n  cursor: 12 }\n// → cursor: 18', 'running', 78, '6 new entries · tests running'),
+      frame('The result lands; collect it with evidence', 'At turn end an atomic sentinel file carries status and result.', 'sentinel_file', '~/.dsh/.dsh-any-agent/runs/conv-app/run-001.json\n{ "status": "done", "result": "…" }', 'done', 100, 'Sentinel written · waiter can read the result', { sentinel: true }),
+      frame('Come back, collect, continue', 'Read the sentinel or fetch the full answer by run_id.', 'dsh_get', '{ conversation_id: "conv-app",\n  run_id: "run-001" }\n// → status: done, result: "config refactor complete"', 'done', 100, 'Result collected · session kept', { sentinel: true, collected: true }),
+    ],
+  },
+  interject: {
+    label: 'Change course', summary: 'When the plan changes, steer back.',
+    description: 'Interject cancels the current turn and starts the next one with history intact. You can also queue a message for after this turn.',
+    frames: [
+      frame('Halfway through the refactor', 'Implementation started, but you want to verify old behaviour first.', 'dsh_status', '{ state: "running",\n  current_tool: "edit", turns: 3 }', 'running', 35, 'run-001 · refactoring the config loader'),
+      frame('State the new requirement', '“Add regression tests first, then continue.”', 'your new requirement', 'Add regression tests first, confirm old behaviour,\nthen continue the config loader refactor.', 'running', 38, 'Direction change received · preparing to interject'),
+      frame('Stop the turn, keep the history', 'End the current turn through ACP cancel; do not destroy the session.', 'dsh_interject', '{ conversation_id: "conv-app",\n  mode: "interject",\n  message: "Add regression tests first, then continue" }', 'interrupted', 38, 'run-001 cancelled · conversation_id unchanged', { preserved: true }),
+      frame('Continue in the new direction with context', 'The same session starts a new turn; prior work remains.', 'new turn run-002', 'history → preserved\nnext → write regression tests', 'running', 62, 'run-002 · tests first', { preserved: true }),
+      frame('Verify first, then refactor', 'Testing becomes the first step of this turn.', 'shell · edit', 'node --test test/config.test.mjs\n// continue implementation after the baseline is confirmed', 'running', 86, 'Baseline verified · continuing the refactor', { preserved: true }),
+      frame('A new result gets its own receipt', 'Each turn is collected independently; interruption and completion are not mixed.', 'sentinel_file', '~/.dsh/.dsh-any-agent/runs/conv-app/run-002.json\n{ "status": "done", "result": "…" }', 'done', 100, 'run-002 complete · new sentinel written', { preserved: true, sentinel: true, collected: true }),
+    ],
+  },
+  resume: {
+    label: 'Resume', summary: 'Processes end; session identity stays.',
+    description: 'Resume a persisted conversation and continue. A process exit interrupts the running turn; dispatch again afterwards.',
+    frames: [
+      frame('The context is already on disk', 'The session persists its identity with a DSH sessionId.', 'sessionId', 'conv-app → ~/.dsh/sessions/…\nprogress → implementation started', 'running', 56, 'Session history persisted · current turn running', { persisted: true }),
+      frame('The process is interrupted', 'The current turn stops with the process; it does not continue in the background.', 'process exit', 'process → stopped\ncurrent turn → interrupted\nsession history → on disk', 'interrupted', 56, 'Process exited · current turn interrupted', { persisted: true }),
+      frame('The session identity remains', 'History is kept, and files already written in the workspace remain.', 'sessionId on disk', 'conversation_id: "conv-app"\nprocess: none\nhistory: persisted', 'detached', 56, 'Persisted session found · waiting to reconnect', { persisted: true }),
+      frame('The next call resumes automatically', 'A new process attaches through ACP session/resume.', 'session/resume', '{ sessionId: "conv-app" }\n// → history restored', 'idle', 56, 'New process attached · same session history restored', { persisted: true, preserved: true }),
+      frame('Dispatch again and finish the remaining work', 'Check the workspace first, then give the next turn a clear goal.', 'dsh_send', '{ conversation_id: "conv-app",\n  prompt: "Check the completed edits and continue the remaining tests",\n  wait: false }', 'running', 80, 'run-002 · checking edits, then tests', { persisted: true, preserved: true }),
+      frame('What resumes is the collaboration', 'The process is a cache; the session is the long-lived unit.', 'dsh_get', '{ run_id: "run-002" }\n// → status: done', 'done', 100, 'New turn complete · history continues', { persisted: true, preserved: true, sentinel: true, collected: true }),
+    ],
+  },
+  parallel: {
+    label: 'Parallel', summary: 'Several jobs at once, each with its own progress.',
+    description: 'Open a separate session for each independent task and switch between incremental outputs. Each has its own workspace and receipt.',
+    frames: [
+      frame('Let independent jobs start', 'Create sessions for implementation, tests, and docs.', 'dsh_start × 3', 'conv-app  → /workspace/app\nconv-test → /workspace/tests\nconv-docs → /workspace/docs', 'idle', 0, '3 independent sessions ready', { jobs: [0, 0, 0] }),
+      frame('One dispatch each, all progress independently', 'Every call returns its own run_id.', 'dsh_send · wait=false', 'build → run-001\ntests → run-001\ndocs → run-001', 'running', 18, '3 turns running in the background', { jobs: [18, 12, 25] }),
+      frame('See who is busy at a glance', 'List only running sessions, then inspect as needed.', 'dsh_list', '{ only_running: true }\n// → app: running\n// → test: running, docs: running', 'running', 45, 'Switch sessions to read independent incremental output', { jobs: [45, 35, 65] }),
+      frame('Docs finish first; the rest continue', 'Each session runs and is collected independently.', 'dsh_read', '{ conversation_id: "conv-test",\n  cursor: 8 }\n// → test progress…', 'running', 68, 'Docs sentinel landed · build and tests continue', { jobs: [68, 62, 100] }),
+      frame('Per-session directories keep results apart', 'Even when run_ids collide, sentinels have independent paths.', 'sentinel_file', 'runs/conv-app/run-001.json\nruns/conv-test/run-001.json\nruns/conv-docs/run-001.json', 'running', 91, 'Build complete · tests almost done', { jobs: [100, 91, 100] }),
+      frame('Collect everything and continue', 'Finish and collect one at a time; every result is traceable.', 'dsh_get × 3', 'app  → done\ntest → done\ndocs → done', 'done', 100, '3 results ready · no overwrites', { jobs: [100, 100, 100], sentinel: true, collected: true }),
+    ],
+  },
+};
+export function getFrame(mode, index, set = scenarios) {
+  const scenario = set[mode];
   if (!scenario) throw new RangeError('Unknown demo scenario');
   if (!Number.isInteger(index) || index < 0 || index >= scenario.frames.length) throw new RangeError('Invalid demo frame');
   return scenario.frames[index];
 }
-export function advance(mode, index) { getFrame(mode, index); return Math.min(index + 1, scenarios[mode].frames.length - 1); }
-export function isFinished(mode, index) { return index === scenarios[mode].frames.length - 1; }
+export function advance(mode, index, set = scenarios) { getFrame(mode, index, set); return Math.min(index + 1, set[mode].frames.length - 1); }
+export function isFinished(mode, index, set = scenarios) { return index === set[mode].frames.length - 1; }
 export const statusNames = { idle: '待命', running: '执行中', interrupted: '已中断', detached: '已分离', done: '已完成' };
+export const statusNamesEn = { idle: 'Standby', running: 'Running', interrupted: 'Interrupted', detached: 'Detached', done: 'Done' };

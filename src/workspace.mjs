@@ -15,7 +15,7 @@
  * 或手动执行回填时做一次读-改-写，窗口很小；但仍与 GUI 存在理论上的覆盖可能。
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, realpathSync } from 'node:fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -152,6 +152,12 @@ function readDoc() {
 
 function writeDoc(doc) {
   mkdirSync(dirname(WORKSPACE_FILE), { recursive: true });
+  // 保留上一份**可解析**的注册表：逻辑写坏时用户还能手工回滚。
+  try {
+    if (existsSync(WORKSPACE_FILE)) copyFileSync(WORKSPACE_FILE, `${WORKSPACE_FILE}.bak-dsh`);
+  } catch {
+    /* 备份失败不阻断写入 */
+  }
   // 临时文件名必须唯一：固定 `.dshmcp.tmp` 会让两个实例/CLI 并发写互相覆盖。
   const tmp = `${WORKSPACE_FILE}.${process.pid}.${randomUUID()}.tmp`;
   try {
@@ -355,9 +361,10 @@ export function backfillWorkspaces({ includeTemp = false, dryRun = false, pruneM
  * 删除测试会话（**这是唯一会动磁盘会话文件的函数**，所以规则写得很死）。
  *
  * 只会删这几类，其余一律不碰：
- *   1) 会话头里的 cwd 位于系统临时目录下
- *   2) 会话头里的 cwd 匹配 Desktop\dsh-any-agent-test-* —— 传 tempOnly 可关掉这一条
- *   3) ids 里显式指定的
+ *   1) testOnly：cwd 在 `tmpdir()/dsh-any-agent-*` 下（本仓库测试自己造的）
+ *   2) cwd 匹配 Desktop\dsh-any-agent-test-*
+ *   3) tempOnly：cwd 在系统临时目录下（显式人工命令才用，范围最大）
+ *   4) ids 里显式指定的
  *
  * @param {object} opts
  * @param {boolean} [opts.testOnly] 只删**本仓库测试造的**临时目录（`tmpdir()/dsh-any-agent-*`）

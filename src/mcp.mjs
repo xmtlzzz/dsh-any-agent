@@ -183,6 +183,12 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
     // 通知（无 id）：不需要回包
     if (id === undefined) {
       if (method === 'notifications/initialized') initialized = true;
+      // 客户端换了打开的项目：丢掉缓存并重新问一次，下一次 dsh_start 才会用新目录。
+      if (method === 'notifications/roots/list_changed') {
+        clientRoots = null;
+        rootsRequested = false;
+        requestRoots().catch(() => {});
+      }
       return;
     }
 

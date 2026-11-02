@@ -25,13 +25,14 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { platform } from 'node:os';
-import { dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** 写进每个客户端的条目名。同时也是 --remove 唯一的识别依据。 */
@@ -57,7 +58,29 @@ export function backupFile(file, stamp) {
   let dst = base;
   for (let i = 2; existsSync(dst); i++) dst = base + '-' + i;
   copyFileSync(file, dst);
+  pruneBackups(file);
   return dst;
+}
+
+/**
+ * 备份轮转：同一目标只保留最近 N 份（默认 20，DSH_MCP_BACKUP_KEEP 可调）。
+ * 备份里可能有凭据，无限累积既占空间也扩大暴露面；保留最近若干份足够回滚。
+ */
+export function pruneBackups(file) {
+  const raw = Number(process.env.DSH_MCP_BACKUP_KEEP ?? 20);
+  const keep = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 20;
+  try {
+    const dir = dirname(file);
+    const prefix = basename(file) + '.bak-dsh-';
+    const backups = readdirSync(dir)
+      .filter((name) => name.startsWith(prefix))
+      .sort();
+    for (const name of backups.slice(0, Math.max(0, backups.length - keep))) {
+      try { unlinkSync(join(dir, name)); } catch {}
+    }
+  } catch {
+    /* 轮转失败不影响本次备份 */
+  }
 }
 
 /**
@@ -585,7 +608,7 @@ export function describeEntry(shape, entry) {
 
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 /** 解析出本次要用的 home 与 appdata（--home / 环境变量 / 平台默认）。 */
 export function resolveDirs(homeOverride) {

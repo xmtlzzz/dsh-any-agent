@@ -5,12 +5,16 @@ import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 const dist = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
 const html = await readFile(resolve(dist, 'index.html'), 'utf8');
+const enHtml = await readFile(resolve(dist, 'en/index.html'), 'utf8');
 const assets = await readdir(resolve(dist, 'assets'));
 
 test('Every linked local asset exists in the deployable output', async () => {
   const paths = [...html.matchAll(/(?:href|src)="(\/[^"#]*)"/g)].map((m) => m[1]);
   assert.ok(paths.length >= 4);
-  for (const path of paths) assert.ok((await stat(resolve(dist, '.' + path))).isFile(), path);
+  for (const path of paths) {
+    if (path.endsWith('/')) continue; // locale directory links, not assets
+    assert.ok((await stat(resolve(dist, '.' + path))).isFile(), path);
+  }
   const modulePath = paths.find((p) => p.endsWith('.mjs'));
   const module = await readFile(resolve(dist, '.' + modulePath), 'utf8');
   const imports = [...module.matchAll(/from '\.\/([a-z]+\.[a-f0-9]+\.mjs)'/g)].map((m) => m[1]);
@@ -19,9 +23,29 @@ test('Every linked local asset exists in the deployable output', async () => {
 });
 
 test('Navigation anchors resolve and public output contains no build placeholders or machine paths', () => {
-  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
-  for (const match of html.matchAll(/href="#([^"\s]+)"/g)) assert.ok(ids.has(match[1]), match[1]);
-  assert.doesNotMatch(html, /\{\{\w+\}\}|[CD]:\\|127\.0\.0\.1:8770/);
+  for (const page of [html, enHtml]) {
+    const ids = new Set([...page.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
+    for (const match of page.matchAll(/href="#([^"\s]+)"/g)) assert.ok(ids.has(match[1]), match[1]);
+    assert.doesNotMatch(page, /\{\{\w+\}\}|[CD]:\\|127\.0\.0\.1:8770/);
+  }
+});
+
+test('English page is a real locale with hreflang alternates and its own canonical', () => {
+  assert.match(enHtml, /<html lang="en">/);
+  assert.match(enHtml, /hreflang="zh-CN" href="https:\/\/dsh-any-agent\.xmtlz\.dev\/"/);
+  assert.match(enHtml, /hreflang="en" href="https:\/\/dsh-any-agent\.xmtlz\.dev\/en\/"/);
+  assert.match(enHtml, /<link rel="canonical" href="https:\/\/dsh-any-agent\.xmtlz\.dev\/en\/">/);
+  assert.match(enHtml, /href="\/en\/"|href="\/"/);
+  assert.match(html, /hreflang="en" href="https:\/\/dsh-any-agent\.xmtlz\.dev\/en\/"/);
+  assert.match(html, /href="\/en\/"/);
+});
+
+test('The pre-paint theme script is allowed by the CSP hash', async () => {
+  const headers = await readFile(resolve(dist, '_headers'), 'utf8');
+  assert.match(headers, /script-src 'self' 'sha256-[A-Za-z0-9+/=]+' https:\/\/static\.cloudflareinsights\.com/);
+  assert.match(html, /<script>try\{var t=localStorage\.getItem\('dsh-theme'\)/);
+  assert.match(enHtml, /<script>try\{var t=localStorage\.getItem\('dsh-theme'\)/);
+  assert.match(html, /matchMedia\('\(prefers-color-scheme: light\)'\)/);
 });
 
 test('Unknown routes have a real error page and metadata points to the selected brand asset', async () => {
@@ -34,8 +58,10 @@ test('Unknown routes have a real error page and metadata points to the selected 
 });
 
 test('The release version is fetched at runtime, never baked into the page', async () => {
-  assert.match(html, /id="release-version">v—<\/span>/);
-  assert.doesNotMatch(html, /\bv\d+\.\d+\.\d+\b/, 'no semver literal may be baked into the page');
+  for (const page of [html, enHtml]) {
+    assert.match(page, /id="release-version">v—<\/span>/);
+    assert.doesNotMatch(page, /\bv\d+\.\d+\.\d+\b/, 'no semver literal may be baked into the page');
+  }
   const releaseName = assets.find((name) => /^release\.[a-f0-9]{10}\.mjs$/.test(name));
   assert.ok(releaseName, 'release module must be built as a hashed asset');
   const release = await readFile(resolve(dist, 'assets', releaseName), 'utf8');
@@ -46,7 +72,7 @@ test('The release version is fetched at runtime, never baked into the page', asy
 
 test('CSP allows the runtime version endpoints and canonical uses the public domain', async () => {
   const headers = await readFile(resolve(dist, '_headers'), 'utf8');
-  assert.match(headers, /connect-src 'self' https:\/\/registry\.npmjs\.org https:\/\/api\.github\.com;/);
+  assert.match(headers, /connect-src 'self' https:\/\/registry\.npmjs\.org https:\/\/api\.github\.com https:\/\/cloudflareinsights\.com/);
   assert.match(html, /<link rel="canonical" href="https:\/\/dsh-any-agent\.xmtlz\.dev\/">/);
   assert.match(html, /property="og:image" content="https:\/\/dsh-any-agent\.xmtlz\.dev\/assets\/hero\.jpg"/);
 });
