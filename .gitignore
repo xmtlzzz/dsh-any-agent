@@ -53,3 +53,6 @@ credentials*.json
 *.tgz
 # 本机导出的快照（含会话正文，绝不入库）
 state/
+
+# 官网源码与 Cloudflare 部署文件仅保留在本地
+/website/
