@@ -48,6 +48,7 @@ DSH 自己有文件读写、shell、搜索、技能、子代理等全套工具�
    dsh_read(conversation_id, cursor)          中途看它当前吐出的内容（增量）
    dsh_get(conversation_id, run_id)           验收：取那一次派活的完整结果
 4. dsh_interject / dsh_interrupt              跑偏了就插话改口 / 直接打断
+                                              （会话空闲时 interject 等价于 wait=true，会阻塞到回合结束）
 5. dsh_release                                交还会话（释放写锁，之后仍可 resume）
 6. dsh_takeover                               写锁被别人占着时的**抢占**（见下）
 
@@ -86,9 +87,12 @@ dsh_interject —— 一个回合 = 一个哨兵，没有例外）。dsh_send �
 - 会话在忙时**不要**再 dsh_send：想改口用 dsh_interject，想停用 dsh_interrupt，
   想把话留到本轮结束后说用 dsh_interject(mode='queue')。
 - 思考内容**默认隐藏**（只返回字数/耗时统计）。确实需要时传 reasoning='full'，但很占上下文。
-- 权限档默认 ${DEFAULT_PERMISSION}，审批默认 ${process.env.DSH_MCP_APPROVAL ?? 'auto-allow'}（read-only 一律 auto-deny）。分析不信任样本（恶意软件、来路不明 dump）时用
+- 权限档默认 ${DEFAULT_PERMISSION}，审批默认 ${process.env.DSH_MCP_APPROVAL ?? 'auto-allow'}。**read-only 强制 auto-deny**：传 auto-allow/ask 会被直接拒绝（否则 DSH 的 sandbox 提权会被放行）。分析不信任样本（恶意软件、来路不明 dump）时用
   read-only：沙箱只读 + 审批一律拒绝。
 - 思考深度默认 max；想省钱可在 dsh_start 传 reasoning_effort 调低。
+- 隐私边界：本服务自己的日志、哨兵、注册表都不写思考正文（哨兵只留思考统计）；但 **DSH 自己的会话日志
+  ~/.dsh/sessions/** 会保存 reasoning，reasoning=hide 也照存** —— 分析敏感数据时要把它算进去。
+- 异步哨兵文件保存最终正文与工具输入（常见密钥字面量已脱敏），默认保留 7 天；消费后建议自行删除。
 - 想并行：开多个会话，dsh_list(only_running=true) 看谁在跑，再轮流 dsh_read。
 
 【不要做】

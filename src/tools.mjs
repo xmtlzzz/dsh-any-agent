@@ -39,7 +39,7 @@ export const TOOL_DEFS = [
           description:
             '工作区绝对路径。决定 agent 的工作目录、AGENTS.md/技能的发现范围、以及沙箱可写根。' +
             '**省略时自动用客户端当前打开的项目目录**（MCP roots），这样客户端里看到哪个项目就在这里干活；' +
-            '客户端不支持 roots 时才会要求你显式传入。别传用户家目录本身 —— 那里会让 DSH 的 ACL 沙箱起不来。',
+            '客户端不支持 roots、或 roots 为空时才会要求你显式传入。别传用户家目录本身 —— 那里会让 DSH 的 ACL 沙箱起不来。',
         },
         permission: {
           type: 'string',
@@ -52,7 +52,9 @@ export const TOOL_DEFS = [
         on_approval: {
           type: 'string',
           enum: APPROVAL_POLICIES,
-          description: `审批处理策略。默认 read-only → auto-deny，其余 → ${process.env.DSH_MCP_APPROVAL ?? 'auto-allow'}。ask 会把审批挂起，需用 dsh_approval_decide 裁决。`,
+          description:
+            `审批处理策略。**read-only 强制 auto-deny**（传 auto-allow/ask 会被直接拒绝，否则会放行 DSH 的 sandbox 提权）；` +
+            `其余档位默认 ${process.env.DSH_MCP_APPROVAL ?? 'auto-allow'}。ask 会把审批挂起，需用 dsh_approval_decide 裁决。`,
         },
         title_hint: {
           type: 'string',
@@ -103,7 +105,7 @@ export const TOOL_DEFS = [
         timeout_ms: {
           type: 'number',
           description:
-            '仅 wait=true 时的**等待**上限（毫秒），默认 30 分钟；0 = 一直等。到期不会取消回合，只会转成后台并给你 run_id。',
+            '仅 wait=true 时的**等待**上限（毫秒），**默认 0 = 一直等**（不会凭空发明 30 分钟）。到期不会取消回合，只会转成后台并给你 run_id。',
         },
       },
       ['conversation_id', 'prompt'],
@@ -137,7 +139,8 @@ export const TOOL_DEFS = [
       '不必等回合结束。典型用法：dsh_list(only_running) 找到在跑的会话 → 反复 dsh_read 并回传上次的 cursor，' +
       '就能像切换窗口一样轮流观察多个会话。' +
       '输出缓冲**只在内存里且有界**（环形，满则丢最旧），服务/进程退出即消失；' +
-      '**思考内容不进缓冲**——只有 include_reasoning=true 时才会附带"当前正在跑那一轮"的实时思考。',
+      '**思考内容不进缓冲**——只有 include_reasoning=true 时才会附带"当前正在跑那一轮"的实时思考。' +
+      'cursor 是**修订号**：同一条目被追加文本后会再次返回，调用方按 `seq` 用它替换全文（不要重复累加）。',
     inputSchema: S(
       {
         conversation_id: CONV_ID,
@@ -153,7 +156,8 @@ export const TOOL_DEFS = [
     description:
       '查看单个会话的详情；带 run_id 时**取那一次派活的最终结果**（异步模式的验收入口）。' +
       '不传 run_id 则取最近一次回合。返回：标题、工作区、权限档、状态、轮数、token 用量、' +
-      '上下文压力、待决审批，以及该回合的完整结果（正文/工具/用量/错误）。',
+      '上下文压力、待决审批，以及该回合的完整结果（正文/工具/用量/错误）。' +
+      '**run 记录只在内存、最多保留最近 20 条**；服务重启或记录被挤掉后请改读哨兵文件（它落盘且扛重启）。',
     inputSchema: S(
       {
         conversation_id: CONV_ID,
@@ -167,7 +171,7 @@ export const TOOL_DEFS = [
     description:
       '插话：会话正在跑某个回合时往里补一句话。两种模式——' +
       'interject（默认）打断当前回合并立刻改口；queue 不打断，等本轮自然结束后紧接着说。' +
-      '会话空闲时等同于一次普通 dsh_send。' +
+      '会话空闲时按 **wait=true 的普通回合**执行（会阻塞到回合结束并返回完整结果，不是收据）。' +
       '说明：ACP 明确拒绝并发 prompt，所以做不到"让模型在同一个回合里即时改向"；' +
       'interject 是它的实用等价物（取消 + 立刻开新回合，历史完整保留）。',
     inputSchema: S(
@@ -184,7 +188,7 @@ export const TOOL_DEFS = [
           enum: REASONING_MODES,
           description: `思考内容展示档位，默认 ${DEFAULT_REASONING}。`,
         },
-        timeout_ms: { type: 'number', description: '新回合的**等待**上限（毫秒），默认 30 分钟；0 = 一直等。到期转后台，不取消回合。' },
+        timeout_ms: { type: 'number', description: '新回合的**等待**上限（毫秒），**默认 0 = 一直等**；queue 模式也用它限制等待上一轮结束。到期转后台，不取消回合。' },
       },
       ['conversation_id', 'message'],
     ),
@@ -222,8 +226,10 @@ export const TOOL_DEFS = [
     name: 'dsh_release',
     description:
       '释放会话占用的 DSH 进程（释放写锁，让用户能在自己的 DSH GUI 里打开同一个会话）。' +
-      '会话本体留在磁盘上，之后仍可 resume；forget=true 才会从注册表里摘掉。' +
-      '★ 用完了想一次性腾内存就传 all=true（默认"永不回收"下每个会话约 300-480MB，全放掉即立刻归零，之后随时 resume）。',
+      '会话本体留在磁盘上，之后仍可 resume；**forget=true 会写墓碑**：从注册表移除，此后按 id 查询明确报“已被 forget”' +
+      '（想恢复可按错误里的路径删除墓碑文件，默认在 `$DSH_HOME/.dsh-any-agent-forgotten/<id>.json`）。' +
+      '★ 用完了想一次性腾内存就传 all=true（每个会话约 300-480MB；默认 `MAX_LIVE=8` 会回收最久未用者，' +
+      'all=true 可立即全部释放，之后随时 resume）。',
     inputSchema: S(
       {
         conversation_id: CONV_ID,
@@ -374,11 +380,24 @@ export function createHandlers(hub, opts = {}) {
         (snap.title_hint && snap.title !== snap.title_hint ? `（你给的标题提示: ${snap.title_hint}）` : ''),
         `工作区登记: ${snap.workspace_registered ? '已写入 DSH 工作区注册表（GUI 里能看到）' : '未登记'}`,
       ];
-      if (snap.config_failed?.length) lines.push(`⚠️ 配置未完全套用: ${snap.config_failed.join('; ')}`);
+      if (snap.config_failed?.length) {
+        lines.push(`⚠️ 配置未完全套用: ${snap.config_failed.join('; ')}`);
+        if (snap.config_failed.some((f) => String(f).startsWith('模型='))) {
+          lines.push(
+            '⚠️ 指定的 provider/model 无效：本会话已回退到 profile 默认模型，' +
+              '后续回合**不会**使用你指定的模型。',
+          );
+        }
+      }
       return { structured: snap, text: lines.join('\n') };
     },
 
     async dsh_send(args) {
+      // 空/纯空白 prompt 会被 DSH 以 [-32602] 拒绝；默认 wait=false 下那会变成
+      // 一个“accepted 但注定失败”的收据（错误只异步出现在哨兵里）。这里同步拦下。
+      if (typeof args.prompt !== 'string' || args.prompt.trim() === '') {
+        throw new Error('prompt 不能为空：至少包含一个非空白字符');
+      }
       const conv = hub.get(args.conversation_id);
       const opts = { reasoning: args.reasoning ?? DEFAULT_REASONING };
       if (args.timeout_ms) opts.timeoutMs = args.timeout_ms;
@@ -531,6 +550,9 @@ export function createHandlers(hub, opts = {}) {
     },
 
     async dsh_interject(args) {
+      if (typeof args.message !== 'string' || args.message.trim() === '') {
+        throw new Error('message 不能为空：至少包含一个非空白字符');
+      }
       const conv = hub.get(args.conversation_id);
       const opts = { mode: args.mode ?? 'interject', reasoning: args.reasoning ?? DEFAULT_REASONING };
       if (args.timeout_ms) opts.timeoutMs = args.timeout_ms;

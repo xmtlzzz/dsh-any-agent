@@ -4,7 +4,7 @@
  * 覆盖：MCP 协议边界、工具参数校验、生命周期幂等性、未知 id、脏输入。
  */
 
-import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,11 +78,44 @@ try {
   const badAppr = await client.callTool('dsh_start', { cwd: goodWs, on_approval: 'maybe' });
   check('非法 on_approval → isError', isErr(badAppr) && /on_approval/.test(txt(badAppr)), txt(badAppr).slice(0, 140));
 
+  // ★ read-only 是硬边界：显式 auto-allow/ask 会放行 DSH 的 sandbox 提权。
+  const roAllow = await client.callTool('dsh_start', { cwd: goodWs, permission: 'read-only', on_approval: 'auto-allow' });
+  check(
+    '★ read-only + auto-allow → isError（只读强制 auto-deny）',
+    isErr(roAllow) && /read-only/.test(txt(roAllow)) && /auto-deny/.test(txt(roAllow)),
+    txt(roAllow).slice(0, 240),
+  );
+  const roAsk = await client.callTool('dsh_start', { cwd: goodWs, permission: 'read-only', on_approval: 'ask' });
+  check(
+    '★ read-only + ask → isError（只读强制 auto-deny）',
+    isErr(roAsk) && /auto-deny/.test(txt(roAsk)),
+    txt(roAsk).slice(0, 240),
+  );
+
   const badEffort = await client.callTool('dsh_start', { cwd: goodWs, reasoning_effort: 'ultra' });
   check('非法 reasoning_effort → isError', isErr(badEffort) && /reasoning_effort/.test(txt(badEffort)), txt(badEffort).slice(0, 140));
 
   const modelNoProv = await client.callTool('dsh_start', { cwd: goodWs, model: 'deepseek-v4.1-flash' });
   check('给了 model 但没给 provider → isError', isErr(modelNoProv) && /provider/.test(txt(modelNoProv)), txt(modelNoProv).slice(0, 140));
+
+  const locksDir = join(tmpdir(), 'locks');
+  const locksBefore = existsSync(locksDir) ? readdirSync(locksDir).length : 0;
+  const badProvider = await client.callTool(
+    'dsh_start',
+    { cwd: goodWs, provider: 'no-such-provider-xyz', model: 'deepseek-flash' },
+    120_000,
+  );
+  check(
+    '★ 无效 provider/model → isError（不回退默认模型）',
+    isErr(badProvider) && /provider|模型/.test(txt(badProvider)),
+    txt(badProvider).slice(0, 260),
+  );
+  const locksAfter = existsSync(locksDir) ? readdirSync(locksDir).length : 0;
+  check(
+    '★ 失败路径不留下写锁登记',
+    locksAfter === locksBefore,
+    `${locksBefore} -> ${locksAfter}（${locksDir}）`,
+  );
 
   // ── 合法建会话 + reasoning_effort=default ─────────────────
   console.log('\n[C] 合法建会话与配置');

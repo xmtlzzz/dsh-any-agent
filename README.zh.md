@@ -4,16 +4,18 @@
 
 **给任何 MCP 客户端配一个能长期共事的编码搭子。**
 
-[English](README.md) · **简体中文**
+**[官网](https://dsh-any-agent.xmtlz.dev/)** · [English](README.md) · **简体中文**
 
 [![npm version](https://img.shields.io/npm/v/dsh-any-agent.svg?style=flat-square)](https://www.npmjs.com/package/dsh-any-agent)
 [![node](https://img.shields.io/node/v/dsh-any-agent.svg?style=flat-square)](https://nodejs.org)
 [![license](https://img.shields.io/npm/l/dsh-any-agent.svg?style=flat-square)](LICENSE)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
 
-[快速开始](#快速开始) · [主要优势](#-主要优势) · [工具](#-工具) · [使用注意事项](USAGE-NOTES.md) · [更新日志](CHANGELOG.md)
+[官网](https://dsh-any-agent.xmtlz.dev/) · [快速开始](#快速开始) · [主要优势](#-主要优势) · [工具](#-工具) · [使用注意事项](USAGE-NOTES.md) · [更新日志](CHANGELOG.md)
 
 </div>
+
+🧪 0.3.3 本机离线 673 项检查全绿（九种客户端配置齐全时 691 项；其中 517 项属于客户端注册器套件，齐全时 535 项） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
 
 一个 MCP 服务端，把 DeepSeek Harness 当作**长驻的编码 agent** 来驱动。开个会话、扔个目标，它自己写代码、跑脚本、派子代理；你随时能看、能插话、能回头验收。
 
@@ -68,7 +70,7 @@ DSH（DeepSeek Harness）本身**全都能做** —— 它有文件/shell 工具
 | 🗣️ **不用傻等** | 回合跑偏了能**插话改口**（约 100ms 收敛到 idle，四次打断实测），或**排队**等这轮跑完再说；打断后会话不损坏。 |
 | 📡 **跑完自动通知** | 长任务 `wait=false` 立刻返回 `run_id`；回合结束时**原子写出哨兵文件**，用你宿主的后台任务等它即可。不轮询、不占轮次。 |
 | 🪟 **多会话并发** | `dsh_list(only_running)` 看谁在跑，`dsh_read` 游标式增量读——像切窗口一样轮流盯。 |
-| 🧠 **灰色思考默认隐藏** | 只给"想了 N 字 / M 秒"的统计，不烧上下文；**不写日志、不落盘**。 |
+| 🧠 **灰色思考默认隐藏** | 只给"想了 N 字 / M 秒"的统计，不烧上下文；**本服务不写日志、不落盘**（DSH 自己的会话日志仍含思考，见“日志与隐私”）。 |
 | 🤫 **默认完全静默** | 一个字节都不输出，不污染宿主日志；stdout 只走协议。 |
 | 🧩 **能力可叠加** | DSH 自己还能挂别的 MCP（IDA Pro、浏览器、内部工具）——这是一座通往整个工具箱的桥。 |
 | 🛡️ **只读档真能只读** | `read-only` 沙箱 + 审批一律拒绝，适合分析不信任样本。 |
@@ -165,6 +167,8 @@ dsh --profile dsh-mcp --from-default-profile acp
 - 写入前后各解析一次，坏配置绝不落盘；坏 JSON 与只读文件一律拒绝而不是硬写，目录不存在则安全创建
 - **文本级写入**：只替换自己那个条目的字节，缩进（2 空格 / 4 空格 / Tab）、键顺序、CRLF 行尾、UTF-8 BOM、有无末尾换行都原样保留
 - **幂等**，重复运行只改变有差异的部分；第二次 `--yes` 不写盘、不新增 `.bak`
+
+**实测影响范围（2026-11-02，本机 plan 模式）：** 9 个客户端中检测到 5 个（Claude Code、Codex、Cursor、Zed、VS Code），其余 4 个跳过；`--json` 报告 `mode=plan, changed=5, skipped=4, failed=0`。所有已存在客户端配置的 SHA-256、大小与 mtime **全部未变**。真正执行 `--yes` 也是增量写入：只写 `dsh-any-agent` 这一个条目，其余字节原样保留，写前先落一份 `.bak-dsh-<时间戳>`；`--remove` 也只删这一个条目。
 
 ```bash
 dsh-any-agent-setup --yes --only cursor,zed     # 只装这几个
@@ -391,12 +395,12 @@ node test/smoke.mjs          # 不调用 LLM，验证整条管道
 | `dsh_start` | 建会话：工作区、权限档、审批策略、**思考深度（默认 `max`）**、模型 |
 | `dsh_send` | 派任务。**默认 `wait=false`：立刻返回 `run_id` + `sentinel_file`**，回合在后台跑，跑完由哨兵文件通知你（推荐）。`wait=true` 才原地阻塞到回合结束；到期（`timeout_ms`，默认 0 = 一直等）**只会转后台，不取消回合、不丢结果** |
 | `dsh_list` | 所有会话及运行状态：`running` / `idle` / `detached`，已跑时长、当前工具、本轮输出。`only_running=true` 只看活动会话 |
-| `dsh_read` | **游标式增量读**——看正在跑的会话此刻吐出了什么 |
-| `dsh_get` | 会话详情；带 `run_id` 时返回**那一次派活的完整结果**（"回头验收"的入口） |
-| `dsh_interject` | 会话在忙时插话：`interject` 打断并改口，`queue` 等本轮跑完接着说。**这一轮同样会写哨兵**，返回里给 `sentinel_file` |
+| `dsh_read` | **游标式增量读**——看正在跑的会话此刻吐出了什么。cursor 是**修订号**：文本被追加过的条目会再次返回，按 `seq` 替换全文（不要重复累加） |
+| `dsh_get` | 会话详情；带 `run_id` 时返回**那一次派活的完整结果**（"回头验收"的入口）。run 记录只在内存（最近 20 条），服务重启后请读哨兵文件 |
+| `dsh_interject` | 会话在忙时插话：`interject` 打断并改口，`queue` 等本轮跑完接着说。**这一轮同样会写哨兵**，返回里给 `sentinel_file`。会话空闲时等价于 `wait=true`，**会阻塞到回合结束** |
 | `dsh_takeover` | **抢占写锁**。锁被别的 DSH 进程占着时的唯一出路（DSH 没有夺锁 API，抢 = 杀掉持有者）。先判定持有者：本服务残留的孤儿 → 自动抢；另一个活着的实例 → 需 `force`；**GUI/未知 → 绝不杀**，只报告 |
 | `dsh_interrupt` | 打断当前回合（会话不会损坏） |
-| `dsh_release` | 交还会话（释放写锁，之后可在你自己的 DSH GUI 里打开）。仍可 resume |
+| `dsh_release` | 交还会话（释放写锁，之后可在你自己的 DSH GUI 里打开）。仍可 resume；`forget=true` 会写墓碑，此后按 id 查询一律拒绝，直到删除 `$DSH_HOME/.dsh-any-agent-forgotten/<id>.json` |
 | `dsh_approval_decide` | 裁决待决审批（仅当 `on_approval=ask`） |
 | `dsh_status` | 轻量状态查询 |
 
@@ -445,7 +449,7 @@ echo "DONE"                            # 后台任务退出 → 宿主唤醒你 
 - **闩锁语义**：文件写一次并保留。即便 run 在你启动等待任务**之前**就已完成，`[ -f ]` 也立刻为真，不会漏。
 - **原子落地**：`tmp` + `rename`，文件一旦存在内容必然完整；每个 run 用独立 tmp，并发写互不干扰。
 - **无主动推送**：本服务在 MCP 协议上只应答请求、不发通知；"跑完通知"完全由这个哨兵文件 + 你的后台等待任务实现。
-- **★ 哨兵里没有思考内容**：载荷只含正文与思考**统计**；`result.thinking` 会被剥掉并置 `thinking_omitted: true`——本项目的红线是思考不落盘。`dsh_get(run_id)` 在内存里仍能看到它（记录还在时）。设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 可以故意打破这条保证。
+- **★ 哨兵里没有思考内容**：载荷含正文、思考**统计**、用量与（已脱敏的）工具输入，但没有思考正文；`result.thinking` 会被剥掉，并始终给出布尔 `thinking_omitted`（剥离了为 `true`，本来没有为 `false`）——本服务自己的落盘物里不写思考。`dsh_get(run_id)` 在内存里仍能看到它（记录还在时）。设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 可以故意打破这条保证。注意：**DSH 自己的会话日志仍含思考**，见“日志与隐私”。
 
 > 清理：哨兵内含完整正文，所以服务**启动时会清掉超过 7 天的哨兵**（用 `DSH_MCP_SENTINEL_TTL_MS` 调；`0` 关闭）。等待任务消费后仍建议自行 `rm`。
 
@@ -457,7 +461,7 @@ echo "DONE"                            # 后台任务退出 → 宿主唤醒你 
      - … | id=33427096… | 🔵进行中(已跑8s, 本轮输出=34字)        | cwd=…
 2. dsh_read(id,  cursor=0)      # 读第一个，记下 cursor
 3. dsh_read(id2, cursor=0)      # 切到第二个
-4. dsh_read(id,  cursor=<上次>) # 切回来，只拿增量
+4. dsh_read(id,  cursor=<上次>) # 切回来；上次之后被追加过的条目会再次出现（按 seq 替换全文）
 ```
 
 ## 🤫 思考内容：默认隐藏
@@ -477,6 +481,8 @@ DSH 在模型层就把思考与正文分开，ACP 又把它们做成**两条独�
 | `read-only` | `auto-deny` | 分析不信任样本（恶意软件、来路不明 dump） |
 
 `on_approval` 可选 `auto-allow` / `auto-deny` / `ask`（`ask` 会把审批挂起，交给 `dsh_approval_decide` 裁决）。
+
+**`read-only` 是强制边界，不只是默认值**：它固定使用 `auto-deny`；给只读会话传 `auto-allow` / `ask` 会在 `dsh_start` 被直接拒绝，审批层也会拒绝来自只读会话的任何权限请求。否则 DSH 可以请求 `sandbox_permissions` 提权，而宽松的审批策略会把写操作放行（对抗审计实测过）。
 
 ## 🪟 会话在 DSH GUI 里的可见性
 
@@ -516,13 +522,13 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 | `debug` | 更细的本服务事件；仍不打印 DSH 输出 |
 | `DSH_MCP_LOG_STDERR=1` | 额外转发 DSH 原始 stderr（**可能含思考内容**） |
 
-**思考内容不落盘**，只有一个**刻意留下**的例外：
+**本服务不把思考内容写进自己的落盘物**，只有一个**刻意留下**的例外：
 
-- 不写日志（默认静默）；状态文件只有元数据（id、cwd、权限、计数），冒烟测试里有一条断言专门守这个。
-- **异步完成哨兵需要把正文写进文件**（否则调用方无法离线收活），但 `result.thinking` 会被**剥掉**并置 `thinking_omitted: true`。测试里专门验证了：即使请求 `reasoning=full`，哨兵里也不出现任何思考文本——而同一 run 在内存（`dsh_get`）里仍能看到。设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 可刻意打破这条。
+- 不写日志（默认静默）；状态文件与 `.state/meta/` 下的会话元数据侧车都只有元数据（id、cwd、权限、计数、标题提示），冒烟测试里有一条断言专门守注册表。
+- **异步完成哨兵需要把正文写进文件**（否则调用方无法离线收活），载荷还包含用量与（已按审批规则脱敏的）工具输入，但 `result.thinking` 会被**剥掉**，并始终给出布尔 `thinking_omitted`。测试里专门验证了：即使请求 `reasoning=full`，哨兵里也不出现任何思考文本——而同一 run 在内存（`dsh_get`）里仍能看到。设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 可刻意打破这条。
 - 哨兵默认 7 天后由启动清理删除（`DSH_MCP_SENTINEL_TTL_MS`，`0` 表示永久保留）。
 
-（DSH 自己会在 `~/.dsh/sessions` 写会话日志，那是 resume 的依据，不在本服务控制范围内。）
+> ⚠️ **DSH 自己会在 `~/.dsh/sessions` 写会话日志，而且其中包含完整 reasoning 文本**（即使 `reasoning=hide` 也照存）。那是 resume 的依据，不在本服务控制范围内；“思考不落盘”的绝对表述只适用于**本服务自己的**日志/哨兵/注册表。
 
 ## ⚙️ 环境变量
 
@@ -565,18 +571,21 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | 套件 | 检查数 | 覆盖 |
 |---|---|---|
 | `smoke` | 29 | 握手、工具表、建会话、配置、注册表纯净性 |
-| `boundary` | 42 | 协议边界（重复 initialize、脏行、未知方法）、参数校验、未知 id、游标边界、生命周期幂等、unicode |
+| `boundary` | 46 | 协议边界（重复 initialize、脏行、未知方法）、参数校验（含 read-only + 宽松审批必须拒绝、未知 provider/model、失败创建不留下写锁登记）、未知 id、游标边界、生命周期幂等、unicode |
 | `integration` | 30 | 跨进程 resume 与记忆、中断、两种插话 |
 | `async` | 16 | fire-and-forget + 事后验收 |
 | `sentinel` | 36 | 完成哨兵：原子性、闩锁语义、多会话并发不串台、被取消也落地、**思考不进文件** |
 | `prune` | 11 | **哨兵留存**：清超期与崩溃残留、留新、清空壳目录、`TTL=0` 关闭清理、且绝不碰同目录的会话注册表（不花 token，每次必跑） |
 | `guards` | 31 | **环境变量守卫**：奇怪的数值一律压到安全侧 —— `IDLE_TTL_MS` 的 `-1`/非法值都当"永不回收"（绝不主动让出写锁）、回收间隔过小压回默认（防空转紧循环）、**失联阈值下限 30 秒**（防别的实例"合法地"抢占并杀掉我们的回合）（不花 token，每次必跑） |
 | `sandbox-guard` | 18 | **测试沙箱自身**：「临时 HOME」如果落到真实用户目录、它的子目录、盘符根目录，或 OS 临时目录之外，一律报错拒绝，绝不被写入和删除。其余套件都通过 `test/sandbox-home.mjs` 拿目录、只销毁自己建的那个（不花 token，每次必跑） |
-| `approval-details` | 24 | **审批审查上下文**：待决审批的快照带命令、理由、cwd 与原始审批 ID —— 不只是一个裸 ID，调用方才能真正裁决；凭据形状的字段与常见内联字面量在结构化上下文和展示标题里都会脱敏。经真实 stdio MCP 端到端验证 |
+| `approval-details` | 27 | **审批审查上下文**：待决审批的快照带命令、理由、cwd 与原始审批 ID —— 不只是一个裸 ID，调用方才能真正裁决；缺失的 `rawInput` 会按 ID 从先前的 `tool_call` 更新关联回来；凭据形状的字段与常见内联字面量在结构化上下文和展示标题里都会脱敏；关闭会话会取消待决审批。经真实 stdio MCP 端到端验证 |
+| `read-cursor` | 10 | **`dsh_read` 游标语义**：追加到已读条目里的文本必须再次返回（修订号游标，按 `seq` 替换全文）；`limit` 钳到 1..500，`0`/负数不会空转或丢尾（不花 token） |
+| `sentinel-redaction` | 11 | **哨兵落盘卫生**：`result.thinking` 被剥掉、`thinking_omitted` 始终是布尔值、`tools_used[].input` 走与审批相同的凭据脱敏（不花 token） |
+| `forget-tombstone` | 7 | **`forget` 是终态**：`release(forget=true)` 写墓碑，按 id 查询明确失败并给出恢复路径，列表不再展示；删除墓碑后回到常规“未知会话”路径（不花 token） |
 | `setup` | 41 | **注册 CLI**：预览不写盘、`--remove` 只摘自己那条、没装客户端算跳过不算失败、Codex TOML 段往返、以及把写进配置里的命令真的拉起一次并要求应答 `initialize`（不花 token） |
 | `removal-scope` | 24 | **注销只动自己那条**：给一份装着别的 MCP 服务器、顶层 Codex 设置和 Zed 兄弟设置的配置，注册再注销，断言其余每个值逐字节不变；删一个从没写过的东西 = 无写入、无报错（不花 token） |
-| `config-safety` | 403 | **0.3 这条线的核心性质**，逐客户端验证：预览后文件逐字节不变且不产生 `.bak`；注册再注销后其余条目逐字节还原、键顺序不变、顶层键不丢；4 空格 / 2 空格 / Tab 缩进、单行 JSON、无末尾换行、CRLF、UTF-8 BOM 都能在写入后保留；坏 JSON 与只读文件被拒绝且原文件无损；第二次 `--yes` 空跑不新增备份；每个 `.bak-dsh-<时间戳>` 只出现一次且内容等于写入前字节（不花 token） |
-| `real-configs` | 66 | **拿真家伙做往返**：把本机**真实**的客户端配置复制进临时目录（18 万字节、含几百个 `projects` 条目与大小写重复键的 `~/.claude.json`，238 行的 Codex TOML，Zed 的完整 `settings.json`），注册再撤销，要求每个文件**逐字节**还原；CI 上没有这些文件时明确打印 `skipped`，绝不假绿（不花 token） |
+| `config-safety` | 404 | **0.3 这条线的核心性质**，逐客户端验证：预览后文件逐字节不变且不产生 `.bak`；注册再注销后其余条目逐字节还原、键顺序不变、顶层键不丢；4 空格 / 2 空格 / Tab 缩进、单行 JSON、无末尾换行、CRLF、UTF-8 BOM 都能在写入后保留；坏 JSON 与只读文件被拒绝且原文件无损；第二次 `--yes` 空跑不新增备份；每个 `.bak-dsh-<时间戳>` 只出现一次且内容等于写入前字节（不花 token） |
+| `real-configs` | 66（本机 5/9 配置时 48） | **拿真家伙做往返**：把本机**真实**的客户端配置复制进临时目录（18 万字节、含几百个 `projects` 条目与大小写重复键的 `~/.claude.json`，238 行的 Codex TOML，Zed 的完整 `settings.json`），注册再撤销，要求每个文件**逐字节**还原；条目是否存在按**键**判断而不是裸子串；缺少 fixture 时明确打印 `skipped`，绝不假绿（不花 token） |
 | `timeout` | 38 | **超时语义**：`wait=false` 不受 `timeout_ms` 影响、`wait=true` 到期只转后台（不取消/不丢结果、`busy` 不说谎）、`timeout_ms<=0` 一直等、resume 失败会作废进程而不永久卡死、空 prompt 给清晰错误 |
 | `lock` | 79 | **写锁与抢占**：四类持有者判定、`writeMarker` 不覆盖活着的持有者、登记文件损坏/目录缺失等边界；**端到端**两实例抢锁 → 清晰报错 → 拒绝 → `force` 夺锁；**崩溃自动释放锁**、**卡死持有者无 force 自动抢占**；以及"一个回合 = 一个哨兵"的不变量（含内联回合与空闲插话） |
 | `cycle` | 36 | **异步派活的生命周期**：异步派活 → 收哨兵 → 空闲回收 → 再派活，连做 3 轮必须全程无锁错误；贴着回收窗口立刻重派（放大竞态）；`dsh_release` 后立刻重派；并断言回收后**不留下无法归因的锁**（这条实测抓到过"刚拉起的进程被 reaper 当空闲收掉"的竞态） |
@@ -584,17 +593,17 @@ node test/cleanup.mjs      # 单独跑收尾清理（只针对临时目录；--d
 | `capability` | 22 | 写代码、跑脚本、**自行派子代理**（用磁盘上的子会话头验证） |
 | `workspace-effect` | 24 | 不给路径时工作区是否真的生效 |
 | `acceptance` | 36 | 两个文件夹 × 两个会话做只读 IDA Pro 分析 |
-| `multi` | 19 | **多实例共存 + 非 ASCII 路径**：复现"两实例共写注册表 → 后写的把先建的会话抹掉"，并验证**仅凭 id 就能从会话存储找回并真的派活**；**兜底取回不会悄悄提权**（read-only 会话取回后仍是 read-only）；不留 `.tmp` 残渣；**中文 / emoji 工作区路径**能建会话、能干活、文件落在正确目录 |
+| `multi` | 19 | **多实例共存 + 非 ASCII 路径**：复现"两实例共写注册表 → 后写的把先建的会话抹掉"，并验证**仅凭 id 就能从会话存储找回并真的派活**（指注册表丢失，不是显式 `forget` —— forget 是终态墓碑）；**兜底取回不会悄悄提权**（read-only 会话取回后仍是 read-only）；不留 `.tmp` 残渣；**中文 / emoji 工作区路径**能建会话、能干活、文件落在正确目录 |
 | `permission` | 11 | ★ **权限档是否真的生效**（安全属性）：不看我们的返回值（那正是会说谎的地方），而是读**会话自己记录的事实**（投影缓存里的 `permissions.preset` / `sandboxMode`），三档逐一核对且三档记录值互不相同。**这条测试抓到过无声提权**：profile 里 `defaultPreset` 会在会话创建时盖掉 `DSH_PERMISSION_MODE` |
 | `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
 
-**离线那半边是 660 项检查，0.3.2 上全绿** —— `guards` 31、`prune` 11、`approval-details` 24、`sandbox-guard` 18、`setup` 41、`removal-scope` 24、`config-safety` 403、`real-configs` 66、`package-check` 14、`roots` 12、`workspace-titles` 15。九套全部退出码 0，都不需要模型、不需要装 DSH、也不需要 provider。
+**离线套件在九种客户端配置齐全时合计 691 项（本机 5/9 配置时 673 项），0.3.3 上全绿** —— `guards` 31、`prune` 11、`approval-details` 27、`sandbox-guard` 18、`setup` 41、`removal-scope` 24、`config-safety` 404、`real-configs` 66（本机 48）、`package-check` 14、`roots` 12、`workspace-titles` 15、`read-cursor` 10、`sentinel-redaction` 11、`forget-tombstone` 7。全部退出码 0，都不需要模型、不需要装 DSH、也不需要 provider。
 
-其中 **619 项属于客户端注册器套件**（`setup`、`removal-scope`、`config-safety`、`real-configs`）—— 0.3 的活其实都在这里。
+其中 **535 项属于客户端注册器套件**（`setup`、`removal-scope`、`config-safety`、`real-configs`；本机 5/9 配置时 517 项）—— 0.3 的活其实都在这里。
 
-需要模型的套件（`smoke` 29、`boundary` 42、`integration` 30、`async` 16、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13）合计 462 项，**完整实测停在 0.1.2** —— 它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。
+需要模型的套件（`smoke` 29、`boundary` 46、`integration` 30、`async` 16、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13）合计 466 项，**完整实测停在 0.1.2** —— 它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**。
 
-> 数字取各套件自己打印的汇总，不在这里手抄。`smoke`/`prune`/`guards`/`sandbox-guard`/`approval-details`/`boundary`/`setup`/`removal-scope`/`config-safety`/`package-check` 不调用模型；其余需要可用的 provider。
+> 数字取各套件自己打印的汇总，不在这里手抄。`smoke`/`prune`/`guards`/`sandbox-guard`/`approval-details`/`boundary`/`setup`/`removal-scope`/`config-safety`/`package-check`/`read-cursor`/`sentinel-redaction`/`forget-tombstone` 不调用模型；其余需要可用的 provider。
 
 ### 🧯 为什么会有 `sandbox-guard`
 

@@ -37,12 +37,14 @@ const timed = async (args) => {
   return { ms: Date.now() - t, s: r?.structuredContent ?? {} };
 };
 
+let trackedId = null;
 try {
   await client.initialize();
   const ws = join(ROOT, 'ws');
   mkdirSync(ws, { recursive: true });
   const st = await client.callTool('dsh_start', { cwd: ws, permission: 'danger-full-access' }, 180_000);
   const conv = st?.structuredContent?.conversation_id;
+  trackedId = conv ?? null;
   check('会话已建', !!conv, McpClient.text(st).slice(0, 140));
 
   console.log('\n[1] 默认调用：第一次要付磁盘探测的代价');
@@ -94,7 +96,9 @@ try {
 } finally {
   await client.close();
   const { purgeTestSessions } = await import('../src/workspace.mjs');
-  purgeTestSessions({ tempOnly: true });
+  // 只删本套件自己创建的会话（idsOnly），绝不再用 tempOnly —— 那会删掉
+  // 其他进程/测试正在使用的临时工作区会话（实测导致 ENOENT 与跨套件误杀）。
+  purgeTestSessions({ ids: trackedId ? [trackedId] : [], idsOnly: true });
   for (let i = 0; i < 3; i++) {
     try {
       rmSync(ROOT, { recursive: true, force: true });

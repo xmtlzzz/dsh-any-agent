@@ -103,7 +103,8 @@ try {
 } finally {
   await client.close();
   const { purgeTestSessions } = await import('../src/workspace.mjs');
-  purgeTestSessions({ tempOnly: true });
+  // idsOnly：只清理本套件创建的会话，不再按 %TEMP% 一刀切。
+  purgeTestSessions({ ids: convs.filter(Boolean), idsOnly: true });
   for (let i = 0; i < 3; i++) {
     try {
       rmSync(ROOT, { recursive: true, force: true });
