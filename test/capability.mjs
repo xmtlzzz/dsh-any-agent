@@ -177,8 +177,9 @@ try {
   );
 
   console.log('\n[4] 收尾');
-  for (const r of results) await client.callTool('dsh_release', { conversation_id: r.id, forget: true });
-  check('全部释放', true);
+  const released = [];
+  for (const r of results) released.push(await client.callTool('dsh_release', { conversation_id: r.id, forget: true }));
+  check('全部释放', released.length > 0 && released.every((r) => r?.structuredContent?.closed === true), JSON.stringify(released.map((r) => r?.structuredContent?.closed)));
   console.log(`    总耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
 } catch (e) {
   failCount++;

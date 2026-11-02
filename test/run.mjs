@@ -1,7 +1,7 @@
 /**
- * 测试入口：先跑冒烟（不花 token），再跑集成（会调用真实 LLM）。
- * 用法：npm test          只跑冒烟
- *       npm test -- --all 冒烟 + 集成
+ * 测试入口：默认跑全部离线套件（不花 token；smoke 在无 DSH 时跳过会话段）。
+ * 用法：npm test              离线套件
+ *       npm run test:all      离线 + 需要真实 DSH/模型的套件
  */
 
 import { spawn } from 'node:child_process';

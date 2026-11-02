@@ -155,8 +155,8 @@ try {
   // 把这条会话从磁盘上删掉，再派活 → resume 必然失败。
   // ⚠️ 必须用 idsOnly：否则"临时目录"那条规则会把同批次的其它会话（比如 convA）一起删掉，
   //    后面的用例就会莫名其妙失败（本测试真的踩过这个坑）。
-  purgeTestSessions({ ids: [convB], idsOnly: true });
-  check('会话文件已删除（构造 resume 失败）', true);
+  const purged = purgeTestSessions({ ids: [convB], idsOnly: true });
+  check('会话文件已删除（构造 resume 失败）', purged.count >= 1 && purged.victims.some((v) => v.id === convB), JSON.stringify(purged.victims));
 
   const bad1 = await client.callTool('dsh_send', { conversation_id: convB, prompt: '随便', wait: false }, 180_000);
   const bad1Text = McpClient.text(bad1);
@@ -203,8 +203,12 @@ try {
   console.log(`    空 prompt 的结果: ${empty?.isError ? 'isError' : `stop_reason=${empty?.structuredContent?.stop_reason}`}${emptyErr ? ` err=${String(emptyErr).slice(0, 120)}` : ''}`);
 
   console.log('\n[7] 收尾');
-  for (const id of convs) await client.callTool('dsh_release', { conversation_id: id, forget: true });
-  check('已释放', true);
+  const closed = [];
+  for (const id of convs) {
+    const rel = await client.callTool('dsh_release', { conversation_id: id, forget: true });
+    closed.push(rel?.structuredContent?.closed === true);
+  }
+  check('已释放', closed.length > 0 && closed.every(Boolean), JSON.stringify(closed));
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

@@ -239,10 +239,16 @@ try {
   check('标题含 emoji/控制符仍能建会话', !!emoji?.structuredContent?.conversation_id, txt(emoji).slice(0, 160));
 
   console.log('\n[H] 收尾');
+  const closed = [];
   for (const id of [convId, lowId, emoji?.structuredContent?.conversation_id, realStart?.structuredContent?.conversation_id].filter(Boolean)) {
-    await client.callTool('dsh_release', { conversation_id: id, forget: true });
+    closed.push(await client.callTool('dsh_release', { conversation_id: id, forget: true }));
   }
-  check('全部释放完成', true);
+  // 有些会话在前面的生命周期用例里已经 release/forget 过；此时 release 会返回
+  // “已被 forget” 的 isError。两者都算清理完成，不能因为重复 release 失败而假红。
+  const cleaned = closed.length > 0 && closed.every(
+    (r) => r?.structuredContent?.closed === true || r?.isError === true,
+  );
+  check('全部释放完成', cleaned, JSON.stringify(closed.map((r) => ({ closed: r?.structuredContent?.closed, isError: r?.isError }))));
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

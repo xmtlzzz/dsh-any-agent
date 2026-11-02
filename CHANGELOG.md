@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Post-0.3.7 hardening.
+Post-0.3.8 hardening.
+
+## [0.3.8] — 2026-11-02
+
+### Changed
+
+- `npm test` now works without a local DSH: smoke still checks handshake and
+  the tool table, then skips session-dependent sections instead of failing, so
+  all offline suites run. `npm run test:all` is the explicit full-suite entry.
+- Added the `model-suites` workflow for a self-hosted runner with DSH and
+  provider credentials; hosted runners print an explicit skip.
+- Added an English `USAGE-MIGRATION.en.md` and linked it from the English
+  README and `/en/` install section.
+
+### Testing
+
+- Removed the remaining always-true `check(..., true)` assertions; cleanup
+  checks now assert actual release/forget results or timeout state.
+- `prune` runs with an isolated `DSH_HOME` so it cannot touch real tombstones.
+- Added 8 static accessibility tests for both locales (28 website tests total
+  counting the existing site/release/demo suites).
+- `readHeaderAsync` now uses `StringDecoder` for multi-byte UTF-8 boundaries.
+
+### Website
+
+- `robots.txt` now mirrors the complete Cloudflare Managed crawler list, not
+  just the four most common bots.
 
 ## [0.3.7] — 2026-11-02
 
@@ -670,7 +696,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.7...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.8...HEAD
+[0.3.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.4...v0.3.5

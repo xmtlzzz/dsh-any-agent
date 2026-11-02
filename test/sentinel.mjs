@@ -93,7 +93,7 @@ try {
   let doc = null;
   try {
     doc = readSentinel(sA.sentinel_file);
-    check('原子可解析为合法 JSON', true);
+    check('原子可解析为合法 JSON', doc && typeof doc === 'object', JSON.stringify(doc));
   } catch (e) {
     check('原子可解析为合法 JSON', false, e.message);
   }
@@ -193,8 +193,12 @@ try {
   check('没有残留的 .tmp 文件', tmpLeft.length === 0, JSON.stringify(tmpLeft));
 
   console.log('\n[10] 收尾');
-  for (const id of [convA, convC]) await client.callTool('dsh_release', { conversation_id: id, forget: true });
-  check('会话已释放', true);
+  const closed = [];
+  for (const id of [convA, convC]) {
+    const rel = await client.callTool('dsh_release', { conversation_id: id, forget: true });
+    closed.push(rel?.structuredContent?.closed === true);
+  }
+  check('会话已释放', closed.length === 2 && closed.every(Boolean), JSON.stringify(closed));
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

@@ -132,9 +132,10 @@ try {
   check('未知 run_id 返回 isError', bogus?.isError === true, McpClient.text(bogus).slice(0, 140));
 
   console.log('\n[8] 收尾');
-  await client.callTool('dsh_release', { conversation_id: convA, forget: true });
-  await client.callTool('dsh_release', { conversation_id: convB, forget: true });
-  check('两个会话已释放', true);
+  const relA = await client.callTool('dsh_release', { conversation_id: convA, forget: true });
+  const relB = await client.callTool('dsh_release', { conversation_id: convB, forget: true });
+  check('两个会话已释放', relA?.structuredContent?.closed === true && relB?.structuredContent?.closed === true,
+    JSON.stringify([relA?.structuredContent?.closed, relB?.structuredContent?.closed]));
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

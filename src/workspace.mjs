@@ -19,6 +19,7 @@ import { copyFileSync, createReadStream, readFileSync, writeFileSync, existsSync
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
+import { StringDecoder } from 'node:string_decoder';
 import { createZstdDecompress, zstdDecompressSync } from 'node:zlib';
 import { DSH_HOME, REGISTER_WORKSPACE } from './config.mjs';
 
@@ -245,6 +246,7 @@ export async function readHeaderAsync(file, { timeoutMs = 5000, maxHeaderBytes =
     let settled = false;
     let buf = '';
     let timer = null;
+    const decoder = new StringDecoder('utf8');
     const rs = createReadStream(file);
     const zs = createZstdDecompress();
     const finish = (value) => {
@@ -268,12 +270,15 @@ export async function readHeaderAsync(file, { timeoutMs = 5000, maxHeaderBytes =
     rs.on('error', () => finish(null));
     zs.on('error', () => finish(null));
     zs.on('data', (chunk) => {
-      buf += chunk.toString('utf8');
+      // 用 StringDecoder 处理跨 chunk 的多字节 UTF-8（中文/emoji 路径），
+      // 避免 chunk.toString() 把字符截成乱码。
+      buf += decoder.write(chunk);
       const nl = buf.search(/\r?\n/);
       if (nl >= 0) parseLine(buf.slice(0, nl));
       else if (buf.length > maxHeaderBytes) finish(null);
     });
     zs.on('end', () => {
+      buf += decoder.end();
       const line = buf.split(/\r?\n/).find(Boolean);
       if (line) parseLine(line);
       else finish(null);

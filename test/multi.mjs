@@ -153,7 +153,8 @@ try {
       } catch {}
     }
   }
-  check('已释放', true);
+  const gone = await A.callTool('dsh_get', { conversation_id: conv1 });
+  check('已释放（forget 后按 id 查询明确失败）', gone?.isError === true && /已被 forget/.test(McpClient.text(gone)), McpClient.text(gone).slice(0, 160));
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

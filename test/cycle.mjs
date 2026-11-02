@@ -177,13 +177,14 @@ try {
   check('★★ 回合进行中心跳也在续（修掉了"长回合被别的实例误杀"）', typeof hb4 === 'number' && hb4 > hb3, `${hb3} → ${hb4}`);
   // 等它跑完，避免带着 busy 收尾
   let waited = 0;
+  let ended = false;
   while (waited < 120_000) {
     const st = await keep.callTool('dsh_status', { conversation_id: conv2 });
-    if (st?.structuredContent?.busy === false) break;
+    if (st?.structuredContent?.busy === false) { ended = true; break; }
     await sleep(2000);
     waited += 2000;
   }
-  check('长回合已结束', true, `waited=${waited}ms`);
+  check('长回合已结束', ended, `waited=${waited}ms`);
 
   await keep.callTool('dsh_release', { conversation_id: conv2, forget: true }, 60_000);
   await keep.close();
@@ -245,8 +246,8 @@ try {
 
   // ── [8] 收尾 ────────────────────────────────────────────────
   console.log('\n[8] 收尾');
-  await client.callTool('dsh_release', { conversation_id: conv, forget: true }, 60_000);
-  check('已释放', true);
+  const relEnd = await client.callTool('dsh_release', { conversation_id: conv, forget: true }, 60_000);
+  check('已释放', relEnd?.structuredContent?.closed === true, JSON.stringify(relEnd?.structuredContent));
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

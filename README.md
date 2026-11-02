@@ -15,7 +15,7 @@
 
 </div>
 
-🧪 815 checks green on 0.3.7 on this machine (851 when all nine client fixtures exist); 519 of them are in the client-registration suites (555 with all fixtures) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 815 checks green on 0.3.8 on this machine (851 when all nine client fixtures exist); 519 of them are in the client-registration suites (555 with all fixtures) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Hand it a goal, let it write code and run scripts, steer it mid-flight, and collect the result when you are ready.
 
@@ -33,7 +33,7 @@ dsh-any-agent-setup --yes
 
 The second command previews the changes; `--yes` applies them. Reconnect your client's MCP server, then ask your agent to start a DSH conversation in your project, dispatch a task, and collect the result. The [dispatch workflow](#-workflow-dispatch-then-collect-later) shows the tool sequence.
 
-> **Before your first task:** read the [Usage Notes](USAGE-NOTES.en.md), especially the model-config and external-MCP permission boundaries. External MCP tools bypass DSH's sandbox. For a fresh machine, follow the [migration guide](USAGE-MIGRATION.md).
+> **Before your first task:** read the [Usage Notes](USAGE-NOTES.en.md), especially the model-config and external-MCP permission boundaries. External MCP tools bypass DSH's sandbox. For a fresh machine, follow the [migration guide](USAGE-MIGRATION.en.md).
 
 <details>
 <summary>Full contents</summary>
@@ -550,10 +550,14 @@ Silent by default — **not one byte is written**.
 ## 🧪 Tests
 
 ```bash
-node test/run.mjs          # all offline suites (no LLM calls; needs DSH for smoke)
-node test/run.mjs --all    # offline + model-backed suites
+npm test                   # offline suites; smoke skips DSH sections if no DSH
+npm run test:all           # offline + model-backed suites (needs DSH/provider)
 node test/cleanup.mjs      # suite teardown on its own (test-created dirs only; --dry-run to preview)
 ```
+
+Model-backed suites are not part of the hosted CI matrix (they need a real DSH
+install and provider credentials). Run them locally, or dispatch the
+`model-suites` workflow with a self-hosted runner that has DSH configured.
 
 The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, which removes sessions and workspace registrations whose cwd is **a test-created directory** (`tmpdir()/dsh-any-agent-*` or `Desktop/dsh-any-agent-test-*`). Real project sessions — including projects under `%TEMP%` — and your live state directory are never touched. To remove `Desktop/dsh-any-agent-test-*` artifacts explicitly, run `node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions`.
 
@@ -595,11 +599,11 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
 | `reasoning-check` | 8 | **reasoning visibility**: `reasoning=hide` returns no thinking body but non-zero stats; `reasoning=full` returns the text and the rendered section |
 
-**`node test/run.mjs` runs 815 checks on a machine with five client fixtures (851 with all nine)** — smoke 29 + 786 offline checks (822 with nine). Every suite exited 0 on 0.3.7; none needs a provider (smoke needs a DSH install for its session-creation section).
+**`node test/run.mjs` runs 815 checks on a machine with five client fixtures (851 with all nine)** — smoke 29 + 786 offline checks (822 with nine). Every suite exited 0 on 0.3.8; none needs a provider (smoke skips its session-creation sections when DSH is absent).
 
 That is **519 assertions in the client-registration suites alone** (`setup` 41, `removal-scope` 24, `config-safety` 406, `real-configs` 48; 555 with all nine fixtures), which is where the 0.3 work actually is.
 
-The model-backed suites (`smoke` 29, `boundary` 46, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8) total 474 and were last measured in full on 0.3.7 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
+The model-backed suites (`smoke` 29, `boundary` 46, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8) total 474 and were last measured in full on 0.3.8 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
 
 > Three different totals are intentional: `node test/run.mjs` (815/851), the CI offline job (786/822, no smoke), and the model-backed set (474 nominal). Counts are the numbers each suite prints itself; don't use one number for a different runner.
 

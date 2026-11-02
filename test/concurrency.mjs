@@ -159,10 +159,12 @@ try {
   }
 
   console.log('\n[7] 收尾');
+  const closed = [];
   for (const c of CASES) {
-    await client.callTool('dsh_release', { conversation_id: conv.get(c.key).id, forget: true });
+    const rel = await client.callTool('dsh_release', { conversation_id: conv.get(c.key).id, forget: true });
+    closed.push(rel?.structuredContent?.closed === true);
   }
-  check('三个会话均已释放', true);
+  check('三个会话均已释放', closed.length === CASES.length && closed.every(Boolean), JSON.stringify(closed));
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

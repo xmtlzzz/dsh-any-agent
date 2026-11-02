@@ -2,7 +2,15 @@
 
 > 目标：做一个 MCP Server，让 **Codex / Claude Code** 能调用 **DeepSeek Harness (DSH)** 当"外包工程师"——写代码、搭脚手架、跑任务，并且 DSH 自己还能挂它自己的 MCP。
 >
-> 本文只谈**功能与接口**，不写实现代码；其中 M2/M3 工具（`dsh_rename` 等）是分期计划，不是当前 0.3.7 的缺失功能。技术判断最初基于 DSH 0.1.7-rc.2，当前验证基线是 **DSH 0.2.1-rc.5**（见 §2 证据）。
+> 本文只谈**功能与接口**，不写实现代码；其中 M2/M3 工具（`dsh_rename` 等）是分期计划，不是当前 0.3.8 的缺失功能。技术判断最初基于 DSH 0.1.7-rc.2，当前验证基线是 **DSH 0.2.1-rc.5**（见 §2 证据）。
+
+## 当前实现状态（0.3.8）
+
+当前对外暴露 11 个工具，均已实现并有回归：
+
+`dsh_start`、`dsh_send`、`dsh_list`、`dsh_read`、`dsh_get`、`dsh_interject`、`dsh_interrupt`、`dsh_release`、`dsh_takeover`、`dsh_approval_decide`、`dsh_status`
+
+本文后续出现的 `dsh_resume`、`dsh_rename`、`dsh_delete`、`dsh_transcript`、`dsh_diff`、`dsh_doctor` 等属于 M2/M3 路线图，**不是当前版本的缺失**。当前版本的能力边界以 README 的 Known limitations 与 USAGE-NOTES 为准。
 
 ---
 

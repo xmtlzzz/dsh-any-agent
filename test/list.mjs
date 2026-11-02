@@ -88,8 +88,8 @@ try {
   );
 
   console.log('\n[5] 收尾');
-  await client.callTool('dsh_release', { conversation_id: conv, forget: true }, 60_000);
-  check('已释放', true);
+  const rel = await client.callTool('dsh_release', { conversation_id: conv, forget: true }, 60_000);
+  check('已释放', rel?.structuredContent?.closed === true, JSON.stringify(rel?.structuredContent));
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

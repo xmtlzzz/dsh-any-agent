@@ -15,7 +15,7 @@
 
 </div>
 
-🧪 0.3.7 本机 815 项检查全绿（九种客户端配置齐全时 851 项；其中 519 项属于客户端注册器套件，齐全时 555 项） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
+🧪 0.3.8 本机 815 项检查全绿（九种客户端配置齐全时 851 项；其中 519 项属于客户端注册器套件，齐全时 555 项） · 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
 
 一个 MCP 服务端，把 DeepSeek Harness 当作**长驻的编码 agent** 来驱动。开个会话、扔个目标，它自己写代码、跑脚本、派子代理；你随时能看、能插话、能回头验收。
 
@@ -565,10 +565,13 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 ## 🧪 测试
 
 ```bash
-node test/run.mjs          # 全部离线套件（不消耗 token；smoke 段需要装 DSH）
-node test/run.mjs --all    # 离线 + 需要模型的套件
+npm test                   # 全部离线套件；没有 DSH 时 smoke 自动跳过会话段
+npm run test:all           # 离线 + 需要模型的套件（需要 DSH/provider）
 node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目录；--dry-run 可预演）
 ```
+
+模型套件不在 GitHub 托管 CI 里（需要真实 DSH、provider 与凭据）。在本机跑，
+或用 `model-suites` workflow 指定一台装好 DSH 的 self-hosted runner。
 
 测试套件**会自己收尾**：`run.mjs` 结束时必定执行 `cleanup.mjs`，它只清理 cwd 在**测试自己造的目录**（`tmpdir()/dsh-any-agent-*` 或桌面 `dsh-any-agent-test-*`）里的会话与工作区登记。**用户在 `%TEMP%` 里自己的真实项目、以及你的状态目录都不会被碰**。要连桌面测试目录一起清，可显式跑 `node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions`。
 
@@ -610,11 +613,11 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
 | `reasoning-check` | 8 | **思考可见性**：`reasoning=hide` 不返回思考正文但统计非零；`reasoning=full` 返回正文且渲染出思考段 |
 
-**`node test/run.mjs` 在本机 5/9 客户端配置时跑 815 项（九种齐全时 851 项）** —— smoke 29 + 离线套件 786 项（九种齐全时 822 项）。0.3.7 上全部退出码 0；都不需要 provider（smoke 的建会话段需要装 DSH）。
+**`node test/run.mjs` 在本机 5/9 客户端配置时跑 815 项（九种齐全时 851 项）** —— smoke 29 + 离线套件 786 项（九种齐全时 822 项）。0.3.8 上全部退出码 0；都不需要 provider（没有 DSH 时 smoke 自动跳过建会话段）。
 
 其中 **519 项属于客户端注册器套件**（`setup` 41、`removal-scope` 24、`config-safety` 406、`real-configs` 48；九种齐全时 555 项）—— 0.3 的活其实都在这里。
 
-需要模型的套件（`smoke` 29、`boundary` 46、`integration` 30、`async` 16、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13、`reasoning-check` 8）合计 474 项，**最近一次完整实测在 0.3.7** —— 它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**。
+需要模型的套件（`smoke` 29、`boundary` 46、`integration` 30、`async` 16、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13、`reasoning-check` 8）合计 474 项，**最近一次完整实测在 0.3.8** —— 它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**。
 
 > 三个总数是刻意分开的：`node test/run.mjs`（815/851）、CI 离线 job（786/822，不含 smoke）、需要模型的集合（名义 474）。数字取各套件自己打印的汇总，不在这里手抄；不要把一个数字套到另一个 runner 上。
 

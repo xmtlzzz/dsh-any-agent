@@ -10,6 +10,10 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
+import { resolveDshBin } from '../src/config.mjs';
+
+let hasDsh = true;
+try { resolveDshBin(); } catch { hasDsh = false; }
 
 let pass = 0;
 let failCount = 0;
@@ -40,8 +44,12 @@ try {
     check(`含工具 ${n}`, names.includes(n));
   }
 
+  let ws = null;
+  if (!hasDsh) {
+    console.log('\n[3-5] 跳过 DSH 会话部分（未找到 DSH CLI；其余离线套件仍会执行）');
+  } else {
   console.log('\n[3] dsh_start（只读档，临时工作区）');
-  const ws = mkdtempSync(join(tmpdir(), 'dsh-any-agent-smoke-ws-'));
+  ws = mkdtempSync(join(tmpdir(), 'dsh-any-agent-smoke-ws-'));
   const startRes = await client.callTool('dsh_start', { cwd: ws, permission: 'read-only' }, 90_000);
   const startText = McpClient.text(startRes);
   const convId = startRes?.structuredContent?.conversation_id;
@@ -78,6 +86,7 @@ try {
   check('release 成功', relRes?.structuredContent?.closed === true);
   const getAfter = await client.callTool('dsh_get', { conversation_id: convId });
   check('释放后会话仍在注册表（未打开）', getAfter?.structuredContent?.alive === false);
+  }
 
   console.log('\n[6] 未知工具应返回 isError 而不是崩溃');
   const bad = await client.callTool('dsh_nope', {});
@@ -90,21 +99,25 @@ try {
     client.stderr.slice(0, 5).join(' | '),
   );
 
-  console.log('\n[8] 会话注册表只存元数据（不含对话内容）');
-  const stateRaw = readFileSync(STATE, 'utf8');
-  const parsed = JSON.parse(stateRaw);
-  const allowed = [
-    'id', 'cwd', 'permission', 'onApproval', 'createdAt', 'lastUsedAt',
-    'turnCount', 'titleHint', 'reasoningEffort', 'provider', 'model', 'workspace',
-  ];
-  const keys = Object.keys(parsed.conversations?.[0] ?? {});
-  check('注册表条目字段仅元数据', keys.every((k) => allowed.includes(k)), keys.join(','));
-  // 按精确 JSON 键判断，避免把 reasoningEffort（配置值）误判成思考内容
-  const contentKeys = ['"answer"', '"thinking"', '"live_thinking"', '"result"', '"entries"', '"prompt_preview"', '"text"'];
-  const leaked = contentKeys.filter((k) => stateRaw.includes(k));
-  check('注册表里没有正文/思考等对话内容', leaked.length === 0, `命中=${leaked.join(',')}`);
+  if (hasDsh) {
+    console.log('\n[8] 会话注册表只存元数据（不含对话内容）');
+    const stateRaw = readFileSync(STATE, 'utf8');
+    const parsed = JSON.parse(stateRaw);
+    const allowed = [
+      'id', 'cwd', 'permission', 'onApproval', 'createdAt', 'lastUsedAt',
+      'turnCount', 'titleHint', 'reasoningEffort', 'provider', 'model', 'workspace',
+    ];
+    const keys = Object.keys(parsed.conversations?.[0] ?? {});
+    check('注册表条目字段仅元数据', keys.every((k) => allowed.includes(k)), keys.join(','));
+    // 按精确 JSON 键判断，避免把 reasoningEffort（配置值）误判成思考内容
+    const contentKeys = ['"answer"', '"thinking"', '"live_thinking"', '"result"', '"entries"', '"prompt_preview"', '"text"'];
+    const leaked = contentKeys.filter((k) => stateRaw.includes(k));
+    check('注册表里没有正文/思考等对话内容', leaked.length === 0, `命中=${leaked.join(',')}`);
+  } else {
+    console.log('\n[8] 跳过注册表内容检查（没有建会话）');
+  }
 
-  rmSync(ws, { recursive: true, force: true });
+  if (ws) rmSync(ws, { recursive: true, force: true });
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}`);

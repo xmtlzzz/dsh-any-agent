@@ -56,7 +56,7 @@ try {
   console.log('\n[1] 默认 TTL（7 天）：清旧、留新');
   const rootA = mkdtempSync(join(tmpdir(), 'dsh-any-agent-prune-a-'));
   const a = seedRuns(rootA);
-  await runStartup({ DSH_MCP_STATE: join(rootA, 'state.json') });
+  await runStartup({ DSH_MCP_STATE: join(rootA, 'state.json'), DSH_HOME: join(rootA, 'dsh-home') });
 
   check('★ 十年旧的哨兵被清掉', !existsSync(a.old), a.old);
   check('★ 崩溃残留的 .tmp 被清掉', !existsSync(a.tmp), a.tmp);
@@ -69,7 +69,7 @@ try {
   console.log('\n[3] DSH_MCP_SENTINEL_TTL_MS=0 → 关闭清理');
   const rootB = mkdtempSync(join(tmpdir(), 'dsh-any-agent-prune-b-'));
   const b = seedRuns(rootB);
-  await runStartup({ DSH_MCP_STATE: join(rootB, 'state.json'), DSH_MCP_SENTINEL_TTL_MS: '0' });
+  await runStartup({ DSH_MCP_STATE: join(rootB, 'state.json'), DSH_HOME: join(rootB, 'dsh-home'), DSH_MCP_SENTINEL_TTL_MS: '0' });
   check('★ TTL=0 时旧哨兵保留', existsSync(b.old), b.old);
   check('TTL=0 时 .tmp 也保留（清理整个关闭）', existsSync(b.tmp), b.tmp);
   check('TTL=0 时空壳目录保留', existsSync(join(b.runs, 'conv-empty-shell')));
@@ -83,7 +83,7 @@ try {
   writeFileSync(neighbor, JSON.stringify({ version: 1, conversations: [] }), 'utf8');
   const neighborOld = Date.now() / 1000 - 30 * 24 * 3600;
   utimesSync(neighbor, neighborOld, neighborOld);
-  await runStartup({ DSH_MCP_STATE: neighbor });
+  await runStartup({ DSH_MCP_STATE: neighbor, DSH_HOME: join(rootC, 'dsh-home') });
   check('★ 同一目录下的会话注册表没被哨兵清理碰到', existsSync(neighbor), neighbor);
   check('哨兵清理照常发生', !existsSync(c.old), c.old);
   check('runs 目录里只剩新哨兵', readdirSync(c.dir).join(',') === 'run-fresh-2.json', readdirSync(c.dir).join(','));

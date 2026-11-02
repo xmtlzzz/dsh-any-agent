@@ -43,7 +43,7 @@ test('English page is a real locale with hreflang alternates and its own canonic
 test('robots.txt mirrors the Cloudflare Managed AI-crawler policy instead of drifting', async () => {
   const robots = await readFile(resolve(dist, 'robots.txt'), 'utf8');
   assert.match(robots, /Content-Signal: search=yes, ai-train=no/);
-  for (const bot of ['GPTBot', 'ClaudeBot', 'Google-Extended', 'CCBot']) {
+  for (const bot of ['GPTBot', 'ClaudeBot', 'Google-Extended', 'CCBot', 'Amazonbot', 'Applebot-Extended', 'Bytespider', 'KimiBot']) {
     assert.match(robots, new RegExp(`User-agent: ${bot}\\nDisallow: /`));
   }
   assert.match(robots, /Sitemap: https:\/\/dsh-any-agent\.xmtlz\.dev\/sitemap\.xml/);

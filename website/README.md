@@ -44,7 +44,7 @@ Cloudflare Workers Git 集成可将根目录设为 `website`，构建命令设�
 ### 部署侧行为（不在仓库中）
 
 - Cloudflare Web Analytics 可能自动注入 `https://static.cloudflareinsights.com/beacon.min.js`；`src/_headers` 的 CSP 已放行该脚本与 `https://cloudflareinsights.com` 上报域。若关闭 Web Analytics，不会注入，CSP 放行也不产生影响。
-- Cloudflare 的 Managed robots.txt / Content Signals 在**控制台**管理，会在源站 `robots.txt` 之前追加内容。构建生成的 `dist/robots.txt` 现在**镜像同一套策略**（`Content-Signal: search=yes, ai-train=no`，并 Disallow GPTBot/ClaudeBot/Google-Extended/CCBot），让非 Cloudflare 主机与仓库不再漂移；若控制台策略改变，请同步 `scripts/build.mjs` 并重新部署。
+- Cloudflare 的 Managed robots.txt / Content Signals 在**控制台**管理，会在源站 `robots.txt` 之前追加内容。构建生成的 `dist/robots.txt` 现在**镜像同一套完整策略**（`Content-Signal: search=yes, ai-train=no, use=reference`，并 Disallow Cloudflare Managed 列表中的全部训练/抓取 bot），让非 Cloudflare 主机与仓库不再漂移；若控制台策略改变，请同步 `scripts/build.mjs` 并重新部署。
 - 主题在首屏前由内联脚本恢复（CSP 使用构建时生成的 sha256 哈希），避免浅色系统用户先看到深色页面。
 
 ## Cloudflare Pages（可选）

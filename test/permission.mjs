@@ -91,12 +91,14 @@ try {
   check('★ 三档记录值互不相同', new Set(seen).size === 3, JSON.stringify(seen));
 
   console.log('\n[收尾]');
+  const closed = [];
   for (const id of convs) {
     try {
-      await client.callTool('dsh_release', { conversation_id: id, forget: true }, 60_000);
-    } catch {}
+      const rel = await client.callTool('dsh_release', { conversation_id: id, forget: true }, 60_000);
+      closed.push(rel?.structuredContent?.closed === true);
+    } catch { closed.push(false); }
   }
-  check('已释放', true);
+  check('已释放', convs.length > 0 && closed.every(Boolean), JSON.stringify(closed));
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

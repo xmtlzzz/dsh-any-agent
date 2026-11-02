@@ -80,11 +80,38 @@ await Promise.all([
   writeFile(
     join(dist, 'robots.txt'),
     '# Origin policy. Cloudflare may prepend Managed content in production.\n' +
-      'User-agent: *\nAllow: /\nContent-Signal: search=yes, ai-train=no\n\n' +
-      'User-agent: GPTBot\nDisallow: /\n\n' +
-      'User-agent: ClaudeBot\nDisallow: /\n\n' +
-      'User-agent: Google-Extended\nDisallow: /\n\n' +
+      'User-agent: *\nAllow: /\nContent-Signal: search=yes, ai-train=no, use=reference\n\n' +
+      'User-agent: Amazonbot\nDisallow: /\n\n' +
+      'User-agent: Applebot-Extended\nDisallow: /\n\n' +
+      'User-agent: Bytespider\nDisallow: /\n\n' +
       'User-agent: CCBot\nDisallow: /\n\n' +
+      'User-agent: ClaudeBot\nDisallow: /\n\n' +
+      'User-agent: Diffbot\nDisallow: /\n\n' +
+      'User-agent: Google-Extended\nDisallow: /\n\n' +
+      'User-agent: GPTBot\nDisallow: /\n\n' +
+      'User-agent: omgili\nDisallow: /\n\n' +
+      'User-agent: anthropic-ai\nDisallow: /\n\n' +
+      'User-agent: Claude-Web\nDisallow: /\n\n' +
+      'User-agent: cohere-ai\nDisallow: /\n\n' +
+      'User-agent: MistralAI-Training\nDisallow: /\n\n' +
+      'User-agent: meta-externalagent\nDisallow: /\n\n' +
+      'User-agent: GoogleOther\nDisallow: /\n\n' +
+      'User-agent: Baiduspider\nDisallow: /\n\n' +
+      'User-agent: PetalBot\nDisallow: /\n\n' +
+      'User-agent: AwarioSmartBot\nUser-agent: AwarioRssBot\nDisallow: /\n\n' +
+      'User-agent: Google-CloudVertexBot\nDisallow: /\n\n' +
+      'User-agent: QualifiedBot\nDisallow: /\n\n' +
+      'User-agent: Cotoyogi\nDisallow: /\n\n' +
+      'User-agent: ICC-Crawler\nDisallow: /\n\n' +
+      'User-agent: atlassian-bot\nDisallow: /\n\n' +
+      'User-agent: FishBot\nDisallow: /\n\n' +
+      'User-agent: BorderxBot\nDisallow: /\n\n' +
+      'User-agent: NavuBot\nDisallow: /\n\n' +
+      'User-agent: SemrushBot-SWA\nDisallow: /\n\n' +
+      'User-agent: WARDBot\nDisallow: /\n\n' +
+      'User-agent: magpie-crawler\nDisallow: /\n\n' +
+      'User-agent: KimiBot\nDisallow: /\n\n' +
+      'User-agent: CitibotSiteCrawler\nDisallow: /\n\n' +
       (origin ? `Sitemap: ${origin}/sitemap.xml\n` : ''),
   ),
   writeFile(

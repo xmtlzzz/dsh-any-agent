@@ -1,0 +1,51 @@
+name: model-suites
+
+# Model-backed suites need a real DSH install, a configured provider and
+# credentials. GitHub-hosted runners do not have those, so this workflow is
+# manual and expects a self-hosted runner label that does.
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner label with DSH + a working provider (e.g. self-hosted)'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  model:
+    name: full model-backed suite
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: detect DSH
+        id: dsh
+        shell: bash
+        env:
+          DSH_BIN: ${{ secrets.DSH_BIN }}
+        run: |
+          if [ -n "${DSH_BIN:-}" ] || command -v dsh >/dev/null 2>&1; then
+            echo 'ok=1' >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=Model suites skipped::No DSH on this runner. Use a self-hosted runner with DSH, a provider and credentials."
+          fi
+
+      - name: run offline + model suites
+        if: steps.dsh.outputs.ok == '1'
+        env:
+          DSH_BIN: ${{ secrets.DSH_BIN }}
+          DSH_MCP_LOG: silent
+        run: node test/run.mjs --all
+
+      - name: explain the skip
+        if: steps.dsh.outputs.ok != '1'
+        run: |
+          echo "Model suites were skipped: this runner cannot start DSH."
+          echo "Run locally with a configured DSH: node test/run.mjs --all"

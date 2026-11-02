@@ -363,13 +363,16 @@ try {
   }
 
   console.log('\n[9] 收尾');
+  const closed = [];
   for (const c of [A, B]) {
     try {
-      await c.callTool('dsh_release', { conversation_id: conv, forget: true }, 60_000);
-    } catch {}
+      const rel = await c.callTool('dsh_release', { conversation_id: conv, forget: true }, 60_000);
+      // 第二个实例可能看到“已被 forget”的 isError；那同样说明清理完成。
+      closed.push(rel?.structuredContent?.closed === true || rel?.isError === true);
+    } catch { closed.push(false); }
     await c.close();
   }
-  check('两个实例都已关闭', true);
+  check('两个实例都已关闭', closed.length === 2 && closed.every(Boolean), JSON.stringify(closed));
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);
