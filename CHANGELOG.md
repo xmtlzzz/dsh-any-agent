@@ -5,6 +5,59 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] — 2026-11-02
+
+An adversarial audit of the 0.3.2 MCP surface found one safety boundary that
+could be bypassed and several places where the implementation and the docs
+disagreed. This release closes them, with regressions for each.
+
+### Security
+
+- **`read-only` is now a hard boundary.** `dsh_start` rejects
+  `permission=read-only` combined with `on_approval=auto-allow`/`ask`, and the
+  approval layer refuses every permission request from a read-only
+  conversation. Previously DSH could ask for a `sandbox_permissions` escalation
+  and a permissive policy would let the write through while the session record
+  still said `read-only`.
+
+### Fixed
+
+- **`dsh_read` no longer loses streamed text.** The cursor is a revision
+  number: text appended to an already-read entry is delivered again, so a
+  polling caller sees the rest of the message. `limit` is clamped to 1..500.
+- **`dsh_release(forget=true)` is terminal.** It writes a tombstone under
+  `$DSH_HOME/.dsh-any-agent-forgotten`; by-id lookups fail with a recovery
+  path, lists exclude the session, and stale tombstones are pruned at startup.
+- **A failed `dsh_start` no longer leaves a write-lock marker.** It was
+  visible as an orphan holder after an invalid provider/model.
+- **Real approval context.** The permission request's `toolCallId` is
+  correlated with the earlier `tool_call` update, so
+  `pending_approval_details` carries the command and reason instead of an
+  opaque id.
+- **Sentinels redact tool inputs** with the approval credential rules, and
+  `thinking_omitted` is always a boolean.
+- **Empty prompts fail synchronously** instead of producing an accepted
+  receipt for a turn that immediately errors.
+- **`dsh_start` rejects an unknown provider/model** instead of silently
+  falling back to the profile default model.
+- **Pending approvals are cancelled and cleared** when a turn ends or a
+  conversation closes.
+- **`queue`-mode interject honors `timeout_ms`** (0 = wait forever).
+- Tests: `read-cursor`, `sentinel-redaction` and `forget-tombstone`
+  regressions; `real-configs` checks entry keys rather than a bare substring;
+  test teardown removes only the conversation ids it created; acceptance
+  skips explicitly when no IDA MCP is configured.
+
+### Changed
+
+- `dsh_read` cursor semantics: entries reappear when their text grows; match
+  by `seq` and replace the text.
+- Documentation now states that **DSH's own session log contains reasoning**
+  (even with `reasoning=hide`); the "never reaches disk" guarantee covers this
+  server's logs, sentinels and registry only.
+- README links the official site at <https://dsh-any-agent.xmtlz.dev/> and
+  records the measured config impact scope for the nine supported clients.
+
 ## [0.3.2] — 2026-10-30
 
 Two fixes and one feature, all from driving this server from Claude Code
