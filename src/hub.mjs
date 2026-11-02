@@ -14,6 +14,8 @@
  */
 
 import {
+  copyFileSync,
+  cpSync,
   mkdirSync,
   readFileSync,
   writeFileSync,
@@ -41,13 +43,17 @@ import {
   SENTINEL_INCLUDE_REASONING,
   SENTINEL_TTL_MS,
   STATE_FILE,
+  LEGACY_STATE_FILE,
+  USING_DEFAULT_STATE,
   DSH_HOME,
+  assertWritableDir,
   defaultApprovalPolicy,
 } from './config.mjs';
 import { AcpProcess } from './acp.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { registerWorkspace, findSessionHeader } from './workspace.mjs';
 import {
+  LOCKS_DIR,
   classifyHolder,
   describeLeaseConflict,
   heartbeat as lockHeartbeat,
@@ -240,13 +246,18 @@ export function sanitizeResultForSentinel(result) {
   if (!result || typeof result !== 'object') return result ?? null;
   if (SENTINEL_INCLUDE_REASONING) return result;
   const { thinking, ...rest } = result;
+  // 正文/错误/标题同样可能夹带密钥；哨兵是落盘副本，统一套脱敏。
+  for (const key of ['answer', 'error', 'title']) {
+    if (typeof rest[key] === 'string') rest[key] = sanitizeApprovalContext(rest[key], key);
+  }
   // 工具输入里会有完整命令、路径，甚至写入的文件内容。哨兵会保留 7 天，
   // 所以按审批上下文同一套规则脱敏（密钥/令牌/密码类字段与常见内联字面量）。
   if (Array.isArray(rest.tools_used)) {
     rest.tools_used = rest.tools_used.map((t) => {
       if (!t || typeof t !== 'object') return t;
       const { input, ...meta } = t;
-      return input === undefined ? meta : { ...meta, input: sanitizeApprovalContext(input) };
+      const safeMeta = sanitizeApprovalContext(meta);
+      return input === undefined ? safeMeta : { ...safeMeta, input: sanitizeApprovalContext(input) };
     });
   }
   // 始终给出布尔值：调用方才能区分“思考被剥离”与“本来没有思考”。
@@ -271,6 +282,8 @@ export class Conversation {
       model: state.model ?? null,
     };
     this.lastConfigApplied = null;
+    /** 是否已回读并确认会话记录的权限档（null=尚未核对，true/false=结果）。 */
+    this.permissionVerified = null;
     /** 工作区登记结果（决定你的 DSH GUI 里能不能看到这个会话）。 */
     this.workspace = state.workspace ?? null;
     this.#hub = hub;
@@ -350,6 +363,8 @@ export class Conversation {
       title_hint: this.titleHint ?? null,
       cwd: this.cwd,
       permission: this.permission,
+      /** true=已回读会话记录且一致；false/null=缓存暂时没有记录（read-only 仍由审批层兜底）。 */
+      permission_verified: this.permissionVerified,
       on_approval: this.onApproval,
       alive: !!this.proc?.alive,
       busy: this.busy,
@@ -418,6 +433,8 @@ export class Conversation {
       // 新进程不记得会话级配置（思考深度/模型），resume 后必须重套
       this.lastConfigApplied = await applySessionConfig(proc, this.id, this.cfg);
       for (const f of this.lastConfigApplied.failed) this.#hub.log.info(`[conv ${this.id}] ${f}`);
+      // ★ 回读会话自己的权限记录，防止 profile defaultPreset 无声提权。
+      await this.verifyPermissionRecorded();
       // 锁到手了，这时才登记；从此别人能查到"锁在我们手上"
       writeMarker(this.id, { childPid: proc.pid, cwd: this.cwd });
       this.lockConflict = null; // 拿到锁了，之前的撞锁记录作废
@@ -463,6 +480,39 @@ export class Conversation {
       }
       throw new Error(`恢复会话失败（已作废该进程，下次调用会重建）：${e.message}`);
     }
+  }
+
+  /**
+   * 核对**会话自己记录**的权限档是否与请求一致。
+   *
+   * 为什么不能只信入参：DSH profile 里的 `permission.defaultPreset` 会在
+   * session/new 时覆盖 `DSH_PERMISSION_MODE`（test/permission.mjs 实测抓到过
+   * read-only 被静默提升）。投影缓存可能稍后才刷盘，所以短轮询；读不到时
+   * 不阻断（read-only 仍有审批层的硬拒绝兜底），但读到不一致就立刻失败。
+   */
+  async verifyPermissionRecorded({ attempts = 6, delayMs = 250 } = {}) {
+    for (let i = 0; i < attempts; i++) {
+      const meta = readConversationMeta(this.id);
+      const recorded = meta?.permissions?.preset;
+      if (recorded) {
+        if (!PERMISSION_TIERS.includes(recorded) || recorded !== this.permission) {
+          throw new Error(
+            `会话实际权限档为 ${JSON.stringify(recorded)}，与请求的 ${this.permission} 不一致。\n` +
+              '  这通常意味着 DSH profile 里写了 permission.defaultPreset，覆盖了启动时传入的权限档。\n' +
+              `  请检查 ${join(DSH_HOME, 'profiles', process.env.DSH_MCP_PROFILE ?? 'dsh-mcp', 'cordis.patch.yml')}，` +
+              '删掉 permission.defaultPreset 后重试。',
+          );
+        }
+        this.permissionVerified = true;
+        return recorded;
+      }
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+    }
+    this.permissionVerified = false;
+    this.#hub.log.info(
+      `[conv ${this.id}] 投影缓存里暂时没有权限记录，跳过运行期核对（read-only 仍由审批层强制拒绝）`,
+    );
+    return null;
   }
 
   /**
@@ -806,7 +856,9 @@ export class Conversation {
         //   之前只在"调用方没在原地等"时才写，于是插话那一轮没有哨兵 —— 调用方的
         //   等待逻辑（等文件出现）就永远空等，即使 run 早已 status=done（真实事故）。
         //   统一规则也消除了整类"有 run_id 却没有哨兵"的坑。
-        this.#hub.writeRunSentinel(this.id, runRecord);
+        const sentinelFile = this.#hub.writeRunSentinel(this.id, runRecord);
+        result.sentinel_file = sentinelFile ?? this.#hub.runSentinelPath(this.id, runRecord.run_id);
+        if (!sentinelFile) result.sentinel_error = runRecord.sentinel_error ?? '哨兵文件写入失败';
         return result;
       } catch (e) {
         this.#hub.log.info(`[conv ${this.id}] 回合收尾异常（已兜底）: ${e.message}`);
@@ -830,7 +882,9 @@ export class Conversation {
         runRecord.status = 'error';
         runRecord.error = fallback.error;
         runRecord.result = fallback;
-        this.#hub.writeRunSentinel(this.id, runRecord);
+        const sentinelFile = this.#hub.writeRunSentinel(this.id, runRecord);
+        fallback.sentinel_file = sentinelFile ?? this.#hub.runSentinelPath(this.id, runRecord.run_id);
+        if (!sentinelFile) fallback.sentinel_error = runRecord.sentinel_error ?? '哨兵文件写入失败';
         return fallback;
       }
     };
@@ -1051,8 +1105,17 @@ export class Conversation {
 
 /** 收集当前工作区的 git 变更摘要（非 git 目录返回 null）。 */
 export function gitStatus(cwd) {
+  if (process.env.DSH_MCP_GIT_STATUS === '0') return null;
   try {
-    const r = spawnSync('git', ['status', '--porcelain'], { cwd, encoding: 'utf8', timeout: 8000 });
+    // ★ 在不可信仓库里 `git status` 可能触发仓库配置的 fsmonitor/filter；这些
+    //   命令发生在 DSH 沙箱与审批层之外。禁用可选锁与 fsmonitor，并允许用
+    //   DSH_MCP_GIT_STATUS=0 完全关掉。
+    const r = spawnSync('git', ['-c', 'core.fsmonitor=false', 'status', '--porcelain', '--no-optional-locks'], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 8000,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+    });
     if (r.status !== 0 || !r.stdout) return null;
     const lines = r.stdout.split('\n').filter(Boolean);
     if (!lines.length) return null;
@@ -1120,7 +1183,10 @@ export class Hub {
   constructor({ log } = {}) {
     this.conversations = new Map();
     this.log = log ?? NOOP_LOG;
-    this.approvalTimeoutMs = Number(process.env.DSH_MCP_APPROVAL_TIMEOUT_MS ?? 5 * 60 * 1000);
+    const rawApprovalTimeout = Number(process.env.DSH_MCP_APPROVAL_TIMEOUT_MS ?? 5 * 60 * 1000);
+    // 空串会变成 0 / NaN → setTimeout(0) 会把 ask 审批立刻取消；统一回落到 5 分钟。
+    this.approvalTimeoutMs =
+      Number.isFinite(rawApprovalTimeout) && rawApprovalTimeout > 0 ? rawApprovalTimeout : 5 * 60 * 1000;
     this.#reaper = null;
   }
 
@@ -1129,6 +1195,30 @@ export class Hub {
   #probeCache = null;
 
   load() {
+    // ★ 启动即确认三个关键目录可写。以前"写失败只记 silent 日志"会让服务
+    //   看起来正常，但注册表/哨兵/锁登记全部丢失，异步等待永远醒不过来。
+    assertWritableDir(dirname(STATE_FILE), '状态目录');
+    assertWritableDir(RUNS_DIR, '哨兵目录');
+    assertWritableDir(LOCKS_DIR, '锁登记目录');
+
+    // 旧版本的默认状态文件在包安装目录里；一次性迁移到新的用户可写目录。
+    // 只在没有显式设置 DSH_MCP_STATE 时做，避免覆盖用户指定的路径。
+    if (USING_DEFAULT_STATE && !existsSync(STATE_FILE) && existsSync(LEGACY_STATE_FILE)) {
+      try {
+        copyFileSync(LEGACY_STATE_FILE, STATE_FILE);
+        this.log.info(`[hub] 已迁移旧状态文件: ${LEGACY_STATE_FILE} → ${STATE_FILE}`);
+        // 侧车元数据（审批策略/思考深度/标题/轮数）也一并搬过来；
+        // 否则旧会话按 id 重建时会悄悄回落到默认值。
+        const legacyMeta = join(dirname(LEGACY_STATE_FILE), 'meta');
+        if (existsSync(legacyMeta) && !existsSync(META_DIR)) {
+          cpSync(legacyMeta, META_DIR, { recursive: true });
+          this.log.info(`[hub] 已迁移旧元数据侧车: ${legacyMeta} → ${META_DIR}`);
+        }
+      } catch (e) {
+        this.log.info(`[hub] 旧状态文件迁移失败（继续用新路径）: ${e.message}`);
+      }
+    }
+
     const stale = pruneStaleTombstones();
     if (stale) this.log.info(`[hub] 清理 ${stale} 个失效的 forget 墓碑`);
     if (!existsSync(STATE_FILE)) return;
@@ -1186,24 +1276,34 @@ export class Hub {
     return join(RUNS_DIR, conversationId, `${runId}.json`);
   }
 
-  /** 写完成哨兵（原子）。失败只记日志，绝不影响主流程。 */
+  /**
+   * 写完成哨兵（原子）。
+   * @returns {string|null} 成功返回文件路径；失败返回 null，并把原因记进 run.sentinel_error。
+   *
+   * 失败不阻断回合收尾，但**必须让调用方看得见**：以前只记 silent 日志，
+   * 调用方会拿着一个永远不会出现的路径一直等。
+   */
   writeRunSentinel(conversationId, run) {
+    const file = this.runSentinelPath(conversationId, run.run_id);
     try {
-      const file = this.runSentinelPath(conversationId, run.run_id);
       mkdirSync(dirname(file), { recursive: true });
       const payload = {
         conversation_id: conversationId,
         run_id: run.run_id,
         status: run.status ?? 'unknown',
         ended_at: run.ended_at ?? Date.now(),
-        error: run.error ?? run.result?.error ?? null,
+        error: sanitizeApprovalContext(run.error ?? run.result?.error ?? null, 'error'),
         result: sanitizeResultForSentinel(run.result ?? null),
       };
       const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
       writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
       renameSync(tmp, file);
+      return file;
     } catch (e) {
-      this.log.info(`[hub] 写完成哨兵失败: ${e.message}`);
+      const msg = `写完成哨兵失败（${file}）: ${e.message}`;
+      run.sentinel_error = msg;
+      this.log.info(`[hub] ${msg}`);
+      return null;
     }
   }
 
@@ -1287,12 +1387,15 @@ export class Hub {
         const recordedPreset = meta?.permissions?.preset;
         const recordedPermission = PERMISSION_TIERS.includes(recordedPreset) ? recordedPreset : null;
         // 安全优先：会话记录说 read-only 就绝不能被侧车“提升”为可写档。
+        // ★ 档位未知（没有投影缓存、也没有本服务侧车）时 **fail-closed 到 read-only**。
+        //   以前回落到 DEFAULT_PERMISSION（danger-full-access），等于把一个可能是
+        //   只读的外部会话悄悄提升为完全访问。宁可让用户显式新建会话，也不要无声提权。
         const permission =
           recordedPermission === 'read-only'
             ? 'read-only'
             : PERMISSION_TIERS.includes(persisted?.permission)
               ? persisted.permission
-              : (recordedPermission ?? DEFAULT_PERMISSION);
+              : (recordedPermission ?? 'read-only');
         const recordedApproval = meta?.permissions?.approval;
         let onApproval = APPROVAL_POLICIES.includes(persisted?.onApproval)
           ? persisted.onApproval
@@ -1452,6 +1555,8 @@ export class Hub {
             `  请检查 ${provider}/${model} 是否在 profile 中声明；不传这两个参数可使用 profile 默认模型。`,
         );
       }
+      // ★ 回读会话自己的权限记录；不一致会在这里失败并走 catch（停进程、删登记）。
+      await conv.verifyPermissionRecorded();
       // 登记工作区，否则这些会话在你的 DSH GUI 里看不到。
       // ★ 必须容错：registerWorkspace 会写 workspace.json（磁盘满/被占时会抛），
       //   而它在 this.conversations.set 之前 —— 抛出去就会**丢掉这个会话并泄漏进程**。
@@ -1619,10 +1724,17 @@ export class Hub {
    * 场景：默认"永不回收"下每个用过的会话会常驻一个 DSH 进程（实测约 300-480MB ✗）。
    * 一批活干完了就调它，内存立刻归零 ✓；下次派活按需 resume ✓。
    */
-  async releaseAll() {
+  async releaseAll({ force = false } = {}) {
     const released = [];
+    const skippedBusy = [];
     for (const c of this.conversations.values()) {
       if (!c.proc?.alive) continue;
+      // ★ 默认不打断正在跑的回合：all=true 是"腾内存"，不是"取消任务"。
+      //   确实要连跑着的也停掉时传 force=true。
+      if (c.busy && !force) {
+        skippedBusy.push(c.id);
+        continue;
+      }
       const proc = c.proc;
       c.proc = null;
       await proc.stop().catch(() => {});
@@ -1630,7 +1742,7 @@ export class Hub {
       released.push(c.id);
     }
     this.save();
-    return { released: released.length, conversations: released };
+    return { released: released.length, conversations: released, skipped_busy: skippedBusy };
   }
 
   async shutdown() {

@@ -5,9 +5,10 @@
  * 环境变量：
  *   DSH_BIN                     DSH CLI 入口（默认探测 npx 缓存位置）
  *   DSH_MCP_PROFILE             驱动用的 DSH profile（默认 dsh-mcp）
- *   DSH_MCP_STATE               会话注册表路径（默认 <仓库>/.state/conversations.json）
+ *   DSH_MCP_STATE               会话注册表路径（默认 $DSH_HOME/.dsh-any-agent/conversations.json）
  *   DSH_MCP_PERMISSION          新建会话的默认权限档（默认 danger-full-access）
- *   DSH_MCP_IDLE_TTL_MS         空闲多久回收会话进程（默认 5 分钟）
+ *   DSH_MCP_APPROVAL            默认审批策略（非只读档默认 auto-allow；ask = 挂起待裁决）
+ *   DSH_MCP_IDLE_TTL_MS         空闲多久回收会话进程（默认 0 = 永不回收）
  *   DSH_MCP_PROMPT_TIMEOUT_MS   wait=true 时的等待上限（默认 0 = 不设超时）
  *   DSH_MCP_LOCK_STALE_MS       写锁登记多久没心跳算"持有者失联"（默认 90 秒）
  *   DSH_MCP_LOG                 silent(默认) | info | debug —— 日志级别

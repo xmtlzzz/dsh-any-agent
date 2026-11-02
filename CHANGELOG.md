@@ -5,6 +5,67 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Post-0.3.5 hardening (remaining completeness-audit items).
+
+## [0.3.5] — 2026-11-02
+
+Completeness-audit follow-up. Data-safety and privilege boundaries first,
+then documentation/CI truthfulness.
+
+### Security
+
+- **Unknown permission on an adopted external session now fails closed to
+  `read-only`.** It previously fell back to `danger-full-access` when the
+  projection cache had no permission record.
+- **Runtime permission read-back.** After `session/new` and every
+  `session/resume`, the session's own recorded `permissions.preset` is read
+  back; a mismatch (for example a profile `defaultPreset`) fails the call
+  instead of silently escalating. `dsh_get` exposes `permission_verified`.
+- **Workspace-write semantics documented honestly.** Out-of-workspace
+  requests are auto-allowed by default; pass `on_approval=ask` to adjudicate.
+
+### Fixed
+
+- **Temp-path prefix bug could delete real sessions.** `isTempPath` now
+  compares path segments, so `tmpdir()+'Suffix'` and `/tmpfoo` are no longer
+  treated as the OS temp directory. Automatic cleanup only deletes
+  test-created sessions (`tmpdir()/dsh-any-agent-*` and the Desktop test
+  folders); `tempOnly` remains an explicit manual flag.
+- **`setup` no longer invokes `claude mcp get`.** That probe made Claude Code
+  rewrite `~/.claude.json` (dropping `projects[*].history` and adding keys).
+- **First-start profile bootstrap works in the published package.** The
+  undeclared `js-yaml` dependency is replaced by a built-in YAML subset parser
+  (`src/yaml-lite.mjs`); generated profiles include the three permission
+  presets but never `defaultPreset`. A route without a default provider/model
+  fails with an actionable error instead of writing an empty `acp` config.
+- **State/sentinel/lock storage moved to `$DSH_HOME/.dsh-any-agent`.** The
+  old in-package `.state` location is migrated once (including metadata
+  sidecars). Startup now fails loudly if the directories are unwritable, and
+  a sentinel write failure is surfaced as `sentinel_error`.
+- **Corrupt `workspace.json` is no longer overwritten** with an empty
+  document; register/prune report the error and leave the file byte-identical.
+  The temp filename is unique per writer.
+- **`defaultLaunch` uses `fileURLToPath`**, so install paths containing
+  spaces or non-ASCII characters no longer become percent-encoded.
+- **`release(all=true)` now skips busy conversations by default** (pass
+  `force=true` to interrupt them); the interject timeout description matches
+  the busy-path behavior.
+- Numeric env guards: negative sentinel TTL no longer deletes every sentinel;
+  empty permission/reasoning-effort values fall back to defaults.
+- `ACP clientInfo.version` now comes from `package.json`.
+
+### Tests
+
+- New offline suites: `bootstrap-profile`, `workspace-safety`,
+  `permission-adopt`, `state-safety` (81 checks total). `package-check` is
+  part of `node test/run.mjs`; `acceptance` is part of `--all` (it self-skips
+  without IDA); `reasoning-check` now asserts rather than only printing.
+- CI runs every offline suite and the website build/tests; stale counts in
+  the SCOPE header and READMEs were corrected (815 checks on five client
+  fixtures, 851 with nine; CI offline 786/822).
+
 ## [0.3.4] — 2026-11-02
 
 Docs-only release. No runtime code changed; this publishes the updated
@@ -555,7 +616,12 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.4...v0.3.5
+[0.3.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.2...v0.3.0
 [0.1.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.1.0...v0.1.1

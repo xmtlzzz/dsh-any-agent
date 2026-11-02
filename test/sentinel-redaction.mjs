@@ -56,7 +56,18 @@ check('Bearer 令牌被替换', !String(input.command).includes('sk-ABCDEF123456
 check('普通描述保留', input.description === 'safe text');
 check('thinking_omitted=false（本来没有思考）', redacted.thinking_omitted === false);
 
-console.log('\n[3] 非对象/空值安全');
+console.log('\n[3] 正文/标题/错误也脱敏');
+const body = sanitizeResultForSentinel({
+  answer: 'use token sk-ANSWERLEAK12345 and password: hunter2',
+  error: 'Authorization: Bearer sk-ERRORLEAK12345',
+  title: 'run with api_key=sk-TITLELEAK12345',
+});
+check('answer 里的令牌被替换', !String(body.answer).includes('sk-ANSWERLEAK12345'), String(body.answer));
+check('answer 里的 password 被替换', !String(body.answer).includes('hunter2'), String(body.answer));
+check('error 里的 Bearer 被替换', !String(body.error).includes('sk-ERRORLEAK12345'), String(body.error));
+check('title 里的 api_key 被替换', !String(body.title).includes('sk-TITLELEAK12345'), String(body.title));
+
+console.log('\n[4] 非对象/空值安全');
 check('null 原样返回', sanitizeResultForSentinel(null) === null);
 check('字符串原样返回', sanitizeResultForSentinel('x') === 'x');
 

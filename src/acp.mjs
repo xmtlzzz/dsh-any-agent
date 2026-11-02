@@ -11,7 +11,7 @@
 
 import { spawn } from 'node:child_process';
 import { ensureProfile } from './bootstrap.mjs';
-import { DSH_PROFILE, REQUEST_TIMEOUT_MS, resolveDshBin } from './config.mjs';
+import { DSH_PROFILE, PKG_VERSION, REQUEST_TIMEOUT_MS, resolveDshBin } from './config.mjs';
 
 /** ACP 协议版本（@agentclientprotocol/sdk 的 v1）。 */
 const PROTOCOL_VERSION = 1;
@@ -83,6 +83,22 @@ export class AcpProcess {
     });
 
     this.#child.stdout.on('data', (d) => this.#onData(d));
+    // ★ stdio 的 'error' 必须常驻监听：子进程退出与下一次写入之间存在竞态，
+    //   未监听的 EPIPE 会以未处理错误终止**整个 MCP 进程**（连带所有会话）。
+    const streamError = (e) => {
+      this.#log.info(`[acp] 子进程 stdio 错误: ${e.message}`);
+      const err = new Error(`DSH 进程 stdio 不可用: ${e.message}`);
+      for (const [, p] of this.#pending) {
+        clearTimeout(p.timer);
+        p.reject(err);
+      }
+      this.#pending.clear();
+      this.#child = null;
+      this.initialized = false;
+    };
+    this.#child.stdin.on('error', streamError);
+    this.#child.stdout.on('error', streamError);
+    this.#child.stderr.on('error', streamError);
     this.#child.stderr.on('data', (d) => {
       for (const line of d.toString('utf8').split(/\r?\n/)) {
         if (!line.trim()) continue;
@@ -205,7 +221,12 @@ export class AcpProcess {
             }, timeoutMs)
           : null;
       this.#pending.set(id, { resolve, reject, timer });
-      this.#write({ jsonrpc: '2.0', id, method, params });
+      const written = this.#write({ jsonrpc: '2.0', id, method, params });
+      if (!written) {
+        if (timer) clearTimeout(timer);
+        this.#pending.delete(id);
+        reject(new Error(`ACP 写入失败（子进程 stdin 不可写）: ${method}`));
+      }
     });
   }
 
@@ -227,7 +248,7 @@ export class AcpProcess {
     this.#initResult = await this.request('initialize', {
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: {},
-      clientInfo: { name: 'dsh-any-agent', version: '0.1.0' },
+      clientInfo: { name: 'dsh-any-agent', version: PKG_VERSION },
     });
     this.initialized = true;
     return this.#initResult;

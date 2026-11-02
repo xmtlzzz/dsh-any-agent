@@ -223,7 +223,14 @@ console.log('\n[9] the command written into the config actually starts');
       input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'setup-test', version: '1' } } }) + '\n',
       encoding: 'utf8',
       timeout: 20000,
-      env: { ...process.env, ...entry.env, DSH_MCP_LOG: 'silent' },
+      // 隔离状态/墓碑目录：绝不能因为一次 setup 测试写进真实的 ~/.dsh。
+      env: {
+        ...process.env,
+        ...entry.env,
+        DSH_MCP_LOG: 'silent',
+        DSH_MCP_STATE: join(home, '.state.json'),
+        DSH_HOME: join(home, '.dsh-home'),
+      },
     });
     const line = (child.stdout || '').split('\n').find((l) => l.includes('"serverInfo"'));
     check('it answers initialize', Boolean(line), (child.stdout || '').slice(0, 120) || (child.stderr || '').slice(0, 120));

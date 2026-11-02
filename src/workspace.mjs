@@ -17,7 +17,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { zstdDecompressSync } from 'node:zlib';
 import { DSH_HOME, REGISTER_WORKSPACE } from './config.mjs';
@@ -42,11 +42,46 @@ export function canonicalPath(p) {
   }
 }
 
-/** 路径是否位于系统临时目录下（这类"工作区"不该出现在 GUI 里）。 */
+/** `child` 是否真的在 `parent` 里面（按路径分段，不能用字符串前缀）。 */
+function isInside(parent, child) {
+  try {
+    const rel = relative(parent, child);
+    if (!rel) return true;
+    return rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 路径是否位于系统临时目录下（这类"工作区"不该出现在 GUI 里）。
+ *
+ * ★ 必须按路径分段判断，不能用 `startsWith(tmpdir())`：那样
+ *   `/tmpfoo`、`%LOCALAPPDATA%\Temporary\proj` 都会被当成临时目录，
+ *   而清理逻辑会据此**递归删除真实会话目录**（真实数据丢失级 bug）。
+ */
 export function isTempPath(p) {
   try {
-    const t = normPath(tmpdir());
-    return normPath(p).startsWith(t);
+    return Boolean(p) && isInside(tmpdir(), p);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 是否是本仓库测试自己造的临时工作区。
+ *
+ * 只认系统临时目录下、第一段目录名以 `dsh-any-agent-` 开头的路径
+ * （测试统一用 `mkdtempSync(join(tmpdir(), 'dsh-any-agent-...'))`）。
+ * 这不是"所有临时目录"——用户完全可能把真实项目放在 %TEMP% 的同级目录里。
+ */
+export function isTestTempPath(p) {
+  try {
+    if (!p || !isTempPath(p)) return false;
+    const rel = relative(tmpdir(), p);
+    if (!rel || rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) return false;
+    const first = rel.split(/[\\/]/).filter(Boolean)[0] ?? '';
+    return /^dsh-any-agent-/.test(first);
   } catch {
     return false;
   }
@@ -87,16 +122,25 @@ function emptyDoc() {
   };
 }
 
+/**
+ * 读取工作区注册表。
+ *
+ * ★ 解析失败必须 **fail-closed**：以前会静默回落到空结构，下一次 register/prune
+ *   就会把 GUI 的整个工作区列表覆盖掉（不可恢复）。现在抛错，并且绝不写盘；
+ *   调用方（register/backfill/prune）各自把错误返回给上层。
+ */
 function readDoc() {
-  let doc = emptyDoc();
-  if (existsSync(WORKSPACE_FILE)) {
-    try {
-      const parsed = JSON.parse(readFileSync(WORKSPACE_FILE, 'utf8'));
-      if (parsed && typeof parsed === 'object') doc = parsed;
-    } catch {
-      /* 坏文件就用空结构重建，避免把 GUI 的注册表彻底写坏 */
-    }
+  if (!existsSync(WORKSPACE_FILE)) return emptyDoc();
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(WORKSPACE_FILE, 'utf8'));
+  } catch (e) {
+    throw new Error(`workspace.json 无法解析，已保持原样不写入: ${WORKSPACE_FILE}（${e.message}）`);
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`workspace.json 结构异常（不是对象），已保持原样不写入: ${WORKSPACE_FILE}`);
+  }
+  const doc = parsed;
   doc.global ??= emptyDoc().global;
   doc.global.workspaceIds ??= [];
   doc.global.archivedSessionIds ??= [];
@@ -108,9 +152,17 @@ function readDoc() {
 
 function writeDoc(doc) {
   mkdirSync(dirname(WORKSPACE_FILE), { recursive: true });
-  const tmp = `${WORKSPACE_FILE}.dshmcp.tmp`;
-  writeFileSync(tmp, JSON.stringify(doc, null, 2), 'utf8');
-  renameSync(tmp, WORKSPACE_FILE);
+  // 临时文件名必须唯一：固定 `.dshmcp.tmp` 会让两个实例/CLI 并发写互相覆盖。
+  const tmp = `${WORKSPACE_FILE}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(doc, null, 2), 'utf8');
+    renameSync(tmp, WORKSPACE_FILE);
+  } catch (e) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {}
+    throw e;
+  }
 }
 
 /** 在已读入的 doc 里找到（或新建）某路径对应的工作区条目。 */
@@ -172,10 +224,17 @@ function readHeader(file) {
   }
 }
 
-/** 扫描磁盘上所有会话，按 header.cwd 归组。数据源是会话头，不是目录名（目录名有损）。 */
+/**
+ * 扫描磁盘上所有会话，按 header.cwd 归组。数据源是会话头，不是目录名（目录名有损）。
+ *
+ * 会话根目录**不可读时抛错**，而不是返回空 Map —— 否则 backfill 的
+ * `pruneMissing` 会以为"所有会话都消失了"，把工作区注册表里的 sessionIds 清空。
+ */
 export function scanSessions() {
   const byCwd = new Map();
-  if (!existsSync(SESSIONS_ROOT)) return byCwd;
+  if (!existsSync(SESSIONS_ROOT)) {
+    throw new Error(`会话目录不存在或不可读: ${SESSIONS_ROOT}`);
+  }
   for (const bucket of readdirSync(SESSIONS_ROOT)) {
     const bucketPath = join(SESSIONS_ROOT, bucket);
     let dirs;
@@ -210,7 +269,13 @@ export function scanSessions() {
 export function findSessionHeader(sessionId) {
   if (typeof sessionId !== 'string' || !/^[A-Za-z0-9._-]{4,80}$/.test(sessionId)) return null;
   if (!existsSync(SESSIONS_ROOT)) return null;
-  for (const bucket of readdirSync(SESSIONS_ROOT)) {
+  let buckets;
+  try {
+    buckets = readdirSync(SESSIONS_ROOT);
+  } catch {
+    return null;
+  }
+  for (const bucket of buckets) {
     const f = join(SESSIONS_ROOT, bucket, sessionId, 'session.v4.jsonl.zstd');
     if (!existsSync(f)) continue;
     const header = readHeader(f);
@@ -224,9 +289,6 @@ export function findSessionHeader(sessionId) {
  * 用于修复"本功能上线前创建的会话在 GUI 里看不到"。
  */
 export function backfillWorkspaces({ includeTemp = false, dryRun = false, pruneMissing = true } = {}) {
-  const byCwd = scanSessions();
-  const doc = readDoc();
-  const nowIso = new Date().toISOString();
   const stats = {
     workspaces_created: 0,
     workspaces_existing: 0,
@@ -236,7 +298,19 @@ export function backfillWorkspaces({ includeTemp = false, dryRun = false, pruneM
     temp_skipped_workspaces: 0,
     /** 磁盘上已不存在、被从注册表摘掉的 sessionId 数量。 */
     sessions_pruned: 0,
+    /** 读取失败时的说明；非空表示**没有写盘**。 */
+    error: null,
   };
+  let byCwd;
+  let doc;
+  try {
+    byCwd = scanSessions();
+    doc = readDoc();
+  } catch (e) {
+    // 看不到会话存储 / 注册表坏了时绝不做对账：那会把所有 sessionIds 清空。
+    return { ...stats, error: e.message };
+  }
+  const nowIso = new Date().toISOString();
 
   /** 磁盘上真实存在的会话 id 全集。 */
   const live = new Set();
@@ -286,12 +360,14 @@ export function backfillWorkspaces({ includeTemp = false, dryRun = false, pruneM
  *   3) ids 里显式指定的
  *
  * @param {object} opts
- * @param {boolean} [opts.tempOnly] 只删临时目录下的。自动清理（测试套件收尾）用这条，
- *   绝不动桌面或真实项目里的任何会话。
- * @param {boolean} [opts.idsOnly] **只删 ids 里点名的**，忽略上面两条规则。
+ * @param {boolean} [opts.testOnly] 只删**本仓库测试造的**临时目录（`tmpdir()/dsh-any-agent-*`）
+ *   与桌面 `dsh-any-agent-test-*`。自动清理（测试套件收尾）必须用这条。
+ * @param {boolean} [opts.tempOnly] 删除**所有** cwd 在系统临时目录下的会话。
+ *   只给显式人工命令用；不要放进自动清理 —— 用户完全可能把真实项目放在临时目录。
+ * @param {boolean} [opts.idsOnly] **只删 ids 里点名的**，忽略上面三条规则。
  *   要精确删某几个会话时用这条（否则一条临时目录规则会把别的也一起带走 —— 真实踩过）。
  */
-export function purgeTestSessions({ dryRun = false, ids = [], tempOnly = false, idsOnly = false } = {}) {
+export function purgeTestSessions({ dryRun = false, ids = [], testOnly = false, tempOnly = false, idsOnly = false } = {}) {
   const explicit = new Set(ids);
   const victims = [];
   if (existsSync(SESSIONS_ROOT)) {
@@ -304,12 +380,15 @@ export function purgeTestSessions({ dryRun = false, ids = [], tempOnly = false, 
         continue;
       }
       for (const d of dirs) {
-        if (!d.isDirectory()) continue;
+        // 符号链接一律不碰：rmSync 对链接的行为依赖平台，且链接目标可能不在会话目录内。
+        if (!d.isDirectory() || d.isSymbolicLink()) continue;
         const dir = join(bucketPath, d.name);
+        // 兜底：只允许删 SESSIONS_ROOT 下面的目录（结构上已经如此，防未来改动）。
+        if (!isInside(SESSIONS_ROOT, dir)) continue;
         const header = readHeader(join(dir, 'session.v4.jsonl.zstd'));
         if (!header?.id) continue;
         const cwd = header.cwd ?? '';
-        const isTemp = isTempPath(cwd);
+        const isTemp = testOnly ? isTestTempPath(cwd) : isTempPath(cwd);
         const isTestDesktop = !tempOnly && /[\\/]Desktop[\\/]dsh-any-agent-test-[AB]([\\/]|$)/i.test(cwd);
         const isExplicit = explicit.has(header.id);
         // idsOnly：只认点名，别的规则全部作废
@@ -318,7 +397,7 @@ export function purgeTestSessions({ dryRun = false, ids = [], tempOnly = false, 
           id: header.id,
           dir,
           cwd,
-          reason: isExplicit ? '显式指定' : isTemp ? '临时目录' : '验收测试目录',
+          reason: isExplicit ? '显式指定' : isTestDesktop ? '验收测试目录' : testOnly ? '测试临时目录' : '临时目录',
           origin: header.origin ?? null,
         });
       }
@@ -339,12 +418,14 @@ export function purgeTestSessions({ dryRun = false, ids = [], tempOnly = false, 
       }
     }
     // 清掉因删空而残留的空分桶目录（每个工作区一个桶，空桶会一直堆着）
-    for (const bucket of readdirSync(SESSIONS_ROOT)) {
-      const p = join(SESSIONS_ROOT, bucket);
-      try {
-        if (readdirSync(p).length === 0) rmSync(p, { recursive: true, force: true });
-      } catch {
-        /* 桶被占用或权限问题就跳过 */
+    if (existsSync(SESSIONS_ROOT)) {
+      for (const bucket of readdirSync(SESSIONS_ROOT)) {
+        const p = join(SESSIONS_ROOT, bucket);
+        try {
+          if (readdirSync(p).length === 0) rmSync(p, { recursive: true, force: true });
+        } catch {
+          /* 桶被占用或权限问题就跳过 */
+        }
       }
     }
     // 删完之后把注册表里对应的 id 也摘掉
@@ -355,7 +436,12 @@ export function purgeTestSessions({ dryRun = false, ids = [], tempOnly = false, 
 
 /** 清掉"没有会话且路径已不存在"的空工作区条目。 */
 export function pruneEmptyWorkspaces({ dryRun = false } = {}) {
-  const doc = readDoc();
+  let doc;
+  try {
+    doc = readDoc();
+  } catch (e) {
+    return { removed: [], error: e.message };
+  }
   const removed = [];
   for (const id of Object.keys(doc.tables.workspaces)) {
     const ws = doc.tables.workspaces[id];
@@ -379,13 +465,20 @@ export function pruneEmptyWorkspaces({ dryRun = false } = {}) {
  * 启发式，实测不一定兜住）。这里按**路径模式**确定性清理，绝不碰真实项目目录。
  */
 export function pruneTestWorkspaces({ dryRun = false } = {}) {
-  const doc = readDoc();
+  let doc;
+  try {
+    doc = readDoc();
+  } catch (e) {
+    return { removed: [], error: e.message };
+  }
   const removed = [];
   for (const id of Object.keys(doc.tables.workspaces)) {
     const ws = doc.tables.workspaces[id];
     const p = ws?.path ?? '';
     if (!p) continue;
-    if (!isTempPath(p) && !isTestDesktopPath(p)) continue;
+    // ★ 只删测试自己造的临时目录（dsh-any-agent-*）与桌面测试目录。
+    //   以前用 isTempPath(p) 会把用户在 %TEMP% 里的真实项目登记也删掉。
+    if (!isTestTempPath(p) && !isTestDesktopPath(p)) continue;
     removed.push({ id, path: p, sessions: ws?.sessionIds?.length ?? 0 });
     delete doc.tables.workspaces[id];
     doc.global.workspaceIds = (doc.global.workspaceIds ?? []).filter((x) => x !== id);
@@ -397,7 +490,12 @@ export function pruneTestWorkspaces({ dryRun = false } = {}) {
 
 /** 清理：把系统临时目录下的工作区条目从注册表移除（**不动磁盘上的会话**）。 */
 export function pruneTempWorkspaces({ dryRun = false } = {}) {
-  const doc = readDoc();
+  let doc;
+  try {
+    doc = readDoc();
+  } catch (e) {
+    return { removed: [], error: e.message };
+  }
   const removed = [];
   for (const id of Object.keys(doc.tables.workspaces)) {
     const ws = doc.tables.workspaces[id];
@@ -411,7 +509,7 @@ export function pruneTempWorkspaces({ dryRun = false } = {}) {
   return { removed };
 }
 
-/** 列出当前注册表里的工作区。 */
+/** 列出当前注册表里的工作区。解析失败时抛错（由 CLI 显示可操作的错误）。 */
 export function listWorkspaces() {
   const doc = readDoc();
   return Object.entries(doc.tables.workspaces).map(([id, w]) => ({

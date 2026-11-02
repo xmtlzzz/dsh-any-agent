@@ -26,7 +26,7 @@
 
 | 项目 | 要求 | 检查命令 |
 |---|---|---|
-| Node.js | **≥ 20** | `node -v` |
+| Node.js | **≥ 22.15**（`zstdDecompressSync` 的下限） | `node -v` |
 | DSH | 已安装且**能正常聊天** | 打开 DSH，随便发一句 |
 | provider 与凭据 | 已配好，写进 `~/.dsh/.credentials.yaml` 或环境变量 | 见下 |
 
@@ -91,27 +91,27 @@ npm install -g dsh-any-agent
 
 ```bash
 # 先看它会改什么（默认不写任何文件）
-dsh-any-agent setup
+dsh-any-agent-setup
 
 # 确认后真正写入
-dsh-any-agent setup --yes
+dsh-any-agent-setup --yes
 
 # 只装某几个 / 换权限档
-dsh-any-agent setup --yes --only cursor,zed
-dsh-any-agent setup --yes --permission read-only
+dsh-any-agent-setup --yes --only cursor,zed
+dsh-any-agent-setup --yes --permission read-only
 
 # 反悔了，全部移除
-dsh-any-agent setup --remove --yes
+dsh-any-agent-setup --remove --yes
 ```
 
-支持的客户端：**Claude Code、Codex、Cursor、Windsurf、Zed**。没装的那些会被跳过，不算失败。
+支持的客户端：**Claude Code、Claude Desktop、Codex、Cursor、Windsurf、Zed、Gemini CLI、opencode、VS Code**。没装的那些会被跳过，不算失败。
 
 它做的几件保证安全的事：
 
 - **默认 dry-run**，加 `--yes` 才写
 - 每个文件写前备份成 `<file>.bak-dsh-<时间戳>`
-- JSON 类客户端：写入前解析原文件、写后回读校验，坏文件绝不留在磁盘上
-- Claude Code / Codex 走它们自己的 `mcp add` 子命令，不手改数据库
+- JSON/JSONC/TOML 全部**文本级定点编辑**：只改自己那一条，保留缩进、键序、CRLF、BOM 与注释；坏文件直接拒绝
+- **不调用任何客户端 CLI**（`claude mcp get` 会整体回写 `~/.claude.json`，已移除该探针）
 - **幂等**：重复运行只会更新变化的部分
 
 > 用 npm 全局安装时命令叫 `dsh-any-agent-setup`（或 `npx dsh-any-agent-setup`）。

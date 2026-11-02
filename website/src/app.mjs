@@ -127,13 +127,18 @@ $$('[data-config]').forEach(button => button.addEventListener('click', () => {
   $('#config-panel').setAttribute('aria-labelledby', button.id);
   $$('[data-config]').forEach(tab => { const active = tab === button; tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1; });
 }));
-$$('[role="tablist"]').forEach(list => list.addEventListener('keydown', event => {
-  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-  const tabs = [...list.querySelectorAll('[role="tab"]')], active = tabs.indexOf(document.activeElement);
-  if (active < 0) return;
-  const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (active + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-  event.preventDefault(); tabs[index].focus(); tabs[index].click();
-}));
+$$('[role="tablist"]').forEach(list => {
+  const vertical = list.getAttribute('aria-orientation') === 'vertical';
+  const prevKey = vertical ? 'ArrowUp' : 'ArrowLeft';
+  const nextKey = vertical ? 'ArrowDown' : 'ArrowRight';
+  list.addEventListener('keydown', event => {
+    if (![prevKey, nextKey, 'Home', 'End'].includes(event.key)) return;
+    const tabs = [...list.querySelectorAll('[role="tab"]')], active = tabs.indexOf(document.activeElement);
+    if (active < 0) return;
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (active + (event.key === nextKey ? 1 : -1) + tabs.length) % tabs.length;
+    event.preventDefault(); tabs[index].focus(); tabs[index].click();
+  });
+});
 async function copy(text, button) {
   try {
     if (!navigator.clipboard?.writeText) throw Error('Clipboard unavailable');

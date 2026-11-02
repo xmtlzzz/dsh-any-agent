@@ -32,6 +32,7 @@ import {
 } from 'node:fs';
 import { platform } from 'node:os';
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** 写进每个客户端的条目名。同时也是 --remove 唯一的识别依据。 */
 export const ENTRY_NAME = 'dsh-any-agent';
@@ -652,7 +653,7 @@ export function existingShapeMode(client, file) {
 export function clientList(dirs) {
   const { home, appData } = dirs;
   return [
-    { ...jsonClient('claude-code', 'Claude Code', 'vscode', 'mcpServers', () => join(home, '.claude.json')), verifyCli: 'claude' },
+    jsonClient('claude-code', 'Claude Code', 'vscode', 'mcpServers', () => join(home, '.claude.json')),
     jsonClient(
       'claude-desktop', 'Claude Desktop', 'default', 'mcpServers',
       () => IS_WIN || IS_MAC
@@ -684,7 +685,9 @@ export function isPresent(client, dirs) {
 
 export function defaultLaunch() {
   // 与本模块相邻的 bin/dsh-any-agent.mjs 优先；否则退回 PATH 上的命令。
-  const here = dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+  // ★ 必须用 fileURLToPath：new URL(...).pathname 会把路径里的空格/中文变成
+  //   %20 / 百分号编码，existsSync 失败后静默退回 PATH 命令，客户端随后连接失败。
+  const here = dirname(fileURLToPath(import.meta.url));
   const sibling = join(here, '..', 'bin', 'dsh-any-agent.mjs');
   if (existsSync(sibling)) return { command: process.execPath, args: [sibling], style: 'node + sibling entry' };
   return { command: ENTRY_NAME, args: [], style: 'PATH command' };
@@ -866,24 +869,16 @@ export function applyClient(plan, ctx, stamp) {
     if (originalMode !== null) {
       try { chmodSync(plan.path, originalMode); } catch { /* 尽力而为 */ }
     }
-    const base = {
+    // ★ 不再调用客户端 CLI 做验证。
+    //   Claude Code 的 `claude mcp get` 会让客户端**整体回写** ~/.claude.json
+    //   （实测会丢掉 projects[*].history、往顶层塞十几个键）。我们只承诺
+    //   "只改自己那一条"，因此验证只报告我们写入的字节与备份路径，不碰客户端。
+    return {
       ...plan,
       status: remove ? 'removed' : 'applied',
       summary: (remove ? 'entry removed' : 'entry written') + (originalMode !== null ? ' (read-only file overridden by --force)' : ''),
       backup,
     };
-    // 有的客户端自己维护这份文件（Claude Code 会缓存并回写 ~/.claude.json）。
-    // 有 CLI 时用它做一次只读确认，除了状态行不产生任何副作用。
-    if (client.verifyCli && which(client.verifyCli)) {
-      const probe = spawnSync(client.verifyCli, ['mcp', 'get', ENTRY_NAME], {
-        encoding: 'utf8', shell: IS_WIN, windowsHide: true,
-      });
-      const registered = probe.status === 0;
-      base.summary += registered
-        ? ' (confirmed by ' + client.verifyCli + ' mcp get)'
-        : ' (note: ' + client.verifyCli + ' mcp get does not see it yet; restart the client)';
-    }
-    return base;
   } catch (e) {
     if (originalMode !== null) {
       try { chmodSync(plan.path, originalMode); } catch { /* 尽力而为 */ }

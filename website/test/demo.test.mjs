@@ -41,3 +41,19 @@ test('Invalid workflow state cannot silently display misleading content', () => 
   assert.throws(() => getFrame('unknown', 0), RangeError);
   for (const value of [-1, 6, 1.5, NaN]) assert.throws(() => getFrame('dispatch', value), RangeError);
 });
+test('Demo snippets use the real MCP argument and response keys', () => {
+  const frames = Object.values(scenarios).flatMap(s => s.frames);
+  const interject = frames.filter(f => f.tool === 'dsh_interject');
+  const reads = frames.filter(f => f.tool === 'dsh_read');
+  const status = frames.filter(f => f.tool === 'dsh_status');
+  assert.ok(interject.length > 0 && reads.length > 0 && status.length > 0);
+  for (const f of interject) {
+    assert.match(f.code, /message:/);
+    assert.doesNotMatch(f.code, /\bprompt:/);
+  }
+  for (const f of reads) {
+    assert.match(f.code, /cursor:/);
+    assert.doesNotMatch(f.code, /next_cursor/);
+  }
+  for (const f of status) assert.doesNotMatch(f.code, /\bhistory:/);
+});

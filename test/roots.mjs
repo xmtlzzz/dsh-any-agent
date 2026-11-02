@@ -16,12 +16,17 @@
  */
 
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ENTRY = join(HERE, '..', 'bin', 'dsh-any-agent.mjs');
+/** 服务端启动会创建状态/锁/哨兵目录；给测试一份独立 HOME，绝不碰真实 ~/.dsh。 */
+const STATE_ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-roots-'));
+process.on('exit', () => { try { rmSync(STATE_ROOT, { recursive: true, force: true }); } catch {} });
 
 let passed = 0;
 let failed = 0;
@@ -34,7 +39,14 @@ const check = (name, cond, detail = '') => {
 function startServer(env = {}) {
   const child = spawn(process.execPath, [ENTRY], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, DSH_MCP_LOG: 'silent', DSH_BIN: '/fake/never/used.js', ...env },
+    env: {
+      ...process.env,
+      DSH_MCP_LOG: 'silent',
+      DSH_BIN: '/fake/never/used.js',
+      DSH_MCP_STATE: join(STATE_ROOT, 'state.json'),
+      DSH_HOME: join(STATE_ROOT, 'dsh-home'),
+      ...env,
+    },
   });
   const waiters = new Map();
   let buf = '';

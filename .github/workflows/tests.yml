@@ -7,15 +7,25 @@ name: tests
 #   OFFLINE (runs in CI)
 #     guards            env-var edge cases            31 checks
 #     prune             sentinel retention            11 checks
-#     approval-details  credential redaction          24 checks
+#     approval-details  credential redaction          27 checks
+#     read-cursor       dsh_read revision cursor      10 checks
+#     sentinel-redaction sentinel disk hygiene        15 checks
+#     forget-tombstone  forget is terminal             7 checks
+#     bootstrap-profile zero-dependency bootstrap     24 checks
+#     workspace-safety  data-loss boundaries          23 checks
+#     permission-adopt  no silent privilege escalation 13 checks
+#     state-safety      state/sentinel/lock storage   21 checks
 #     sandbox-guard     real HOME is never a sandbox    18 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     roots             cwd from MCP roots            12 checks
 #     workspace-titles  home cwd guard, title_hint    15 checks
 #     setup             client config writer          41 checks
 #     removal-scope     --remove only touches its own   24 checks
-#     package-check     publishability                12 checks
+#     config-safety     in-place edits, format        406 checks
+#     real-configs      real config round-trip        48 checks (5 fixtures)
+#     package-check     publishability                14 checks
 #     package job       pack -> install -> --version
+#     website job       build + 16 site tests
 #
 #     These load modules and touch the filesystem: no DSH, no model, no
 #     credentials.
@@ -60,6 +70,10 @@ jobs:
         # cannot even load the server -- tested and confirmed by CI failing
         # with 'server exited code 1' before it answered a single request.
         node: ['22', '24']
+        # macOS has darwin-specific config paths; run one representative cell.
+        include:
+          - os: macos-latest
+            node: '22'
 
     steps:
       - uses: actions/checkout@v4
@@ -88,6 +102,34 @@ jobs:
         env: { DSH_MCP_LOG: silent }
         run: node test/approval-details.mjs
 
+      - name: read-cursor (revision cursor semantics)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/read-cursor.mjs
+
+      - name: sentinel-redaction (thinking/input hygiene)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/sentinel-redaction.mjs
+
+      - name: forget-tombstone (forget is terminal)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/forget-tombstone.mjs
+
+      - name: bootstrap-profile (zero-dependency first-run profile)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/bootstrap-profile.mjs
+
+      - name: workspace-safety (no data-loss on bad registry/temp prefixes)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/workspace-safety.mjs
+
+      - name: permission-adopt (no silent privilege escalation)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/permission-adopt.mjs
+
+      - name: state-safety (state/sentinel/lock storage)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/state-safety.mjs
+
       # Guards the sandbox itself, not the writer. A test suite that points its
       # "sandbox" at the real user profile deletes real data while reporting
       # green; this suite fails instead.
@@ -103,7 +145,7 @@ jobs:
         env: { DSH_MCP_LOG: silent }
         run: node test/removal-scope.mjs
 
-      # 9 个客户端 × 格式保留(2/4 空格、Tab、单行、CRLF、BOM) × 只读文件 ×
+      # 9 个客户端 × 格式保留(2/4 空格、单行、CRLF、BOM) × 只读文件 ×
       # 坏 JSON × 幂等 × 真实 HOME 只读回归。用户的底线是「注册/删除只能
       # 影响自己写的那一条」，这是它的可执行版本。
       - name: config-safety (in-place edits, format preserved)
@@ -192,3 +234,35 @@ jobs:
             echo 'tarball looks like it contains a credential'; exit 1
           fi
           echo 'tarball contents ok'
+
+  website:
+    name: website build + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # The site has no runtime dependencies; build (hash assets, CSP/SEO checks)
+      # and run its node:test suite. Do not deploy from CI -- deploys are manual.
+      - name: build and test
+        working-directory: website
+        run: npm run check
+
+  node-floor:
+    name: Node 22.15 floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # The declared floor, not the latest 22.x. Proves zstdDecompressSync
+          # is actually available at the version users are told to install.
+          node-version: '22.15'
+      - name: floor checks
+        env: { DSH_MCP_LOG: silent }
+        run: |
+          node --version
+          node test/package-check.mjs
+          node test/workspace-safety.mjs
+          node test/bootstrap-profile.mjs

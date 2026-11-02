@@ -5,13 +5,22 @@
  * 因为本服务是被 Codex/Claude 以未知环境拉起的。
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const PKG_ROOT = join(HERE, '..');
+
+/** 包版本（与 package.json 单一来源；ACP clientInfo 也用它，避免硬编码漂移）。 */
+export const PKG_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8')).version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 /** 相对 DSH 包入口的固定尾巴。 */
 const DSH_ENTRY = join('@deepseek-ai', 'dsh', 'lib', 'bin.js');
@@ -105,9 +114,45 @@ export const ROUTE_SOURCE_PROFILE = (() => {
   return v === undefined || String(v).trim() === '' ? null : String(v).trim();
 })();
 
-/** 会话注册表（跨 MCP 服务重启存活）。 */
+/**
+ * 会话注册表（跨 MCP 服务重启存活）。
+ *
+ * ★ 默认放在 **$DSH_HOME/.dsh-any-agent/**，不再放在包安装目录里。
+ *   全局安装到只读位置（sudo / Program Files / 只读挂载）时，包目录不可写，
+ *   注册表、哨兵、锁登记会全部静默失败 —— 调用方等哨兵会永远等不到。
+ *   DSH_HOME 本身就是用户目录，天然可写，且与 DSH 自己的数据放在一起。
+ *
+ * 兼容：旧版本的 `<包目录>/.state/conversations.json` 会在首次启动时复制过来
+ * （只在没有显式设置 DSH_MCP_STATE 时做，见 LEGACY_STATE_FILE / USING_DEFAULT_STATE）。
+ */
+const DEFAULT_STATE_DIR = join(DSH_HOME, '.dsh-any-agent');
 export const STATE_FILE =
-  process.env.DSH_MCP_STATE ?? join(PKG_ROOT, '.state', 'conversations.json');
+  process.env.DSH_MCP_STATE ?? join(DEFAULT_STATE_DIR, 'conversations.json');
+/** 旧默认位置；仅用于一次性迁移。 */
+export const LEGACY_STATE_FILE = join(PKG_ROOT, '.state', 'conversations.json');
+/** 是否仍在使用默认状态路径（显式设置 DSH_MCP_STATE 时不做自动迁移）。 */
+export const USING_DEFAULT_STATE = !process.env.DSH_MCP_STATE;
+
+/**
+ * 确认一个目录可写；不可写就抛出可直接展示给用户的错误。
+ *
+ * 在 Hub.load() 启动时调用：宁可服务明确起不来，也不要"看起来正常、
+ * 哨兵永远不出现、锁也无法归因"的静默降级。
+ */
+export function assertWritableDir(dir, label = '目录') {
+  try {
+    mkdirSync(dir, { recursive: true });
+    const probe = join(dir, `.write-probe-${process.pid}-${Math.random().toString(36).slice(2)}`);
+    writeFileSync(probe, 'ok', 'utf8');
+    rmSync(probe, { force: true });
+  } catch (e) {
+    throw new Error(
+      `${label}不可写: ${dir}\n` +
+        `  ${e.message}\n` +
+        '  请用 DSH_MCP_STATE / DSH_MCP_RUNS_DIR / DSH_MCP_LOCKS_DIR 指向可写目录。',
+    );
+  }
+}
 
 /**
  * 异步派活"完成哨兵"文件的根目录。每个 run 终止时在这里写一个独立小文件，
@@ -134,9 +179,9 @@ export const SENTINEL_INCLUDE_REASONING = process.env.DSH_MCP_SENTINEL_INCLUDE_R
  *
  * 为什么要清理：哨兵内含完整正文，长期不清理会无声地堆积占用磁盘。
  */
-export const SENTINEL_TTL_MS = Number(
-  process.env.DSH_MCP_SENTINEL_TTL_MS ?? 7 * 24 * 60 * 60 * 1000,
-);
+const rawSentinelTtl = numEnv('DSH_MCP_SENTINEL_TTL_MS', 7 * 24 * 60 * 60 * 1000);
+/** ★ 负数/NaN 一律当作 0（关闭清理），绝不能把 cutoff 推到未来删光全部哨兵。 */
+export const SENTINEL_TTL_MS = Number.isFinite(rawSentinelTtl) && rawSentinelTtl > 0 ? rawSentinelTtl : 0;
 
 /**
  * 把 Windows 路径转成 Bash / MSYS 形式（`D:\a\b` → `/d/a/b`），非 Windows 原样返回。
@@ -234,7 +279,10 @@ export const LIST_PROBE_TTL_MS = numEnv('DSH_MCP_LIST_PROBE_TTL_MS', 10_000);
 
 /** 权限档 → 该档下的默认审批策略。 */
 export const PERMISSION_TIERS = ['read-only', 'workspace-write', 'danger-full-access'];
-export const DEFAULT_PERMISSION = process.env.DSH_MCP_PERMISSION ?? 'danger-full-access';
+/** 空串/非法值一律回落到 danger-full-access（保持旧默认），而不是让 Hub.create 每次都失败。 */
+export const DEFAULT_PERMISSION = PERMISSION_TIERS.includes(process.env.DSH_MCP_PERMISSION)
+  ? process.env.DSH_MCP_PERMISSION
+  : 'danger-full-access';
 
 /**
  * 审批处理策略：
@@ -260,7 +308,10 @@ export const DEFAULT_REASONING = 'hide';
  * ACP 默认值是空串（= Provider default），不是我们想要的；默认显式设成 max。
  */
 export const REASONING_EFFORTS = ['default', 'low', 'medium', 'high', 'xhigh', 'max'];
-export const DEFAULT_REASONING_EFFORT = process.env.DSH_MCP_REASONING_EFFORT ?? 'max';
+/** 空串/非法值回落到 max；否则 Hub.create 的合法性校验会让**所有** dsh_start 失败。 */
+export const DEFAULT_REASONING_EFFORT = REASONING_EFFORTS.includes(process.env.DSH_MCP_REASONING_EFFORT)
+  ? process.env.DSH_MCP_REASONING_EFFORT
+  : 'max';
 
 /**
  * 工作区登记模式：

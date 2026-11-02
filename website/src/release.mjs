@@ -38,6 +38,8 @@ export async function fetchLatestVersion(fetchImpl = fetch) {
       const response = await fetchImpl(source.url, {
         headers: { accept: 'application/json' },
         cache: 'no-store',
+        // 3 s per source: a hung registry must not leave the badge pending forever.
+        signal: AbortSignal.timeout(3000),
       });
       if (!response?.ok) continue;
       const version = normalizeVersion(source.pick(await response.json()));

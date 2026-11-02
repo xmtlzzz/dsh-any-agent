@@ -45,7 +45,7 @@ export const TOOL_DEFS = [
           type: 'string',
           enum: PERMISSION_TIERS,
           description:
-            `权限档。默认 ${DEFAULT_PERMISSION}。read-only 适合分析不信任样本（如恶意软件）；workspace-write 越界操作会冒泡为待决审批。` +
+            `权限档。默认 ${DEFAULT_PERMISSION}。read-only 适合分析不信任样本（如恶意软件）；workspace-write 由 DSH 沙箱限制可写范围，越界请求默认 auto-allow，想在调用方挂起审批请传 on_approval=ask。` +
             '**档位在创建时定下**：DSH 设计上"resume 的会话保留它自己记录的权限"，所以事后改这个参数不会改变已有会话，要换档需新建。' +
             '（本档位是**真实生效**的 —— 由启动时传入的 env 决定，并有 test/permission.mjs 对着会话自己的记录逐档核验。）',
         },
@@ -188,7 +188,7 @@ export const TOOL_DEFS = [
           enum: REASONING_MODES,
           description: `思考内容展示档位，默认 ${DEFAULT_REASONING}。`,
         },
-        timeout_ms: { type: 'number', description: '新回合的**等待**上限（毫秒），**默认 0 = 一直等**；queue 模式也用它限制等待上一轮结束。到期转后台，不取消回合。' },
+        timeout_ms: { type: 'number', description: '新回合的**等待**上限（毫秒），**默认 0 = 一直等**；queue 模式也用它限制等待上一轮结束。忙时等待超时会报错（本次插话未发送，会话不受损）；空闲时到期只转后台，不取消回合。' },
       },
       ['conversation_id', 'message'],
     ),
@@ -229,14 +229,19 @@ export const TOOL_DEFS = [
       '会话本体留在磁盘上，之后仍可 resume；**forget=true 会写墓碑**：从注册表移除，此后按 id 查询明确报“已被 forget”' +
       '（想恢复可按错误里的路径删除墓碑文件，默认在 `$DSH_HOME/.dsh-any-agent-forgotten/<id>.json`）。' +
       '★ 用完了想一次性腾内存就传 all=true（每个会话约 300-480MB；默认 `MAX_LIVE=8` 会回收最久未用者，' +
-      'all=true 可立即全部释放，之后随时 resume）。',
+      'all=true 会释放**空闲**会话，正在跑回合的默认跳过；确实要连跑着的也停掉请传 force=true）。' +
+      '对单个会话 release 会停掉其 DSH 进程；若它正在跑回合，该回合会被中断。',
     inputSchema: S(
       {
         conversation_id: CONV_ID,
         forget: { type: 'boolean', description: '同时从本服务的注册表里移除，默认 false。' },
         all: {
           type: 'boolean',
-          description: '忽略 conversation_id，释放**所有**活着的会话进程（腾内存用）。默认 false。',
+          description: '忽略 conversation_id，释放所有**空闲**会话进程（腾内存用）。正在跑回合的默认跳过。默认 false。',
+        },
+        force: {
+          type: 'boolean',
+          description: '仅配合 all=true：连正在跑回合的会话也停掉（会中断那些回合）。默认 false。',
         },
       },
       [],
@@ -587,12 +592,15 @@ export function createHandlers(hub, opts = {}) {
       // ★ all=true：一次性放掉所有活着的会话进程（腾内存）。
       //   无损：会话日志都在磁盘上，之后照样 resume。
       if (args.all === true) {
-        const r = await hub.releaseAll();
+        const r = await hub.releaseAll({ force: args.force === true });
         return {
-          structured: { released: r.released, conversations: r.conversations },
+          structured: { released: r.released, conversations: r.conversations, skipped_busy: r.skipped_busy },
           text:
-            `已释放 ${r.released} 个会话进程（写锁全部让出，内存立刻回收）。` +
-            `\n会话日志都在磁盘上，之后派活会自动 resume；其中一个都没在跑时 released=0。`,
+            `已释放 ${r.released} 个空闲会话进程（写锁让出，内存回收）。` +
+            (r.skipped_busy.length
+              ? `\n跳过 ${r.skipped_busy.length} 个正在跑回合的会话；要连它们一起停掉请传 force=true。`
+              : '') +
+            `\n会话日志都在磁盘上，之后派活会自动 resume；没有一个可释放时 released=0。`,
         };
       }
       const conv = hub.get(args.conversation_id);

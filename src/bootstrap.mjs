@@ -16,19 +16,15 @@
  *   自己的凭据服务在每次请求时解析（$DSH_HOME/.credentials.yaml > 继承环境 > .env），
  *   与 GUI 完全同一条路径。
  *
- * 幂等性：用户手改过 profile 就不覆盖（用内容指纹判断），只报告。
+ * 幂等性：用户手改过 profile（删掉 managed 标记）就不再覆盖，只报告。
  */
 
 import { createHash } from 'node:crypto';
-import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 import { BOOTSTRAP_ENABLED, DSH_HOME, DSH_PROFILE, ROUTE_SOURCE_PROFILE } from './config.mjs';
-
-/** server 包根目录（本文件位于 <server>/src/）。 */
-const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+import { load as yamlLoad, dump as yamlDump } from './yaml-lite.mjs';
 
 /** 与 dsh 内置 acp 模板一致的组合包列表。 */
 const PROFILE_BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-acp-app'];
@@ -47,25 +43,37 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** 一眼像密钥的值（防止有人把字面密钥写进 apiKeyEnv）。 */
 const LOOKS_LIKE_SECRET = /^(sk-|ak-|Bearer\s|eyJ)/i;
+/** 任何层级都不复制的凭据字段（providers/models 的嵌套对象同样适用）。 */
+const SECRET_KEY = /^(?:api[_-]?key|apikey|authorization|proxy[_-]?authorization|cookie|set[_-]?cookie|password|passwd|secret|token|access[_-]?token|refresh[_-]?token|credentials?|headers|client[_-]?secret|private[_-]?key|access[_-]?key[_-]?id|oauth|env|environment)$/i;
 
-/**
- * 载入 YAML 解析器。自包含导出包从兄弟 runtime 目录取（包内没有 node_modules），
- * 普通 npm 安装走正常的模块解析。
- */
-function loadYaml() {
-  const anchors = [
-    join(PKG_ROOT, 'src', 'anchor.mjs'),
-    join(PKG_ROOT, '..', 'runtime', 'node_modules', 'anchor.cjs'),
-    join(PKG_ROOT, '..', '..', 'runtime', 'node_modules', 'anchor.cjs'),
-  ];
-  for (const anchor of anchors) {
-    try {
-      return createRequire(anchor)('js-yaml');
-    } catch {
-      /* 换下一个锚点 */
+/** 递归剥掉凭据字段；baseURL 里的 userinfo 也一并清掉。 */
+function scrubSecrets(value, key = '') {
+  if (SECRET_KEY.test(key)) return undefined;
+  if (typeof value === 'string') {
+    if (key === 'baseURL') {
+      try {
+        const u = new URL(value);
+        if (u.username || u.password) {
+          u.username = '';
+          u.password = '';
+          return u.toString();
+        }
+      } catch {
+        /* 不是合法 URL：原样保留，让 DSH 自己报错 */
+      }
     }
+    return value;
   }
-  return null;
+  if (Array.isArray(value)) return value.map((item) => scrubSecrets(item));
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      const clean = scrubSecrets(v, k);
+      if (clean !== undefined) out[k] = clean;
+    }
+    return out;
+  }
+  return value;
 }
 
 /** profile 目录：$DSH_HOME/profiles/<name>。 */
@@ -96,28 +104,15 @@ function sanitizeProviders(raw) {
   const out = {};
   for (const [route, profile] of Object.entries(raw)) {
     if (!profile || typeof profile !== 'object' || Array.isArray(profile)) continue;
-    const clean = {};
-    for (const [k, v] of Object.entries(profile)) {
-      // apiKey 是适配器从不读取的字段；headers 里可能夹部署凭据。两者都不复制。
-      if (k === 'apiKey' || k === 'headers') continue;
-      clean[k] = v;
-    }
+    // 递归剥离：provider 层与 models[] 里的 headers/apiKey/clientSecret 等
+    // 都不会被抄进受管 profile（以前只处理顶层，模型级 headers 会漏过去）。
+    const clean = scrubSecrets(profile);
+    if (!clean || typeof clean !== 'object') continue;
     if (typeof clean.apiKeyEnv === 'string') {
       if (LOOKS_LIKE_SECRET.test(clean.apiKeyEnv) || !ENV_NAME.test(clean.apiKeyEnv)) {
         // 疑似把字面密钥写进了 apiKeyEnv：丢掉引用，而不是把密钥抄进新文件
         delete clean.apiKeyEnv;
       }
-    }
-    if (Array.isArray(clean.models)) {
-      clean.models = clean.models.map((m) => {
-        if (!m || typeof m !== 'object') return m;
-        const copy = {};
-        for (const [k, v] of Object.entries(m)) {
-          if (k === 'apiKey') continue;
-          copy[k] = v;
-        }
-        return copy;
-      });
     }
     out[route] = clean;
   }
@@ -165,7 +160,7 @@ function sanitizeDeepseek(config) {
 }
 
 /** 依次从候选来源里找第一份能用的路由。 */
-function findRouting(yaml) {
+function findRouting() {
   const candidates = ROUTE_SOURCE_PROFILE ? [ROUTE_SOURCE_PROFILE] : DEFAULT_SOURCES;
   const tried = [];
   for (const name of candidates) {
@@ -179,7 +174,7 @@ function findRouting(yaml) {
     }
     let entries;
     try {
-      entries = yaml.load(readFileSync(file, 'utf8'));
+      entries = yamlLoad(readFileSync(file, 'utf8'));
     } catch (e) {
       tried.push({ source: name, file, reason: '解析失败: ' + e.message });
       continue;
@@ -257,22 +252,42 @@ function buildEntries(routing) {
   //   - acp-app 包里把它写死成 deepseek-official/deepseek-v4-flash（会去找 DEEPSEEK_API_KEY）；
   //   - 若清成 {}，ACP 会话就没有初始模型选择，settings 里的 reasoning_effort 也就无处可设。
   //   所以这里显式指向本机自己的默认路由 —— 与 GUI 会话用的是同一个模型。
+  if (!defaultModel?.provider || !defaultModel?.model) {
+    throw new Error(
+      '找到的路由里没有可用的默认 provider/model：请先在 DSH GUI 的 Models 页面\n' +
+        '  配置一个带 models 列表的 provider（或在来源 profile 里写 agent-default-model）。',
+    );
+  }
   entries.push({
     id: 'acp',
     name: '@deepseek-ai/dsh-acp',
-    config: defaultModel ? { provider: defaultModel.provider, model: defaultModel.model } : {},
+    config: { provider: defaultModel.provider, model: defaultModel.model },
   });
+  entries.push({ id: 'agent-default-model', config: defaultModel });
 
-  if (defaultModel) entries.push({ id: 'agent-default-model', config: defaultModel });
+  // ★ 与 profile-example 对齐：显式声明三档预设，但**绝不写 defaultPreset**。
+  //   defaultPreset 会在会话创建时覆盖 DSH_PERMISSION_MODE，导致 read-only 被静默提权
+  //   （test/permission.mjs 实测抓到过）。不写它时，DSH 按 sandbox+approval 组合推断。
+  entries.push({
+    id: 'permission',
+    name: '@deepseek-ai/dsh-permission-presets',
+    config: {
+      presets: {
+        'read-only': { sandbox: 'read-only', approval: 'ask' },
+        'workspace-write': { sandbox: 'workspace-write', approval: 'ask' },
+        'danger-full-access': { sandbox: 'danger-full-access', approval: 'never' },
+      },
+    },
+  });
   return entries;
 }
 
-function renderDocument(yaml, entries, source) {
+function renderDocument(entries, source) {
   const where =
     source === '__home__' ? join(DSH_HOME, 'cordis.patch.yml') : 'profile "' + source + '"';
   const header = [
     '# ' + MANAGED_MARKER + ': 本文件由 dsh-any-agent 首次启动时自动生成，可安全删除后重建。',
-    '# 也可以手改：手改之后 dsh-any-agent 不会再覆盖它（用内容指纹判断）。',
+    '# 也可以手改：手改之后 dsh-any-agent 不会再覆盖它（用开头的 managed 标记判断）。',
     '#',
     '# 这里**不含任何密钥**：路由只声明 apiKeyEnv / baseURL / api / models，',
     '# 真正的凭据由 DSH 在每次请求时从 $DSH_HOME/.credentials.yaml（或环境变量）解析，',
@@ -281,7 +296,7 @@ function renderDocument(yaml, entries, source) {
     '# 路由来源: ' + where,
     '',
   ].join('\n');
-  return header + yaml.dump(entries, { lineWidth: 200, noRefs: true });
+  return header + yamlDump(entries);
 }
 
 /**
@@ -306,18 +321,8 @@ export function ensureProfile({ log } = {}) {
     return { ok: false, error: '创建 profile 目录失败: ' + e.message };
   }
 
-  const yaml = loadYaml();
-  if (!yaml) {
-    return {
-      ok: false,
-      error: '未找到 YAML 解析器（js-yaml）：无法从本机已有 profile 复制模型路由',
-      reason: '请在 server/ 下安装 js-yaml，或使用自包含导出包',
-    };
-  }
-
   const patchPath = join(dir, 'cordis.patch.yml');
   const existed = existsSync(patchPath);
-  const state = readManagedState();
 
   /**
    * 归属判断：**只看文件里有没有 MANAGED_MARKER**。
@@ -338,7 +343,7 @@ export function ensureProfile({ log } = {}) {
     return { ok: true, skipped: 'profile 由用户维护（无管理标记），保持原样' };
   }
 
-  const found = findRouting(yaml);
+  const found = findRouting();
   if (!found.routing) {
     if (existed) return { ok: true, skipped: '本机没有可复制的模型路由，且 profile 已存在' };
     return {
@@ -349,8 +354,13 @@ export function ensureProfile({ log } = {}) {
     };
   }
 
-  const entries = buildEntries(found.routing);
-  const text = renderDocument(yaml, entries, found.source);
+  let entries;
+  try {
+    entries = buildEntries(found.routing);
+  } catch (e) {
+    return { ok: false, error: e.message, reason: '未写入 profile' };
+  }
+  const text = renderDocument(entries, found.source);
   const hash = sha256(text);
 
   // 与磁盘上的实际内容比对（不用 state.hash：DSH 自己也会改写这个文件）
@@ -401,12 +411,11 @@ export function inspectProfile() {
   const dir = profileDir();
   const patchPath = join(dir, 'cordis.patch.yml');
   const state = readManagedState();
-  const yaml = loadYaml();
   let routes = [];
   let agentDefaultModel = null;
-  if (yaml && existsSync(patchPath)) {
+  if (existsSync(patchPath)) {
     try {
-      const routing = extractRouting(yaml.load(readFileSync(patchPath, 'utf8')));
+      const routing = extractRouting(yamlLoad(readFileSync(patchPath, 'utf8')));
       routes = Object.keys(routing?.providers || {});
       agentDefaultModel = routing?.agentDefaultModel || null;
     } catch {

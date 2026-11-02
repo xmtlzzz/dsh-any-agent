@@ -15,7 +15,8 @@
  *   node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions [--dry-run] [--ids=a,b]
  *
  * 只有 --purge-test-sessions 会动磁盘上的会话文件，且规则很死：只删
- * "cwd 在系统临时目录下" 或 "cwd 在 Desktop\dsh-any-agent-test-*" 的会话，外加 --ids 显式指定的。
+ * "cwd 在 tmpdir()/dsh-any-agent-* 下" 或 "cwd 在 Desktop\dsh-any-agent-test-*" 的会话，
+ * 外加 --ids 显式指定的。**不会**删除用户在 %TEMP% 里自己的真实项目会话。
  */
 
 import {
@@ -45,7 +46,7 @@ const ids = (val('--ids') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 
 // ── 清理测试会话（唯一会删文件的动作） ──────────────────────
 if (has('--purge-test-sessions')) {
-  const res = purgeTestSessions({ dryRun, ids });
+  const res = purgeTestSessions({ dryRun, ids, testOnly: true });
   console.log(`${flag}清理测试会话：${res.count} 个`);
   for (const v of res.victims) {
     console.log(`  - ${v.id}  [${v.reason}]${v.origin ? ` origin=${v.origin}` : ''}  cwd=${v.cwd}`);
@@ -59,6 +60,10 @@ if (has('--purge-test-sessions')) {
 // ── 回填 ────────────────────────────────────────────────────
 if (has('--backfill')) {
   const stats = backfillWorkspaces({ includeTemp: has('--include-temp'), dryRun });
+  if (stats.error) {
+    console.error(`${flag}回填失败（未写盘）：${stats.error}`);
+    process.exitCode = 1;
+  }
   console.log(`${flag}回填：`);
   console.log(`  扫描到会话            ${stats.sessions_scanned}`);
   console.log(`  新建工作区            ${stats.workspaces_created}`);
@@ -74,6 +79,10 @@ if (has('--backfill')) {
 // ── 清理临时工作区 ──────────────────────────────────────────
 if (has('--prune-temp')) {
   const res = pruneTempWorkspaces({ dryRun });
+  if (res.error) {
+    console.error(`${flag}清理失败（未写盘）：${res.error}`);
+    process.exitCode = 1;
+  }
   console.log(`${flag}清理临时工作区条目：${res.removed.length} 个`);
   for (const r of res.removed) console.log(`  - ${r.path}（含 ${r.sessions} 个会话条目）`);
   console.log('');
@@ -82,6 +91,10 @@ if (has('--prune-temp')) {
 // ── 清理空工作区 ────────────────────────────────────────────
 if (has('--prune-empty')) {
   const res = pruneEmptyWorkspaces({ dryRun });
+  if (res.error) {
+    console.error(`${flag}清理失败（未写盘）：${res.error}`);
+    process.exitCode = 1;
+  }
   console.log(`${flag}清理"无会话且路径已不存在"的工作区：${res.removed.length} 个`);
   for (const r of res.removed) console.log(`  - ${r.path}`);
   console.log('');
@@ -89,7 +102,13 @@ if (has('--prune-empty')) {
 
 // ── 列表（或什么都不传时默认） ──────────────────────────────
 if (has('--list') || argv.length === 0 || argv.every((a) => a === '--dry-run')) {
-  const list = listWorkspaces();
+  let list;
+  try {
+    list = listWorkspaces();
+  } catch (e) {
+    console.error(`读取工作区注册表失败: ${e.message}`);
+    process.exit(1);
+  }
   const temp = list.filter((w) => w.is_temp);
   console.log(`共 ${list.length} 个工作区（临时目录 ${temp.length} 个）——**这是文件里的内容**：`);
   for (const w of list.sort((a, b) => Number(a.is_temp) - Number(b.is_temp))) {

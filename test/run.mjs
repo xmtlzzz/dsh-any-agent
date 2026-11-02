@@ -45,6 +45,26 @@ if (code === 0) {
   code = await run('forget-tombstone.mjs');
 }
 if (code === 0) {
+  // 首启 profile bootstrap：零依赖发布形态下必须能复制路由、剥离密钥、幂等；
+  // 用户手写文件绝不覆盖。纯文件系统，不花 token。
+  code = await run('bootstrap-profile.mjs');
+}
+if (code === 0) {
+  // 工作区注册表与测试清理的安全边界：坏文件不覆盖、临时目录前缀不误伤、
+  // 自动清理只删本仓库测试造的会话。纯文件系统，不花 token。
+  code = await run('workspace-safety.mjs');
+}
+if (code === 0) {
+  // 接管外部会话 / 运行期权限核对：未知档 fail-closed 到 read-only，
+  // 记录 read-only 不能被侧车提升。纯内存 + 文件系统，不花 token。
+  code = await run('permission-adopt.mjs');
+}
+if (code === 0) {
+  // 状态/哨兵/锁目录：默认在用户可写位置、不可写时明确失败、
+  // 哨兵写失败可见、非法数值落安全侧。纯文件系统，不花 token。
+  code = await run('state-safety.mjs');
+}
+if (code === 0) {
   // 沙箱守卫先跑：任何把真实 HOME 当沙箱的写法必须立刻失败。
   // 2026-10-29 的事故就是少了这一条，一段临时脚本把 ~ 当沙箱递归删了。
   code = await run('sandbox-guard.mjs');
@@ -82,6 +102,11 @@ if (code === 0) {
   // 真实配置往返：本机已装的客户端配置复制进沙箱，注册再撤销必须逐字节还原。
   // 手工 fixture 证明实现符合假设，这一组证明假设和真实文件一致。
   code = await run('real-configs.mjs');
+}
+if (code === 0) {
+  // 打包可发布性：files 白名单、零依赖、Node 下限、bin shebang。
+  // 纯静态检查 + npm pack --dry-run，不花 token。
+  code = await run('package-check.mjs');
 }
 if (code === 0 && all) {
   code = await run('boundary.mjs');
@@ -123,11 +148,18 @@ if (code === 0 && all) {
   code = await run('workspace-effect.mjs');
 }
 if (code === 0 && all) {
+  // 没有 IDA MCP（mcp__ida__*）时套件自己明确 skip（打印 skipped，退出 0），
+  // 所以把它接进 --all 是安全的；README 不再声称一个实际没跑的命令。
+  code = await run('acceptance.mjs');
+}
+if (code === 0 && all) {
   code = await run('reasoning-check.mjs');
 }
-// 收尾清理：只清临时目录里的测试残留（真实项目会话与仓库 .state/ 不动）。
+// 收尾清理：只清本仓库测试造出来的目录（真实项目会话与状态目录不动）。
 // 无论前面成败都跑，否则失败的运行会把垃圾留在磁盘上。
-await run('cleanup.mjs');
+// ★ cleanup 的退出码必须计入总结果：以前忽略它，清理悄悄失败也会显示全绿。
+const cleanupCode = await run('cleanup.mjs');
+if (code === 0 && cleanupCode !== 0) code = cleanupCode;
 
 console.log(`\n总结果: ${code === 0 ? '通过 ✅' : '失败 ❌'}`);
 process.exit(code);

@@ -40,7 +40,7 @@
 import {
   readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, chmodSync, statSync,
 } from 'node:fs';
-import { join, dirname, relative, isAbsolute, resolve, sep } from 'node:path';
+import { join, dirname, relative, isAbsolute, resolve, sep, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { makeSandboxHome, removeSandbox, realHome } from './sandbox-home.mjs';
@@ -1347,29 +1347,44 @@ section('[13] claude-code：~/.claude.json 定点编辑，只增删自己那一�
 });
 
 // ══════════════════════════════════════════════════════════════════════
-// [16] claude-code：CLI 存在时的 verify 语义（只验报告，不验文件）
+// [16] claude-code：绝不调用客户端 CLI（CLI 会整体回写 ~/.claude.json）
 // ══════════════════════════════════════════════════════════════════════
 
-section('[16] claude-code：CLI 存在时 summary 出现 confirmed by claude mcp get', () => {
+section('[16] claude-code：CLI 在 PATH 上也不会被 setup 调用', () => {
   const home = sandbox({});
   const p = resolvePath('claude-code', home);
   seedText(home, p, JSON.stringify({ mcpServers: {}, projects: {} }, null, 2) + '\n');
-  const hasCli = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['claude'],
-    { encoding: 'utf8', shell: process.platform === 'win32', windowsHide: true }).status === 0;
 
-  const r = runJson(home, ['--yes', '--only', 'claude-code']);
+  // 造一个假 claude：只要被调用就写 marker。放在 PATH 最前面。
+  const binDir = join(home, 'fake-bin');
+  mkdirSync(binDir, { recursive: true });
+  const marker = join(home, 'claude-was-called.txt');
+  if (process.platform === 'win32') {
+    writeFileSync(join(binDir, 'claude.cmd'),
+      '@echo off\r\necho called>>"%DSH_TEST_CLAUDE_MARKER%"\r\nexit /b 0\r\n', 'utf8');
+  } else {
+    const f = join(binDir, 'claude');
+    writeFileSync(f, '#!/bin/sh\necho called >> "$DSH_TEST_CLAUDE_MARKER"\nexit 0\n', 'utf8');
+    chmodSync(f, 0o755);
+  }
+  const pathEnv = binDir + delimiter + (process.env.PATH || process.env.Path || '');
+  const env = {
+    PATH: pathEnv,
+    Path: pathEnv,
+    DSH_TEST_CLAUDE_MARKER: marker,
+  };
+
+  const r = runJson(home, ['--yes', '--only', 'claude-code'], env);
   const c = r.json ? (r.json.clients || []).find((x) => x && x.id === 'claude-code') : null;
 
-  check('claude-code: CLI 存在时不报 failed', r.json ? r.json.failed === 0 : false,
+  check('claude-code: 不报 failed', r.json ? r.json.failed === 0 : false,
     r.json ? 'failed=' + r.json.failed : r.jsonError);
   check('claude-code: --json 可解析', Boolean(r.json), r.jsonError);
-  if (!hasCli) {
-    check('claude-code: 本机没有 claude CLI，confirmed 断言不适用（不假绿）', true);
-  } else {
-    check('claude-code: summary 出现 confirmed by claude mcp get',
-      c ? /confirmed by claude mcp get/i.test(String(c.summary || '')) : false,
-      c ? preview(c.summary || '') : 'no client');
-  }
+  check('★ claude CLI 没有被调用（无 marker 文件）', !existsSync(marker), marker);
+  check('★ summary 不再声称 claude mcp get 确认过',
+    c ? !/confirmed by/i.test(String(c.summary || '')) : false,
+    c ? preview(c.summary || '') : 'no client');
+  check('写入仍然成功', c ? c.status === 'applied' : false, c ? JSON.stringify(c) : 'no client');
 
   dropSandbox(home);
 });
