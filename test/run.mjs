@@ -57,6 +57,11 @@ if (code === 0) {
   code = await run('sentinel-redaction.mjs');
 }
 if (code === 0) {
+  // 调用方审核：结果/哨兵带审核单，dsh_review 落盘并回写；重启后仍可审核。
+  // 纯内存 + 文件系统，不花 token。
+  code = await run('review.mjs');
+}
+if (code === 0) {
   // forget 墓碑：纯内存，不花 token；守住“forget 之后按 id 查询明确失败”。
   code = await run('forget-tombstone.mjs');
 }

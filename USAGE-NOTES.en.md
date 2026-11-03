@@ -131,6 +131,7 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 2. **One conversation per task** — mixing unrelated work pollutes history and costs more.
 3. **Split long work into dispatch + collect**: `wait=false` → do something else → `dsh_get(run_id)`.
 4. **Review output via workspace changes** — `workspace_changed` is true when the `git status` entry set changed across the turn; `diff_stat` lists the current dirty files (it is not a per-turn diff).
-5. **Ask for a plan first** if you want to approve before execution (DSH has plan mode).
-6. **Three cost knobs**: lower `reasoning_effort`, keep `reasoning=hide`, release and start fresh.
-7. **Don't paste large code blocks into the prompt** — tell it which file to read instead; DSH has its own file tools.
+5. **Review the result, don't just relay it** — every result carries a `review` ticket. Check at least one claim with your own tools (read the changed file, inspect `git diff`, run the relevant test), then record `pass` / `partial` / `fail` with `dsh_review`. Default `advisory` does not block the next send; `fail`/`partial` need a reason, and a failed review is not fed back to DSH automatically.
+6. **Ask for a plan first** if you want to approve before execution (DSH has plan mode).
+7. **Three cost knobs**: lower `reasoning_effort`, keep `reasoning=hide`, release and start fresh.
+8. **Don't paste large code blocks into the prompt** — tell it which file to read instead; DSH has its own file tools.

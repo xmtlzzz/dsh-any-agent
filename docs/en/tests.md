@@ -16,10 +16,10 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 
 | Suite | Checks | Covers |
 |---|---|---|
-| `smoke` | 29 | handshake, tool table, conversation creation, config, registry purity |
+| `smoke` | 30 | handshake, tool table (15 tools), conversation creation, config, registry purity |
 | `boundary` | 46 | protocol edges (double initialize, malformed lines, unknown method), argument validation (including read-only + permissive approval rejection, unknown provider/model, and no stale write-lock marker on a failed create), unknown ids, cursor edges, lifecycle idempotence, unicode |
 | `integration` | 30 | resume-with-memory across processes, interrupt, both interject modes |
-| `async` | 16 | fire-and-forget + later collection |
+| `async` | 21 | fire-and-forget + later collection, including the review ticket in the receipt/result/sentinel and a real `dsh_review` round trip |
 | `sentinel` | 36 | completion sentinel: atomicity, latch semantics, per-conversation namespacing under concurrency, cancelled runs still land it, and **reasoning never reaching the file** |
 | `prune` | 11 | **sentinel retention**: prunes over-age and crash-leftover files, keeps fresh ones, removes empty shells, `TTL=0` disables pruning, and never touches the conversation registry beside it (no tokens, runs every time) |
 | `guards` | 40 | **environment-variable guards**: odd numbers always land on the safe side — `IDLE_TTL_MS=-1` means "never reap", garbage/empty falls back to the 10-minute default, a too-small reap interval falls back to the default (no busy loop), and the **lost-holder threshold is floored at 30 s** (so another instance cannot "legitimately" preempt and kill our turn); plus the team-mode default and precedence (`DSH_MCP_TEAM` > `settings.json` > off) (no tokens, runs every time) |
@@ -32,6 +32,7 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `line-decoder` | 4 | **UTF-8 line framing**: multi-byte characters split across MCP/ACP stream chunks are preserved (no U+FFFD), including CRLF and EOF-without-newline (no tokens) |
 | `read-cursor` | 10 | **`dsh_read` cursor semantics**: text appended to an already-read entry is delivered again (revision cursor, match by `seq`), and `limit` is clamped to 1..500 so `0`/negative cannot spin or drop the tail (no tokens) |
 | `sentinel-redaction` | 19 | **sentinel disk hygiene**: `result.thinking` is stripped, `thinking_omitted` is always a boolean, and `answer`/`error`/`title`/`tools_used[].input` all pass the same credential redaction as approvals (no tokens) |
+| `review` | 63 | **caller review**: default `advisory` tickets carry a checklist + evidence + `dsh_review` entry; `dsh_review` writes the verdict to disk and back into the run and sentinel; `fail`/`partial` require notes; running/unknown runs are refused; review still works after a restart (sentinel-backed); queue and `client_run_id` replay receipts carry the ticket; review records share the sentinel TTL; notes/previews are credential-redacted (no tokens) |
 | `forget-tombstone` | 10 | **`forget` is terminal**: `release(forget=true)` writes a tombstone, by-id lookups fail with a recovery path, lists exclude it, and deleting the tombstone restores the normal unknown-session path (no tokens) |
 | `bootstrap-profile` | 24 | **first-start profile works in the published zero-dependency form**: copies routing with the built-in YAML subset parser, strips `apiKey`/`headers`/literal secrets, never writes `defaultPreset`, is idempotent, and leaves a user-maintained profile byte-identical (no tokens) |
 | `workspace-safety` | 23 | **data-loss boundaries**: `isTempPath` is segment-aware (`tmpdir()+'Suffix'` and `/tmpfoo` are *not* temp), a corrupt `workspace.json` is never overwritten, an unreadable session root never wipes `sessionIds`, and automatic cleanup deletes only test-created sessions (no tokens) |
@@ -57,13 +58,13 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `list` | 13 | **the cost of `dsh_list`** (measured): a default call with the on-disk probe takes ~1 s (it spawns a DSH process) while **repeated calls hit a cache and drop to single-digit milliseconds**; `only_running=true` and `include_closed=false` **skip the probe** with equivalent semantics (unopened on-disk sessions are simply excluded) |
 | `reasoning-check` | 8 | **reasoning visibility**: `reasoning=hide` returns no thinking body but non-zero stats; `reasoning=full` returns the text and the rendered section |
 
-**`node test/run.mjs` runs 937 checks on a machine with seven client fixtures (955 with all nine)** — smoke 29 + 908 offline checks (926 with nine). Every suite exited 0 on 0.5.0 (2026-11-03, Windows / Node 24.21.0); none needs a provider (smoke skips its session-creation sections when DSH is absent).
+**`node test/run.mjs` runs 1001 checks on a machine with seven client fixtures (1019 with all nine)** — smoke 30 + 971 offline checks (989 with nine). Every suite exited 0 on the 0.5.0 tree plus caller review (2026-11-03, Windows / Node 22.19.0; the local five-fixture run reports 983); none needs a provider (smoke skips its session-creation sections when DSH is absent).
 
 That is **542 assertions in the client-registration suites alone** (`setup` 45, `removal-scope` 24, `config-safety` 407, `real-configs` 66; 560 with all nine fixtures), which is where the 0.3 work actually is.
 
-The model-backed suites (`smoke` 29, `boundary` 46, `integration` 30, `async` 16, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8) total 474 and were last measured in full on 0.3.9 — they need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
+The model-backed suites (`smoke` 30, `boundary` 46, `integration` 30, `async` 21, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8) total 480. Most were last measured in full on 0.3.9; the suites touched by caller review (`smoke`, `integration`, `async`, `sentinel`, `boundary`) were re-run on this tree. They need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
 
-> Three different totals are intentional: `node test/run.mjs` (937/955), the CI offline job (nominal 908/926, no smoke; hosted runners without client fixtures skip `real-configs` entirely), and the model-backed set (474 nominal). Counts are the numbers each suite prints itself; don't use one number for a different runner.
+> Three different totals are intentional: `node test/run.mjs` (1001/1019), the CI offline job (nominal 971/989, no smoke; hosted runners without client fixtures skip `real-configs` entirely), and the model-backed set (480 nominal). Counts are the numbers each suite prints itself; don't use one number for a different runner.
 
 ### 🧯 Why `sandbox-guard` exists
 

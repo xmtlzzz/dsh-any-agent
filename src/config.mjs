@@ -279,6 +279,35 @@ export function assertWritableDir(dir, label = '目录') {
 export const RUNS_DIR = process.env.DSH_MCP_RUNS_DIR ?? join(dirname(STATE_FILE), 'runs');
 
 /**
+ * 调用方审核记录的落盘目录（默认与状态文件同目录下的 reviews/）。
+ *
+ * 每个 run 一份 `<REVIEWS_DIR>/<conversation_id>/<run_id>.review.json`，
+ * 里面是调用方的裁决（pass/partial/fail）、理由、审核清单和证据摘要。
+ * 审核记录与哨兵分开存放：哨兵是"回合完成"的闩锁，审核是"调用方已验收"的独立事实，
+ * 后者可能在服务重启、run 记录被挤出内存之后才发生。
+ */
+export const REVIEWS_DIR = process.env.DSH_MCP_REVIEWS_DIR ?? join(dirname(STATE_FILE), 'reviews');
+
+/**
+ * 调用方审核策略：
+ *   advisory（默认）—— 每个回合结果都附审核单（清单 + dsh_review 入口 + 证据），
+ *                      但**不阻塞**后续 dsh_send；调用方仍可自己决定先做什么。
+ *   off              —— 不生成审核单；dsh_review 仍可对旧 run 显式提交。
+ *
+ * 默认开着的原因：返回值是"另一个 agent 的自述"，调用方最容易犯的错就是直接转述。
+ * 审核单把"先核验"放进返回载荷本身，而不是依赖调用方记得要审核。
+ */
+export const REVIEW_MODES = ['off', 'advisory'];
+export const DEFAULT_REVIEW = (() => {
+  const raw = process.env.DSH_MCP_REVIEW;
+  if (raw === undefined || String(raw).trim() === '') return 'advisory';
+  const v = String(raw).trim().toLowerCase();
+  if (v === '0' || v === 'false' || v === 'off' || v === 'no') return 'off';
+  if (v === '1' || v === 'true' || v === 'on' || v === 'advisory' || v === 'yes') return 'advisory';
+  return 'advisory';
+})();
+
+/**
  * 哨兵文件里是否带上**思考内容**。
  *
  * 默认 **不带** —— 本项目的红线是"思考内容不落盘、不写日志"。哨兵的用途是

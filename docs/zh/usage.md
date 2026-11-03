@@ -17,14 +17,20 @@ MCP 工具调用是**阻塞**的，所以 `dsh_send` **默认就不阻塞**（`w
      → [我] … | [轮次] 第 1 轮开始 | [工具] pwsh [in_progress]
 
 5. dsh_get(conversation_id, run_id)                       # 验收
-     → status=done, elapsed=20.3s, 完整答复
+     → status=done, elapsed=20.3s, 完整答复,
+       review: { status: "pending", checklist: [...], submit: { tool: "dsh_review", ... } }
+
+6. dsh_review(conversation_id, run_id, verdict="pass", notes="已看 diff 并跑过测试")
+     → review: { status: "pass", reviewed_at: "...", review_file: "..." }
 ```
 
-`run_id` 是验收凭据。回合记录**只在内存、只留最近 20 条**；并发跑很多 run 时旧记录会被挤掉，`dsh_get` 就会失败——这正是下面"完成哨兵"自带结果的原因。
+**结果返回 ≠ 已完成。** 每个结果都带一张 `review` 审核单：根据这一轮的情况生成核验清单（有没有改文件、回合是否正常结束、用了哪些工具），并附上证据摘要。调用方应该用自己的工具独立核验至少一项关键声明（读改动的文件、看 `git diff`、跑相关测试），再用 `dsh_review` 提交裁决。默认 `advisory` **不阻塞**下一次 `dsh_send`，它的作用是把"先审核"放进返回载荷本身，而不是依赖调用方记得。`fail` / `partial` 必须给 `notes` 或 `findings`。审核不通过**不会**自动回灌给 DSH——要不要再派修复回合由调用方自己决定。
+
+`run_id` 是验收凭据。回合记录**只在内存、只留最近 20 条**；并发跑很多 run 时旧记录会被挤掉，`dsh_get` 就会失败——这正是下面"完成哨兵"自带结果（以及 `dsh_review` 仍能凭哨兵审核）的原因。
 
 ## 🔔 用法：跑完自动通知（不轮询）
 
-`wait=false` 除了 `run_id`，还会返回 **`sentinel_file`**（哨兵文件路径）以及 **`sentinel_file_posix`**（Bash/MSYS 形式，**直接用它，别无手工转换**——转错了等待任务会一直挂到超时）。回合结束时——**无论成功、失败还是被取消**——本服务都会往这个路径**原子写出**一个含最终 `status` 与 `result` 的小文件。于是你不用轮询、也不用傻等：**用你自己宿主（Claude/Codex）的后台任务等这个文件出现即可，文件一到就会唤醒你。**
+`wait=false` 除了 `run_id`，还会返回 **`sentinel_file`**（哨兵文件路径）以及 **`sentinel_file_posix`**（Bash/MSYS 形式，**直接用它，别无手工转换**——转错了等待任务会一直挂到超时）。回合结束时——**无论成功、失败还是被取消**——本服务都会往这个路径**原子写出**一个含最终 `status`、`result` 与**审核单**（`result.review`）的小文件。于是你不用轮询、也不用傻等：**用你自己宿主（Claude/Codex）的后台任务等这个文件出现即可，文件一到就会唤醒你。**
 
 ```bash
 # sent="$sentinel_file_posix"   ← 直接用工具返回里那个字段
@@ -45,9 +51,10 @@ echo "DONE"                            # 后台任务退出 → 宿主唤醒你 
 - **闩锁语义**：文件写一次并保留。即便 run 在你启动等待任务**之前**就已完成，`[ -f ]` 也立刻为真，不会漏。
 - **原子落地**：`tmp` + `rename`，文件一旦存在内容必然完整；每个 run 用独立 tmp，并发写互不干扰。
 - **无主动推送**：本服务在 MCP 协议上只应答请求、不发通知；"跑完通知"完全由这个哨兵文件 + 你的后台等待任务实现。
+- **审核不随哨兵消失**：`result.review` 随结果一起写入，所以只读文件的调用方也能看到清单。之后 `dsh_review` 会**原子重写**这个审核块（`status` → `pass`/`partial`/`fail`，并写入 `notes`、`reviewed_at`、`review_file`），闩锁文件本身始终存在。审核记录在 `<状态目录>/reviews/` 下，和哨兵一样按 7 天 TTL 清理。
 - **★ 哨兵里没有思考内容**：载荷含正文、思考**统计**、用量与（已脱敏的）工具输入，但没有思考正文；`result.thinking` 会被剥掉，并始终给出布尔 `thinking_omitted`（剥离了为 `true`，本来没有为 `false`）——本服务自己的落盘物里不写思考。`dsh_get(run_id)` 在内存里仍能看到它（记录还在时）。设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 可以故意打破这条保证。注意：**DSH 自己的会话日志仍含思考**，见“日志与隐私”。
 
-> 清理：哨兵内含完整正文，所以服务**启动时会清掉超过 7 天的哨兵**（用 `DSH_MCP_SENTINEL_TTL_MS` 调；`0` 关闭）。等待任务消费后仍建议自行 `rm`。
+> 清理：哨兵与审核记录内含完整正文/理由，所以服务**启动时会清掉超过 7 天的哨兵与审核记录**（用 `DSH_MCP_SENTINEL_TTL_MS` 调；`0` 关闭）。等待任务消费后仍建议自行 `rm`。
 
 ## 🧵 用法：同时控制多个会话
 

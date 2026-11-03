@@ -15,10 +15,10 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 
 | 套件 | 检查数 | 覆盖 |
 |---|---|---|
-| `smoke` | 29 | 握手、工具表、建会话、配置、注册表纯净性 |
+| `smoke` | 30 | 握手、工具表（15 个工具）、建会话、配置、注册表纯净性 |
 | `boundary` | 46 | 协议边界（重复 initialize、脏行、未知方法）、参数校验（含 read-only + 宽松审批必须拒绝、未知 provider/model、失败创建不留下写锁登记）、未知 id、游标边界、生命周期幂等、unicode |
 | `integration` | 30 | 跨进程 resume 与记忆、中断、两种插话 |
-| `async` | 16 | fire-and-forget + 事后验收 |
+| `async` | 21 | fire-and-forget + 事后验收，含收据/结果/哨兵里的审核单，以及一次真实 `dsh_review` 往返 |
 | `sentinel` | 36 | 完成哨兵：原子性、闩锁语义、多会话并发不串台、被取消也落地、**思考不进文件** |
 | `prune` | 11 | **哨兵留存**：清超期与崩溃残留、留新、清空壳目录、`TTL=0` 关闭清理、且绝不碰同目录的会话注册表（不花 token，每次必跑） |
 | `guards` | 40 | **环境变量守卫**：奇怪的数值一律压到安全侧 —— `IDLE_TTL_MS` 的 `-1` 当"永不回收"、非法值/空串回落默认 10 分钟、回收间隔过小压回默认（防空转紧循环）、**失联阈值下限 30 秒**（防别的实例"合法地"抢占并杀掉我们的回合）；以及团队模式的默认值与优先级（`DSH_MCP_TEAM` > `settings.json` > 默认关）（不花 token，每次必跑） |
@@ -31,6 +31,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `read-cursor` | 10 | **`dsh_read` 游标语义**：追加到已读条目里的文本必须再次返回（修订号游标，按 `seq` 替换全文）；`limit` 钳到 1..500，`0`/负数不会空转或丢尾（不花 token） |
 | `line-decoder` | 4 | **UTF-8 行分帧**：MCP/ACP 的 chunk 边界不能把中文/emoji 截成 U+FFFD；覆盖逐字节、任意 chunk、CRLF 与 EOF 残留（不花 token） |
 | `sentinel-redaction` | 19 | **哨兵落盘卫生**：`result.thinking` 被剥掉、`thinking_omitted` 始终是布尔值、`answer`/`error`/`title`/`tools_used[].input` 都走与审批相同的凭据脱敏（不花 token） |
+| `review` | 63 | **调用方审核**：默认 `advisory` 审核单带清单 + 证据 + `dsh_review` 入口；`dsh_review` 把裁决落盘并回写内存 run 与哨兵；`fail`/`partial` 必须给理由；未完成/未知 run 被拒绝；重启后仍可凭哨兵审核；队列与 `client_run_id` 重放收据也带审核单；审核记录与哨兵共享 TTL；理由与预览都凭据脱敏（不花 token） |
 | `forget-tombstone` | 10 | **`forget` 是终态**：`release(forget=true)` 写墓碑，按 id 查询明确失败并给出恢复路径，列表不再展示；删除墓碑后回到常规“未知会话”路径（不花 token） |
 | `bootstrap-profile` | 24 | **首启 profile 在零依赖发布形态下可用**：内置 YAML 子集解析器复制路由、剥掉 `apiKey`/`headers`/字面密钥、绝不写 `defaultPreset`、幂等；用户手写文件逐字节不动（不花 token） |
 | `workspace-safety` | 23 | **数据丢失边界**：`isTempPath` 按路径分段（`tmpdir()+'Suffix'`、`/tmpfoo` 都不算临时目录）、坏 `workspace.json` 绝不覆盖、会话根不可读时绝不清空 `sessionIds`、自动清理只删测试造的会话（不花 token） |
@@ -56,13 +57,13 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
 | `reasoning-check` | 8 | **思考可见性**：`reasoning=hide` 不返回思考正文但统计非零；`reasoning=full` 返回正文且渲染出思考段 |
 
-**`node test/run.mjs` 在本机 7/9 客户端配置时跑 937 项（九种齐全时 955 项）** —— smoke 29 + 离线套件 908 项（九种齐全时 926 项）。**0.5.0 上全部退出码 0**（2026-11-03，Windows / Node 24.21.0）；都不需要 provider（没有 DSH 时 smoke 自动跳过建会话段）。
+**`node test/run.mjs` 在本机 7/9 客户端配置时跑 1001 项（九种齐全时 1019 项）** —— smoke 30 + 离线套件 971 项（九种齐全时 989 项）。**0.5.0 加调用方审核后全部退出码 0**（2026-11-03，Windows / Node 22.19.0；本机 5/9 配置时实测 983 项）；都不需要 provider（没有 DSH 时 smoke 自动跳过建会话段）。
 
 其中 **542 项属于客户端注册器套件**（`setup` 45、`removal-scope` 24、`config-safety` 407、`real-configs` 66；九种齐全时 560 项）—— 0.3 的活其实都在这里。
 
-需要模型的套件（`smoke` 29、`boundary` 46、`integration` 30、`async` 16、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13、`reasoning-check` 8）合计 474 项，**最近一次完整实测在 0.3.9** —— 它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**。
+需要模型的套件（`smoke` 30、`boundary` 46、`integration` 30、`async` 21、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13、`reasoning-check` 8）合计 480 项。多数最近一次完整实测在 0.3.9；与调用方审核相关的 `smoke`/`integration`/`async`/`sentinel`/`boundary` 已在本树重跑。它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**。
 
-> 三个总数是刻意分开的：`node test/run.mjs`（937/955）、CI 离线 job（名义 908/926，不含 smoke；hosted runner 没有客户端 fixture 时 `real-configs` 会整体跳过）、需要模型的集合（名义 474）。数字取各套件自己打印的汇总，不在这里手抄；不要把一个数字套到另一个 runner 上。
+> 三个总数是刻意分开的：`node test/run.mjs`（1001/1019）、CI 离线 job（名义 971/989，不含 smoke；hosted runner 没有客户端 fixture 时 `real-configs` 会整体跳过）、需要模型的集合（名义 480）。数字取各套件自己打印的汇总，不在这里手抄；不要把一个数字套到另一个 runner 上。
 
 ### 🧯 为什么会有 `sandbox-guard`
 

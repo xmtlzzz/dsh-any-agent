@@ -15,7 +15,7 @@
 
 </div>
 
-🧪 0.4.0 offline suite green (memory controls, team mode and the dispatch surface are all covered) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 0.5.0 offline suite green, including caller review (memory controls, team mode and the dispatch surface are all covered) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Hand it a goal, let it write code and run scripts, steer it mid-flight, and collect the result when you are ready.
 
@@ -48,6 +48,7 @@ DSH (DeepSeek Harness) can do all of that — it has file/shell tools, skills, s
 | 🤫 **Silent by default** | Not one byte on stderr, so nothing pollutes your host's logs. stdout carries the protocol and nothing else. |
 | 🧩 **Capabilities compose** | DSH can mount its own MCP servers (IDA Pro, browsers, your internal tooling), so this is a bridge to a whole toolbox. |
 | 🛡️ **Read-only that really is read-only** | `read-only` sandbox plus auto-denied approvals, for working on untrusted samples. |
+| 🔎 **Caller review, not blind relay** | Every result carries a `review` ticket (checklist + evidence + `dsh_review` entry). The caller verifies with its own tools, then records `pass` / `partial` / `fail`. Advisory by default — it never blocks the next dispatch, and a failed review is not silently fed back to DSH. |
 
 ## 🧭 Positioning: a dispatcher, not a capability aggregator
 
@@ -76,7 +77,7 @@ multi-role work" line; simple tasks are not forced into a team. Turn it off with
 profile disables the legacy `subagent` tools and replaces them with nine team
 tools; teammates share one workspace.
 
-**Only dispatch semantics become tools**: start, send, read, get, interject,
+**Only dispatch semantics become tools**: start, send, read, get, review, interject,
 interrupt, approve, queue, inbox, status, release, takeover, doctor. No file I/O, no
 shell, no editor, no task board.
 
@@ -119,7 +120,8 @@ The second command previews the changes; `--yes` applies them. Reconnect your cl
 | `dsh_send` | Hand it a task. **Defaults to `wait=false`: returns a `run_id` + `sentinel_file` immediately**, the turn runs in the background and the sentinel file notifies you when it's done (recommended). `wait=true` blocks until the turn ends; hitting `timeout_ms` (default `0` = wait forever) **only downgrades to background — the turn is never cancelled and the result is never lost** |
 | `dsh_list` | All conversations with live state: `running` / `idle` / `detached`, elapsed time, current tool, output so far. `only_running=true` for active ones |
 | `dsh_read` | **Cursor-based incremental read** of what a *running* conversation is producing right now. The cursor is a **revision number**: an entry whose text grew since your last read reappears — match it by `seq` and replace its text, don't append again |
-| `dsh_get` | Conversation details; with `run_id`, the **final result of that dispatch** (the "collect the result later" entry point). Run records live in memory (last 20) — use the sentinel file after a restart |
+| `dsh_get` | Conversation details; with `run_id`, the **final result of that dispatch** (the "collect the result later" entry point) **plus its review ticket**. Run records live in memory (last 20) — use the sentinel file after a restart |
+| `dsh_review` | **Caller review.** Submit `pass` / `partial` / `fail` for a completed run, with notes and optional findings. The verdict is written to `<state dir>/reviews/<conversation_id>/<run_id>.review.json` and back into the in-memory run and sentinel. Advisory by default: it never blocks the next `dsh_send` |
 | `dsh_interject` | Interject while it's busy: `interject` = stop and redirect, `queue` = wait for the current turn, then speak. **This round writes a sentinel too**, and the reply carries its `sentinel_file`. On an idle conversation it behaves like `wait=true` and **blocks until the turn ends** |
 | `dsh_takeover` | **Preempt the write lock.** The only way out when another DSH process holds it (DSH has no steal API — preempting means killing the holder). It classifies the holder first: our own orphaned child → taken automatically; another live instance → needs `force`; **GUI/unknown → never killed**, reported instead |
 | `dsh_interrupt` | Stop the current turn (the conversation stays healthy) |
