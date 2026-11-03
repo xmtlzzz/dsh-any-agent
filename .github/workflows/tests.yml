@@ -12,6 +12,7 @@ name: tests
 #     approval-details  credential redaction          27 checks
 #     read-cursor       dsh_read revision cursor      10 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
+#     review            caller review tickets        63 checks
 #     forget-tombstone  forget is terminal            10 checks
 #     bootstrap-profile zero-dependency bootstrap     24 checks
 #     workspace-safety  data-loss boundaries          23 checks
@@ -119,6 +120,10 @@ jobs:
       - name: sentinel-redaction (thinking/input hygiene)
         env: { DSH_MCP_LOG: silent }
         run: node test/sentinel-redaction.mjs
+
+      - name: review (caller review tickets, verdicts, sentinel rewrite)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/review.mjs
 
       - name: forget-tombstone (forget is terminal)
         env: { DSH_MCP_LOG: silent }
