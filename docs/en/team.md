@@ -1,100 +1,74 @@
 > Back to [README](../../README.md)
 
-# 🧑‍🤝‍🧑 Team mode (on by default since 0.4.0)
+# 🧑‍🤝‍🧑 Team mode (opt-in)
 
-The default profile is `dsh-team`: created on first start, it mounts the
-experimental Agent Teams packages and disables the legacy `subagent` tools.
-`dsh_send` injects a short "form a team when this needs parallel or multi-role
-work" line before the caller's prompt; simple tasks are not forced into a team.
+**Off by default since 0.5.0.** Turn it on with one command; no client config editing.
 
-## Three ways to turn it off
+When enabled: the profile switches to `dsh-team` (the experimental Agent Teams
+packages, with the legacy `subagent` tools disabled), and `dsh_send` adds a short
+"form a team if this needs parallel or multi-role work" line; simple tasks are not
+forced into a team.
 
-| What you want | How | Effect |
-|---|---|---|
-| **Global off** | Add `DSH_MCP_TEAM=0` to the MCP server entry and reconnect | Back to the `dsh-mcp` profile; no team tools; no injection |
-| **One call only** | `dsh_send(..., team=false)` | Profile stays `dsh-team`; the agent still has team tools, but this call is not prompted to use them |
-| **Custom profile** | `DSH_MCP_PROFILE=<name>` | The server checks whether that profile actually contains the team package and suppresses injection if it does not |
-
-> `DSH_MCP_PROFILE` wins over the default. If you point it at `dsh-team`,
-> setting `DSH_MCP_TEAM=0` does not remove the team tools from that profile;
-> to disable completely, also change `DSH_MCP_PROFILE` to `dsh-mcp` (or unset it).
-
-## Steps (Claude Code example)
-
-### 1. Find the entry
+## Commands
 
 ```bash
-claude mcp get dsh-any-agent
+dsh-any-agent team on       # enable (writes settings.json)
+dsh-any-agent team off      # disable
+dsh-any-agent team status   # show the effective value, source and profile
 ```
 
-It shows the scope and command. You can also inspect:
+`team on/off` writes the `team` field in `<DSH_HOME>/.dsh-any-agent/settings.json`;
+it does **not** touch client configs. Reconnect the MCP server (or restart the
+client) for the change to take effect.
 
-- user scope: `mcpServers.dsh-any-agent` in `~/.claude.json`
-- project scope: `mcpServers.dsh-any-agent` in the project's `.mcp.json`
+## Enable
 
-### 2. Add the env key
+1. Run:
 
-Append `DSH_MCP_TEAM`; do not replace other env values:
+   ```bash
+   dsh-any-agent team on
+   ```
 
-```json
-{
-  "mcpServers": {
-    "dsh-any-agent": {
-      "command": "npx",
-      "args": ["-y", "dsh-any-agent"],
-      "env": {
-        "DSH_MCP_TEAM": "0"
-      }
-    }
-  }
-}
+2. Reconnect: in Claude Code, `/mcp` → `dsh-any-agent` → reconnect; other clients
+   restart or reconnect in their MCP panel.
+3. Verify: `dsh_start` should report:
+
+   ```
+   Team mode: on (profile=dsh-team; dispatch prompts suggest a team when needed)
+   ```
+
+   or run `dsh_doctor` and look for the `team` check (`on`).
+
+## Disable
+
+```bash
+dsh-any-agent team off
 ```
 
-### 3. Reconnect
+After reconnecting, the profile is back to `dsh-mcp`: no team tools, no injection.
 
-The MCP server reads env only at process start, so reconnect or restart:
-
-- Claude Code: `/mcp` → `dsh-any-agent` → reconnect, or restart Claude Code.
-- Other clients: restart, or disconnect/reconnect in their MCP panel.
-
-### 4. Verify
-
-`dsh_start` should report:
+**One call only** (profile stays `dsh-team`):
 
 ```
-Team mode: off (DSH_MCP_TEAM=0 or DSH < 0.1.7)
+dsh_send(..., team=false)
 ```
 
-`dsh_doctor`'s `config` check should show:
+## Precedence
 
-```
-profile=dsh-mcp team=off
-```
+1. `DSH_MCP_TEAM` environment variable (`1` / `0`) — **highest**;
+2. the `team` field in `settings.json`;
+3. off by default.
 
-`dsh_send` will no longer inject the "【团队】…" line.
-
-## Per-client env
-
-| Client | Location | Shape |
-|---|---|---|
-| Claude Desktop | `claude_desktop_config.json` | `"env": { "DSH_MCP_TEAM": "0" }` |
-| Cursor | `~/.cursor/mcp.json` | same |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` | same |
-| Codex | `~/.codex/config.toml` | `[mcp_servers.dsh-any-agent.env]` with `DSH_MCP_TEAM = "0"` |
-| VS Code | `.vscode/mcp.json` | `"env": { "DSH_MCP_TEAM": "0" }` |
-| opencode | its MCP config | the field is `environment` |
-| Zed | `settings.json` → `context_servers` | under `command.env` |
+If an older client config still carries `DSH_MCP_TEAM`, it overrides `team on/off`.
+`dsh-any-agent team status` shows the source (`env` / `file` / `default`), and
+`team on/off` warns when the env var is present.
 
 ## Notes
 
-- Team mode requires DSH `>= 0.1.7-0`; an older runtime falls back to `dsh-mcp`
-  even if `DSH_MCP_TEAM=1`.
+- Team mode requires DSH `>= 0.1.7-0`; an older runtime stays off even after
+  `team on`, and `dsh_doctor` marks it `warn`.
 - The team profile disables the legacy `subagent` tools and replaces them with
   nine team tools; teammates share one workspace.
 - Agent Teams is **experimental** and carries no stability promise.
-- You do not need to delete `~/.dsh/profiles/dsh-team`; it is simply unused
-  when team mode is off. Delete it only if you want to clean up.
-
-## Revert
-
-Remove `"DSH_MCP_TEAM": "0"` (or set it to `"1"`) and reconnect.
+- You do not need to delete `~/.dsh/profiles/dsh-team`; it is simply unused when
+  team mode is off.

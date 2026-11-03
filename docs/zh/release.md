@@ -13,6 +13,7 @@ npm version patch --no-git-tag-version
 # 2. 本地跑一遍离线套件（和 CI 相同，不花 token、不需要 DSH）
 node test/run.mjs
 node test/package-check.mjs
+npm run check:release   # 版本号 / CHANGELOG / 文档链接 / 打包清单一致性
 
 # 3. 确认 tarball 本身：打得出来、装得上、起得来
 npm pack --dry-run
@@ -21,6 +22,8 @@ npm pack --dry-run
 # 4. 打 tag 并推送（CI 绿了再发）
 git add -A && git commit -m "chore: release x.y.z"
 git tag vx.y.z && git push origin main --tags
+# 推送 tag 后，.github/workflows/release.yml 会自动创建 GitHub Release
+# （使用 GitHub 生成的 release notes）；没有 gh CLI 也不影响。
 
 # 5. 发布
 npm publish

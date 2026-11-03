@@ -1,5 +1,5 @@
 /**
- * 共享 ACP 进程宿主（0.4.0，实验性，`DSH_MCP_SHARED_PROCESS=1` 开启）。
+ * 共享 ACP 进程宿主（0.4.0 引入，0.5.0 起默认开启；`DSH_MCP_SHARED_PROCESS=0` 关闭）。
  *
  * DSH 的 ACP 服务端支持一条连接上多会话，每个 session 有自己的 Agent 与上下文。
  * 但 `dsh-base` 的 `sandbox-policy.workspaceRoot` / `mode` 与 `approval.policy`

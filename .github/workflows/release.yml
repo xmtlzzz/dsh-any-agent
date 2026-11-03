@@ -1,0 +1,37 @@
+name: release
+
+# Create (or refresh) a GitHub Release for a pushed version tag.
+# The tag itself is pushed by the release process; this workflow only turns it
+# into a Release page with generated notes.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish a release for'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release for $TAG already exists; nothing to do."
+          else
+            gh release create "$TAG" --generate-notes --title "$TAG"
+          fi

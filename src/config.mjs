@@ -129,17 +129,45 @@ export function resolveDshBin() {
 }
 
 /**
- * 团队模式（0.4.0 默认开启）。
+ * DSH 主目录。**默认就是本机用户自己的 ~/.dsh** —— 本服务不拥有独立的 home，
+ * 因此凭据（.credentials.yaml）、会话历史、工作区登记与 GUI 完全共用一份。
  *
- * - 默认 profile 用 `dsh-team`（自动创建，含实验性 Agent Teams）；
- * - `dsh_send` 默认在 prompt 前注入一句"需要并行/多角色时先建团队"；
- * - 关闭：`DSH_MCP_TEAM=0`（回到 `dsh-mcp` profile、不注入）；
- *   单次关闭：`dsh_send(team=false)`。
+ * 环境变量仍然保留，但只作高级用途（隔离测试、多账号）：
+ * 一旦指向别的目录，就要自己准备那个目录下的凭据与 profile。
  */
+export const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh');
+
+/**
+ * 团队开关（0.5.0 起默认关闭，按需开启）。
+ *
+ * 优先级：`DSH_MCP_TEAM` 环境变量 > `<DSH_HOME>/.dsh-any-agent/settings.json`
+ * 的 `team` 字段 > 默认关闭。用 `dsh-any-agent team on|off` 写这个文件，
+ * 不必手改客户端配置。
+ */
+export const TEAM_SETTINGS_FILE =
+  process.env.DSH_MCP_SETTINGS ?? join(DSH_HOME, '.dsh-any-agent', 'settings.json');
+
+function readTeamSetting() {
+  try {
+    const j = JSON.parse(readFileSync(TEAM_SETTINGS_FILE, 'utf8'));
+    return typeof j.team === 'boolean' ? j.team : null;
+  } catch {
+    return null;
+  }
+}
+
+export const TEAM_MODE_SOURCE = (() => {
+  const v = process.env.DSH_MCP_TEAM;
+  if (v !== undefined && String(v).trim() !== '') return 'env';
+  return readTeamSetting() === null ? 'default' : 'file';
+})();
+
 export const TEAM_MODE = (() => {
   const v = process.env.DSH_MCP_TEAM;
-  if (v === undefined || String(v).trim() === '') return true;
-  return !['0', 'false', 'off', 'no'].includes(String(v).trim().toLowerCase());
+  if (v !== undefined && String(v).trim() !== '') {
+    return !['0', 'false', 'off', 'no'].includes(String(v).trim().toLowerCase());
+  }
+  return readTeamSetting() ?? false;
 })();
 
 /** 运行中的 DSH 版本（读不到为 null）。 */
@@ -157,15 +185,6 @@ export const DSH_VERSION = (() => {
 // 注意用 `0.1.7-0` 而不是 `0.1.7`：semver 里 `0.1.7-rc.1 < 0.1.7`，
 // 但 team 包正是随 0.1.7-rc.1 发布的。
 const teamVersionOk = DSH_VERSION === null || cmpVersion(DSH_VERSION, '0.1.7-0') >= 0;
-
-/**
- * DSH 主目录。**默认就是本机用户自己的 ~/.dsh** —— 本服务不拥有独立的 home，
- * 因此凭据（.credentials.yaml）、会话历史、工作区登记与 GUI 完全共用一份。
- *
- * 环境变量仍然保留，但只作高级用途（隔离测试、多账号）：
- * 一旦指向别的目录，就要自己准备那个目录下的凭据与 profile。
- */
-export const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh');
 
 /** 用于驱动 DSH 的 profile（由 bootstrap 在首启时按 acp 模板创建）。 */
 export const DSH_PROFILE =
@@ -391,13 +410,23 @@ export const CHILD_MAX_OLD_SPACE_MB =
   Number.isFinite(rawChildHeap) && rawChildHeap > 0 ? Math.floor(rawChildHeap) : 0;
 
 /**
- * 实验性：同一 `(cwd, permission)` 的多个会话共享一个 ACP 进程（0.4.0）。
+ * 同一 `(cwd, permission)` 的多个会话共享一个 ACP 进程（0.4.0 引入，**0.5.0 起默认开启**）。
  *
- * DSH 的 ACP 服务端支持一条连接上多会话，且每个 session 有独立 Agent。
- * 但 `sandbox-policy.workspaceRoot` / `mode` 与 `approval.policy` 都是**进程级**配置，
- * 所以只能按 `(cwd, permission)` 分组共享。默认关闭：共享进程的崩溃会连坐同组会话。
+ * 为什么默认开：DSH 的 ACP 服务端支持一条连接上多会话，且每个 session 有独立 Agent。
+ * 实测（DSH 0.1.7）：两个会话 → 一个 PID，第二个 `session/new` 约 300ms，独立进程约 4s；
+ * 内存也从"每会话 300-480MB"降到"每个 (cwd, 权限) 组一份"。
+ *
+ * 为什么仍然分组：`sandbox-policy.workspaceRoot` / `mode` 与 `approval.policy` 在
+ * `dsh-base` 里是**进程级**配置，不同工作区/权限档混进一个进程会让沙箱边界失真 ——
+ * 那两种情况仍各起一个进程（硬约束，不是实现偷懒）。
+ *
+ * 代价（已写进文档，别当它不存在）：共享进程崩溃会连坐同组的**所有**会话。崩溃时统一写
+ * error 哨兵并唤醒等待者，下次派活各自 resume —— 会话本体无损，但进行中的回合会断。
+ * 所以 `dsh_takeover` 在杀一个还挂着其它会话的共享进程前，会要求显式 `force=true`。
+ *
+ * 设 `DSH_MCP_SHARED_PROCESS=0` 回到"一会话一进程"（拿内存换隔离性）。
  */
-export const SHARED_PROCESS = numEnv('DSH_MCP_SHARED_PROCESS', 0) === 1;
+export const SHARED_PROCESS = numEnv('DSH_MCP_SHARED_PROCESS', 1) === 1;
 
 /**
  * `dsh_list` 的"磁盘探测"结果缓存多久（毫秒）。
@@ -410,10 +439,19 @@ export const LIST_PROBE_TTL_MS = numEnv('DSH_MCP_LIST_PROBE_TTL_MS', 10_000);
 
 /** 权限档 → 该档下的默认审批策略。 */
 export const PERMISSION_TIERS = ['read-only', 'workspace-write', 'danger-full-access'];
-/** 空串/非法值一律回落到 danger-full-access（保持旧默认），而不是让 Hub.create 每次都失败。 */
+/**
+ * 新建会话的默认权限档。0.5.0 起默认 **workspace-write**（沙箱把写入限制在工作区内），
+ * 不再是 danger-full-access；空串/非法值也回落到它。
+ *
+ * `danger-full-access` 需要机器侧显式允许（`DSH_MCP_ALLOW_FULL_ACCESS=1`），
+ * 避免"任何 MCP 客户端都能驱动"的服务默认把整机写权限交出去。
+ */
 export const DEFAULT_PERMISSION = PERMISSION_TIERS.includes(process.env.DSH_MCP_PERMISSION)
   ? process.env.DSH_MCP_PERMISSION
-  : 'danger-full-access';
+  : 'workspace-write';
+
+/** 是否允许 `permission=danger-full-access`（默认关）。 */
+export const ALLOW_FULL_ACCESS = process.env.DSH_MCP_ALLOW_FULL_ACCESS === '1';
 
 /**
  * 审批处理策略：

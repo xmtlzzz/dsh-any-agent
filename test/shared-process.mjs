@@ -49,21 +49,35 @@ const cwd = mkdtempSync(join(tmpdir(), 'dsh-any-agent-shared-ws-'));
 const log = { info() {}, debug() {}, dshStderr() {} };
 const hub = new Hub({ log });
 
-console.log('\n[1] 同 cwd + 同权限的两个会话共享一个 DSH 进程');
-const a = await hub.create({ cwd, permission: 'read-only', onApproval: 'auto-deny' });
-const b = await hub.create({ cwd, permission: 'read-only', onApproval: 'auto-deny' });
+console.log('\n[1] 同 cwd + 同权限的 4 个会话共享一个 DSH 进程');
+const mk = () => hub.create({ cwd, permission: 'read-only', onApproval: 'auto-deny' });
+const a = await mk();
+const b = await mk();
+const c = await mk();
+const d = await mk();
 
-check('两个会话指向同一个宿主对象', () => assert.equal(a.proc, b.proc));
-check('两个会话的 PID 相同', () => assert.equal(a.proc.pid, b.proc.pid));
-check('宿主上挂了两个会话', () => assert.equal(a.proc.size, 2));
+check('四个会话指向同一个宿主对象', () => {
+  assert.equal(a.proc, b.proc);
+  assert.equal(b.proc, c.proc);
+  assert.equal(c.proc, d.proc);
+});
+check('四个会话的 PID 相同', () => {
+  assert.equal(a.proc.pid, b.proc.pid);
+  assert.equal(b.proc.pid, c.proc.pid);
+  assert.equal(c.proc.pid, d.proc.pid);
+});
+check('宿主上挂了四个会话', () => assert.equal(a.proc.size, 4));
 check('注册表里只有一个宿主', () => assert.equal(hub.hosts.size, 1));
 
-console.log('\n[2] 关掉一个不影响另一个，最后一个关掉才停进程');
+console.log('\n[2] 并发关闭一半不影响另一半，最后一个关掉才停进程');
 const pid = a.proc.pid;
-await a.close();
-check('a 关闭后 b 仍活着', () => assert.equal(b.proc?.alive, true));
-check('宿主上只剩一个会话', () => assert.equal(b.proc?.size, 1));
-await b.close();
+await Promise.all([a.close(), b.close()]);
+check('并发关闭 a/b 后 c/d 仍活着', () => {
+  assert.equal(c.proc?.alive, true);
+  assert.equal(d.proc?.alive, true);
+});
+check('宿主上只剩两个会话', () => assert.equal(c.proc?.size, 2));
+await Promise.all([c.close(), d.close()]);
 check('全部关闭后宿主被清掉', () => assert.equal(hub.hosts.size, 0));
 // 给进程一点退出时间，再确认 PID 从进程表里消失。
 await new Promise((r) => setTimeout(r, 500));

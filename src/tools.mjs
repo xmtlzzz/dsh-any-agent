@@ -562,7 +562,7 @@ export function createHandlers(hub, opts = {}) {
         `团队模式: ${
           TEAM_ACTIVE
             ? `开（profile=${DSH_PROFILE}；派发时会提示"需要时先建团队"，简单任务不会组队）`
-            : '关（DSH_MCP_TEAM=0 或 DSH < 0.1.7）'
+            : '关（默认关闭；需要时运行 dsh-any-agent team on）'
         }`,
         `对话名: ${snap.title ?? '(DSH 尚未生成，发出第一条消息后自动生成)'}` +
         (snap.title_hint && snap.title !== snap.title_hint ? `（你给的标题提示: ${snap.title_hint}）` : ''),
@@ -1201,13 +1201,33 @@ export function createHandlers(hub, opts = {}) {
 
       const all = [...hub.conversations.values()];
       const alive = all.filter((c) => c.proc?.alive);
-      const totalRss = alive.reduce((s, c) => s + (rssMb(c.proc?.pid) ?? 0), 0);
-      add('sessions', 'ok', `共 ${all.length}，活进程 ${alive.length}，RSS 合计 ${totalRss}MB`);
+      // ★ 共享进程下多个会话共用一个 PID：必须按 PID 去重，否则同一份 RSS 会被按会话
+      //   重复累加，"RSS 合计"就会凭空翻几倍，把这行诊断变成误导。
+      const livePids = new Set(alive.map((c) => c.proc?.pid).filter(Boolean));
+      let totalRss = 0;
+      for (const pid of livePids) totalRss += rssMb(pid) ?? 0;
+      add(
+        'sessions',
+        'ok',
+        `共 ${all.length} 个会话，活进程 ${livePids.size} 个` +
+          (SHARED_PROCESS ? `（共享宿主 ${hub.hosts?.size ?? 0} 个）` : '（一会话一进程）') +
+          `，RSS 合计 ${totalRss}MB`,
+      );
       add(
         'config',
         'ok',
         `profile=${DSH_PROFILE} team=${TEAM_ACTIVE ? 'on' : 'off'} permission=${DEFAULT_PERMISSION} ` +
           `idle_ttl=${IDLE_TTL_MS}ms max_live=${MAX_LIVE} max_rss=${MAX_RSS_MB}MB shared=${SHARED_PROCESS}`,
+      );
+      add(
+        'team',
+        TEAM_ACTIVE ? 'ok' : TEAM_MODE ? 'warn' : 'ok',
+        TEAM_ACTIVE
+          ? `on（profile=${DSH_PROFILE}）`
+          : TEAM_MODE
+            ? 'requested but unavailable：DSH < 0.1.7-0，或该 profile 不含 team 包'
+            : 'off（opt-in：dsh-any-agent team on）',
+        TEAM_ACTIVE ? null : TEAM_MODE ? '检查 DSH 版本 / profile，或 dsh-any-agent team off' : null,
       );
 
       const ok = !checks.some((c) => c.status === 'fail');

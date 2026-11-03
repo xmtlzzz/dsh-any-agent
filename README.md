@@ -68,13 +68,13 @@ does not need to know DSH's tool list. The DSH agent picks what it needs — inc
 capabilities added after this server was built (for example the experimental Agent
 Teams). This server does not grow one MCP tool per DSH feature.
 
-**Team mode (on by default since 0.4.0)**: the default profile is `dsh-team`
-(auto-created on first start with the experimental Agent Teams packages), and
-`dsh_send` injects a short "form a team if this needs parallel or multi-role work"
-line before the caller's prompt; simple tasks are not forced into a team. Disable it
-globally with `DSH_MCP_TEAM=0` (back to `dsh-mcp`, no injection) or per call with
-`dsh_send(team=false)`. The team profile disables the legacy `subagent` tools and
-replaces them with nine team tools; teammates share one workspace.
+**Team mode (opt-in since 0.5.0)**: off by default. Run `dsh-any-agent team on`
+and reconnect; the profile switches to `dsh-team` (the experimental Agent Teams
+packages), and `dsh_send` then adds a short "form a team if this needs parallel or
+multi-role work" line; simple tasks are not forced into a team. Turn it off with
+`dsh-any-agent team off`, or for one call with `dsh_send(team=false)`. The team
+profile disables the legacy `subagent` tools and replaces them with nine team
+tools; teammates share one workspace.
 
 **Only dispatch semantics become tools**: start, send, read, get, interject,
 interrupt, approve, queue, inbox, status, release, takeover, doctor. No file I/O, no
@@ -142,17 +142,19 @@ The second command previews the changes; `--yes` applies them. Reconnect your cl
 | [Environment variables](docs/en/reference.md) | Every switch and its default |
 | [Tests](docs/en/tests.md) | Offline/integration suites and coverage |
 | [Known limitations](docs/en/limits.md) | Limits, profile naming |
+| [Compatibility](docs/en/compatibility.md) | DSH version matrix, team-package requirements, upgrade checks |
 | [Architecture](docs/en/architecture.md) | Why ACP, sdk/plugin comparison |
 | [Release process](docs/en/release.md) | Release checklist |
 
-## 🧑‍🤝‍🧑 Team mode (on by default since 0.4.0)
+## 🧑‍🤝‍🧑 Team mode (opt-in)
 
-The default profile is `dsh-team` with the experimental Agent Teams packages;
-`dsh_send` injects a short "form a team when this needs parallel or multi-role
-work" line, and simple tasks are not forced into a team. Disable it globally
-with `DSH_MCP_TEAM=0`, or for one call with `dsh_send(team=false)`.
+Off by default. Run `dsh-any-agent team on` and reconnect; the profile switches
+to `dsh-team` (the experimental Agent Teams packages) and `dsh_send` adds a
+short "form a team when this needs parallel or multi-role work" line. Simple
+tasks are not forced into a team. Turn it off with `dsh-any-agent team off`, or
+for one call with `dsh_send(team=false)`.
 
-> Full steps (per-client config, verification, rollback) are in [Team mode](docs/en/team.md).
+> Full steps (commands, verification, rollback) are in [Team mode](docs/en/team.md).
 
 ## Star History
 

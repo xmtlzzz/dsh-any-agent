@@ -24,9 +24,9 @@ DSH 自带两个可编程入口。`sdk` profile 看着更简单，但它的 JSON
          │ MCP over stdio            │ 换行分隔 JSON-RPC（ACP）
          ▼                           ▼
    ┌─────────────┐          ┌──────────────────────────┐
-   │dsh-any-agent│─────────▶│ dsh --profile dsh-mcp    │  每个会话一个长驻进程
-   └─────────────┘          │                          │
-                            └────────────┬─────────────┘
+   │dsh-any-agent│─────────▶│ dsh --profile dsh-team   │  同 (cwd, 权限) 的会话
+   └─────────────┘          │                          │  共用一个长驻进程
+                            └────────────┬─────────────┘  （0.5.0 起默认）
                                          │
                             ┌────────────┴─────────────┐
                             │ DSH 自带工具             │ 文件/shell/搜索/
@@ -35,6 +35,8 @@ DSH 自带两个可编程入口。`sdk` profile 看着更简单，但它的 JSON
                             │ dsh-mcp-client           │ → 你自己的其他 MCP 服务器
                             └──────────────────────────┘
 ```
+
+**进程模型。** 会话的身份是 `sessionId`，进程只是可丢弃的载体。0.5.0 起同一 `(cwd, permission)` 的会话默认共用一个 ACP 进程（`src/host.mjs`）：DSH 的 ACP 服务端支持一条连接上多会话、每个 session 有自己的 Agent，但沙箱根与审批策略是**进程级**的，所以只能按这两项分组。收益是第二个会话建起来约 300ms（独立进程约 4s），内存也按组只付一份；代价是这**一个**进程崩了，组里所有会话的进行中回合会一起断（会话本体无损，下次派活各自 resume）——因此 `dsh_takeover` 不会在不带 `force` 的情况下杀共享进程。要回到「一会话一进程」就设 `DSH_MCP_SHARED_PROCESS=0`。
 
 **MCP 兼容性。** 服务端只使用 `initialize`、`ping`、`tools/list`、`tools/call` 四个标准方法。已用一个协商旧版协议、从不发送 `notifications/initialized` 的原始客户端验证。
 

@@ -66,9 +66,9 @@ DSH（DeepSeek Harness）本身**全都能做** —— 它有文件/shell 工具
 DSH 的 agent 按任务自己选能力——包括它自己新长出来的能力（比如实验性 Agent Teams），
 本服务不需要为每一个新能力加一个 MCP 工具。
 
-**团队模式（0.4.0 默认开）**：默认 profile 是 `dsh-team`（首启自动创建，含实验性 Agent Teams），
-`dsh_send` 会在 prompt 前注入一句"需要并行/多角色时先建团队"；简单任务不会组队。
-关闭：`DSH_MCP_TEAM=0`（回到 `dsh-mcp`、不注入），或单次 `dsh_send(team=false)`。
+**团队模式（0.5.0 起按需开启）**：默认关闭。运行 `dsh-any-agent team on` 并重连后，
+profile 切到 `dsh-team`（含实验性 Agent Teams），`dsh_send` 会提示"需要时先建团队"，简单任务不组队。
+关闭：`dsh-any-agent team off`；单次关闭：`dsh_send(team=false)`。
 注意 team profile 会关闭旧的 `subagent` 工具，换成 9 个团队工具；成员共享一个工作区。
 
 **只有"派发语义"本身需要的才做成工具**：建会话、派活、读进度、验收、插话、中断、审批、
@@ -91,6 +91,8 @@ dsh-any-agent-setup --yes
 第二条命令只预览，加 `--yes` 才会写入配置。重新连接客户端的 MCP 服务，然后让你的 agent 在当前项目中开启 DSH 会话、派活、收结果。[先派活，回头验收](#-用法先派活回头再验收)展示了完整的工具调用顺序。
 
 > **第一次派活前：** 先读[使用注意事项](USAGE-NOTES.md)，尤其是模型配置与外部 MCP 的权限边界。**外部 MCP 工具的副作用不受 DSH 沙箱约束。** 新机器部署可按[迁移指引](USAGE-MIGRATION.md)逐步操作。
+
+> **想先看效果？** `npm run demo` 是一条能跑通的 5 分钟路径：派活 → 中途插话两次 → 脚本自己复核产物（连 `node --test` 都替你跑）。不想花 token 就先 `npm run demo -- --replay`。见 [5 分钟案例](docs/zh/demo.md)。
 
 <details>
 <summary>展开完整目录</summary>
@@ -128,6 +130,7 @@ dsh-any-agent-setup --yes
 | 文档 | 内容 |
 |---|---|
 | [安装与配置](docs/zh/install.md) | 前置要求、profile 引导、9 个客户端注册 |
+| [5 分钟案例](docs/zh/demo.md) | 一条能跑通的端到端路径：派活、插话、自己复核 |
 | [工具与用法](docs/zh/usage.md) | 派活/验收、哨兵、多会话、思考内容 |
 | [团队模式](docs/zh/team.md) | 默认行为、关闭步骤（各客户端）、验证与回退 |
 | [权限与隐私](docs/zh/security.md) | 权限档、审批、GUI 可见性、日志 |
@@ -135,15 +138,17 @@ dsh-any-agent-setup --yes
 | [环境变量](docs/zh/reference.md) | 全部开关与默认值 |
 | [测试](docs/zh/tests.md) | 离线/集成套件与覆盖 |
 | [已知限制](docs/zh/limits.md) | 限制、profile 命名 |
+| [兼容性](docs/zh/compatibility.md) | DSH 版本矩阵、团队包要求、升级检查 |
 | [架构](docs/zh/architecture.md) | 为什么用 ACP、与 sdk/插件对比 |
 | [发布流程](docs/zh/release.md) | 发版清单 |
 
-## 🧑‍🤝‍🧑 团队模式（0.4.0 默认开）
+## 🧑‍🤝‍🧑 团队模式（按需开启）
 
-默认 profile 是 `dsh-team`，包含实验性 Agent Teams；`dsh_send` 会提示"需要并行/多角色时先建团队"，
-简单任务不组队。关闭：`DSH_MCP_TEAM=0`（全局）或 `dsh_send(team=false)`（单次）。
+默认关闭。运行 `dsh-any-agent team on`，重连服务后 profile 切到 `dsh-team`（含实验性 Agent Teams）；
+`dsh_send` 会提示"需要并行/多角色时先建团队"，简单任务不组队。
+关闭：`dsh-any-agent team off`；单次关闭：`dsh_send(team=false)`。
 
-> 完整步骤（各客户端配置、验证、回退）见 [团队模式](docs/zh/team.md)。
+> 完整步骤（命令、验证、回退）见 [团队模式](docs/zh/team.md)。
 
 ## Star History
 

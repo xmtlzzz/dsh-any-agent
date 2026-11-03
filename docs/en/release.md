@@ -12,6 +12,7 @@ npm version patch --no-git-tag-version
 # 2. Run the offline suites locally (same set as CI, no tokens, no DSH needed for most).
 node test/run.mjs
 node test/package-check.mjs
+npm run check:release   # version / CHANGELOG / doc links / package contents agree
 
 # 3. Verify the tarball itself: builds, installs, starts.
 npm pack --dry-run
@@ -20,6 +21,8 @@ npm pack --dry-run
 # 4. Tag and push (wait for CI before publishing).
 git add -A && git commit -m "chore: release x.y.z"
 git tag vx.y.z && git push origin main --tags
+# The pushed tag triggers .github/workflows/release.yml, which creates the
+# GitHub Release with generated notes; no local gh CLI is required.
 
 # 5. Publish to npm and verify.
 npm publish --access public

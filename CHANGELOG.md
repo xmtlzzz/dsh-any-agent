@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-03
+
+### Process model
+
+- **The shared ACP process is now the default.** Sessions with the same `(cwd, permission)`
+  land on one DSH process: a second session costs ≈300 ms instead of a ≈4 s cold start, and the
+  300–480 MB is paid once per group instead of once per conversation.
+  `DSH_MCP_SHARED_PROCESS=0` restores one process per conversation (worth it when you need hard
+  isolation). Different workspaces or permission tiers still get separate processes —
+  `dsh-base` keeps the sandbox root and the approval policy process-wide.
+- **`dsh_takeover` no longer kills a shared process blind.** When the PID it is about to kill
+  still carries other sessions, it refuses unless `force=true` and reports them as
+  `shared_sessions`; with `force` it says how many went down with it.
+- **`dsh_doctor` de-duplicates RSS by PID** and reports the shared host count, so "live processes"
+  and "RSS total" stop multiplying by the number of sessions riding one process.
+- Stale comments corrected: `DSH_MCP_IDLE_TTL_MS=0` is no longer the default (10 minutes since 0.4.0).
+
+### Team mode and defaults
+
+- **Agent Teams is now opt-in.** `DSH_MCP_TEAM` defaults to off. Enable with
+  `dsh-any-agent team on` (writes `<DSH_HOME>/.dsh-any-agent/settings.json`),
+  disable with `team off`, inspect with `team status`; no client config editing.
+  When on, the profile switches to `dsh-team`, the legacy subagent tools are
+  disabled, and `dsh_send` adds the "form a team when needed" line.
+- **The default session permission is now `workspace-write`** (was
+  `danger-full-access`). `permission=danger-full-access` additionally requires
+  `DSH_MCP_ALLOW_FULL_ACCESS=1` on the machine, so a bare `dsh_start` can no
+  longer hand the caller whole-machine write access.
+- `dsh_doctor` has a dedicated `team` check: on / off / requested-but-unavailable.
+
+### Demo
+
+- **`npm run demo`** — a five-minute, end-to-end case: create a conversation, dispatch a task with
+  `wait=false`, interject twice while it runs, collect the sentinel, then verify the artifacts on
+  disk (including `node --test`) instead of trusting the model's own summary. It runs against an
+  isolated registry / sentinel / lock directory, so it never touches your daily
+  `~/.dsh/.dsh-any-agent`. `--replay` walks a recorded transcript with no DSH and no tokens;
+  `--keep` keeps the workspace. Ships as `demo/` in the npm package.
+
 ## [0.4.0] — 2026-11-03
 
 ### Memory

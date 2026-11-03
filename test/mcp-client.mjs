@@ -19,7 +19,9 @@ export class McpClient {
 
   start() {
     this.#child = spawn(process.execPath, [join(PKG_ROOT, 'bin', 'dsh-any-agent.mjs')], {
-      env: { ...process.env, ...this.env },
+      // 集成测试会显式请求 danger-full-access；0.5.0 起它需要机器侧放行。
+      // 只给测试拉起的子进程放行，测试进程自身的默认值仍会被 guards 钉住。
+      env: { DSH_MCP_ALLOW_FULL_ACCESS: '1', ...process.env, ...this.env },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.#child.stdout.on('data', (d) => this.#onData(d));

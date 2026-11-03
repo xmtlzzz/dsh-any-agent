@@ -10,7 +10,8 @@
 5. **首次成功回合之前就死掉的会话可能尚未落盘** —— 此时 resume 会报清晰错误。发出第一条消息后就安全了。
 6. **不能改名** —— DSH 的标题子系统没有对外改名接口（`SessionTitleService.rename` 需要进程内的活会话）。标题一律由首条消息自动生成。
 7. **`session/list` 只返回 `{sessionId, cwd}`，且排除已打开的会话** —— 对话名由本服务从 DSH 投影缓存补全。
-8. **内存（实测 300–480MB/活跃会话）** —— 0.4.0 起默认 **空闲 10 分钟回收 + `MAX_LIVE=4`**，最坏约 1.2–1.9GB；`keep_alive=true` 的会话不因空闲被回收（代价是常驻）。还可以：① `DSH_MCP_MAX_RSS_MB` 按实际 RSS 预算回收；② `DSH_MCP_CHILD_MAX_OLD_SPACE_MB` 给子进程设堆上限；③ `DSH_MCP_SHARED_PROCESS=1` 让同 `(cwd, permission)` 的会话共享一个 ACP 进程（实验性，省内存也省冷启动，但崩溃会连坐同组）。一批活干完想立刻归零：**`dsh_release(all=true)`** ✓（默认只释放空闲会话，**正在跑的回合会跳过、继续跑**；要连它们一起停掉传 `force=true`。之后照样 resume）。
+8. **内存（实测 300–480MB/活跃进程）** —— 0.5.0 起同 `(cwd, permission)` 的会话**默认共用一个 ACP 进程**，所以这份开销是**每组一份**，不再按会话翻倍；再加上 0.4.0 起的默认 **空闲 10 分钟回收 + `MAX_LIVE=4`**，最坏约 1.2–1.9GB。`keep_alive=true` 的会话不因空闲被回收（代价是常驻）。还可以：① `DSH_MCP_MAX_RSS_MB` 按实际 RSS 预算回收；② `DSH_MCP_CHILD_MAX_OLD_SPACE_MB` 给子进程设堆上限。一批活干完想立刻归零：**`dsh_release(all=true)`** ✓（默认只释放空闲会话，**正在跑的回合会跳过、继续跑**；要连它们一起停掉传 `force=true`。之后照样 resume）。
+9. **共享进程会连坐** —— 默认开启的共享宿主让同 `(cwd, permission)` 的会话共用一个 PID：会话之间互不干扰（各自有 Agent 与上下文），但**进程一旦崩溃/被杀，同组所有会话的进行中回合会一起断**（会统一写 error 哨兵并唤醒等待者，下次派活各自 resume，会话本体无损）。所以：① `dsh_takeover` 杀这类进程前要求 `force=true`，并列出"车上还有谁"；② 需要严格隔离（分析不可信样本、跑互不信任的任务）就设 `DSH_MCP_SHARED_PROCESS=0`；③ 不同工作区/不同权限档本来就各起一个进程 —— 那是 `dsh-base` 的进程级沙箱与审批配置决定的，不是可选项。
 
 ## ❓ 为什么 profile 还叫 `dsh-mcp`？
 

@@ -9,12 +9,14 @@ import assert from 'node:assert';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Conversation } from '../src/hub.mjs';
-import { createHandlers } from '../src/tools.mjs';
-import { TEAM_ACTIVE } from '../src/config.mjs';
-
 const auditDir = mkdtempSync(join(tmpdir(), 'dsh-any-agent-audit-'));
 process.env.DSH_MCP_AUDIT_FILE = join(auditDir, 'audit.jsonl');
+// 这一套要覆盖"团队提示注入"，所以在本进程显式启用团队模式；
+// config 在动态 import 时读取 env（静态 import 会被提升到赋值之前）。
+process.env.DSH_MCP_TEAM = '1';
+const { Conversation, Hub } = await import('../src/hub.mjs');
+const { createHandlers } = await import('../src/tools.mjs');
+const { TEAM_ACTIVE } = await import('../src/config.mjs');
 
 let failed = 0;
 function check(name, fn) {
@@ -197,6 +199,22 @@ if (TEAM_ACTIVE) {
   check('team=false 不注入', () => assert.equal(captured[1], 'do it'));
 } else {
   console.log('  skipped: 当前 DSH 版本不启用团队模式');
+}
+
+console.log('\n[8] danger-full-access 需要机器侧显式放行');
+
+if (!process.env.DSH_MCP_ALLOW_FULL_ACCESS) {
+  const guardHub = new Hub({ log });
+  let guardErr = null;
+  try {
+    await guardHub.create({ cwd: process.cwd(), permission: 'danger-full-access' });
+  } catch (e) {
+    guardErr = e;
+  }
+  check('默认拒绝 danger-full-access', () =>
+    assert.match(String(guardErr?.message), /DSH_MCP_ALLOW_FULL_ACCESS/));
+} else {
+  console.log('  skipped: 当前进程已放行 danger-full-access');
 }
 
 rmSync(auditDir, { recursive: true, force: true });

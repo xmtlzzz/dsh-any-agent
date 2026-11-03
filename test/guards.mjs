@@ -38,6 +38,7 @@ function read(env) {
     process.stdout.write(JSON.stringify({
       ttl: a.IDLE_TTL_MS, reap: a.REAP_INTERVAL_MS, stale: b.STALE_MS, maxLive: a.MAX_LIVE,
       team: a.TEAM_MODE, active: a.TEAM_ACTIVE, profile: a.DSH_PROFILE,
+      permission: a.DEFAULT_PERMISSION, allowFull: a.ALLOW_FULL_ACCESS,
     }));
   `;
   const out = execFileSync(process.execPath, ['--input-type=module', '-e', code], {
@@ -49,20 +50,40 @@ function read(env) {
 }
 
 // 清掉可能从父进程继承来的值，保证"默认值"这一项测的是真默认
-const cleanEnv = { DSH_MCP_IDLE_TTL_MS: '', DSH_MCP_REAP_INTERVAL_MS: '', DSH_MCP_LOCK_STALE_MS: '' };
+const cleanEnv = {
+  DSH_MCP_IDLE_TTL_MS: '',
+  DSH_MCP_REAP_INTERVAL_MS: '',
+  DSH_MCP_LOCK_STALE_MS: '',
+  DSH_MCP_PERMISSION: '',
+  DSH_MCP_ALLOW_FULL_ACCESS: '',
+  DSH_MCP_TEAM: '',
+};
 for (const k of Object.keys(cleanEnv)) delete process.env[k];
 
 console.log('\n[1] 默认值');
-const def = read({ DSH_MCP_IDLE_TTL_MS: '', DSH_MCP_REAP_INTERVAL_MS: '', DSH_MCP_LOCK_STALE_MS: '', DSH_MCP_MAX_LIVE: '' });
+const def = read({
+  DSH_MCP_IDLE_TTL_MS: '',
+  DSH_MCP_REAP_INTERVAL_MS: '',
+  DSH_MCP_LOCK_STALE_MS: '',
+  DSH_MCP_MAX_LIVE: '',
+  DSH_MCP_PERMISSION: '',
+  DSH_MCP_ALLOW_FULL_ACCESS: '',
+  DSH_MCP_TEAM: '',
+});
 console.log('  ', JSON.stringify(def));
 check('★ 默认 IDLE_TTL_MS = 600000（空闲 10 分钟回收）', def.ttl === 600_000, String(def.ttl));
 check('默认回收间隔 30 秒', def.reap === 30_000, String(def.reap));
 check('默认失联阈值 = 3×间隔', def.stale === 90_000, String(def.stale));
 check('★★ 默认 MAX_LIVE = 4（内存有界是默认行为，不是要用户自己配）', def.maxLive === 4, String(def.maxLive));
 
-console.log('\n[1a] 团队模式：默认开，可全局关，显式 profile 优先');
-check('默认 TEAM_MODE = true', def.team === true, String(def.team));
+console.log('\n[1a] 权限与团队：默认 workspace-write / 团队 opt-in');
+check('★ 默认 permission = workspace-write', def.permission === 'workspace-write', def.permission);
+check('★★ 默认不允许 danger-full-access', def.allowFull === false, String(def.allowFull));
+check('默认 TEAM_MODE = false（opt-in）', def.team === false, String(def.team));
 check('默认 profile 跟随团队是否可用', def.profile === (def.active ? 'dsh-team' : 'dsh-mcp'), def.profile);
+const teamOn = read({ DSH_MCP_TEAM: '1' });
+check('DSH_MCP_TEAM=1 → 团队开', teamOn.team === true, String(teamOn.team));
+check('DSH_MCP_TEAM=1 时 profile 跟随可用性', teamOn.profile === (teamOn.active ? 'dsh-team' : 'dsh-mcp'), teamOn.profile);
 const teamOff = read({ DSH_MCP_TEAM: '0' });
 check('DSH_MCP_TEAM=0 → 团队关', teamOff.team === false, String(teamOff.team));
 check('DSH_MCP_TEAM=0 → profile=dsh-mcp', teamOff.profile === 'dsh-mcp', teamOff.profile);

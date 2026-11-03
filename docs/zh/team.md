@@ -1,95 +1,71 @@
 > 返回 [README](../../README.zh.md)
 
-# 🧑‍🤝‍🧑 团队模式（0.4.0 默认开）
+# 🧑‍🤝‍🧑 团队模式（按需开启）
 
-默认 profile 是 `dsh-team`：首次启动自动创建，包含实验性 Agent Teams，并关闭旧的 `subagent` 工具。
-`dsh_send` 会在调用方的 prompt 前注入一句"需要并行/多角色时先建团队"；简单任务不会被强制组队。
+**0.5.0 起默认关闭。** 需要时用一条命令开启，不用手改客户端配置。
 
-## 三种关闭方式
+开启后：profile 切到 `dsh-team`（含实验性 Agent Teams，关闭旧的 `subagent` 工具），
+`dsh_send` 会在 prompt 前注入一句"需要并行/多角色时先建团队"；简单任务不会被强制组队。
 
-| 想做什么 | 怎么做 | 效果 |
-|---|---|---|
-| **全局关闭** | 在 MCP 客户端的服务条目里加 `DSH_MCP_TEAM=0`，重连 | 回到 `dsh-mcp` profile；没有 team 工具；不注入提示 |
-| **只关这一次** | `dsh_send(..., team=false)` | profile 仍是 `dsh-team`；agent 仍有 team 工具；只是这次不提示它组队 |
-| **换 profile** | `DSH_MCP_PROFILE=<name>` | 服务会检查该 profile 是否真的含 team 包；不含就自动不注入 |
-
-> 注意：`DSH_MCP_PROFILE` 显式设置时优先级最高。如果你把它指向 `dsh-team`，只设
-> `DSH_MCP_TEAM=0` 不会移除 profile 里的 team 工具；要彻底关闭，把 `DSH_MCP_PROFILE`
-> 也改成 `dsh-mcp`（或删掉这个变量）。
-
-## 具体步骤（以 Claude Code 为例）
-
-### 1. 找到注册条目
+## 命令
 
 ```bash
-claude mcp get dsh-any-agent
+dsh-any-agent team on       # 开启（写 settings.json）
+dsh-any-agent team off      # 关闭
+dsh-any-agent team status   # 查看当前生效值、来源、profile
 ```
 
-会显示注册在哪个 scope、命令是什么。也可以直接看：
+`team on/off` 写入 `<DSH_HOME>/.dsh-any-agent/settings.json` 的 `team` 字段，
+**不改任何客户端配置**。改完需要**重连 MCP 服务**（或重启客户端）才会生效。
 
-- 用户级：`~/.claude.json` 里的 `mcpServers.dsh-any-agent`
-- 项目级：项目根目录的 `.mcp.json` 里的 `mcpServers.dsh-any-agent`
+## 开启步骤
 
-### 2. 在条目里加 env
+1. 运行：
 
-只追加 `DSH_MCP_TEAM`，不要覆盖已有的其它 env：
+   ```bash
+   dsh-any-agent team on
+   ```
 
-```json
-{
-  "mcpServers": {
-    "dsh-any-agent": {
-      "command": "npx",
-      "args": ["-y", "dsh-any-agent"],
-      "env": {
-        "DSH_MCP_TEAM": "0"
-      }
-    }
-  }
-}
+2. 重连 MCP 服务：Claude Code 用 `/mcp` → `dsh-any-agent` → reconnect；
+   其它客户端重启或在 MCP 面板里 reconnect。
+3. 验证：调用 `dsh_start`，返回里应该出现：
+
+   ```
+   团队模式: 开（profile=dsh-team；派发时会提示"需要时先建团队"，简单任务不会组队）
+   ```
+
+   或调用 `dsh_doctor`，`team` 检查应为 `on`。
+
+## 关闭
+
+```bash
+dsh-any-agent team off
 ```
 
-### 3. 重连服务
+重连后 profile 回到 `dsh-mcp`，没有 team 工具，也不注入提示。
 
-MCP 服务的 env 只在进程启动时读一次，所以必须让客户端重新拉起它：
-
-- Claude Code：`/mcp` → `dsh-any-agent` → reconnect；或重启 Claude Code。
-- 其它客户端：重启客户端，或在其 MCP 面板里 disconnect/reconnect。
-
-### 4. 验证
-
-调用一次 `dsh_start`，返回里应该出现：
+**单次关闭**（只这一次不提示组队，profile 仍是 `dsh-team`）：
 
 ```
-团队模式: 关（DSH_MCP_TEAM=0 或 DSH < 0.1.7）
+dsh_send(..., team=false)
 ```
 
-或调用 `dsh_doctor`，`config` 检查里应该是：
+## 优先级与排查
 
-```
-profile=dsh-mcp team=off
-```
+生效值的优先级：
 
-这时 `dsh_send` 也不会再注入"【团队】…"那句提示。
+1. 环境变量 `DSH_MCP_TEAM`（`1` / `0`）—— **最高**；
+2. `settings.json` 的 `team` 字段；
+3. 默认关闭。
 
-## 各客户端的 env 写法
-
-| 客户端 | 位置 | 写法 |
-|---|---|---|
-| Claude Desktop | `claude_desktop_config.json` | `"env": { "DSH_MCP_TEAM": "0" }` |
-| Cursor | `~/.cursor/mcp.json` | 同上 |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` | 同上 |
-| Codex | `~/.codex/config.toml` | `[mcp_servers.dsh-any-agent.env]` 下写 `DSH_MCP_TEAM = "0"` |
-| VS Code | `.vscode/mcp.json` | `"env": { "DSH_MCP_TEAM": "0" }` |
-| opencode | 其 MCP 配置 | 字段名是 `environment` |
-| Zed | `settings.json` 的 `context_servers` | 其 `command.env` 下写 `DSH_MCP_TEAM` |
+如果客户端配置里还留着旧版本写下的 `DSH_MCP_TEAM`，它会覆盖 `team on/off`。
+`dsh-any-agent team status` 会显示来源（`env` / `file` / `default`）；
+`team on/off` 检测到环境变量时也会提示。
 
 ## 注意
 
-- 团队模式要求 DSH `>= 0.1.7-0`；版本不够会自动退回 `dsh-mcp`，即使设了 `DSH_MCP_TEAM=1` 也不会启用。
+- 团队模式要求 DSH `>= 0.1.7-0`；版本不够时即使 `team on` 也不会启用，
+  `dsh_doctor` 会把它标成 `warn`。
 - team profile 会关闭旧的 `subagent` 工具，换成 9 个团队工具；成员共享一个工作区。
-- 团队是**实验性**能力，DSH 不提供稳定性承诺；不要在关键路径上假定它永远可用。
-- 不需要删 `~/.dsh/profiles/dsh-team`；关闭后它只是不被使用。想彻底清理再删即可。
-
-## 恢复
-
-把 `"DSH_MCP_TEAM": "0"` 删掉（或改成 `"1"`），重新连接即可回到默认的团队模式。
+- 团队是**实验性**能力，DSH 不提供稳定性承诺。
+- 不需要删 `~/.dsh/profiles/dsh-team`；关闭后它只是不被使用。

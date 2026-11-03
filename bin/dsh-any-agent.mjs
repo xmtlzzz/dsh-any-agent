@@ -34,6 +34,8 @@ if (argv.includes('--help') || argv.includes('-h')) {
     'Runs as an MCP stdio server; normally launched by your MCP client, not by hand.\n\n' +
     'Usage:\n' +
     '  dsh-any-agent                 run the MCP server on stdio\n' +
+    '  dsh-any-agent team on|off     enable/disable Agent Teams (writes settings.json)\n' +
+    '  dsh-any-agent team status     show the effective team mode\n' +
     '  dsh-any-agent --version       print the version and exit\n' +
     '  dsh-any-agent --help          this text\n\n' +
     'Register it with your client:\n' +
@@ -48,6 +50,63 @@ if (argv.includes('--help') || argv.includes('-h')) {
     'Docs: https://github.com/xmtlzzz/dsh-any-agent\n',
   );
   process.exit(0);
+}
+
+/**
+ * `dsh-any-agent team on|off|status`
+ *
+ * 团队开关写 `<DSH_HOME>/.dsh-any-agent/settings.json`，不改客户端配置。
+ * 优先级：环境变量 DSH_MCP_TEAM > 该文件 > 默认关。
+ */
+if (argv[0] === 'team') {
+  const fs = await import('node:fs');
+  const nodePath = await import('node:path');
+  const cfg = await import('../src/config.mjs');
+  const readSettings = () => {
+    try {
+      return JSON.parse(fs.readFileSync(cfg.TEAM_SETTINGS_FILE, 'utf8'));
+    } catch {
+      return {};
+    }
+  };
+  const writeSettings = (obj) => {
+    fs.mkdirSync(nodePath.dirname(cfg.TEAM_SETTINGS_FILE), { recursive: true });
+    const tmp = `${cfg.TEAM_SETTINGS_FILE}.tmp.${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf8');
+    fs.renameSync(tmp, cfg.TEAM_SETTINGS_FILE);
+  };
+
+  const action = argv[1] ?? 'status';
+  if (action === 'on' || action === 'off') {
+    const cur = readSettings();
+    cur.team = action === 'on';
+    writeSettings(cur);
+    process.stdout.write(
+      `团队模式已${action === 'on' ? '开启' : '关闭'}（${cfg.TEAM_SETTINGS_FILE}）。\n` +
+        `DSH 版本: ${cfg.DSH_VERSION ?? '未检测到'}（团队需要 >= 0.1.7-0）。\n`,
+    );
+    if (cfg.TEAM_MODE_SOURCE === 'env') {
+      process.stdout.write(
+        '⚠️ 环境变量 DSH_MCP_TEAM 优先级更高；请同时删除它，否则本次设置不会生效。\n',
+      );
+    }
+    process.stdout.write('重新连接 MCP 服务（或重启客户端）后生效。\n');
+    process.exit(0);
+  }
+  if (action === 'status') {
+    const file = readSettings();
+    process.stdout.write(
+      '团队模式状态：\n' +
+        `  环境变量 DSH_MCP_TEAM: ${process.env.DSH_MCP_TEAM ?? '(未设置)'}\n` +
+        `  设置文件: ${cfg.TEAM_SETTINGS_FILE}（team=${file.team === undefined ? '未设置' : file.team}）\n` +
+        `  生效值: ${cfg.TEAM_MODE ? '开' : '关'}（来源: ${cfg.TEAM_MODE_SOURCE}）\n` +
+        `  profile: ${cfg.DSH_PROFILE}\n` +
+        `  团队能力可用: ${cfg.TEAM_ACTIVE ? '是' : '否'}\n`,
+    );
+    process.exit(0);
+  }
+  process.stderr.write('用法: dsh-any-agent team on|off|status\n');
+  process.exit(2);
 }
 
 const { createLogger } = await import('../src/config.mjs');

@@ -97,7 +97,7 @@ try {
     'console.log(JSON.stringify({ ttl: cfg.SENTINEL_TTL_MS, permission: cfg.DEFAULT_PERMISSION, effort: cfg.DEFAULT_REASONING_EFFORT, usingDefault: cfg.USING_DEFAULT_STATE }));';
   const neg = runNode(envScript, { DSH_HOME: join(root, 'env-home'), DSH_MCP_SENTINEL_TTL_MS: '-1', DSH_MCP_PERMISSION: '', DSH_MCP_REASONING_EFFORT: '' });
   check('负 SENTINEL_TTL 压到 0（关闭清理）', neg.value?.ttl === 0, JSON.stringify(neg.value || neg.stderr));
-  check('空 PERMISSION 回落 danger-full-access', neg.value?.permission === 'danger-full-access', JSON.stringify(neg.value));
+  check('空 PERMISSION 回落 workspace-write（0.5.0 起）', neg.value?.permission === 'workspace-write', JSON.stringify(neg.value));
   check('空 REASONING_EFFORT 回落 max', neg.value?.effort === 'max', JSON.stringify(neg.value));
   const explicit = runNode(envScript, { DSH_HOME: join(root, 'env-home-2'), DSH_MCP_STATE: join(root, 'explicit.json') });
   check('显式 DSH_MCP_STATE 时不做默认迁移', explicit.value?.usingDefault === false, JSON.stringify(explicit.value || explicit.stderr));

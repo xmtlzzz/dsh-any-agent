@@ -6,8 +6,9 @@
 |---|---|---|
 | `DSH_BIN` | auto-detected | Path to `@deepseek-ai/dsh/lib/bin.js` |
 | `DSH_HOME` | `~/.dsh` | DSH home shared with the GUI (credentials, sessions, workspace registry). Point it elsewhere only for isolation/multi-account |
-| `DSH_MCP_PROFILE` | `dsh-team` (team on) / `dsh-mcp` (team off) | DSH profile to drive; an explicit value wins |
-| `DSH_MCP_TEAM` | `1` | Team mode. On by default: uses the `dsh-team` profile and injects a "form a team when needed" line before `dsh_send`. Set `0` to disable (back to `dsh-mcp`, no injection); per call use `dsh_send(team=false)` |
+| `DSH_MCP_PROFILE` | `dsh-mcp` (`dsh-team` when team is on) | DSH profile to drive; an explicit value wins |
+| `DSH_MCP_TEAM` | `0` (off) | Team mode, opt-in. `dsh-any-agent team on` writes the settings file; this env var overrides it. When on, uses the `dsh-team` profile and injects a "form a team when needed" line before `dsh_send`; per call use `dsh_send(team=false)` |
+| `DSH_MCP_SETTINGS` | `$DSH_HOME/.dsh-any-agent/settings.json` | Settings file written by `dsh-any-agent team on/off` |
 | `DSH_MCP_BOOTSTRAP` | on | Whether this server may create/sync the DSH profile on first start. `0` makes it drive an existing profile only and never write a file |
 | `DSH_MCP_ROUTE_SOURCE` | unset | Pin where model routes are copied from during bootstrap: a profile name (`desktop`, `web`, …) or `__home__` for `$DSH_HOME/cordis.patch.yml`. Unset = try home → desktop → web → headless → acp |
 | `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | Conversation registry, survives restarts. The old `<repo>/.state` location is migrated once on startup |
@@ -21,12 +22,13 @@
 | `DSH_MCP_MAX_LIVE` | `4` (≈1.2–1.9 GB worst case) | ★ **How many conversation processes to keep alive at once** (`0` = unlimited). Going over the cap reaps the **least recently used** one (a running turn is never reaped). `keep_alive=true` sessions are exempt. To free idle conversations at once: `dsh_release(all=true)` (busy turns are skipped unless `force=true`) |
 | `DSH_MCP_MAX_RSS_MB` | `0` (off) | Global child-process memory budget in MB. When the measured RSS exceeds it, idle conversations are reaped least-recently-used first; `keep_alive` sessions are reaped last |
 | `DSH_MCP_CHILD_MAX_OLD_SPACE_MB` | `0` (unset) | Appends `--max-old-space-size` to each DSH child's `NODE_OPTIONS`. A backstop for runaway contexts; too small will OOM long conversations |
-| `DSH_MCP_SHARED_PROCESS` | `0` (off) | **Experimental**: sessions with the same `(cwd, permission)` share one ACP process. Large memory and cold-start win (measured: second `session/new` ≈300 ms vs ≈4 s standalone). Trade-off: a process crash takes down the whole group (error sentinels are written; each session resumes on the next call) |
+| `DSH_MCP_SHARED_PROCESS` | `1` (on) | **On by default**: sessions with the same `(cwd, permission)` share one ACP process. Large memory and cold-start win (measured: second `session/new` ≈300 ms vs ≈4 s standalone), and `dsh_doctor` de-dupes RSS by PID. Trade-off: a process crash takes down the whole group (error sentinels are written; each session resumes on the next call), so `dsh_takeover` requires `force=true` to kill such a process. Set `0` for one process per conversation |
 | `DSH_MCP_AUDIT_FILE` | empty (off) | Metadata audit JSONL path. Records events, conversation/run ids, decisions and counts; **never** prompts, answers, thinking or tool input. Rotates at 10 MB |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | Cache lifetime for `dsh_list`'s on-disk probe (the probe spawns a DSH process and takes ~1 s) |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels; `0` disables pruning |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**); answer/error/title/tool inputs are still credential-redacted |
-| `DSH_MCP_PERMISSION` | `danger-full-access` | Default tier for `dsh_start` |
+| `DSH_MCP_PERMISSION` | `workspace-write` | Default tier for `dsh_start`. `danger-full-access` additionally requires `DSH_MCP_ALLOW_FULL_ACCESS=1` |
+| `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | Whether `permission=danger-full-access` is allowed. Denied by default: it hands the caller whole-machine write access |
 | `DSH_MCP_REASONING_EFFORT` | `max` | Default reasoning effort |
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0` (no timeout) | Wait bound for **`wait=true` only**; on expiry the turn merely moves to the background |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |

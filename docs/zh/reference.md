@@ -5,8 +5,9 @@
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `DSH_BIN` | 自动探测 | `@deepseek-ai/dsh/lib/bin.js` 路径 |
-| `DSH_MCP_PROFILE` | `dsh-team`（团队开）/ `dsh-mcp`（团队关） | 驱动用的 DSH profile；显式设置优先 |
-| `DSH_MCP_TEAM` | `1` | 团队模式。默认开：用 `dsh-team` profile，并在 `dsh_send` 前注入"需要时先建团队"的提示。设 `0` 关闭（回到 `dsh-mcp`、不注入）；单次关闭用 `dsh_send(team=false)` |
+| `DSH_MCP_PROFILE` | `dsh-mcp`（团队开启时 `dsh-team`） | 驱动用的 DSH profile；显式设置优先 |
+| `DSH_MCP_TEAM` | `0`（关闭） | 团队模式，按需开启。`dsh-any-agent team on` 写设置文件；这里设 `1`/`0` 可覆盖它。开启后使用 `dsh-team` profile，并在 `dsh_send` 前注入"需要时先建团队"的提示；单次关闭用 `dsh_send(team=false)` |
+| `DSH_MCP_SETTINGS` | `$DSH_HOME/.dsh-any-agent/settings.json` | 团队开关的设置文件（`dsh-any-agent team on/off` 写它） |
 | `DSH_HOME` | `~/.dsh` | DSH 主目录。**默认就用本机用户自己的**，凭据与会话历史因此与 GUI 共用。指向别处即隔离环境（那就得自己准备那个目录的凭据与 profile） |
 | `DSH_MCP_BOOTSTRAP` | 开 | `0` 关闭首启 profile 自动创建/同步（关掉后只驱动已存在的 profile，不写任何文件） |
 | `DSH_MCP_ROUTE_SOURCE` | 自动 | 复制模型路由的来源 profile 名；`__home__` 表示只认 `$DSH_HOME/cordis.patch.yml` |
@@ -21,12 +22,13 @@
 | `DSH_MCP_MAX_LIVE` | `4`（最坏约 1.2–1.9GB） | ★ **最多同时保活几个会话进程**（`0` = 不限）。超标时回收**最久没用过**的（**在跑的回合绝不回收**）。`keep_alive=true` 的会话不受本上限约束。用完想立刻放掉空闲会话：`dsh_release(all=true)`（busy 回合默认跳过，`force=true` 才中断） |
 | `DSH_MCP_MAX_RSS_MB` | `0`（关闭） | 全局子进程内存预算（MB）。实际 RSS 超过预算时按"最久未用"回收空闲会话，`keep_alive` 会话最后才动。按实际内存而不是会话数，适合上下文大小差异大的场景 |
 | `DSH_MCP_CHILD_MAX_OLD_SPACE_MB` | `0`（不设） | 给每个 DSH 子进程追加 `--max-old-space-size`，兜底失控的上下文。设太小会让长会话 OOM |
-| `DSH_MCP_SHARED_PROCESS` | `0`（关闭） | **实验性**：同 `(cwd, permission)` 的会话共享一个 ACP 进程。显著省内存与冷启动（实测第二个会话 `session/new` 约 300ms，独立进程约 4s）。代价：进程崩溃会连坐同组会话（会统一写 error 哨兵，之后各自 resume） |
+| `DSH_MCP_SHARED_PROCESS` | `1`（开启） | **默认开启**：同 `(cwd, permission)` 的会话共享一个 ACP 进程。显著省内存与冷启动（实测第二个会话 `session/new` 约 300ms，独立进程约 4s），`dsh_doctor` 的 RSS 也按 PID 去重。代价：进程崩溃会连坐同组会话（统一写 error 哨兵，之后各自 resume），所以 `dsh_takeover` 杀这类进程时要求 `force=true`。设 `0` 回到"一会话一进程" |
 | `DSH_MCP_AUDIT_FILE` | 空（关闭） | 元数据审计 JSONL 路径。只记事件、会话/回合 ID、决定与计数；**不记** prompt、正文、思考、工具输入。10MB 滚动到 `.1` |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | `dsh_list` 磁盘探测结果的缓存时长（探测要 spawn 一个 DSH 进程，实测约 1 秒） |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000`（7 天） | 启动时清理超过此时长的哨兵；`0` 关闭清理 |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | 未设置 | `1` 会把 `result.thinking` 一并写进哨兵（**打破"思考不落盘"的保证**）；answer/error/title/工具输入仍会脱敏 |
-| `DSH_MCP_PERMISSION` | `danger-full-access` | `dsh_start` 未指定时的权限档 |
+| `DSH_MCP_PERMISSION` | `workspace-write` | `dsh_start` 未指定时的权限档。设为 `danger-full-access` 还需要 `DSH_MCP_ALLOW_FULL_ACCESS=1` |
+| `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | 是否允许 `permission=danger-full-access`。默认拒绝：该档把整机写权限交给调用方 |
 | `DSH_MCP_REASONING_EFFORT` | `max` | 默认思考深度 |
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0`（不设超时） | **仅 `wait=true` 时**的等待上限；到期只转后台，不取消回合 |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |

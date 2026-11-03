@@ -30,6 +30,7 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import {
+  ALLOW_FULL_ACCESS,
   APPROVAL_POLICIES,
   DEFAULT_PERMISSION,
   DEFAULT_REASONING_EFFORT,
@@ -642,7 +643,23 @@ export class Conversation {
       return report;
     }
 
-    // 3) 杀 + 重试（内核在持有者进程退出时释放信号量）
+    // 3) 共享进程：杀它会连坐同组会话，先把代价说清楚，别让对方在不知情下按下去。
+    //    共享进程池（0.5.0 默认开启）让一个 PID 载着多个会话，takeover 只看"谁握着锁"
+    //    会做出一个很贵的决定 —— 杀掉持有者 = 同组所有会话的进行中回合一起断。
+    const sharedVictims = this.#hub.hostVictimsOf(killTarget, this.id);
+    if (sharedVictims.length > 0) {
+      report.shared_sessions = sharedVictims;
+      if (!force) {
+        report.message =
+          `抢占被拒绝：PID ${killTarget} 是共享进程，上面还挂着 ${sharedVictims.length} 个其它会话` +
+          `（${sharedVictims.map((id) => id.slice(0, 8)).join(', ')}）。\n` +
+          '杀掉它会连坐这些会话：各自进行中的回合会中断（会话本体无损，之后照常 resume）。\n' +
+          '确认可以接受就带 force=true 重试；不想连坐就先 dsh_release 那些会话，或等它们空闲。';
+        return report;
+      }
+    }
+
+    // 4) 杀 + 重试（内核在持有者进程退出时释放信号量）
     const kill = killHolderChild(killTarget, { expectedSpawnedAt: holder.marker?.spawned_at });
     report.killed_pid = killTarget;
     report.kill = kill;
@@ -662,7 +679,10 @@ export class Conversation {
       report.ok = true;
       report.message =
         `已抢占：杀掉持有者 PID ${killTarget}（${holder.reason}），并成功接管会话。` +
-        `\n⚠️ 如果那个进程当时正在跑回合，那一轮的工作会中断（会话日志会记为 interrupted）。`;
+        `\n⚠️ 如果那个进程当时正在跑回合，那一轮的工作会中断（会话日志会记为 interrupted）。` +
+        (sharedVictims.length > 0
+          ? `\n⚠️ 它是共享进程，另外 ${sharedVictims.length} 个会话也被一起断掉了（各自 resume 即可）。`
+          : '');
     } catch (e) {
       report.message = `杀掉 PID ${killTarget} 之后仍无法接管：${e.message}`;
     }
@@ -1514,7 +1534,7 @@ export function homeWorkspaceProblem(cwd, permission) {
 export class Hub {
   constructor({ log } = {}) {
     this.conversations = new Map();
-    /** 共享 ACP 进程池：key = `${cwd}\0${permission}`（实验性，DSH_MCP_SHARED_PROCESS=1）。 */
+    /** 共享 ACP 进程池：key = `${cwd}\0${permission}`（0.5.0 起默认启用，`DSH_MCP_SHARED_PROCESS=0` 关闭）。 */
     this.hosts = new Map();
     this.log = log ?? NOOP_LOG;
     /** 最近一次 dsh_list 磁盘探测的结果：{ok, error, cached, at}。 */
@@ -1842,6 +1862,23 @@ export class Hub {
     }
   }
 
+  /**
+   * 共享进程下，某个子进程 PID 上还挂着哪些**别的**会话。
+   *
+   * 用途只有一个：`takeover` 要杀这个 PID 之前，先看看会不会连坐 ——
+   * 杀一个还载着三个会话的宿主，代价是那三个会话的进行中回合一起断。
+   * 只有本服务自己的宿主池查得清这件事；别的实例的宿主编号外部，查不到就只能让调用方
+   * 自己用 `force` 承担。
+   */
+  hostVictimsOf(pid, exceptId) {
+    if (!pid) return [];
+    for (const host of this.hosts.values()) {
+      if (host.pid !== pid) continue;
+      return [...host.conversations.keys()].filter((id) => id !== exceptId);
+    }
+    return [];
+  }
+
   /** 新建一个会话：拉起进程 + ACP 初始化 + session/new。 */
   async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false } = {}) {
     if (!cwd) {
@@ -1860,6 +1897,14 @@ export class Hub {
     }
     if (!PERMISSION_TIERS.includes(permission)) {
       throw new Error(`permission 必须是 ${PERMISSION_TIERS.join(' | ')} 之一`);
+    }
+    // ★ 0.5.0：danger-full-access 不再默认可用。它把整机写权限交给调用方，
+    //   而本服务可能被任何 MCP 客户端拉起；必须由机器所有者显式放行。
+    if (permission === 'danger-full-access' && !ALLOW_FULL_ACCESS) {
+      throw new Error(
+        'permission=danger-full-access 需要机器侧显式允许：设置 DSH_MCP_ALLOW_FULL_ACCESS=1 后重试。' +
+          ' 默认请用 workspace-write（写入限制在工作区内）或 read-only。',
+      );
     }
     const policy = onApproval ?? defaultApprovalPolicy(permission);
     if (!APPROVAL_POLICIES.includes(policy)) {
@@ -2042,7 +2087,7 @@ export class Hub {
 
   /** 空闲回收：停掉闲置进程，会话本身保留（可 resume 复活）。
    *
-   * ★ `DSH_MCP_IDLE_TTL_MS=0`（**默认**）= **永不回收**。
+   * ★ `DSH_MCP_IDLE_TTL_MS=0` = **永不回收**（0.4.0 起默认是 10 分钟，不再是默认值）。
    *   理由（实测，见 USAGE-NOTES §3.10~3.12）：空闲回收是写锁**唯一**会变空的时刻，
    *   而只要锁一空，你在 web 里点开那条会话，`dsh web` 就会**永久**持有它
    *   （切走 ✗ 等待 ✗ 归档 ✗ 都不释放），本服务之后每一次 resume 都失败 ——
