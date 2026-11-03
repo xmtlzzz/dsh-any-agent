@@ -234,6 +234,26 @@ try {
   check('★ 审核记录不含 notes 里的凭证', !recordText.includes('NOTESLEAK12345'), recordText);
   check('审核记录保留脱敏标记', recordText.includes('[REDACTED]'));
 
+  // Codex review 指出的缺口：result.error 会被 buildReviewChecklist 拼进清单项，
+  // 审核记录落盘时必须逐项脱敏，否则 error 里的令牌会绕过 notes/evidence 的脱敏。
+  const errorRun = completedRun('校验失败的任务', {
+    overrides: { stop_reason: 'error', error: 'request failed token=ERRORLEAK12345' },
+  });
+  const errorReviewed = await handlers.dsh_review({
+    conversation_id: conv.id,
+    run_id: errorRun.run_id,
+    verdict: 'pass',
+    notes: '确认失败原因可接受',
+  });
+  const errorRecordText = readFileSync(errorReviewed.structured.review_file, 'utf8');
+  check('★ 审核记录 checklist 不含 error 里的凭证', !errorRecordText.includes('ERRORLEAK12345'), errorRecordText);
+  const errorSentinel = JSON.parse(readFileSync(hub.runSentinelPath(conv.id, errorRun.run_id), 'utf8'));
+  check(
+    '★ 哨兵 checklist 也不含 error 里的凭证',
+    !JSON.stringify(errorSentinel.result?.review?.checklist).includes('ERRORLEAK12345'),
+    JSON.stringify(errorSentinel.result?.review?.checklist),
+  );
+
   const safe = sanitizeResultForSentinel({
     answer: 'x',
     thinking: 'THINK_SECRET',

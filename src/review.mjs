@@ -168,7 +168,11 @@ export function writeReviewRecord({ ticket, verdict, notes, findings, reviewedAt
     reviewed_at: reviewedAt,
     review_file: file,
     prompt_preview: sanitizeApprovalContext(ticket.prompt_preview ?? null, 'prompt_preview'),
-    checklist: Array.isArray(ticket.checklist) ? ticket.checklist : [],
+    // 清单里可能拼进 result.error（例如 `error=... token=sk-...`），落盘前必须逐项脱敏。
+    // 哨兵走的是 sanitizeResultForSentinel，这里若漏掉，审核记录会成为第二个明文泄漏点。
+    checklist: Array.isArray(ticket.checklist)
+      ? ticket.checklist.map((item) => sanitizeApprovalContext(item))
+      : [],
     evidence: sanitizeApprovalContext(ticket.evidence ?? null),
   };
   try {
