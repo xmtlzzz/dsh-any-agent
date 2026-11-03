@@ -30,6 +30,7 @@
   "files": [
     "bin/",
     "src/",
+    "docs/",
     "profile-example/",
     "README.md",
     "README.zh.md",

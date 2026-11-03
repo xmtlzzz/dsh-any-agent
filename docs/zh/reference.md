@@ -1,0 +1,38 @@
+> 返回 [README](../../README.zh.md)
+
+# ⚙️ 环境变量
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `DSH_BIN` | 自动探测 | `@deepseek-ai/dsh/lib/bin.js` 路径 |
+| `DSH_MCP_PROFILE` | `dsh-team`（团队开）/ `dsh-mcp`（团队关） | 驱动用的 DSH profile；显式设置优先 |
+| `DSH_MCP_TEAM` | `1` | 团队模式。默认开：用 `dsh-team` profile，并在 `dsh_send` 前注入"需要时先建团队"的提示。设 `0` 关闭（回到 `dsh-mcp`、不注入）；单次关闭用 `dsh_send(team=false)` |
+| `DSH_HOME` | `~/.dsh` | DSH 主目录。**默认就用本机用户自己的**，凭据与会话历史因此与 GUI 共用。指向别处即隔离环境（那就得自己准备那个目录的凭据与 profile） |
+| `DSH_MCP_BOOTSTRAP` | 开 | `0` 关闭首启 profile 自动创建/同步（关掉后只驱动已存在的 profile，不写任何文件） |
+| `DSH_MCP_ROUTE_SOURCE` | 自动 | 复制模型路由的来源 profile 名；`__home__` 表示只认 `$DSH_HOME/cordis.patch.yml` |
+| `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | 会话注册表，跨重启存活。旧版 `<仓库>/.state` 会在首次启动时自动迁移一次 |
+| `DSH_MCP_RUNS_DIR` | `<状态文件同目录>/runs` | 异步完成哨兵的根目录（`<此目录>/<会话id>/<run_id>.json`） |
+| `DSH_MCP_LOCKS_DIR` | `<状态文件同目录>/locks` | 写锁"持有者登记"的目录。⚠️ **多个实例必须指向同一个值**，否则彼此看不见对方的持锁登记、会把对方误判成"无法识别的持有者（GUI）"而拒绝抢占 |
+| `DSH_MCP_APPROVAL` | `auto-allow`（非只读档） | 默认审批策略。设成 `ask` 才能让越界请求挂起给 `dsh_approval_decide`，而不是自动放行 |
+| `DSH_MCP_APPROVAL_TIMEOUT_MS` | `300000` | 待决 `ask` 审批的等待上限；超时按拒绝处理 |
+| `DSH_MCP_FORGOTTEN_DIR` | `$DSH_HOME/.dsh-any-agent-forgotten` | `dsh_release(forget=true)` 写的墓碑目录 |
+| `DSH_MCP_LOCK_STALE_MS` | `90000`（3× `REAP_INTERVAL_MS`，下限 30 秒） | 持锁登记多久没续心跳就算"持有者失联"（此时可被 `dsh_takeover` 自动抢占）；改回收间隔会改变推导出的默认值 |
+| `DSH_MCP_IDLE_TTL_MS` | `600000`（10 分钟） | 会话空闲多久回收其 DSH 进程。**默认 10 分钟**：回收后内存释放，下次派活自动 resume（对话不丢），代价是写锁会空出来、GUI 可能拿走。设 `0` = 永不回收（一直握锁，代价是每会话常驻 300–480MB）；需要长期握锁的个别会话用 `dsh_start(keep_alive=true)` |
+| `DSH_MCP_MAX_LIVE` | `4`（最坏约 1.2–1.9GB） | ★ **最多同时保活几个会话进程**（`0` = 不限）。超标时回收**最久没用过**的（**在跑的回合绝不回收**）。`keep_alive=true` 的会话不受本上限约束。用完想立刻放掉空闲会话：`dsh_release(all=true)`（busy 回合默认跳过，`force=true` 才中断） |
+| `DSH_MCP_MAX_RSS_MB` | `0`（关闭） | 全局子进程内存预算（MB）。实际 RSS 超过预算时按"最久未用"回收空闲会话，`keep_alive` 会话最后才动。按实际内存而不是会话数，适合上下文大小差异大的场景 |
+| `DSH_MCP_CHILD_MAX_OLD_SPACE_MB` | `0`（不设） | 给每个 DSH 子进程追加 `--max-old-space-size`，兜底失控的上下文。设太小会让长会话 OOM |
+| `DSH_MCP_SHARED_PROCESS` | `0`（关闭） | **实验性**：同 `(cwd, permission)` 的会话共享一个 ACP 进程。显著省内存与冷启动（实测第二个会话 `session/new` 约 300ms，独立进程约 4s）。代价：进程崩溃会连坐同组会话（会统一写 error 哨兵，之后各自 resume） |
+| `DSH_MCP_AUDIT_FILE` | 空（关闭） | 元数据审计 JSONL 路径。只记事件、会话/回合 ID、决定与计数；**不记** prompt、正文、思考、工具输入。10MB 滚动到 `.1` |
+| `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | `dsh_list` 磁盘探测结果的缓存时长（探测要 spawn 一个 DSH 进程，实测约 1 秒） |
+| `DSH_MCP_SENTINEL_TTL_MS` | `604800000`（7 天） | 启动时清理超过此时长的哨兵；`0` 关闭清理 |
+| `DSH_MCP_SENTINEL_INCLUDE_REASONING` | 未设置 | `1` 会把 `result.thinking` 一并写进哨兵（**打破"思考不落盘"的保证**）；answer/error/title/工具输入仍会脱敏 |
+| `DSH_MCP_PERMISSION` | `danger-full-access` | `dsh_start` 未指定时的权限档 |
+| `DSH_MCP_REASONING_EFFORT` | `max` | 默认思考深度 |
+| `DSH_MCP_PROMPT_TIMEOUT_MS` | `0`（不设超时） | **仅 `wait=true` 时**的等待上限；到期只转后台，不取消回合 |
+| `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |
+| `DSH_MCP_GIT_STATUS` | 开 | `0` 关闭每回合的 `git status` 摘要。分析不可信仓库时建议关掉（git 可能触发仓库配置的 fsmonitor/filter，且发生在 DSH 沙箱之外） |
+| `DSH_MCP_BACKUP_KEEP` | `20` | 每个客户端配置最多保留多少份 `.bak-dsh-*`（尽力轮转） |
+| `DSH_MCP_REQUEST_TIMEOUT_MS` | `60000` | ACP 通道单请求超时（initialize、session/new 等） |
+| `DSH_MCP_REAP_INTERVAL_MS` | `30000` | 空闲回收器多久检查一次。低于安全下限的值会回落到默认值 |
+| `DSH_MCP_LOG` | `silent` | `silent` / `info` / `debug` |
+| `DSH_MCP_LOG_STDERR` | 未设置 | `1` 才转发 DSH 原始 stderr |
