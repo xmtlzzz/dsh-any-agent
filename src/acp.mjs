@@ -11,7 +11,13 @@
 
 import { spawn } from 'node:child_process';
 import { ensureProfile } from './bootstrap.mjs';
-import { DSH_PROFILE, PKG_VERSION, REQUEST_TIMEOUT_MS, resolveDshBin } from './config.mjs';
+import {
+  CHILD_MAX_OLD_SPACE_MB,
+  DSH_PROFILE,
+  PKG_VERSION,
+  REQUEST_TIMEOUT_MS,
+  resolveDshBin,
+} from './config.mjs';
 import { LineDecoder } from './line-decoder.mjs';
 
 /** ACP 协议版本（@agentclientprotocol/sdk 的 v1）。 */
@@ -33,6 +39,8 @@ export class AcpProcess {
   #log = NOOP_LOG;
   #onPermissionRequest;
   #onNotification;
+  #onExit;
+  #exitNotified = false;
 
   /**
    * @param {object} opts
@@ -42,13 +50,25 @@ export class AcpProcess {
    * @param {(params:object)=>Promise<object>} [opts.onPermissionRequest]
    * @param {(params:object)=>void} [opts.onNotification]
    */
-  constructor({ cwd, permission, log, onPermissionRequest, onNotification }) {
+  constructor({ cwd, permission, log, onPermissionRequest, onNotification, onExit }) {
     this.cwd = cwd;
     this.permission = permission;
     if (log) this.#log = log;
     this.#onPermissionRequest = onPermissionRequest;
     this.#onNotification = onNotification;
+    this.#onExit = onExit;
     this.initialized = false;
+  }
+
+  /** 非主动 stop 的退出通知（共享进程池靠它把同组会话标成失败并唤醒等待者）。 */
+  #notifyExit(reason) {
+    if (this.#exitNotified || this.#stopping) return;
+    this.#exitNotified = true;
+    try {
+      this.#onExit?.(reason);
+    } catch (e) {
+      this.#log.debug(`[acp] onExit 处理异常: ${e.message}`);
+    }
   }
 
   get alive() {
@@ -78,9 +98,15 @@ export class AcpProcess {
       this.#log.debug(`[acp] profile 引导跳过: ${ready.skipped}`);
     }
     const bin = resolveDshBin();
+    const env = { ...process.env, DSH_PERMISSION_MODE: this.permission };
+    // 0.4.0：可选的子进程堆上限。只加参数、不覆盖用户已有的 NODE_OPTIONS。
+    if (CHILD_MAX_OLD_SPACE_MB > 0) {
+      const prev = String(env.NODE_OPTIONS ?? '').trim();
+      env.NODE_OPTIONS = `${prev} --max-old-space-size=${CHILD_MAX_OLD_SPACE_MB}`.trim();
+    }
     this.#child = spawn(process.execPath, [bin, '--profile', DSH_PROFILE], {
       cwd: this.cwd,
-      env: { ...process.env, DSH_PERMISSION_MODE: this.permission },
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -97,6 +123,7 @@ export class AcpProcess {
       this.#pending.clear();
       this.#child = null;
       this.initialized = false;
+      this.#notifyExit(`DSH stdio 不可用: ${e.message}`);
     };
     this.#child.stdin.on('error', streamError);
     this.#child.stdout.on('error', streamError);
@@ -119,6 +146,7 @@ export class AcpProcess {
       this.#pending.clear();
       this.#child = null;
       this.initialized = false;
+      this.#notifyExit(`DSH 进程退出（code=${code}）`);
       this.#log.debug(`[acp] 进程退出 code=${code}`);
     });
     this.#child.on('error', (e) => this.#log.info(`[acp] spawn 失败: ${e.message}`));

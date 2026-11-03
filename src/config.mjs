@@ -42,13 +42,58 @@ function findInNpxCache() {
     } catch {
       continue;
     }
+    const found = [];
     for (const e of entries) {
       if (!e.isDirectory()) continue;
       const p = join(root, e.name, 'node_modules', DSH_ENTRY);
-      if (existsSync(p)) return p;
+      if (!existsSync(p)) continue;
+      let version = '0.0.0';
+      try {
+        version =
+          JSON.parse(readFileSync(join(dirname(p), '..', 'package.json'), 'utf8')).version ?? version;
+      } catch {
+        // 版本读不到就当 0.0.0，仍可作为候选
+      }
+      found.push({ p, version });
+    }
+    if (found.length) {
+      // ★ 取**最高版本**，不是目录枚举顺序。本机可以同时缓存 0.1.5 和 0.1.7，
+      //   按目录顺序会随机选中旧版，导致实验性能力（如 Agent Teams）根本加载不到。
+      found.sort((a, b) => cmpVersion(b.version, a.version));
+      return found[0].p;
     }
   }
   return undefined;
+}
+
+/** 极简 semver 比较（够用于 npx 缓存里挑最新）；返回 a-b 的符号。 */
+export function cmpVersion(a, b) {
+  const [ac, ap] = String(a).split('-', 2);
+  const [bc, bp] = String(b).split('-', 2);
+  const an = ac.split('.').map(Number);
+  const bn = bc.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const d = (an[i] || 0) - (bn[i] || 0);
+    if (d) return d;
+  }
+  if (!ap && bp) return 1; // release > prerelease
+  if (ap && !bp) return -1;
+  if (ap && bp) {
+    const ar = ap.split('.');
+    const br = bp.split('.');
+    for (let i = 0; i < Math.max(ar.length, br.length); i++) {
+      const x = ar[i] ?? '';
+      const y = br[i] ?? '';
+      const xn = x !== '' && Number.isFinite(Number(x));
+      const yn = y !== '' && Number.isFinite(Number(y));
+      if (xn && yn) {
+        if (Number(x) !== Number(y)) return Number(x) - Number(y);
+      } else if (xn) return -1;
+      else if (yn) return 1;
+      else if (x !== y) return x < y ? -1 : 1;
+    }
+  }
+  return 0;
 }
 
 /**
@@ -83,8 +128,35 @@ export function resolveDshBin() {
   );
 }
 
-/** 用于驱动 DSH 的 profile（由 bootstrap 在首启时按 acp 模板创建）。 */
-export const DSH_PROFILE = process.env.DSH_MCP_PROFILE ?? 'dsh-mcp';
+/**
+ * 团队模式（0.4.0 默认开启）。
+ *
+ * - 默认 profile 用 `dsh-team`（自动创建，含实验性 Agent Teams）；
+ * - `dsh_send` 默认在 prompt 前注入一句"需要并行/多角色时先建团队"；
+ * - 关闭：`DSH_MCP_TEAM=0`（回到 `dsh-mcp` profile、不注入）；
+ *   单次关闭：`dsh_send(team=false)`。
+ */
+export const TEAM_MODE = (() => {
+  const v = process.env.DSH_MCP_TEAM;
+  if (v === undefined || String(v).trim() === '') return true;
+  return !['0', 'false', 'off', 'no'].includes(String(v).trim().toLowerCase());
+})();
+
+/** 运行中的 DSH 版本（读不到为 null）。 */
+export const DSH_VERSION = (() => {
+  try {
+    const bin = resolveDshBin();
+    return (
+      JSON.parse(readFileSync(join(dirname(bin), '..', 'package.json'), 'utf8')).version ?? null
+    );
+  } catch {
+    return null;
+  }
+})();
+
+// 注意用 `0.1.7-0` 而不是 `0.1.7`：semver 里 `0.1.7-rc.1 < 0.1.7`，
+// 但 team 包正是随 0.1.7-rc.1 发布的。
+const teamVersionOk = DSH_VERSION === null || cmpVersion(DSH_VERSION, '0.1.7-0') >= 0;
 
 /**
  * DSH 主目录。**默认就是本机用户自己的 ~/.dsh** —— 本服务不拥有独立的 home，
@@ -94,6 +166,31 @@ export const DSH_PROFILE = process.env.DSH_MCP_PROFILE ?? 'dsh-mcp';
  * 一旦指向别的目录，就要自己准备那个目录下的凭据与 profile。
  */
 export const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh');
+
+/** 用于驱动 DSH 的 profile（由 bootstrap 在首启时按 acp 模板创建）。 */
+export const DSH_PROFILE =
+  process.env.DSH_MCP_PROFILE ?? (TEAM_MODE && teamVersionOk ? 'dsh-team' : 'dsh-mcp');
+
+/**
+ * 团队能力是否真正可用：
+ *   - 用户没有关（TEAM_MODE）；
+ *   - DSH >= 0.1.7（team 包从 0.1.7 才有）；
+ *   - **profile 里真的含 team 包**（显式指定了不含 team 的 profile 时不注入，
+ *     否则模型会看到一个不存在的工具）。
+ * profile 还不存在时（首启）交给 bootstrap 创建，视为可用。
+ */
+const profileTeamText = (() => {
+  try {
+    return readFileSync(join(DSH_HOME, 'profiles', DSH_PROFILE, 'cordis.patch.yml'), 'utf8');
+  } catch {
+    return null;
+  }
+})();
+
+export const TEAM_ACTIVE =
+  TEAM_MODE &&
+  teamVersionOk &&
+  (profileTeamText === null || profileTeamText.includes('@deepseek-ai/dsh-experimental-agent-team'));
 
 /**
  * 是否允许 bootstrap 自动创建/同步 DSH profile（默认开）。
@@ -240,7 +337,10 @@ export function numEnv(name, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-const rawIdle = numEnv('DSH_MCP_IDLE_TTL_MS', 0);
+// 0.4.0：默认从"永不回收"改为 10 分钟。
+// 代价是锁可能空出来被 GUI 拿走；收益是并发一高不会把内存堆到几 GB。
+// 需要"永远握住写锁"的会话用 dsh_start(keep_alive=true) 显式保活。
+const rawIdle = numEnv('DSH_MCP_IDLE_TTL_MS', 10 * 60 * 1000);
 /** ★ `<= 0` 或非法值一律当作"永不回收"。
  *  否则 `-1` 会被算成 `cutoff = now + 1` → **立刻回收**（谁会想到负数=马上收 ✗），
  *  `NaN` 更糟：比较永远为假，行为取决于具体分支。宁可把"奇怪的输入"统一压到安全侧。 */
@@ -261,12 +361,43 @@ export const REAP_INTERVAL_MS = Number.isFinite(rawReap) && rawReap >= 200 ? raw
  *   - 窗口外的：进程回收、内存释放 ✓（下次派活自动 resume，无损 ✓）
  * 即"**内存有界，锁尽量在手**"。
  *
- * **默认 8**（按实测 300-480MB/个，最坏约 2.5-4GB）：让"内存有界"成为默认行为，而不是要用户先发现再配 ✗。
+ * **默认 4**（按实测 300-480MB/个，最坏约 1.2-1.9GB）：让"内存有界"成为默认行为。
  * 被回收是无损的（会话日志在磁盘上 ✓），代价只是那个会话的写锁会空出来、
  * 且下次派活要 cold start。想做更多并行就调大；机器大也可以设 0（不限）。
+ * `keep_alive=true` 的会话不受本上限约束（由调用方自己负责内存）。
  */
-const rawMaxLive = numEnv('DSH_MCP_MAX_LIVE', 8);
+const rawMaxLive = numEnv('DSH_MCP_MAX_LIVE', 4);
 export const MAX_LIVE = Number.isFinite(rawMaxLive) && rawMaxLive > 0 ? Math.floor(rawMaxLive) : 0;
+
+/**
+ * 全局子进程内存预算（MB）。`0` = 关闭。
+ *
+ * 超过预算时按"最久未用"回收空闲会话，直到回到预算内。
+ * 与 `MAX_LIVE` 的区别：那个按**会话数**，这个按**实际 RSS**——
+ * 会话的上下文大小差异很大，按个数限制经常低估。
+ * 读 RSS 失败时静默跳过（不能因为量不到就把会话全收了）。
+ */
+const rawMaxRss = numEnv('DSH_MCP_MAX_RSS_MB', 0);
+export const MAX_RSS_MB = Number.isFinite(rawMaxRss) && rawMaxRss > 0 ? Math.floor(rawMaxRss) : 0;
+
+/**
+ * 给每个 DSH 子进程的 V8 老生代设上限（MB）。`0` = 不设。
+ *
+ * 只是兜底：DSH 正常不会吃满默认堆，但失控的上下文可以把 RSS 顶到很高。
+ * 设太小会让长会话 OOM，所以默认关闭、由用户按机器情况调。
+ */
+const rawChildHeap = numEnv('DSH_MCP_CHILD_MAX_OLD_SPACE_MB', 0);
+export const CHILD_MAX_OLD_SPACE_MB =
+  Number.isFinite(rawChildHeap) && rawChildHeap > 0 ? Math.floor(rawChildHeap) : 0;
+
+/**
+ * 实验性：同一 `(cwd, permission)` 的多个会话共享一个 ACP 进程（0.4.0）。
+ *
+ * DSH 的 ACP 服务端支持一条连接上多会话，且每个 session 有独立 Agent。
+ * 但 `sandbox-policy.workspaceRoot` / `mode` 与 `approval.policy` 都是**进程级**配置，
+ * 所以只能按 `(cwd, permission)` 分组共享。默认关闭：共享进程的崩溃会连坐同组会话。
+ */
+export const SHARED_PROCESS = numEnv('DSH_MCP_SHARED_PROCESS', 0) === 1;
 
 /**
  * `dsh_list` 的"磁盘探测"结果缓存多久（毫秒）。

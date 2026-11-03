@@ -75,6 +75,54 @@ DSH（DeepSeek Harness）本身**全都能做** —— 它有文件/shell 工具
 | 🧩 **能力可叠加** | DSH 自己还能挂别的 MCP（IDA Pro、浏览器、内部工具）——这是一座通往整个工具箱的桥。 |
 | 🛡️ **只读档真能只读** | `read-only` 沙箱 + 审批一律拒绝，适合分析不信任样本。 |
 
+## 🧭 定位：本服务只负责"派活"，能力复用 DSH
+
+**它不是能力聚合器，而是派发层。** DSH 已经有的能力，本服务默认不重做、不代理、不预加载——
+调用方给一个目标，DSH 自己决定用哪些工具、技能、子代理或团队。
+
+| 归 DSH 管（本服务不碰） | 归本服务管（派发语义） |
+|---|---|
+| 文件读写、shell、搜索、编辑 | 会话身份与跨崩溃 resume |
+| 技能、子代理、Agent Teams、任务板 | 异步派活、收据、完成哨兵 |
+| 模型路由、沙箱、审批策略 | 增量读、插话、中断 |
+| 记忆/上下文/压缩 | 审批桥、写锁治理、队列、收件箱 |
+| worktree（agent 自己用 git 建） | 安装、状态、体检、审计 |
+
+**按需派发**：`dsh_send` 只传目标，不传工具清单，也不要求调用方先了解 DSH 有哪些工具。
+DSH 的 agent 按任务自己选能力——包括它自己新长出来的能力（比如实验性 Agent Teams），
+本服务不需要为每一个新能力加一个 MCP 工具。
+
+**团队模式（0.4.0 默认开）**：默认 profile 是 `dsh-team`（首启自动创建，含实验性 Agent Teams），
+`dsh_send` 会在 prompt 前注入一句"需要并行/多角色时先建团队"；简单任务不会组队。
+关闭：`DSH_MCP_TEAM=0`（回到 `dsh-mcp`、不注入），或单次 `dsh_send(team=false)`。
+注意 team profile 会关闭旧的 `subagent` 工具，换成 9 个团队工具；成员共享一个工作区。
+
+**只有"派发语义"本身需要的才做成工具**：建会话、派活、读进度、验收、插话、中断、审批、
+队列、收件箱、状态、释放、抢占、体检。文件读写 / shell / 编辑器 / 任务板都不做。
+
+**什么时候需要外层再加东西**：只有当你需要"保证"而不是"行为"时——
+例如多个顶层会话并发改同一个仓库，需要外层 worktree 隔离；团队协作则优先让 DSH 自己开团队
+（需要把实验性 team 包挂进 profile，成员共享一个工作区）。
+
+## 🧑‍🤝‍🧑 团队模式（0.4.0 默认开）
+
+默认 profile 是 `dsh-team`：首次启动自动创建，包含实验性 Agent Teams，并关闭旧的 `subagent` 工具。
+`dsh_send` 会在调用方的 prompt 前注入一句"需要并行/多角色时先建团队"；简单任务不会被强制组队。
+
+| 想做什么 | 怎么做 |
+|---|---|
+| 保持默认（开） | 什么都不用设 |
+| **全局关闭** | `DSH_MCP_TEAM=0`（回到 `dsh-mcp` profile，不再注入团队提示） |
+| **只关这一次** | `dsh_send(..., team=false)` |
+| 用自定义 profile | `DSH_MCP_PROFILE=<name>`；服务会检查该 profile 是否真的含 team 包，不含就自动不注入 |
+| 确认当前状态 | `dsh_start` 的返回、或 `dsh_doctor` 的 `config` 检查（`team=on/off`） |
+
+注意：
+
+- 团队模式要求 DSH `>= 0.1.7-0`；版本不够会自动退回 `dsh-mcp`。
+- team profile 会关闭旧的 `subagent` 工具，换成 9 个团队工具；成员共享一个工作区。
+- 团队是**实验性**能力，DSH 不提供稳定性承诺；不要在关键路径上假定它永远可用。
+
 ## ⚡ 为什么不是直接把 DSH 包一层
 
 DSH 自带两个可编程入口。`sdk` profile 看着更简单，但它的 JSON-RPC 只有 **3 个请求 + 4 个通知**，缺了三样让 agent 实际不可用的能力；`acp` profile（Agent Client Protocol）全都有。以下结论全部针对 DSH `0.2.1-rc.5` 实测得出。
@@ -402,7 +450,10 @@ node test/smoke.mjs          # 不调用 LLM，验证整条管道
 | `dsh_interrupt` | 打断当前回合（会话不会损坏） |
 | `dsh_release` | 交还会话（释放写锁，之后可在你自己的 DSH GUI 里打开）。仍可 resume；`forget=true` 会写墓碑，此后按 id 查询一律拒绝，直到删除 `$DSH_HOME/.dsh-any-agent-forgotten/<id>.json` |
 | `dsh_approval_decide` | 裁决待决审批（仅当 `on_approval=ask`） |
-| `dsh_status` | 轻量状态查询 |
+| `dsh_status` | 轻量状态查询（单个会话） |
+| `dsh_inbox` | **跨会话待决审批收件箱**：一次列出所有会话的审批、原因、输入与等待时长；裁决仍用 `dsh_approval_decide` |
+| `dsh_queue` | 查看/修改会话队列：`list` / `remove` / `update` / `promote`（队列由 `dsh_send(queue=true)` 产生，仅内存） |
+| `dsh_doctor` | 只读体检：DSH 版本、profile、状态/目录可写、孤儿锁、会话与 RSS、生效配置 |
 
 ## 📋 用法：先派活，回头再验收
 
@@ -535,7 +586,8 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `DSH_BIN` | 自动探测 | `@deepseek-ai/dsh/lib/bin.js` 路径 |
-| `DSH_MCP_PROFILE` | `dsh-mcp` | 驱动用的 DSH profile |
+| `DSH_MCP_PROFILE` | `dsh-team`（团队开）/ `dsh-mcp`（团队关） | 驱动用的 DSH profile；显式设置优先 |
+| `DSH_MCP_TEAM` | `1` | 团队模式。默认开：用 `dsh-team` profile，并在 `dsh_send` 前注入"需要时先建团队"的提示。设 `0` 关闭（回到 `dsh-mcp`、不注入）；单次关闭用 `dsh_send(team=false)` |
 | `DSH_HOME` | `~/.dsh` | DSH 主目录。**默认就用本机用户自己的**，凭据与会话历史因此与 GUI 共用。指向别处即隔离环境（那就得自己准备那个目录的凭据与 profile） |
 | `DSH_MCP_BOOTSTRAP` | 开 | `0` 关闭首启 profile 自动创建/同步（关掉后只驱动已存在的 profile，不写任何文件） |
 | `DSH_MCP_ROUTE_SOURCE` | 自动 | 复制模型路由的来源 profile 名；`__home__` 表示只认 `$DSH_HOME/cordis.patch.yml` |
@@ -546,8 +598,12 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 | `DSH_MCP_APPROVAL_TIMEOUT_MS` | `300000` | 待决 `ask` 审批的等待上限；超时按拒绝处理 |
 | `DSH_MCP_FORGOTTEN_DIR` | `$DSH_HOME/.dsh-any-agent-forgotten` | `dsh_release(forget=true)` 写的墓碑目录 |
 | `DSH_MCP_LOCK_STALE_MS` | `90000`（3× `REAP_INTERVAL_MS`，下限 30 秒） | 持锁登记多久没续心跳就算"持有者失联"（此时可被 `dsh_takeover` 自动抢占）；改回收间隔会改变推导出的默认值 |
-| `DSH_MCP_IDLE_TTL_MS` | `0`（永不回收） | 会话空闲多久回收其 DSH 进程。★★ **`0` = 永不回收（默认）**：本服务一直握着写锁，**GUI 抢不走**（你在 GUI 里点开是**只读**，照样能看 ✓）。代价：每会话常驻一个 DSH 进程（**两次冷启动实测 476MB / 295MB**）。设成毫秒数（如 `300000`）可省内存，但要接受"锁可能被 GUI 抢走" |
-| `DSH_MCP_MAX_LIVE` | `8`（最坏约 2.5–4GB，见第 8 条） | ★ **最多同时保活几个会话进程**（`0` = 不限）。超标时回收**最久没用过**的（**在跑的回合绝不回收**）—— "**内存有界，锁尽量在手**"。内存紧用 `4`，机器大可以 `0`。用完想立刻放掉空闲会话：`dsh_release(all=true)`（busy 回合默认跳过，`force=true` 才中断） |
+| `DSH_MCP_IDLE_TTL_MS` | `600000`（10 分钟） | 会话空闲多久回收其 DSH 进程。**默认 10 分钟**：回收后内存释放，下次派活自动 resume（对话不丢），代价是写锁会空出来、GUI 可能拿走。设 `0` = 永不回收（一直握锁，代价是每会话常驻 300–480MB）；需要长期握锁的个别会话用 `dsh_start(keep_alive=true)` |
+| `DSH_MCP_MAX_LIVE` | `4`（最坏约 1.2–1.9GB） | ★ **最多同时保活几个会话进程**（`0` = 不限）。超标时回收**最久没用过**的（**在跑的回合绝不回收**）。`keep_alive=true` 的会话不受本上限约束。用完想立刻放掉空闲会话：`dsh_release(all=true)`（busy 回合默认跳过，`force=true` 才中断） |
+| `DSH_MCP_MAX_RSS_MB` | `0`（关闭） | 全局子进程内存预算（MB）。实际 RSS 超过预算时按"最久未用"回收空闲会话，`keep_alive` 会话最后才动。按实际内存而不是会话数，适合上下文大小差异大的场景 |
+| `DSH_MCP_CHILD_MAX_OLD_SPACE_MB` | `0`（不设） | 给每个 DSH 子进程追加 `--max-old-space-size`，兜底失控的上下文。设太小会让长会话 OOM |
+| `DSH_MCP_SHARED_PROCESS` | `0`（关闭） | **实验性**：同 `(cwd, permission)` 的会话共享一个 ACP 进程。显著省内存与冷启动（实测第二个会话 `session/new` 约 300ms，独立进程约 4s）。代价：进程崩溃会连坐同组会话（会统一写 error 哨兵，之后各自 resume） |
+| `DSH_MCP_AUDIT_FILE` | 空（关闭） | 元数据审计 JSONL 路径。只记事件、会话/回合 ID、决定与计数；**不记** prompt、正文、思考、工具输入。10MB 滚动到 `.1` |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | `dsh_list` 磁盘探测结果的缓存时长（探测要 spawn 一个 DSH 进程，实测约 1 秒） |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000`（7 天） | 启动时清理超过此时长的哨兵；`0` 关闭清理 |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | 未设置 | `1` 会把 `result.thinking` 一并写进哨兵（**打破"思考不落盘"的保证**）；answer/error/title/工具输入仍会脱敏 |
@@ -583,9 +639,13 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `async` | 16 | fire-and-forget + 事后验收 |
 | `sentinel` | 36 | 完成哨兵：原子性、闩锁语义、多会话并发不串台、被取消也落地、**思考不进文件** |
 | `prune` | 11 | **哨兵留存**：清超期与崩溃残留、留新、清空壳目录、`TTL=0` 关闭清理、且绝不碰同目录的会话注册表（不花 token，每次必跑） |
-| `guards` | 31 | **环境变量守卫**：奇怪的数值一律压到安全侧 —— `IDLE_TTL_MS` 的 `-1`/非法值都当"永不回收"（绝不主动让出写锁）、回收间隔过小压回默认（防空转紧循环）、**失联阈值下限 30 秒**（防别的实例"合法地"抢占并杀掉我们的回合）（不花 token，每次必跑） |
+| `guards` | 36 | **环境变量守卫**：奇怪的数值一律压到安全侧 —— `IDLE_TTL_MS` 的 `-1` 当"永不回收"、非法值/空串回落默认 10 分钟、回收间隔过小压回默认（防空转紧循环）、**失联阈值下限 30 秒**（防别的实例"合法地"抢占并杀掉我们的回合）（不花 token，每次必跑） |
 | `sandbox-guard` | 21 | **测试沙箱自身**：「临时 HOME」如果落到真实用户目录、它的子目录、盘符根目录，或 OS 临时目录之外，一律报错拒绝，绝不被写入和删除。其余套件都通过 `test/sandbox-home.mjs` 拿目录、只销毁自己建的那个（不花 token，每次必跑） |
 | `approval-details` | 27 | **审批审查上下文**：待决审批的快照带命令、理由、cwd 与原始审批 ID —— 不只是一个裸 ID，调用方才能真正裁决；缺失的 `rawInput` 会按 ID 从先前的 `tool_call` 更新关联回来；凭据形状的字段与常见内联字面量在结构化上下文和展示标题里都会脱敏；关闭会话会取消待决审批。经真实 stdio MCP 端到端验证 |
+| `failure-terminal` | 11 | **失败路径的终态**：`ensureAlive` 失败时唤醒 `dsh_interject` 等待者、落 `status=error` 哨兵、错误对象挂 `runId`；审批没有对应 option 时 `effective=cancelled` 而不是假报 allow；`dsh_get` 能从哨兵文件回读（不花 token） |
+| `shared-host` | 15 | **共享进程宿主**：通知/审批按 `sessionId` 路由、未知会话审批一律取消、进程退出扇出所有挂载会话、最后一个会话 detach 才停进程；以及 RSS 读取（不花 token） |
+| `shared-process` | 8（无 DSH 时 skip） | **共享进程真机验证**：同 `(cwd, permission)` 的两个会话落在同一个 PID、关一个不影响另一个、全部关闭后宿主清空且 PID 退出（需要本机 DSH，`--all` 时运行） |
+| `dispatch-tools` | 31 | **派发面**：`dsh_inbox` 跨会话汇总待决审批、`client_run_id` 幂等命中与淘汰、队列 list/update/promote/remove（remove 写 cancelled 哨兵）、`dsh_get(max_chars)` 只截断 text 且 structured 保留全文、审计只记元数据不记正文、`dsh_doctor` 关键检查项（不花 token） |
 | `read-cursor` | 10 | **`dsh_read` 游标语义**：追加到已读条目里的文本必须再次返回（修订号游标，按 `seq` 替换全文）；`limit` 钳到 1..500，`0`/负数不会空转或丢尾（不花 token） |
 | `line-decoder` | 4 | **UTF-8 行分帧**：MCP/ACP 的 chunk 边界不能把中文/emoji 截成 U+FFFD；覆盖逐字节、任意 chunk、CRLF 与 EOF 残留（不花 token） |
 | `sentinel-redaction` | 19 | **哨兵落盘卫生**：`result.thinking` 被剥掉、`thinking_omitted` 始终是布尔值、`answer`/`error`/`title`/`tools_used[].input` 都走与审批相同的凭据脱敏（不花 token） |
@@ -658,7 +718,7 @@ DSH 的会话有**跨进程写锁**：**持有者活着就永不过期，也没�
 
 | 情形 | 结论 |
 |---|---|
-| **本服务持有锁**（默认） | ✅ 你在 GUI 里点开它是**只读**的：**内容照看**，但**抢不走锁**。默认 `DSH_MCP_IDLE_TTL_MS=0`（永不回收）保证锁不会空出来 |
+| **本服务持有锁**（最近用过，或 `keep_alive=true`） | ✅ 你在 GUI 里点开它是**只读**的：**内容照看**，但**抢不走锁**。0.4.0 起默认空闲 **10 分钟**后才回收；`keep_alive=true` 的会话永不因空闲回收 |
 | **锁空着时你在 GUI 点开它** | ❌ **GUI 会永久持有它**（切走、等待、归档都不释放），本服务**再也接不回来**，只能重启 `dsh web` |
 | **推荐做法** | 看进度用 **`dsh_read`**（游标增量读）或等**哨兵文件**；非要用 GUI 就先 `dsh_release`（会中断在跑的回合，适合任务间隙） |
 
@@ -685,13 +745,15 @@ DSH 的会话有**跨进程写锁**：**持有者活着就永不过期，也没�
 5. **首次成功回合之前就死掉的会话可能尚未落盘** —— 此时 resume 会报清晰错误。发出第一条消息后就安全了。
 6. **不能改名** —— DSH 的标题子系统没有对外改名接口（`SessionTitleService.rename` 需要进程内的活会话）。标题一律由首条消息自动生成。
 7. **`session/list` 只返回 `{sessionId, cwd}`，且排除已打开的会话** —— 对话名由本服务从 DSH 投影缓存补全。
-8. **默认"永不回收"要花内存（实测 300–480MB/会话）** —— 在 `MAX_LIVE` 窗口内，换来的是"GUI 抢不走写锁"。两次冷启动实测单个活跃会话新增常驻内存分别为 476MB 和 295MB（含 DSH 子进程与本服务），冷进程首次偏高。两种省内存办法：① **`DSH_MCP_MAX_LIVE`（默认 8**，超标就回收最久没用过的 → 内存有界 ✓ 锁仍尽量在手 ✓）；② 把 `DSH_MCP_IDLE_TTL_MS` 设成毫秒数（代价是锁可能被 GUI 拿走）。一批活干完想立刻归零：**`dsh_release(all=true)`** ✓（默认只释放空闲会话，**正在跑的回合会跳过、继续跑**；要连它们一起停掉传 `force=true`。之后照样 resume）。
+8. **内存（实测 300–480MB/活跃会话）** —— 0.4.0 起默认 **空闲 10 分钟回收 + `MAX_LIVE=4`**，最坏约 1.2–1.9GB；`keep_alive=true` 的会话不因空闲被回收（代价是常驻）。还可以：① `DSH_MCP_MAX_RSS_MB` 按实际 RSS 预算回收；② `DSH_MCP_CHILD_MAX_OLD_SPACE_MB` 给子进程设堆上限；③ `DSH_MCP_SHARED_PROCESS=1` 让同 `(cwd, permission)` 的会话共享一个 ACP 进程（实验性，省内存也省冷启动，但崩溃会连坐同组）。一批活干完想立刻归零：**`dsh_release(all=true)`** ✓（默认只释放空闲会话，**正在跑的回合会跳过、继续跑**；要连它们一起停掉传 `force=true`。之后照样 resume）。
 
 ## ❓ 为什么 profile 还叫 `dsh-mcp`？
 
 因为改名会打断一堆已经落盘的东西。
 
-本服务首次启动时会在 `~/.dsh/profiles/dsh-mcp/` 建一个 DSH profile。这个目录名被另外三样持久化标识引用着：
+本服务首次启动时会在 `~/.dsh/profiles/dsh-mcp/` 建一个 DSH profile。0.4.0 起团队模式默认改用 `dsh-team`（同样由本服务自动创建）；`dsh-mcp` 仍用于团队关闭或既有部署。两者共用同一套 `DSH_MCP_*` 变量与 `# dsh-mcp:managed` 标记。
+
+这个目录名被另外三样持久化标识引用着：
 
 | 持久标识 | 位置 | 改名的后果 |
 |---|---|---|

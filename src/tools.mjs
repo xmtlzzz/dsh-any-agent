@@ -5,17 +5,32 @@
  * 因为调用方 agent 已经有那些工具了。
  */
 
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   APPROVAL_POLICIES,
   DEFAULT_PERMISSION,
   DEFAULT_REASONING,
   DEFAULT_REASONING_EFFORT,
+  IDLE_TTL_MS,
+  MAX_LIVE,
+  MAX_RSS_MB,
   PERMISSION_TIERS,
   REASONING_EFFORTS,
   REASONING_MODES,
+  RUNS_DIR,
+  SHARED_PROCESS,
+  STATE_FILE,
+  TEAM_ACTIVE,
+  TEAM_MODE,
+  DSH_PROFILE,
   toPosixPath,
+  resolveDshBin,
 } from './config.mjs';
-import { listOrphans } from './locks.mjs';
+import { inspectProfile } from './bootstrap.mjs';
+import { audit } from './audit.mjs';
+import { listOrphans, LOCKS_DIR } from './locks.mjs';
+import { rssMb } from './procstat.mjs';
 
 const S = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
 
@@ -23,6 +38,26 @@ const CONV_ID = {
   type: 'string',
   description: '会话 id，来自 dsh_start 或 dsh_list。',
 };
+
+/**
+ * timeout_ms 校验：只接受 >= 0 的有限数字（0 = 一直等）。
+ *
+ * 之前直接透传：'abc' → NaN → prompt 里 `NaN <= 0` 为假、setTimeout(NaN) 立即触发，
+ * 静默降级成后台收据；非有限值或负数一律报错，别让调用方以为自己在原地等。
+ */
+function parseTimeoutMs(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) throw new Error('timeout_ms 必须是 >= 0 的有限数字');
+  return n;
+}
+
+/**
+ * 团队模式下注入到派发 prompt 前的一句策略。
+ * 只描述"需要时怎么做"，不改变任务本身；简单任务不会因此组队。
+ */
+const TEAM_PREFIX =
+  '【团队】如果这个任务需要并行或多角色协作，先用 spawn_teammate 创建团队再执行；' +
+  '不需要就单 agent 完成。不要为简单任务组队。\n\n';
 
 /** 工具清单（JSON Schema）。 */
 export const TOOL_DEFS = [
@@ -69,6 +104,13 @@ export const TOOL_DEFS = [
         },
         provider: { type: 'string', description: '模型提供方名（如 deepseek-official）。留空用 profile 默认。' },
         model: { type: 'string', description: '模型名（如 deepseek-flash）。指定时必须同时给 provider。' },
+        keep_alive: {
+          type: 'boolean',
+          description:
+            'true = 这个会话的进程不受空闲 TTL / MAX_LIVE 回收（用于"必须一直握住写锁"的长期会话）。' +
+            '默认 false：空闲 10 分钟后进程会被回收、内存释放，下次派活自动 resume（对话不丢）。' +
+            '设 true 时请记得用完 `dsh_release`，否则它会一直占着一个 DSH 进程（约 300–480MB）。',
+        },
       },
       // cwd 不再是必填：有 MCP roots 的客户端会自动带上当前项目目录。
       [],
@@ -77,7 +119,9 @@ export const TOOL_DEFS = [
   {
     name: 'dsh_send',
     description:
-      '向会话派一个任务。**默认不阻塞（wait=false）**：立即返回 run_id + sentinel_file，' +
+      '向会话派一个任务。**给目标，不要给命令**：DSH 自己决定用哪些文件/shell/搜索/技能/子代理/团队工具，' +
+      '本服务不预先加载或代理 DSH 的工具面。' +
+      '**默认不阻塞（wait=false）**：立即返回 run_id + sentinel_file，' +
       '回合在后台跑，跑完自动通知你 —— 你继续做别的事，也永远不用担心任务被"超时"打断。' +
       '想原地等结果就显式传 wait=true（可配 timeout_ms；到期只会转后台，不会取消回合）。' +
       '【超时不会毁掉任务】wait=true 到达 timeout_ms 仍没跑完时，本工具**不会报错、也不会取消回合**，' +
@@ -106,6 +150,24 @@ export const TOOL_DEFS = [
           type: 'number',
           description:
             '仅 wait=true 时的**等待**上限（毫秒），**默认 0 = 一直等**（不会凭空发明 30 分钟）。到期不会取消回合，只会转成后台并给你 run_id。',
+        },
+        queue: {
+          type: 'boolean',
+          description:
+            '会话正忙时是否入队（默认 false = 直接报错）。true 时立即返回 run_id + queue_position，' +
+            '本轮结束后自动执行；哨兵只在真正结束时写，入队时不写。队列仅内存、重启丢失，用 dsh_queue 管理。',
+        },
+        client_run_id: {
+          type: 'string',
+          description:
+            '调用方生成的幂等键（≤128 字符，作用域=本会话）。重复提交同一个键不会创建第二个 run，' +
+            '而是返回首次 run 的结果或收据（replayed=true）。用于"响应在传输层丢了、想安全重发"的场景。',
+        },
+        team: {
+          type: 'boolean',
+          description:
+            '是否在本次派发前注入"需要并行/多角色时先建团队"的提示（默认跟随 DSH_MCP_TEAM，0.4.0 起默认开）。' +
+            '传 false 只对这一次关闭；彻底关闭用 DSH_MCP_TEAM=0。',
         },
       },
       ['conversation_id', 'prompt'],
@@ -162,6 +224,16 @@ export const TOOL_DEFS = [
       {
         conversation_id: CONV_ID,
         run_id: { type: 'string', description: 'dsh_send 返回的 run_id；不传则取最近一次回合。' },
+        client_run_id: {
+          type: 'string',
+          description: '按调用方幂等键取 run（与 run_id 二选一；只对仍在内存里的 run 有效，最多最近 20 条）。',
+        },
+        max_chars: {
+          type: 'number',
+          description:
+            '正文在 **text** 里的最大字符数（默认 0 = 不截断）。' +
+            'structured.run.result 仍保留完整内容；截断时附带 answer_truncated/next_offset，可自行分页。',
+        },
       },
       ['conversation_id'],
     ),
@@ -189,6 +261,10 @@ export const TOOL_DEFS = [
           description: `思考内容展示档位，默认 ${DEFAULT_REASONING}。`,
         },
         timeout_ms: { type: 'number', description: '新回合的**等待**上限（毫秒），**默认 0 = 一直等**；queue 模式也用它限制等待上一轮结束。忙时等待超时会报错（本次插话未发送，会话不受损）；空闲时到期只转后台，不取消回合。' },
+        client_run_id: {
+          type: 'string',
+          description: '调用方生成的幂等键（≤128 字符，作用域=本会话）。重复提交返回首次的 run，不会重复插话。',
+        },
       },
       ['conversation_id', 'message'],
     ),
@@ -265,6 +341,42 @@ export const TOOL_DEFS = [
     name: 'dsh_status',
     description: '轻量状态查询：会话是否活着、是否在忙、待决审批数、最近一次回合的结果。',
     inputSchema: S({ conversation_id: CONV_ID }, ['conversation_id']),
+  },
+  {
+    name: 'dsh_inbox',
+    description:
+      '**跨会话的待决审批收件箱**（dsh_status 只看单个会话）。' +
+      '一次列出所有会话里等你裁决的审批：会话 id/标题、审批 id、工具、原因、命令/路径摘要、等待时长。' +
+      '裁决用 dsh_approval_decide。没有待决审批时返回空列表。',
+    inputSchema: S(
+      {
+        conversation_id: { type: 'string', description: '只看某个会话（省略 = 全部）' },
+        include_input: { type: 'boolean', description: '是否带操作输入摘要（默认 true）' },
+      },
+      [],
+    ),
+  },
+  {
+    name: 'dsh_queue',
+    description:
+      '查看/修改会话的待执行队列（由 dsh_send(queue=true) 产生；**仅内存**，重启丢失）。' +
+      'action=list 列出；remove 取消并写 cancelled 哨兵；update 改写排队文本；promote 提到队首。',
+    inputSchema: S(
+      {
+        conversation_id: CONV_ID,
+        action: { type: 'string', enum: ['list', 'remove', 'update', 'promote'] },
+        run_id: { type: 'string', description: 'remove / update / promote 必填' },
+        text: { type: 'string', description: 'update 时的新文本' },
+      },
+      ['conversation_id', 'action'],
+    ),
+  },
+  {
+    name: 'dsh_doctor',
+    description:
+      '只读体检：DSH 可执行文件与版本、profile 是否存在/漂移、状态文件、runs/locks 目录可写、孤儿锁、' +
+      '当前会话数与 RSS、生效配置。只报告不修改；ok=false 表示存在 fail 项。',
+    inputSchema: S({}, []),
   },
 ];
 
@@ -343,6 +455,63 @@ function backgroundReceipt(hub, conv, res) {
 }
 
 /**
+ * 幂等命中：返回同一个 client_run_id 首次对应 run 的结果或收据。
+ * 绝不创建第二个 run —— 这正是"响应在传输层丢了、想安全重发"需要的语义。
+ */
+function replayRun(hub, conv, run, wantResult) {
+  const sentinel = hub.runSentinelPath(conv.id, run.run_id);
+  const sentinelPosix = toPosixPath(sentinel);
+  const terminal = run.status === 'done' || run.status === 'error' || run.status === 'cancelled';
+  if (terminal && run.result) {
+    return {
+      structured: { ...run.result, replayed: true, ...(wantResult ? {} : { background: true }) },
+      text:
+        `（幂等命中：client_run_id 已对应一个已结束的回合，未重复派活）\n` +
+        renderSendResult(run.result) +
+        `\n哨兵文件: ${sentinel}`,
+    };
+  }
+  return {
+    structured: {
+      conversation_id: conv.id,
+      run_id: run.run_id,
+      status: run.status,
+      accepted: true,
+      background: true,
+      still_running: true,
+      replayed: true,
+      sentinel_file: sentinel,
+      sentinel_file_posix: sentinelPosix,
+    },
+    text:
+      `（幂等命中：同一个 client_run_id 已在跑或排队，未重复派活）run_id=${run.run_id} status=${run.status}\n` +
+      `哨兵文件: ${sentinel}`,
+  };
+}
+
+/** 入队回执：入队时不写哨兵，真正结束才写。 */
+function queuedReceipt(hub, conv, run, position) {
+  const sentinel = hub.runSentinelPath(conv.id, run.run_id);
+  const sentinelPosix = toPosixPath(sentinel);
+  return {
+    structured: {
+      conversation_id: conv.id,
+      run_id: run.run_id,
+      accepted: true,
+      queued: true,
+      queue_position: position,
+      status: 'queued',
+      sentinel_file: sentinel,
+      sentinel_file_posix: sentinelPosix,
+    },
+    text:
+      `已入队（第 ${position} 位）。当前回合结束后自动执行；**入队时不会写哨兵**，真正结束时才写：\n` +
+      `  ${sentinel}\n` +
+      `用 dsh_queue list 查看/修改/删除；取消：dsh_queue(conversation_id, action="remove", run_id="${run.run_id}")。`,
+  };
+}
+
+/**
  * @param {object} hub
  * @param {{projectDir?: () => Promise<string|null>}} [opts]
  *   projectDir：客户端当前打开的项目目录（MCP roots）。不传 cwd 时用它兜底 ——
@@ -372,8 +541,14 @@ export function createHandlers(hub, opts = {}) {
         reasoningEffort: args.reasoning_effort,
         provider: args.provider,
         model: args.model,
+        keepAlive: args.keep_alive === true,
       });
       if (args.title_hint) conv.titleHint = args.title_hint;
+      audit('start', {
+        conversation_id: conv.id,
+        permission: conv.permission,
+        keep_alive: conv.keepAlive === true,
+      });
       const snap = conv.snapshot();
       const lines = [
         '已创建会话。',
@@ -381,6 +556,14 @@ export function createHandlers(hub, opts = {}) {
         `工作区: ${snap.cwd}` + (cwdSource === 'client-root' ? '（取自客户端当前打开的项目）' : ''),
         `权限档: ${snap.permission}（审批策略 ${snap.on_approval}）`,
         `思考深度: ${snap.reasoning_effort}`,
+        snap.keep_alive
+          ? '保活: 是（不受空闲 TTL / MAX_LIVE 回收；用完请 dsh_release）'
+          : '保活: 否（空闲后可被回收，下次派活自动 resume）',
+        `团队模式: ${
+          TEAM_ACTIVE
+            ? `开（profile=${DSH_PROFILE}；派发时会提示"需要时先建团队"，简单任务不会组队）`
+            : '关（DSH_MCP_TEAM=0 或 DSH < 0.1.7）'
+        }`,
         `对话名: ${snap.title ?? '(DSH 尚未生成，发出第一条消息后自动生成)'}` +
         (snap.title_hint && snap.title !== snap.title_hint ? `（你给的标题提示: ${snap.title_hint}）` : ''),
         `工作区登记: ${snap.workspace_registered ? '已写入 DSH 工作区注册表（GUI 里能看到）' : '未登记'}`,
@@ -405,28 +588,63 @@ export function createHandlers(hub, opts = {}) {
       }
       const conv = await hub.get(args.conversation_id);
       const opts = { reasoning: args.reasoning ?? DEFAULT_REASONING };
-      if (args.timeout_ms) opts.timeoutMs = args.timeout_ms;
+      if (args.timeout_ms !== undefined && args.timeout_ms !== null) opts.timeoutMs = parseTimeoutMs(args.timeout_ms);
 
-      // ── 默认路径：后台派活（wait !== true）──────────
-      // 默认不阻塞：立即给收据 + 哨兵路径，回合结束时自动通知。想原地等就显式传 wait=true。
-      if (args.wait !== true) {
-        if (conv.busy) {
-          throw new Error(
-            '会话正在跑另一个回合，无法再排一个。可以：dsh_interject（插话）或 dsh_interrupt（打断）后重试。',
-          );
+      // ── 幂等：同一个 client_run_id 直接返回首次的 run，不重复执行 ──
+      if (args.client_run_id) {
+        if (String(args.client_run_id).length > 128) throw new Error('client_run_id 最长 128 字符');
+        const existing = conv.getRunByClientId(args.client_run_id);
+        if (existing) {
+          audit('send_replay', {
+            conversation_id: conv.id,
+            run_id: existing.run_id,
+            client_run_id: args.client_run_id,
+          });
+          return replayRun(hub, conv, existing, args.wait === true);
         }
-        const run = conv.createRun(args.prompt);
-        // prompt() 自己负责收尾与写哨兵（sentinel: true）。这里 await 是为了
-        // **同步暴露 resume/启动失败** —— 否则调用方会拿到一个 accepted 但注定失败的收据。
-        // 冷启动时这一步要几秒（要拉进程 + resume），热会话是瞬时。
-        const res = await conv.prompt(args.prompt, { ...opts, run, wait: false });
-        conv.lastResult = res;
-        return res.still_running ? backgroundReceipt(hub, conv, res) : { structured: res, text: renderSendResult(res) };
       }
 
-      // ── 等待模式：等到就返回结果；等超时则自动降级为后台（不报错、不丢结果）──
-      const r = await conv.prompt(args.prompt, opts);
+      // 团队提示：只描述"需要时怎么做"，不改变任务本身；简单任务不会因此组队。
+      const teamOn = TEAM_ACTIVE && args.team !== false;
+      const promptText = teamOn ? TEAM_PREFIX + args.prompt : args.prompt;
+
+      // ── 忙时：显式 queue=true 才入队；否则保持"直接报错"的旧契约 ──
+      if (conv.busy) {
+        if (args.queue === true && args.wait !== true) {
+          const { run, position, deduped } = conv.enqueue(promptText, {
+            reasoning: opts.reasoning,
+            clientRunId: args.client_run_id ?? null,
+            preview: args.prompt,
+          });
+          if (deduped) return replayRun(hub, conv, run, false);
+          audit('send_queued', {
+            conversation_id: conv.id,
+            run_id: run.run_id,
+            position,
+            client_run_id: args.client_run_id ?? null,
+          });
+          return queuedReceipt(hub, conv, run, position);
+        }
+        throw new Error(
+          '会话正在跑另一个回合，无法再排一个。可以：dsh_interject（插话）、dsh_interrupt（打断）后重试，' +
+            '或 dsh_send(queue=true) 入队。',
+        );
+      }
+
+      const wait = args.wait === true;
+      // 记录与预览保留调用方原文；实际派发用 promptText（可能带团队提示）。
+      const run = conv.createRun(args.prompt, { clientRunId: args.client_run_id ?? null });
+      // prompt() 自己负责收尾与写哨兵。这里 await 是为了**同步暴露 resume/启动失败** ——
+      // 否则调用方会拿到一个 accepted 但注定失败的收据（冷启动要几秒，热会话瞬时）。
+      const r = await conv.prompt(promptText, { ...opts, run, wait });
       conv.lastResult = r;
+      audit('send', {
+        conversation_id: conv.id,
+        run_id: r?.run_id ?? run.run_id,
+        wait,
+        still_running: Boolean(r?.still_running),
+        client_run_id: args.client_run_id ?? null,
+      });
       if (r?.still_running) return backgroundReceipt(hub, conv, r);
       return { structured: r, text: renderSendResult(r) };
     },
@@ -457,6 +675,9 @@ export function createHandlers(hub, opts = {}) {
         bits.push(`cwd=${c.cwd}`);
         if (c.permission) bits.push(`权限=${c.permission}`);
         if (c.turns != null) bits.push(`轮数=${c.turns}`);
+        if (c.rss_mb != null) bits.push(`rss=${c.rss_mb}MB`);
+        if (c.keep_alive) bits.push('保活');
+        if (c.queue_length) bits.push(`队列=${c.queue_length}`);
         return `- ${bits.join(' | ')}`;
       };
       const probe = hub.lastProbe ?? { ok: null, error: null, cached: false };
@@ -518,6 +739,7 @@ export function createHandlers(hub, opts = {}) {
       const conv = await hub.get(args.conversation_id);
       const snap = conv.snapshot();
       let run = null;
+      let runSource = null;
       const meta = [];
       // DSH 的自动标题是首条消息的截断前缀，信息量低；调用方给过 title_hint 就一并显示。
       const titleKind = snap.title_source === 'native'
@@ -535,40 +757,111 @@ export function createHandlers(hub, opts = {}) {
       if (snap.usage) meta.push(`token: in=${snap.usage.uncachedInputTokens ?? 0} out=${snap.usage.outputTokens ?? 0} cache=${snap.usage.cacheReadTokens ?? 0}`);
       if (snap.context_pressure) meta.push(`上下文压力: ${snap.context_pressure.pressureTokens}/${snap.context_pressure.contextWindow}`);
       if (snap.pending_approvals?.length) meta.push(`待决审批: ${snap.pending_approvals.join(', ')}`);
+      if (snap.queue_length) meta.push(`队列: ${snap.queue_length} 条待执行（dsh_queue list）`);
       for (const detail of snap.pending_approval_details ?? []) {
         const summary = [detail.title ?? detail.tool, detail.reason ?? detail.description].filter(Boolean).join(' — ');
         meta.push(`  ${detail.approval_id}: ${summary.slice(0, 300)}（操作输入见 pending_approval_details）`);
       }
-      run = args.run_id ? conv.getRun(args.run_id) : conv.getRun();
+      if (args.client_run_id) {
+        run = conv.getRunByClientId(args.client_run_id);
+        if (!run) {
+          throw new Error(
+            `未知 client_run_id: ${args.client_run_id}（只在内存里保留最近 20 条；已淘汰/服务重启后请用 run_id 或直接读哨兵文件）`,
+          );
+        }
+        runSource = 'client_run_id';
+      } else if (args.run_id) {
+        try {
+          run = conv.getRun(args.run_id);
+        } catch {
+          run = null;
+        }
+      } else {
+        run = conv.getRun();
+      }
+      if (run && !runSource) runSource = 'memory';
+      // ★ 内存只留最近 MAX_RUNS 条；服务重启或被挤出后，run_id 只能从哨兵文件回读。
+      //   哨兵是"一个回合 = 一个文件"的落盘权威，把它接进入口，调用方不必自己拼路径。
+      if (!run && args.run_id) {
+        const file = hub.runSentinelPath(args.conversation_id, args.run_id);
+        try {
+          const raw = JSON.parse(readFileSync(file, 'utf8'));
+          run = {
+            run_id: raw.run_id ?? args.run_id,
+            status: raw.status ?? 'unknown',
+            started_at: null,
+            ended_at: raw.ended_at ?? null,
+            elapsed_ms: null,
+            prompt_preview: null,
+            result: raw.result ?? null,
+          };
+          runSource = 'sentinel';
+        } catch {
+          // 文件不存在或不可解析：保持 run=null，下面给明确报错
+        }
+      }
+      if (args.run_id && !run) {
+        throw new Error(
+          `未知 run_id: ${args.run_id}（内存只留最近 20 条；哨兵文件 ${hub.runSentinelPath(args.conversation_id, args.run_id)} 也不存在或不可读）`,
+        );
+      }
+      // 正文预算只作用于 text；structured 里保留完整 result，调用方要做程序化处理时仍然拿得到。
+      const answerFull = String(run?.result?.answer ?? '');
+      const capRaw = Number(args.max_chars);
+      const cap = Number.isFinite(capRaw) && capRaw > 0 ? Math.floor(capRaw) : 0;
+      const truncated = cap > 0 && answerFull.length > cap;
       if (run) {
         meta.push('');
         meta.push(
           `回合 ${run.run_id}: 状态=${run.status}` +
+            (runSource === 'sentinel' ? '（来自哨兵文件；内存记录已过期或服务重启过）' : '') +
             (run.elapsed_ms != null ? ` 耗时=${(run.elapsed_ms / 1000).toFixed(1)}s` : '') +
             (run.status === 'running' ? '（还在跑，可继续用 dsh_read 看输出）' : ''),
         );
-        meta.push(`  指令: ${run.prompt_preview}`);
+        if (run.prompt_preview) meta.push(`  指令: ${run.prompt_preview}`);
         if (run.result?.answer) {
-          meta.push('  最终答复:');
-          meta.push(run.result.answer);
+          if (truncated) {
+            meta.push(`  最终答复（已截断，共 ${answerFull.length} 字）:`);
+            meta.push(answerFull.slice(0, cap));
+            meta.push(`  …（余下 ${answerFull.length - cap} 字；max_chars=0 取全文）`);
+          } else {
+            meta.push('  最终答复:');
+            meta.push(answerFull);
+          }
         }
         if (run.result?.thinking_stats?.chars) {
           meta.push(`  （思考 ${run.result.thinking_stats.chars} 字已隐藏）`);
         }
         if (run.result?.error) meta.push(`  ⚠️ 失败: ${run.result.error}`);
       }
+      const sentinelFile = run ? hub.runSentinelPath(args.conversation_id, run.run_id) : null;
       const runView = run
         ? {
             run_id: run.run_id,
+            client_run_id: run.client_run_id ?? null,
+            source: runSource,
             status: run.status,
             started_at: run.started_at ? new Date(run.started_at).toISOString() : null,
             ended_at: run.ended_at ? new Date(run.ended_at).toISOString() : null,
             elapsed_ms: run.elapsed_ms,
             prompt_preview: run.prompt_preview,
+            answer_chars: answerFull.length,
+            answer_truncated: truncated,
+            next_offset: truncated ? cap : null,
             result: run.result,
           }
         : null;
-      return { structured: { ...snap, run: runView }, text: meta.join('\n') };
+      if (sentinelFile) meta.push(`\n哨兵文件: ${sentinelFile}`);
+      return {
+        structured: {
+          ...snap,
+          run: runView,
+          ...(sentinelFile
+            ? { sentinel_file: sentinelFile, sentinel_file_posix: toPosixPath(sentinelFile) }
+            : {}),
+        },
+        text: meta.join('\n'),
+      };
     },
 
     async dsh_interject(args) {
@@ -576,10 +869,32 @@ export function createHandlers(hub, opts = {}) {
         throw new Error('message 不能为空：至少包含一个非空白字符');
       }
       const conv = await hub.get(args.conversation_id);
-      const opts = { mode: args.mode ?? 'interject', reasoning: args.reasoning ?? DEFAULT_REASONING };
-      if (args.timeout_ms) opts.timeoutMs = args.timeout_ms;
+      if (args.client_run_id) {
+        if (String(args.client_run_id).length > 128) throw new Error('client_run_id 最长 128 字符');
+        const existing = conv.getRunByClientId(args.client_run_id);
+        if (existing) {
+          audit('interject_replay', {
+            conversation_id: conv.id,
+            run_id: existing.run_id,
+            client_run_id: args.client_run_id,
+          });
+          return replayRun(hub, conv, existing, true);
+        }
+      }
+      const opts = {
+        mode: args.mode ?? 'interject',
+        reasoning: args.reasoning ?? DEFAULT_REASONING,
+        clientRunId: args.client_run_id ?? null,
+      };
+      if (args.timeout_ms !== undefined && args.timeout_ms !== null) opts.timeoutMs = parseTimeoutMs(args.timeout_ms);
       const r = await conv.interject(args.message, opts);
       conv.lastResult = r;
+      audit('interject', {
+        conversation_id: conv.id,
+        run_id: r?.run_id ?? null,
+        mode: r?.interjected ?? opts.mode,
+        client_run_id: args.client_run_id ?? null,
+      });
       const head =
         r.interjected === 'idle'
           ? '会话当时空闲，已按普通回合执行。'
@@ -602,6 +917,7 @@ export function createHandlers(hub, opts = {}) {
     async dsh_interrupt(args) {
       const conv = await hub.get(args.conversation_id);
       const r = await conv.interrupt();
+      audit('interrupt', { conversation_id: conv.id, interrupted: Boolean(r.interrupted) });
       return { structured: r, text: r.interrupted ? '已发送中断请求。' : `未中断：${r.reason}` };
     },
 
@@ -610,6 +926,7 @@ export function createHandlers(hub, opts = {}) {
       //   无损：会话日志都在磁盘上，之后照样 resume。
       if (args.all === true) {
         const r = await hub.releaseAll({ force: args.force === true });
+        audit('release_all', { released: r.released, failed: r.failed.length, skipped_busy: r.skipped_busy.length });
         return {
           structured: { released: r.released, conversations: r.conversations, skipped_busy: r.skipped_busy, failed: r.failed },
           text:
@@ -625,6 +942,11 @@ export function createHandlers(hub, opts = {}) {
       }
       const conv = await hub.get(args.conversation_id);
       const r = await conv.close({ forget: args.forget === true });
+      audit('release', {
+        conversation_id: conv.id,
+        forgotten: Boolean(r.forgotten),
+        deleted: Boolean(r.deleted),
+      });
       return {
         structured: { conversation_id: args.conversation_id, ...r },
         text: r.forgotten
@@ -636,13 +958,28 @@ export function createHandlers(hub, opts = {}) {
     async dsh_takeover(args) {
       const conv = await hub.get(args.conversation_id);
       const r = await conv.takeover({ force: args.force === true });
+      audit('takeover', { conversation_id: conv.id, ok: Boolean(r.ok), forced: args.force === true });
       return { structured: r, text: `${r.ok ? '✅' : '❌'} ${r.message}` };
     },
 
     async dsh_approval_decide(args) {
       const conv = await hub.get(args.conversation_id);
       const r = conv.decideApproval(args.approval_id, args.decision);
-      return { structured: r, text: `审批 ${r.approval_id} 已裁决为 ${r.decision}。` };
+      audit('approval_decide', {
+        conversation_id: conv.id,
+        approval_id: r.approval_id,
+        decision: r.decision,
+        effective: r.effective,
+      });
+      // ★ 只有 effective=selected 才是真的把决定送达了 DSH。
+      //   没有对应 option 时 ACP 收到的是 cancelled，绝不能渲染成"已裁决为 allow"。
+      const ok = r.effective === 'selected';
+      return {
+        structured: r,
+        text: ok
+          ? `审批 ${r.approval_id} 已裁决为 ${r.decision}。`
+          : `审批 ${r.approval_id} 未生效：DSH 没有提供 ${r.decision} 对应的选项，已按取消处理（effective=cancelled）。`,
+      };
     },
 
     async dsh_status(args) {
@@ -657,6 +994,9 @@ export function createHandlers(hub, opts = {}) {
       }
       if (run) bits.push(`最近回合=${run.run_id}(${run.status})`);
       bits.push(`待决审批=${snap.pending_approvals.length}`);
+      if (snap.rss_mb != null) bits.push(`rss=${snap.rss_mb}MB`);
+      if (snap.keep_alive) bits.push('保活=是');
+      if (snap.queue_length) bits.push(`队列=${snap.queue_length}`);
       // 写锁在谁手上：区分"自己握着"和"被别人占着"，后者直接给出可执行动作
       if (snap.lock_holder && snap.lock_holder !== 'self') {
         const hint =
@@ -691,6 +1031,9 @@ export function createHandlers(hub, opts = {}) {
           pending_approvals: snap.pending_approvals,
           pending_approval_details: snap.pending_approval_details,
           turns: snap.turns,
+          rss_mb: snap.rss_mb,
+          keep_alive: snap.keep_alive,
+          queue_length: snap.queue_length,
           lock_holder: snap.lock_holder,
           lock_holder_reason: snap.lock_holder_reason,
           lock_conflict: snap.lock_conflict,
@@ -705,6 +1048,177 @@ export function createHandlers(hub, opts = {}) {
             : null,
         },
         text: bits.join(' | '),
+      };
+    },
+
+    async dsh_inbox(args) {
+      const convs = args.conversation_id
+        ? [await hub.get(args.conversation_id)]
+        : [...hub.conversations.values()];
+      const items = [];
+      for (const conv of convs) {
+        const snap = conv.snapshot();
+        for (const d of snap.pending_approval_details ?? []) {
+          items.push({
+            conversation_id: snap.conversation_id,
+            title: snap.title ?? null,
+            cwd: snap.cwd,
+            approval_id: d.approval_id,
+            tool: d.tool ?? null,
+            reason: d.reason ?? d.description ?? null,
+            created_at: d.created_at ?? null,
+            age_ms: d.created_at ? Date.now() - d.created_at : null,
+            options: (d.options ?? []).map((o) => ({
+              option_id: o.optionId,
+              kind: o.kind,
+              name: o.name,
+            })),
+            ...(args.include_input === false ? {} : { input: d.input ?? null }),
+          });
+        }
+      }
+      items.sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
+      const lines = items.map(
+        (i) =>
+          `- [${i.conversation_id}] ${i.title ?? '(无标题)'} | ${i.approval_id} | ${i.tool ?? '?'} | ` +
+          `${i.reason ?? ''} | 等待=${i.age_ms == null ? '?' : `${Math.round(i.age_ms / 1000)}s`}`,
+      );
+      return {
+        structured: { count: items.length, approvals: items },
+        text: items.length
+          ? `${items.length} 个待决审批：\n${lines.join('\n')}\n\n` +
+            `裁决：dsh_approval_decide(conversation_id, approval_id, decision)`
+          : '(没有待决审批)',
+      };
+    },
+
+    async dsh_queue(args) {
+      const conv = await hub.get(args.conversation_id);
+      switch (args.action) {
+        case 'list': {
+          const items = conv.queueList();
+          return {
+            structured: { count: items.length, queue: items },
+            text: items.length
+              ? `${items.length} 条排队：\n` +
+                items.map((i) => `- #${i.position} ${i.run_id} | ${i.preview}`).join('\n')
+              : '(队列为空)',
+          };
+        }
+        case 'remove': {
+          if (!args.run_id) throw new Error('remove 需要 run_id');
+          const r = conv.queueRemove(args.run_id);
+          audit('queue_remove', { conversation_id: conv.id, run_id: args.run_id });
+          return {
+            structured: r,
+            text: `已从队列移除 ${args.run_id}（已写 cancelled 哨兵，等待方不会空等）`,
+          };
+        }
+        case 'update': {
+          if (!args.run_id) throw new Error('update 需要 run_id');
+          if (typeof args.text !== 'string' || args.text.trim() === '') {
+            throw new Error('update 需要非空 text');
+          }
+          const r = conv.queueUpdate(args.run_id, args.text);
+          audit('queue_update', { conversation_id: conv.id, run_id: args.run_id });
+          return { structured: r, text: `已更新 ${args.run_id} 的排队文本` };
+        }
+        case 'promote': {
+          if (!args.run_id) throw new Error('promote 需要 run_id');
+          const r = conv.queuePromote(args.run_id);
+          audit('queue_promote', { conversation_id: conv.id, run_id: args.run_id });
+          return { structured: r, text: `已把 ${args.run_id} 提到队首` };
+        }
+        default:
+          throw new Error(`未知 action: ${args.action}`);
+      }
+    },
+
+    async dsh_doctor() {
+      const checks = [];
+      const add = (id, status, detail, fix = null) => checks.push({ id, status, detail, fix });
+
+      try {
+        const bin = resolveDshBin();
+        let version = null;
+        try {
+          version =
+            JSON.parse(readFileSync(join(dirname(bin), '..', 'package.json'), 'utf8')).version ?? null;
+        } catch {}
+        add('dsh_bin', 'ok', `${bin}${version ? ` (DSH ${version})` : ''}`);
+      } catch (e) {
+        add('dsh_bin', 'fail', e.message, '设置 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js');
+      }
+
+      try {
+        const p = inspectProfile();
+        add(
+          'profile',
+          p.exists ? (p.drifted ? 'warn' : 'ok') : 'warn',
+          `${p.dir} exists=${p.exists} managed=${p.managed} drifted=${p.drifted} routes=${p.routes.join(',') || 'none'}`,
+          p.exists ? null : '让服务首启自动创建，或运行 dsh-any-agent-setup',
+        );
+      } catch (e) {
+        add('profile', 'fail', e.message);
+      }
+
+      try {
+        const raw = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+        add(
+          'state',
+          raw.version === 1 ? 'ok' : 'warn',
+          `${STATE_FILE} version=${raw.version} conversations=${raw.conversations?.length ?? 0}`,
+        );
+      } catch (e) {
+        add('state', 'warn', `${STATE_FILE}: ${e.message}`, '首次启动会自动创建');
+      }
+
+      for (const [id, dir] of [
+        ['runs_dir', RUNS_DIR],
+        ['locks_dir', LOCKS_DIR],
+      ]) {
+        try {
+          mkdirSync(dir, { recursive: true });
+          const probe = join(dir, `.doctor-${process.pid}`);
+          writeFileSync(probe, '');
+          rmSync(probe, { force: true });
+          add(id, 'ok', dir);
+        } catch (e) {
+          add(id, 'fail', `${dir}: ${e.message}`, '检查权限，或用对应环境变量指向可写目录');
+        }
+      }
+
+      try {
+        const orphans = listOrphans();
+        add(
+          'orphan_locks',
+          orphans.length ? 'warn' : 'ok',
+          orphans.length ? `${orphans.length} 个孤儿锁持有者（可 dsh_takeover）` : '没有孤儿锁',
+        );
+      } catch (e) {
+        add('orphan_locks', 'warn', e.message);
+      }
+
+      const all = [...hub.conversations.values()];
+      const alive = all.filter((c) => c.proc?.alive);
+      const totalRss = alive.reduce((s, c) => s + (rssMb(c.proc?.pid) ?? 0), 0);
+      add('sessions', 'ok', `共 ${all.length}，活进程 ${alive.length}，RSS 合计 ${totalRss}MB`);
+      add(
+        'config',
+        'ok',
+        `profile=${DSH_PROFILE} team=${TEAM_ACTIVE ? 'on' : 'off'} permission=${DEFAULT_PERMISSION} ` +
+          `idle_ttl=${IDLE_TTL_MS}ms max_live=${MAX_LIVE} max_rss=${MAX_RSS_MB}MB shared=${SHARED_PROCESS}`,
+      );
+
+      const ok = !checks.some((c) => c.status === 'fail');
+      const lines = checks.map(
+        (c) =>
+          `${c.status === 'ok' ? '✓' : c.status === 'warn' ? '⚠' : '✗'} ${c.id}: ${c.detail}` +
+          (c.fix ? ` → ${c.fix}` : ''),
+      );
+      return {
+        structured: { ok, verdict: ok ? 'ok' : 'fail', checks },
+        text: `${ok ? '体检通过' : '体检发现失败项'}\n${lines.join('\n')}`,
       };
     },
   };

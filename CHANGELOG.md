@@ -7,7 +7,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Post-0.3.9 hardening.
+## [0.4.0] — 2026-11-03
+
+### Memory
+
+- **Idle reaping is on by default.** `DSH_MCP_IDLE_TTL_MS` now defaults to
+  10 minutes (was `0` = never). Idle sessions release their DSH process and
+  resume automatically on the next call; the write lock is released with it.
+  Set `0` to restore the old "hold the lock forever" behavior.
+- **`DSH_MCP_MAX_LIVE` defaults to 4** (was 8), keeping the worst case around
+  1.2–1.9 GB instead of 2.5–4 GB at the documented 300–480 MB/session.
+- **`keep_alive` on `dsh_start`.** A session created with `keep_alive: true`
+  is exempt from idle TTL and `MAX_LIVE`; it keeps its DSH process (and write
+  lock) until `dsh_release`. Use it for "must stay attached" sessions.
+- **Global RSS budget** via `DSH_MCP_MAX_RSS_MB` (default `0` = off). When the
+  sum of live child RSS exceeds the budget, the least-recently-used idle
+  sessions are reaped until it fits. `keep_alive` sessions are reaped last.
+- **`dsh_list` / `dsh_status` report `rss_mb`** (and `keep_alive`), so the cost
+  is visible instead of guessed.
+- **Optional child heap cap** via `DSH_MCP_CHILD_MAX_OLD_SPACE_MB` (default
+  `0` = off). It appends `--max-old-space-size=<n>` to the child's
+  `NODE_OPTIONS` without clobbering existing options.
+- **Experimental shared ACP process** via `DSH_MCP_SHARED_PROCESS=1`. Sessions
+  with the same `(cwd, permission)` share one DSH process; ACP supports
+  concurrent sessions over one connection and DSH gives each session its own
+  Agent. Measured on DSH 0.1.7: two sessions → one PID, second `session/new`
+  took ~300 ms instead of ~4 s. Same `(cwd, permission)` is required because
+  `sandbox-policy.workspaceRoot`/`mode` and `approval.policy` are process-wide
+  in `dsh-base`. Trade-off: a process crash takes down the whole group; the
+  host writes error sentinels for every in-flight run and each session resumes
+  on the next call.
+
+### Dispatch surface
+
+- **`dsh_inbox`** — a cross-conversation approval inbox. `dsh_status` remains
+  single-conversation; this tool lists every pending approval with
+  conversation id/title, approval id, tool, reason, input, options and age.
+- **`client_run_id` idempotency** on `dsh_send` / `dsh_interject`: resubmitting
+  the same key returns the first run (`replayed=true`) instead of creating a
+  second one. The key is written into the sentinel and evicted together with
+  the run record.
+- **Session queue** via `dsh_send(queue=true)` (explicit opt-in; the default
+  busy behavior stays "error") plus **`dsh_queue`** for list/remove/update/
+  promote. Sentinels are written only at terminal state; removing a queued
+  item writes a `cancelled` sentinel.
+- **`dsh_get` text budget**: `max_chars` truncates only the rendered text
+  (structured content keeps the full result) and reports
+  `answer_truncated` / `next_offset`.
+- **`dsh_doctor`** — read-only health check: DSH binary/version, profile
+  existence/drift, state file, `runs`/`locks` writability, orphan lock holders,
+  session/RSS totals, effective config.
+- **Optional metadata audit** via `DSH_MCP_AUDIT_FILE`: JSONL records for
+  start/send/queue/interject/interrupt/approve/release/takeover. It records
+  IDs, decisions and counts only — never prompts, answers, thinking or tool
+  input. Rotates at 10 MB.
+- **`resolveDshBin` prefers the newest cached DSH** instead of the first
+  directory it finds. This machine had both 0.1.5 and 0.1.7 cached; picking
+  0.1.5 silently hid the experimental Agent Teams packages.
+- **README positioning section**: the server is a dispatcher, not a capability
+  aggregator; DSH owns its tools/skills/teams, and dispatch is on demand.
+
+### Team mode
+
+- **Agent Teams is on by default** (`DSH_MCP_TEAM=1`). The default profile is
+  now `dsh-team`, auto-created from the same routing source with
+  `@deepseek-ai/dsh-experimental-agent-team` +
+  `@deepseek-ai/dsh-experimental-tool-agent-team`; the legacy `subagent` tools
+  are disabled, matching the official team profile layer. Requires DSH
+  `>= 0.1.7-0` (the packages ship with 0.1.7-rc.1).
+- `dsh_send` injects a short "form a team if this needs parallel or multi-role
+  work" line before the caller's prompt; simple tasks are not forced into a
+  team. `dsh_send(team=false)` disables it for one call; `DSH_MCP_TEAM=0`
+  returns to `dsh-mcp` and disables injection.
+- `TEAM_ACTIVE` is false when the selected profile does not actually contain
+  the team package, so an explicit `DSH_MCP_PROFILE` pointing at a non-team
+  profile does not inject a tool the agent cannot use.
+- **Switching**: `DSH_MCP_TEAM=0` returns to `dsh-mcp` and disables injection;
+  `dsh_send(team=false)` disables it for one call; `DSH_MCP_PROFILE` still
+  wins over the default profile. `dsh_start` / `dsh_doctor` report the
+  effective team mode and profile.
+
+### Correctness
+
+- **A failed `ensureAlive` now has a terminal state.** It wakes every
+  `dsh_interject` waiter, writes an `error` sentinel, and attaches
+  `runId`/`status`/`sentinelFile` to the thrown error. Previously an interject
+  that arrived during a lock-conflict/cold-start window could wait forever
+  (`timeout_ms=0` has no timer).
+- **`dsh_approval_decide` reports the effective outcome.** `decideApproval`
+  returns `effective: 'selected' | 'cancelled'` (plus `reason: 'no_option'`);
+  the tool text no longer claims "decided as allow" when ACP actually received
+  `cancelled`.
+- **`dsh_get` can read a run back from its sentinel.** On a memory miss it
+  reads `RUNS_DIR/<conversation>/<run_id>.json`, returns
+  `run.source='sentinel'`, and always includes `sentinel_file` /
+  `sentinel_file_posix`.
+- **Reap/respawn race fixed.** `stop()` is registered as `recycling` and
+  `proc` is cleared only after the child is confirmed gone, so a concurrent
+  `dsh_send` waits instead of spawning a new process against an unreleased
+  write lock. `lastChildPid` is updated only after a successful resume, so a
+  failed resume no longer loses the previous generation's takeover clue.
+- **`timeout_ms` is validated.** Non-finite or negative values now raise
+  instead of silently becoming `NaN`/immediate background receipts.
+
+### Tests
+
+- New `failure-terminal.mjs` (interject wake + error sentinel + approval
+  effective + sentinel read-back).
+- New `shared-host.mjs` (session routing, exit fan-out, refcount teardown,
+  RSS helper).
+- New `shared-process.mjs` (real-DSH shared process; skips without DSH).
+- New `dispatch-tools.mjs` (`dsh_inbox`, `client_run_id` idempotency, session
+  queue operations, `dsh_get` text budget).
+- `guards.mjs` and `smoke.mjs` updated for the new defaults and the
+  `keepAlive` metadata field.
 
 ## [0.3.9] — 2026-11-02
 

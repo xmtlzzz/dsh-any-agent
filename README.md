@@ -75,6 +75,64 @@ DSH (DeepSeek Harness) can do all of that — it has file/shell tools, skills, s
 | 🧩 **Capabilities compose** | DSH can mount its own MCP servers (IDA Pro, browsers, your internal tooling), so this is a bridge to a whole toolbox. |
 | 🛡️ **Read-only that really is read-only** | `read-only` sandbox plus auto-denied approvals, for working on untrusted samples. |
 
+## 🧭 Positioning: a dispatcher, not a capability aggregator
+
+**This server dispatches; it does not re-implement what DSH already does.** The caller
+gives a goal, and DSH decides which tools, skills, subagents or team to use. Nothing
+from DSH's tool surface is proxied, duplicated or preloaded.
+
+| Owned by DSH (this server stays out) | Owned by this server (dispatch semantics) |
+|---|---|
+| File I/O, shell, search, editing | Session identity and cross-crash resume |
+| Skills, subagents, Agent Teams, task board | Async dispatch, receipts, completion sentinels |
+| Model routing, sandbox, approval policy | Incremental read, interject, interrupt |
+| Memory/context/compaction | Approval bridge, write-lock governance, queue, inbox |
+| worktrees (the agent creates them with git) | Setup, status, doctor, audit |
+
+**Dispatch on demand**: `dsh_send` passes a goal, not a tool manifest, and the caller
+does not need to know DSH's tool list. The DSH agent picks what it needs — including
+capabilities added after this server was built (for example the experimental Agent
+Teams). This server does not grow one MCP tool per DSH feature.
+
+**Team mode (on by default since 0.4.0)**: the default profile is `dsh-team`
+(auto-created on first start with the experimental Agent Teams packages), and
+`dsh_send` injects a short "form a team if this needs parallel or multi-role work"
+line before the caller's prompt; simple tasks are not forced into a team. Disable it
+globally with `DSH_MCP_TEAM=0` (back to `dsh-mcp`, no injection) or per call with
+`dsh_send(team=false)`. The team profile disables the legacy `subagent` tools and
+replaces them with nine team tools; teammates share one workspace.
+
+**Only dispatch semantics become tools**: start, send, read, get, interject,
+interrupt, approve, queue, inbox, status, release, takeover, doctor. No file I/O, no
+shell, no editor, no task board.
+
+**When to add something outside DSH**: only when you need a *guarantee* rather than a
+*behavior* — for example, several top-level sessions editing the same repository need
+outer worktree isolation. For collaboration, prefer letting DSH run the team itself
+(mount the experimental team packages into the profile; teammates share one workspace).
+
+## 🧑‍🤝‍🧑 Team mode (on by default since 0.4.0)
+
+The default profile is `dsh-team`: created on first start, it mounts the
+experimental Agent Teams packages and disables the legacy `subagent` tools.
+`dsh_send` injects a short "form a team when this needs parallel or multi-role
+work" line before the caller's prompt; simple tasks are not forced into a team.
+
+| What you want | How |
+|---|---|
+| Keep the default (on) | Nothing to set |
+| **Turn it off globally** | `DSH_MCP_TEAM=0` (back to the `dsh-mcp` profile, no team prompt) |
+| **Turn it off for one call** | `dsh_send(..., team=false)` |
+| Use a custom profile | `DSH_MCP_PROFILE=<name>`; the server checks whether that profile actually contains the team package and suppresses injection if it does not |
+| Check the current state | The `dsh_start` reply, or `dsh_doctor`'s `config` check (`team=on/off`) |
+
+Notes:
+
+- Team mode requires DSH `>= 0.1.7-0`; an older runtime falls back to `dsh-mcp`.
+- The team profile disables the legacy `subagent` tools and replaces them with
+  nine team tools; teammates share one workspace.
+- Agent Teams is **experimental** and carries no stability promise.
+
 ## ⚡ Why not just wrap the DSH CLI?
 
 DSH ships two programmable entry points. The `sdk` profile looks simpler, but its JSON-RPC surface has only **3 requests and 4 notifications** — and it lacks three things that make an agent unusable in practice. The `acp` profile (Agent Client Protocol) has all of them. Everything below was verified against DSH `0.2.1-rc.5`.
@@ -385,7 +443,10 @@ node test/smoke.mjs          # no LLM calls, verifies the whole plumbing
 | `dsh_interrupt` | Stop the current turn (the conversation stays healthy) |
 | `dsh_release` | Hand the conversation back (frees the write lock so you can open it in your own DSH GUI). Still resumable; `forget=true` writes a tombstone — by-id lookups are refused until you delete `$DSH_HOME/.dsh-any-agent-forgotten/<id>.json` |
 | `dsh_approval_decide` | Adjudicate a pending approval (only when `on_approval=ask`) |
-| `dsh_status` | Lightweight status check |
+| `dsh_status` | Lightweight status check (single conversation) |
+| `dsh_inbox` | **Cross-conversation approval inbox**: every pending approval with reason, input and age; decide with `dsh_approval_decide` |
+| `dsh_queue` | Inspect/modify the session queue: `list` / `remove` / `update` / `promote` (created by `dsh_send(queue=true)`, memory only) |
+| `dsh_doctor` | Read-only health check: DSH version, profile, state/dir writability, orphan locks, sessions and RSS, effective config |
 
 ## 📋 Workflow: dispatch, then collect later
 
@@ -521,7 +582,8 @@ Silent by default — **not one byte is written**.
 |---|---|---|
 | `DSH_BIN` | auto-detected | Path to `@deepseek-ai/dsh/lib/bin.js` |
 | `DSH_HOME` | `~/.dsh` | DSH home shared with the GUI (credentials, sessions, workspace registry). Point it elsewhere only for isolation/multi-account |
-| `DSH_MCP_PROFILE` | `dsh-mcp` | DSH profile to drive. ⚠️ The stale name is deliberate — see [Why is the profile still called `dsh-mcp`?](#-why-is-the-profile-still-called-dsh-mcp) |
+| `DSH_MCP_PROFILE` | `dsh-team` (team on) / `dsh-mcp` (team off) | DSH profile to drive; an explicit value wins |
+| `DSH_MCP_TEAM` | `1` | Team mode. On by default: uses the `dsh-team` profile and injects a "form a team when needed" line before `dsh_send`. Set `0` to disable (back to `dsh-mcp`, no injection); per call use `dsh_send(team=false)` |
 | `DSH_MCP_BOOTSTRAP` | on | Whether this server may create/sync the DSH profile on first start. `0` makes it drive an existing profile only and never write a file |
 | `DSH_MCP_ROUTE_SOURCE` | unset | Pin where model routes are copied from during bootstrap: a profile name (`desktop`, `web`, …) or `__home__` for `$DSH_HOME/cordis.patch.yml`. Unset = try home → desktop → web → headless → acp |
 | `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | Conversation registry, survives restarts. The old `<repo>/.state` location is migrated once on startup |
@@ -531,8 +593,12 @@ Silent by default — **not one byte is written**.
 | `DSH_MCP_RUNS_DIR` | `<state file dir>/runs` | Root for async completion sentinels (`<this>/<conversation_id>/<run_id>.json`) |
 | `DSH_MCP_LOCKS_DIR` | `<state file dir>/locks` | Holder registrations for the write lock. ⚠️ **All instances must agree on this value**, or they cannot see each other's registrations and will misread each other as an unidentifiable holder (a GUI) and refuse to preempt |
 | `DSH_MCP_LOCK_STALE_MS` | `90000` (3× `REAP_INTERVAL_MS`, floor 30 s) | How long without a heartbeat before a holder counts as lost (and becomes auto-preemptible by `dsh_takeover`); changing the reap interval changes the derived default |
-| `DSH_MCP_IDLE_TTL_MS` | `0` (never reap) | How long a conversation may sit idle before its DSH process is reaped. ★★ **`0` means never reap (the default)**: the server keeps holding the write lock, so **the GUI cannot take it** — opening the conversation there is read-only and still works. Cost: one resident DSH process per conversation (**measured 300 MB and 476 MB in two cold starts**). Set a millisecond value (e.g. `300000`) to save memory and accept that the lock can be taken |
-| `DSH_MCP_MAX_LIVE` | `8` (≈2.5–4 GB worst case; see note 8) | ★ **How many conversation processes to keep alive at once** (`0` = unlimited). Going over the cap reaps the **least recently used** one (a running turn is never reaped) — "**bounded memory, locks kept where it matters**". Use `4` when memory is tight, `0` on a big machine. To free idle conversations at once: `dsh_release(all=true)` (busy turns are skipped unless `force=true`) |
+| `DSH_MCP_IDLE_TTL_MS` | `600000` (10 minutes) | How long a conversation may sit idle before its DSH process is reaped. **Default 10 minutes**: the memory is released and the next call resumes the conversation transparently; the cost is that the write lock goes free and the GUI may take it. Set `0` to never reap (hold the lock forever; ~300–480 MB per conversation), or use `dsh_start(keep_alive=true)` for the specific sessions that must stay attached |
+| `DSH_MCP_MAX_LIVE` | `4` (≈1.2–1.9 GB worst case) | ★ **How many conversation processes to keep alive at once** (`0` = unlimited). Going over the cap reaps the **least recently used** one (a running turn is never reaped). `keep_alive=true` sessions are exempt. To free idle conversations at once: `dsh_release(all=true)` (busy turns are skipped unless `force=true`) |
+| `DSH_MCP_MAX_RSS_MB` | `0` (off) | Global child-process memory budget in MB. When the measured RSS exceeds it, idle conversations are reaped least-recently-used first; `keep_alive` sessions are reaped last |
+| `DSH_MCP_CHILD_MAX_OLD_SPACE_MB` | `0` (unset) | Appends `--max-old-space-size` to each DSH child's `NODE_OPTIONS`. A backstop for runaway contexts; too small will OOM long conversations |
+| `DSH_MCP_SHARED_PROCESS` | `0` (off) | **Experimental**: sessions with the same `(cwd, permission)` share one ACP process. Large memory and cold-start win (measured: second `session/new` ≈300 ms vs ≈4 s standalone). Trade-off: a process crash takes down the whole group (error sentinels are written; each session resumes on the next call) |
+| `DSH_MCP_AUDIT_FILE` | empty (off) | Metadata audit JSONL path. Records events, conversation/run ids, decisions and counts; **never** prompts, answers, thinking or tool input. Rotates at 10 MB |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | Cache lifetime for `dsh_list`'s on-disk probe (the probe spawns a DSH process and takes ~1 s) |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels; `0` disables pruning |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**); answer/error/title/tool inputs are still credential-redacted |
@@ -569,9 +635,13 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `async` | 16 | fire-and-forget + later collection |
 | `sentinel` | 36 | completion sentinel: atomicity, latch semantics, per-conversation namespacing under concurrency, cancelled runs still land it, and **reasoning never reaching the file** |
 | `prune` | 11 | **sentinel retention**: prunes over-age and crash-leftover files, keeps fresh ones, removes empty shells, `TTL=0` disables pruning, and never touches the conversation registry beside it (no tokens, runs every time) |
-| `guards` | 31 | **environment-variable guards**: odd numbers always land on the safe side — `IDLE_TTL_MS` values like `-1` or garbage mean "never reap" (never give the write lock away), a too-small reap interval falls back to the default (no busy loop), and the **lost-holder threshold is floored at 30 s** (so another instance cannot "legitimately" preempt and kill our turn) (no tokens, runs every time) |
+| `guards` | 36 | **environment-variable guards**: odd numbers always land on the safe side — `IDLE_TTL_MS=-1` means "never reap", garbage/empty falls back to the 10-minute default, a too-small reap interval falls back to the default (no busy loop), and the **lost-holder threshold is floored at 30 s** (so another instance cannot "legitimately" preempt and kill our turn) (no tokens, runs every time) |
 | `sandbox-guard` | 21 | **the test sandbox itself**: a "throwaway HOME" that resolves to the real user profile, to the filesystem root, or to anywhere outside the OS temp dir is refused with an error instead of being written to and deleted. Every other suite builds its HOME through `test/sandbox-home.mjs` and can only destroy what it created there (no tokens, runs every time) |
 | `approval-details` | 27 | **approval review context**: the pending-approval snapshot carries the command, reason, cwd and original approval ID — not just a bare ID — so a caller can actually adjudicate; missing `rawInput` is correlated from the earlier `tool_call` update by ID; credential-shaped fields and common inline literals are redacted; closing a conversation cancels pending approvals. Verified end-to-end over real stdio MCP |
+| `failure-terminal` | 11 | **terminal state on failure**: an `ensureAlive` failure wakes `dsh_interject` waiters, writes an `error` sentinel, and attaches `runId` to the error; an approval with no matching option reports `effective=cancelled` instead of a fake allow; `dsh_get` reads a run back from its sentinel (no tokens) |
+| `shared-host` | 15 | **shared process host**: notifications and permission requests route by `sessionId`, unknown-session approvals are cancelled, a process exit fans out to every attached conversation, the child stops only when the last conversation detaches; RSS helper (no tokens) |
+| `shared-process` | 8 (skips without DSH) | **real-DSH shared process**: two conversations with the same `(cwd, permission)` share one PID, closing one leaves the other alive, closing both clears the host and exits the PID (needs a local DSH; runs with `--all`) |
+| `dispatch-tools` | 31 | **dispatch surface**: `dsh_inbox` aggregates pending approvals across conversations, `client_run_id` idempotency hits and evicts with its run, queue list/update/promote/remove (remove writes a cancelled sentinel), `dsh_get(max_chars)` truncates only the text while structured keeps the full answer, audit records metadata only, `dsh_doctor` essential checks (no tokens) |
 | `line-decoder` | 4 | **UTF-8 line framing**: multi-byte characters split across MCP/ACP stream chunks are preserved (no U+FFFD), including CRLF and EOF-without-newline (no tokens) |
 | `read-cursor` | 10 | **`dsh_read` cursor semantics**: text appended to an already-read entry is delivered again (revision cursor, match by `seq`), and `limit` is clamped to 1..500 so `0`/negative cannot spin or drop the tail (no tokens) |
 | `sentinel-redaction` | 19 | **sentinel disk hygiene**: `result.thinking` is stripped, `thinking_omitted` is always a boolean, and `answer`/`error`/`title`/`tools_used[].input` all pass the same credential redaction as approvals (no tokens) |
@@ -644,7 +714,7 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 
 | Situation | Outcome |
 |---|---|
-| **This server holds the lock** (the default) | ✅ Opening it in the GUI is **read-only**: you still **see the content**, but you **cannot take the lock**. The default `DSH_MCP_IDLE_TTL_MS=0` (never reap) keeps the lock from ever going free |
+| **This server holds the lock** (recently used, or `keep_alive=true`) | ✅ Opening it in the GUI is **read-only**: you still **see the content**, but you **cannot take the lock**. Since 0.4.0 the process is reaped only after **10 minutes** idle; `keep_alive=true` sessions are never reaped for idleness |
 | **You open it in the GUI while the lock is free** | ❌ **The GUI keeps it permanently** (navigating away, waiting and archiving all fail to release it) and this server **can never reconnect** — only restarting `dsh web` helps |
 | **Recommended** | Watch progress with **`dsh_read`** (cursor-based incremental reads) or the **sentinel file**; if you must use the GUI, `dsh_release` first (that interrupts a running turn, so it fits the gaps between tasks) |
 
@@ -670,7 +740,7 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 5. **A conversation that dies before its first successful turn may never have materialized on disk** — resume then fails with a clear error. Safe after the first message.
 6. **No renaming** — DSH's title subsystem has no external rename API (`SessionTitleService.rename` requires a live in-process session). Titles are auto-generated from the first message.
 7. **`session/list` returns only `{sessionId, cwd}` and excludes already-open sessions** — titles are filled in by this server from DSH's projection cache.
-8. **"Never reap" costs memory (measured 300–480 MB per conversation)** — within the `MAX_LIVE` window that is what buys "the GUI cannot take the write lock". Two fresh-start measurements of one active conversation gave 476 MB and 295 MB of added resident memory (the DSH child plus this server); expect the higher figures on a cold process. Two ways to spend less: ① **`DSH_MCP_MAX_LIVE` (default 8** — over the cap, the least recently used process is reaped → bounded memory, locks still held where it matters); ② set `DSH_MCP_IDLE_TTL_MS` to a millisecond value (at the cost of the lock being takeable). To drop to zero right after a batch of work: **`dsh_release(all=true)`** ✓ (releases idle conversations; busy turns are skipped and keep running — pass `force=true` to interrupt them too. Everything resumes on demand).
+8. **Memory (measured 300–480 MB per active conversation)** — since 0.4.0 the defaults are **10-minute idle reaping + `MAX_LIVE=4`**, so the worst case is ≈1.2–1.9 GB; `keep_alive=true` sessions are exempt from idle reaping (at the cost of staying resident). You can also: ① cap by measured RSS with `DSH_MCP_MAX_RSS_MB`; ② cap the child heap with `DSH_MCP_CHILD_MAX_OLD_SPACE_MB`; ③ set `DSH_MCP_SHARED_PROCESS=1` to share one ACP process across sessions with the same `(cwd, permission)` (experimental: saves memory and cold start, but a crash takes down the group). To drop to zero right after a batch of work: **`dsh_release(all=true)`** ✓ (releases idle conversations; busy turns are skipped and keep running — pass `force=true` to interrupt them too. Everything resumes on demand).
 
 ## ❓ Why is the profile still called `dsh-mcp`?
 

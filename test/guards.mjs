@@ -35,7 +35,10 @@ function read(env) {
   const code = `
     const a = await import(${JSON.stringify(cfg)});
     const b = await import(${JSON.stringify(lk)});
-    process.stdout.write(JSON.stringify({ ttl: a.IDLE_TTL_MS, reap: a.REAP_INTERVAL_MS, stale: b.STALE_MS, maxLive: a.MAX_LIVE }));
+    process.stdout.write(JSON.stringify({
+      ttl: a.IDLE_TTL_MS, reap: a.REAP_INTERVAL_MS, stale: b.STALE_MS, maxLive: a.MAX_LIVE,
+      team: a.TEAM_MODE, active: a.TEAM_ACTIVE, profile: a.DSH_PROFILE,
+    }));
   `;
   const out = execFileSync(process.execPath, ['--input-type=module', '-e', code], {
     encoding: 'utf8',
@@ -52,10 +55,19 @@ for (const k of Object.keys(cleanEnv)) delete process.env[k];
 console.log('\n[1] 默认值');
 const def = read({ DSH_MCP_IDLE_TTL_MS: '', DSH_MCP_REAP_INTERVAL_MS: '', DSH_MCP_LOCK_STALE_MS: '', DSH_MCP_MAX_LIVE: '' });
 console.log('  ', JSON.stringify(def));
-check('★ 默认 IDLE_TTL_MS = 0（永不回收 → 一直握着写锁）', def.ttl === 0, String(def.ttl));
+check('★ 默认 IDLE_TTL_MS = 600000（空闲 10 分钟回收）', def.ttl === 600_000, String(def.ttl));
 check('默认回收间隔 30 秒', def.reap === 30_000, String(def.reap));
 check('默认失联阈值 = 3×间隔', def.stale === 90_000, String(def.stale));
-check('★★ 默认 MAX_LIVE = 8（内存有界是默认行为，不是要用户自己配）', def.maxLive === 8, String(def.maxLive));
+check('★★ 默认 MAX_LIVE = 4（内存有界是默认行为，不是要用户自己配）', def.maxLive === 4, String(def.maxLive));
+
+console.log('\n[1a] 团队模式：默认开，可全局关，显式 profile 优先');
+check('默认 TEAM_MODE = true', def.team === true, String(def.team));
+check('默认 profile 跟随团队是否可用', def.profile === (def.active ? 'dsh-team' : 'dsh-mcp'), def.profile);
+const teamOff = read({ DSH_MCP_TEAM: '0' });
+check('DSH_MCP_TEAM=0 → 团队关', teamOff.team === false, String(teamOff.team));
+check('DSH_MCP_TEAM=0 → profile=dsh-mcp', teamOff.profile === 'dsh-mcp', teamOff.profile);
+const explicitProfile = read({ DSH_MCP_PROFILE: 'my-team' });
+check('显式 DSH_MCP_PROFILE 优先', explicitProfile.profile === 'my-team', explicitProfile.profile);
 
 console.log('\n[1b] ★ 空串 = 未设置（`.env` 里写 `VAR=` 不该改变行为）');
 // 这是实测踩到的坑：Number('') === 0，而 0 在这些开关里是有含义的极值
@@ -66,27 +78,32 @@ const blanks = read({
   DSH_MCP_MAX_LIVE: '',
 });
 console.log('  ', JSON.stringify(blanks));
-check('★ 空串的 IDLE_TTL_MS → 默认 0（永不回收）', blanks.ttl === 0, String(blanks.ttl));
+check('★ 空串的 IDLE_TTL_MS → 默认 600000（10 分钟）', blanks.ttl === 600_000, String(blanks.ttl));
 check('★ 空串的 REAP_INTERVAL_MS → 默认 30000（不是 0）', blanks.reap === 30_000, String(blanks.reap));
 check('★ 空串的 LOCK_STALE_MS → 默认 90000', blanks.stale === 90_000, String(blanks.stale));
-check('★★ 空串的 MAX_LIVE → 默认 8（不是 0=不限）', blanks.maxLive === 8, String(blanks.maxLive));
+check('★★ 空串的 MAX_LIVE → 默认 4（不是 0=不限）', blanks.maxLive === 4, String(blanks.maxLive));
 
 console.log('\n[1c] ★ MAX_LIVE 的取值边界');
 for (const [v, want, label] of [
   ['4', 4, '4'],
   ['0', 0, '0（不限）'],
   ['-1', 0, '-1（压成不限）'],
-  ['abc', 8, 'abc（非法 → 用默认 8，不是"不限"）'],
+  ['abc', 4, 'abc（非法 → 用默认 4，不是"不限"）'],
   ['2.7', 2, '2.7（取整）'],
 ]) {
   const r = read({ DSH_MCP_MAX_LIVE: v });
   check(`MAX_LIVE=${label} → ${want}`, r.maxLive === want, String(r.maxLive));
 }
 
-console.log('\n[2] ★ 奇怪的 IDLE_TTL_MS 必须落到"永不回收"这一侧');
-for (const [v, label] of [['-1', '-1'], ['abc', 'abc（非法）'], ['', '（空串）'], ['0', '0']]) {
+console.log('\n[2] ★ 奇怪的 IDLE_TTL_MS：显式 0/负数 = 永不回收，非法/空串 = 默认 10 分钟');
+for (const [v, want, label] of [
+  ['0', 0, '0'],
+  ['-1', 0, '-1（负数 → 永不回收）'],
+  ['abc', 600_000, 'abc（非法 → 默认 600000）'],
+  ['', 600_000, '（空串 → 默认 600000）'],
+]) {
   const r = read({ DSH_MCP_IDLE_TTL_MS: v });
-  check(`IDLE_TTL_MS=${label} → 0（永不回收，不会主动让出写锁）`, r.ttl === 0, String(r.ttl));
+  check(`IDLE_TTL_MS=${label} → ${want}`, r.ttl === want, String(r.ttl));
 }
 for (const v of ['1000', '60000']) {
   const r = read({ DSH_MCP_IDLE_TTL_MS: v });

@@ -35,6 +35,7 @@ import {
   IDLE_TTL_MS,
   LIST_PROBE_TTL_MS,
   MAX_LIVE,
+  MAX_RSS_MB,
   PERMISSION_TIERS,
   PROMPT_TIMEOUT_MS,
   REAP_INTERVAL_MS,
@@ -42,6 +43,7 @@ import {
   RUNS_DIR,
   SENTINEL_INCLUDE_REASONING,
   SENTINEL_TTL_MS,
+  SHARED_PROCESS,
   STATE_FILE,
   LEGACY_STATE_FILE,
   USING_DEFAULT_STATE,
@@ -50,6 +52,8 @@ import {
   defaultApprovalPolicy,
 } from './config.mjs';
 import { AcpProcess } from './acp.mjs';
+import { SessionHost } from './host.mjs';
+import { rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
 import {
@@ -287,6 +291,8 @@ export class Conversation {
     this.turnCount = state.turnCount ?? 0;
     /** 建会话时给的提示词（仅在 DSH 还没生成原生标题前当兜底显示）。 */
     this.titleHint = state.titleHint ?? null;
+    /** true = 不受空闲 TTL / MAX_LIVE 回收（用于"必须一直握住写锁"的长期会话）。 */
+    this.keepAlive = state.keepAlive === true;
     /** 会话级 ACP 配置（思考深度 / 模型）。新进程不记得，resume 后要重套。 */
     this.cfg = {
       reasoningEffort: state.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
@@ -302,11 +308,15 @@ export class Conversation {
 
     this.proc = null;
     this.busy = false;
+    /** 正在进行的进程回收（`proc.stop()` 的 promise）。非 null 时不得为同一会话再拉起进程。 */
+    this.recycling = null;
     /** 本进程为这个会话拉起过的最后一个子进程 PID（登记被删后仍能归因锁的归属）。 */
     this.lastChildPid = null;
     /** 最近一次撞写锁的记录 `{at, holder_kind, reason, hint}`（见 snapshot()）。 */
     this.lockConflict = null;
     this.pendingApprovals = new Map();
+    /** 正在跑的 run 记录（进程意外退出时要用它写 error 哨兵）。 */
+    this.currentRun = null;
     /** 等待"当前回合结束"的回调队列，供插话排队使用。 */
     this.idleWaiters = [];
 
@@ -329,6 +339,11 @@ export class Conversation {
      */
     this.runs = [];
     this.runSeq = 0;
+    /** 调用方提供的幂等键 → run_id（与 runs 同步淘汰）。 */
+    this.clientRuns = new Map();
+    /** 忙时入队的待执行任务（仅内存；重启丢失）。 */
+    this.queue = [];
+    this.draining = false;
     /** 最近一次回合结果，仅内存（进程退出即消失），不落盘。 */
     this.lastResult = null;
   }
@@ -346,6 +361,7 @@ export class Conversation {
       lastUsedAt: this.lastUsedAt,
       turnCount: this.turnCount,
       titleHint: this.titleHint,
+      keepAlive: this.keepAlive,
       reasoningEffort: this.cfg.reasoningEffort,
       provider: this.cfg.provider,
       model: this.cfg.model,
@@ -385,6 +401,9 @@ export class Conversation {
       on_approval: this.onApproval,
       alive: !!this.proc?.alive,
       busy: this.busy,
+      keep_alive: this.keepAlive,
+      /** 子进程 RSS（MB）；量不到就是 null，不影响任何决策。 */
+      rss_mb: rssMb(this.proc?.pid),
       /** running = 正在跑回合；idle = 进程活着但空闲；detached = 进程未打开（可 resume）。 */
       state: this.state(),
       current_tool: this.currentTool,
@@ -402,9 +421,13 @@ export class Conversation {
       usage: meta?.usage?.totals ?? null,
       context_pressure: meta?.pressure ?? null,
       pending_approvals: [...this.pendingApprovals.keys()],
+      /** 忙时排队的任务（仅内存；重启丢失）。 */
+      queue_length: this.queue?.length ?? 0,
+      queue: this.queueList(),
       // Keep the ID list compatible; details are ephemeral and excluded from toState().
       pending_approval_details: [...this.pendingApprovals].map(([approvalId, pending]) => ({
         approval_id: approvalId,
+        created_at: pending.createdAt ?? null,
         ...pending.params.details,
       })),
       /**
@@ -426,19 +449,30 @@ export class Conversation {
 
   /** 确保有一个可用的 DSH 进程；必要时新建并 resume 回该会话。 */
   async ensureAlive() {
+    // ★ 上一代进程正在回收时必须先等它停完：否则会为同一会话再拉起一个进程，
+    //   去抢一个**尚未释放**的写锁（reaper/release 里 await stop() 的那个窗口）。
+    if (this.recycling) await this.recycling;
     if (this.proc?.alive) return this.proc;
-    const proc = new AcpProcess({
-      cwd: this.cwd,
-      permission: this.permission,
-      log: this.#hub.log,
-      onNotification: (params) => this.onUpdate(params),
-      onPermissionRequest: (params) => this.onPermissionRequest(params),
-    });
-    proc.start();
-    this.proc = proc;
-    // 记住"本进程为这个会话拉起过的最后一个子进程"。回收/重派时若登记已被删掉、
-    // 而这个 PID 还活着，锁就能被正确归因成"我们自己的残留"（否则只能判 none → 无法抢占）。
-    this.lastChildPid = proc.pid;
+    const shared = SHARED_PROCESS;
+    let proc;
+    if (shared) {
+      proc = this.#hub.acquireHost(this.cwd, this.permission);
+      proc.attach(this);
+      this.proc = proc;
+    } else {
+      proc = new AcpProcess({
+        cwd: this.cwd,
+        permission: this.permission,
+        log: this.#hub.log,
+        onNotification: (params) => this.onUpdate(params),
+        onPermissionRequest: (params) => this.onPermissionRequest(params),
+      });
+      proc.start();
+      this.proc = proc;
+    }
+    // ★ lastChildPid **推迟到 resume 真正成功后**再写（见 writeMarker 处）。
+    //   若在这里就覆盖，一次注定撞锁失败的 resume 会把"上一代还活着的子进程"
+    //   这条抢占线索换成刚拉起、注定失败的新进程，takeover 就归因不到真正的持有者。
     // ★ 登记**推迟到真正拿到写锁之后**（见下面 resume 成功处）。
     //   登记的含义是"我正持有这个会话的写锁"，不是"我拉起了一个进程"。
     //   若在这里就写，一次注定撞锁失败的 resume 会先把"谁持有"的线索覆盖掉、
@@ -459,6 +493,8 @@ export class Conversation {
       await this.verifyPermissionRecorded();
       // 锁到手了，这时才登记；从此别人能查到"锁在我们手上"
       writeMarker(this.id, { childPid: proc.pid, cwd: this.cwd });
+      // 只有真正拿到写锁后才更新"我拉起的最后一个子进程"：失败路径需要保留上一代的 PID。
+      this.lastChildPid = proc.pid;
       this.lockConflict = null; // 拿到锁了，之前的撞锁记录作废
       this.#hub.log.info(`[conv ${this.id}] 已 resume`);
       return proc;
@@ -466,12 +502,15 @@ export class Conversation {
       // ★ 半死的进程必须作废：它 alive 但**没有加载这个会话**，一旦留在 this.proc 上，
       //   下次调用会走上面 `this.proc?.alive` 的快路径，把 session/prompt 发给一个
       //   不认识该会话的进程 —— 会话就永久卡死了（重派也不会自愈）。
-      this.proc = null;
+      // 只作废**自己这一次**拉起的进程：窄窗口里另一个调用可能已经换上了新一代。
+      if (this.proc === proc) this.proc = null;
       // ★ 必须 **await**：不等它真的退出，紧接着的 classifyHolder 就会把"正在退出的自己人"
       //   当成持锁者（表现为"上一代子进程还活着并握着锁"），于是每次失败都误报锁冲突 ——
       //   更糟的是旧代码没有 lastChildPid 兜底，会把这种自伤报成"多半是你自己的 GUI"，
       //   而 dsh_takeover 对 none 又拒绝接管，会话就卡住了（test/cycle.mjs 实测抓到）。
-      const stopped = await proc.stop().catch(() => false);
+      const stopped = shared
+        ? await proc.detach(this).catch(() => false)
+        : await proc.stop().catch(() => false);
       // 只删**自己的**登记（removeMarker 会校验 token）；进程没确认退出时保留登记，
       // 让 classifyHolder/takeover 仍能归因。
       if (stopped) removeMarker(this.id);
@@ -733,6 +772,7 @@ export class Conversation {
       }, this.#hub.approvalTimeoutMs);
       this.pendingApprovals.set(approvalId, {
         params: { tool: desc, details: approvalContext(params, toolCall, desc, options) },
+        createdAt: now(),
         allowId,
         rejectId,
         resolve: (outcome) => {
@@ -749,8 +789,76 @@ export class Conversation {
     if (!p) throw new Error(`没有待决审批: ${approvalId}`);
     this.pendingApprovals.delete(approvalId);
     const chosen = decision === 'allow' ? p.allowId : p.rejectId;
+    // ★ 没有对应 option 时实际发出的是 cancelled。必须把 effective 如实告诉调用方，
+    //   否则 dsh_approval_decide 会渲染成"已裁决为 allow"，而 DSH 收到的是取消（假成功）。
+    const effective = chosen ? 'selected' : 'cancelled';
     p.resolve(chosen ? { outcome: { outcome: 'selected', optionId: chosen } } : { outcome: { outcome: 'cancelled' } });
-    return { approval_id: approvalId, decision };
+    return {
+      approval_id: approvalId,
+      decision,
+      effective,
+      ...(chosen ? {} : { reason: 'no_option' }),
+    };
+  }
+
+  /**
+   * 起不来时的统一收尾：唤醒所有等本轮结束的插话请求，并落一条 error 哨兵。
+   *
+   * 这两件事必须都做、且互相独立：
+   *   - 只写哨兵救不了 `dsh_interject`——它等的是 idleWaiters，不是文件；
+   *   - 只唤醒不写哨兵，调用方事后 `dsh_get(run_id)` 就永远找不到这次失败。
+   */
+  #settleFailedRun(runRecord, error) {
+    const waiters = this.idleWaiters;
+    this.idleWaiters = [];
+    for (const w of waiters) {
+      try {
+        w();
+      } catch {}
+    }
+    this.#scheduleDrain();
+    if (this.currentRun === runRecord) this.currentRun = null;
+    runRecord.ended_at = now();
+    runRecord.status = 'error';
+    runRecord.error = error?.message ?? String(error);
+    runRecord.elapsed_ms = 0;
+    runRecord.result = {
+      conversation_id: this.id,
+      run_id: runRecord.run_id,
+      stop_reason: 'error',
+      error: runRecord.error,
+      answer: '',
+      thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
+      tools_used: [],
+      workspace_changed: false,
+      elapsed_ms: 0,
+    };
+    try {
+      if (typeof this.#hub.writeRunSentinel === 'function') {
+        const file = this.#hub.writeRunSentinel(this.id, runRecord);
+        runRecord.result.sentinel_file = file ?? this.#hub.runSentinelPath?.(this.id, runRecord.run_id) ?? null;
+        if (!file) runRecord.result.sentinel_error = runRecord.sentinel_error ?? '哨兵文件写入失败';
+      }
+    } catch (e) {
+      runRecord.result.sentinel_error = `写完成哨兵失败: ${e.message}`;
+    }
+    try {
+      this.#hub.save?.();
+    } catch {}
+    return runRecord.result;
+  }
+
+  /**
+   * 共享进程池的进程意外退出：把本会话在跑的回合标成失败并落哨兵，
+   * 然后解除 proc 引用，下次调用会重新 acquireHost + resume。
+   */
+  onProcessExit(reason) {
+    this.proc = null;
+    this.recycling = null;
+    if (this.busy && this.currentRun) {
+      this.busy = false;
+      this.#settleFailedRun(this.currentRun, new Error(String(reason)));
+    }
   }
 
   // ── 跑任务 ──────────────────────────────────────────────────────
@@ -782,6 +890,7 @@ export class Conversation {
     const runRecord = run ?? this.createRun(text);
     runRecord.status = 'running';
     runRecord.started_at = now();
+    this.currentRun = runRecord;
     const before = gitStatus(this.cwd);
     let proc;
     // ★ `busy` 必须在 ensureAlive **之前**置位。
@@ -796,19 +905,13 @@ export class Conversation {
     } catch (e) {
       // 起不来（撞写锁 / 会话损坏）就**必须放开 busy**，否则这个会话被永久占住；
       // 同时别留一条永远 "running" 的幽灵记录。
-      // 调用方这次拿到的是 isError、并没有 run_id，所以这里不写哨兵。
+      // ★ 与 finalize 对齐：失败也必须给等待者一个终态——唤醒插话队列 + 落 error 哨兵。
+      //   只写哨兵救不了 dsh_interject：它等的是 idleWaiters，不是文件（默认 timeout=0 无 timer）。
       this.busy = false;
-      runRecord.status = 'error';
-      runRecord.ended_at = now();
-      runRecord.error = e.message;
-      runRecord.result = {
-        conversation_id: this.id,
-        run_id: runRecord.run_id,
-        stop_reason: 'error',
-        error: e.message,
-        answer: '',
-        elapsed_ms: 0,
-      };
+      this.#settleFailedRun(runRecord, e);
+      e.runId = runRecord.run_id;
+      e.status = 'error';
+      e.sentinelFile = runRecord.result?.sentinel_file ?? null;
       throw e;
     }
     this.currentTurn += 1;
@@ -840,6 +943,7 @@ export class Conversation {
       //   而且调用方会永远等不到哨兵。所以出错也要落一个"收尾异常"的哨兵。
       try {
         this.busy = false;
+        if (this.currentRun === runRecord) this.currentRun = null;
         this.collector = null;
         this.currentTool = null;
         // 回合结束后，任何仍挂着的审批都已失效：统一取消并清空，避免状态里
@@ -862,6 +966,7 @@ export class Conversation {
         const waiters = this.idleWaiters;
         this.idleWaiters = [];
         for (const w of waiters) w();
+        this.#scheduleDrain();
         const after = gitStatus(this.cwd);
         const result = {
           conversation_id: this.id,
@@ -897,10 +1002,12 @@ export class Conversation {
       } catch (e) {
         this.#hub.log.info(`[conv ${this.id}] 回合收尾异常（已兜底）: ${e.message}`);
         this.busy = false;
+        if (this.currentRun === runRecord) this.currentRun = null;
         this.collector = null;
         const waiters = this.idleWaiters;
         this.idleWaiters = [];
         for (const w of waiters) w();
+        this.#scheduleDrain();
         const fallback = {
           conversation_id: this.id,
           run_id: runRecord.run_id,
@@ -1024,10 +1131,11 @@ export class Conversation {
   }
 
   /** 建一条回合记录。派活时先建，好让调用方立刻拿到 run_id（异步模式的关键）。 */
-  createRun(text) {
+  createRun(text, { clientRunId = null } = {}) {
     const run = {
       run_id: `run-${Date.now().toString(36)}-${++this.runSeq}`,
       conversation_id: this.id,
+      client_run_id: clientRunId ?? null,
       prompt_preview: text.length > MAX_RUN_PREVIEW ? `${text.slice(0, MAX_RUN_PREVIEW)}…` : text,
       status: 'queued',
       started_at: null,
@@ -1036,10 +1144,116 @@ export class Conversation {
       result: null,
     };
     this.runs.push(run);
-    if (this.runs.length > MAX_RUNS) this.runs.shift();
+    if (clientRunId) this.clientRuns.set(clientRunId, run.run_id);
+    if (this.runs.length > MAX_RUNS) {
+      const evicted = this.runs.shift();
+      // 幂等键必须跟着 run 记录一起淘汰，否则会指向一个已经查不到的 run。
+      for (const [k, v] of this.clientRuns) {
+        if (v === evicted.run_id) this.clientRuns.delete(k);
+      }
+    }
     // 防御性清残留：正常情况下该 run_id 从未用过，但确保等待方不会被历史哨兵误触发。
     this.#hub.clearRunSentinel(this.id, run.run_id);
     return run;
+  }
+
+  /** 按调用方幂等键取 run（不存在/已淘汰返回 null）。 */
+  getRunByClientId(clientRunId) {
+    if (!clientRunId) return null;
+    const runId = this.clientRuns.get(clientRunId);
+    if (!runId) return null;
+    return this.runs.find((r) => r.run_id === runId) ?? null;
+  }
+
+  // ── 会话级队列（忙时非阻塞入队）────────────────────────────────
+
+  /** 入队；返回 run 记录与 1-based 位置。队列只在内存，重启丢失。 */
+  enqueue(text, { reasoning = 'hide', clientRunId = null, preview = null } = {}) {
+    const MAX_QUEUE = 8;
+    if (clientRunId) {
+      const existing = this.getRunByClientId(clientRunId);
+      if (existing) return { run: existing, position: 0, deduped: true };
+    }
+    if (this.queue.length >= MAX_QUEUE) {
+      throw new Error(`队列已满（最多 ${MAX_QUEUE} 条）；先用 dsh_queue list 清理，或等当前回合结束`);
+    }
+    // 预览用调用方原文，执行用可能已注入团队前缀的 text。
+    const run = this.createRun(preview ?? text, { clientRunId });
+    run.status = 'queued';
+    this.queue.push({ run, text, reasoning, clientRunId, enqueued_at: now() });
+    return { run, position: this.queue.length, deduped: false };
+  }
+
+  queueList() {
+    // 防御：snapshot 可能被测试用 prototype 替身调用（没有构造器初始化 queue）。
+    return (this.queue ?? []).map((item, i) => ({
+      position: i + 1,
+      run_id: item.run.run_id,
+      preview: item.run.prompt_preview,
+      enqueued_at: item.enqueued_at,
+      client_run_id: item.clientRunId ?? null,
+    }));
+  }
+
+  queueRemove(runId, { cancel = true } = {}) {
+    const i = this.queue.findIndex((x) => x.run.run_id === runId);
+    if (i < 0) throw new Error(`队列里没有 ${runId}`);
+    const [item] = this.queue.splice(i, 1);
+    if (cancel) {
+      const run = item.run;
+      run.status = 'cancelled';
+      run.ended_at = now();
+      run.elapsed_ms = 0;
+      run.result = {
+        conversation_id: this.id,
+        run_id: run.run_id,
+        stop_reason: 'cancelled',
+        error: 'queued run cancelled before it started',
+        answer: '',
+        thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
+        tools_used: [],
+        workspace_changed: false,
+        elapsed_ms: 0,
+      };
+      // 取消也是终态 → 写哨兵，避免等待方永远空等。
+      const file = this.#hub.writeRunSentinel(this.id, run);
+      run.result.sentinel_file = file ?? this.#hub.runSentinelPath(this.id, run.run_id);
+    }
+    return { removed: true, run_id: runId };
+  }
+
+  queueUpdate(runId, text) {
+    const item = this.queue.find((x) => x.run.run_id === runId);
+    if (!item) throw new Error(`队列里没有 ${runId}`);
+    item.text = text;
+    item.run.prompt_preview =
+      text.length > MAX_RUN_PREVIEW ? `${text.slice(0, MAX_RUN_PREVIEW)}…` : text;
+    return { updated: true, run_id: runId };
+  }
+
+  queuePromote(runId) {
+    const i = this.queue.findIndex((x) => x.run.run_id === runId);
+    if (i < 0) throw new Error(`队列里没有 ${runId}`);
+    const [item] = this.queue.splice(i, 1);
+    this.queue.unshift(item);
+    return { promoted: true, run_id: runId, position: 1 };
+  }
+
+  /** 空闲时取队首执行。失败也要继续下一条（否则一条坏任务卡死整条队列）。 */
+  #scheduleDrain() {
+    if (this.busy || this.draining || this.queue.length === 0) return;
+    this.draining = true;
+    const timer = setTimeout(() => {
+      this.draining = false;
+      if (this.busy || this.queue.length === 0) return;
+      const item = this.queue.shift();
+      const run = item.run;
+      run.status = 'running';
+      this.prompt(item.text, { reasoning: item.reasoning, run, wait: false })
+        .catch(() => {})
+        .finally(() => this.#scheduleDrain());
+    }, 0);
+    timer.unref?.();
   }
 
   /** 取回合记录；不传 run_id 就是最近一条。 */
@@ -1092,9 +1306,11 @@ export class Conversation {
    * 之所以无竞态：dsh-acp 在让 prompt 请求返回**之前**就清空了 inflight 槽位，
    * 且只在 agent 完全 idle 后才 settle（lib/index.js:1003-1011）。
    */
-  async interject(message, { mode = 'interject', reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS } = {}) {
+  async interject(message, { mode = 'interject', reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, clientRunId = null } = {}) {
+    // 先建 run：幂等键要在"等待上一轮"之前就登记，否则重试会造出第二个 run。
+    const run = this.createRun(message, { clientRunId });
     if (!this.busy) {
-      const r = await this.prompt(message, { reasoning, timeoutMs });
+      const r = await this.prompt(message, { reasoning, timeoutMs, run });
       return { ...r, interjected: 'idle', waited_ms: 0 };
     }
     const t0 = now();
@@ -1104,21 +1320,61 @@ export class Conversation {
     // 排队等待的时长跟随调用方的 timeout_ms（0 = 一直等），不再固定 30 分钟。
     const idle = await this.waitIdle(timeoutMs);
     const waited = now() - t0;
-    if (!idle) throw new Error('等待当前回合结束超时，插话未发送');
-    const r = await this.prompt(message, { reasoning, timeoutMs });
+    if (!idle) {
+      const err = new Error('等待当前回合结束超时，插话未发送');
+      err.runId = run.run_id;
+      run.status = 'cancelled';
+      run.ended_at = now();
+      run.elapsed_ms = 0;
+      run.result = {
+        conversation_id: this.id,
+        run_id: run.run_id,
+        stop_reason: 'cancelled',
+        error: err.message,
+        answer: '',
+        thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
+        tools_used: [],
+        workspace_changed: false,
+        elapsed_ms: 0,
+      };
+      const file = this.#hub.writeRunSentinel?.(this.id, run);
+      run.result.sentinel_file = file ?? this.#hub.runSentinelPath?.(this.id, run.run_id) ?? null;
+      throw err;
+    }
+    const r = await this.prompt(message, { reasoning, timeoutMs, run });
     return { ...r, interjected: mode, waited_ms: waited };
   }
 
   /** 关闭会话（进程收尾；会话本体留在磁盘上，可再次 resume）。 */
   async close({ forget = false } = {}) {
+    if (this.recycling) await this.recycling;
     const proc = this.proc;
-    this.proc = null;
     let stopped = true;
     if (proc?.alive) {
-      try {
-        await proc.request('session/close', { sessionId: this.id }, 10_000);
-      } catch {}
-      stopped = await proc.stop().catch(() => false);
+      if (typeof proc.detach === 'function') {
+        // 共享进程：只把本会话摘出去（detach 内会 session/close）；最后一个走了才停进程。
+        this.recycling = proc.detach(this).finally(() => {
+          if (this.proc === proc) this.proc = null;
+          this.recycling = null;
+        });
+        stopped = await this.recycling;
+      } else {
+        try {
+          await proc.request('session/close', { sessionId: this.id }, 10_000);
+        } catch {}
+        // 与 reaper 相同：stop 期间保持 proc 可见并登记 recycling，
+        // 落定后再置空——否则并发 dsh_send 会拿到垂死进程或去抢尚未释放的锁。
+        this.recycling = proc
+          .stop()
+          .catch(() => false)
+          .finally(() => {
+            if (this.proc === proc) this.proc = null;
+            this.recycling = null;
+          });
+        stopped = await this.recycling;
+      }
+    } else if (this.proc === proc) {
+      this.proc = null;
     }
     // 回合已经结束/进程正在关闭，任何仍挂着的审批都不再可裁决。
     for (const [, p] of this.pendingApprovals) {
@@ -1232,6 +1488,8 @@ export function homeWorkspaceProblem(cwd, permission) {
 export class Hub {
   constructor({ log } = {}) {
     this.conversations = new Map();
+    /** 共享 ACP 进程池：key = `${cwd}\0${permission}`（实验性，DSH_MCP_SHARED_PROCESS=1）。 */
+    this.hosts = new Map();
     this.log = log ?? NOOP_LOG;
     /** 最近一次 dsh_list 磁盘探测的结果：{ok, error, cached, at}。 */
     this.lastProbe = { ok: null, error: null, cached: false, at: 0 };
@@ -1344,6 +1602,7 @@ export class Hub {
       const payload = {
         conversation_id: conversationId,
         run_id: run.run_id,
+        client_run_id: run.client_run_id ?? null,
         status: run.status ?? 'unknown',
         ended_at: run.ended_at ?? Date.now(),
         error: sanitizeApprovalContext(run.error ?? run.result?.error ?? null, 'error'),
@@ -1540,8 +1799,25 @@ export class Hub {
     this.save();
   }
 
+  /** 取（或建）同 `(cwd, permission)` 的共享 ACP 进程宿主。 */
+  acquireHost(cwd, permission) {
+    const key = `${cwd}\u0000${permission}`;
+    let host = this.hosts.get(key);
+    if (!host) {
+      host = new SessionHost({ cwd, permission, log: this.log, hub: this });
+      this.hosts.set(key, host);
+    }
+    return host;
+  }
+
+  forgetHost(host) {
+    for (const [k, v] of this.hosts) {
+      if (v === host) this.hosts.delete(k);
+    }
+  }
+
   /** 新建一个会话：拉起进程 + ACP 初始化 + session/new。 */
-  async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model } = {}) {
+  async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false } = {}) {
     if (!cwd) {
       throw new Error(
         '没有可用的工作目录。你既没传 cwd，客户端也没有提供当前打开的项目（MCP roots）。\n' +
@@ -1582,26 +1858,31 @@ export class Hub {
     // 与其让用户以为服务坏了，不如在这里把原因和出路一起说清楚。
     const homeProblem = homeWorkspaceProblem(cwd, permission);
     if (homeProblem) throw new Error(homeProblem);
-    const proc = new AcpProcess({
-      cwd,
-      permission,
-      log: this.log,
-      onNotification: () => {},
-      onPermissionRequest: () => ({ outcome: { outcome: 'cancelled' } }),
-    });
-    proc.start();
+    const shared = SHARED_PROCESS;
+    const proc = shared
+      ? this.acquireHost(cwd, permission)
+      : new AcpProcess({
+          cwd,
+          permission,
+          log: this.log,
+          onNotification: () => {},
+          onPermissionRequest: () => ({ outcome: { outcome: 'cancelled' } }),
+        });
+    if (!shared) proc.start();
     let createdSessionId = null;
+    let conv = null;
     try {
       await proc.initialize();
       const res = await proc.request('session/new', { cwd, mcpServers: [] });
       createdSessionId = res.sessionId;
-      const conv = new Conversation(
+      conv = new Conversation(
         {
           id: res.sessionId,
           cwd,
           permission,
           onApproval: policy,
           titleHint,
+          keepAlive: keepAlive === true,
           reasoningEffort: effort,
           provider: provider ?? null,
           model: model ?? null,
@@ -1613,10 +1894,13 @@ export class Hub {
       // ★ 新建会话的进程也要登记持有者 —— 走的是 Hub.create 这条独立路径，
       //   不登记的话 dsh_takeover 会把"本服务自己持有的会话"误判成 none 而拒绝抢占。
       writeMarker(res.sessionId, { childPid: proc.pid, cwd });
-      proc.attachRoutes({
-        onNotification: (params) => conv.onUpdate(params),
-        onPermissionRequest: (params) => conv.onPermissionRequest(params),
-      });
+      if (shared) proc.attach(conv);
+      else {
+        proc.attachRoutes({
+          onNotification: (params) => conv.onUpdate(params),
+          onPermissionRequest: (params) => conv.onPermissionRequest(params),
+        });
+      }
       // 套用会话级配置（思考深度默认 max；ACP 自己的默认是 Provider default）
       conv.lastConfigApplied = await applySessionConfig(proc, res.sessionId, conv.cfg);
       // ★ 无效的 provider/model 必须 fail fast：旧行为是建出会话、静默回退
@@ -1651,7 +1935,11 @@ export class Hub {
       // 失败路径也要清掉写锁登记：session/new 可能已经成功、登记已写入，
       // 但会话最终没有注册（例如无效 provider/model 被 fail-fast）。留下 marker
       // 会被 dsh_list/dsh_takeover 误报成“孤儿持有者”，也会在 locks 目录里积垃圾。
-      const stopped = await proc.stop().catch(() => false);
+      const stopped = shared
+        ? conv
+          ? await proc.detach(conv).catch(() => false)
+          : await proc.stop().catch(() => false)
+        : await proc.stop().catch(() => false);
       if (createdSessionId && stopped) removeMarker(createdSessionId);
       throw e;
     }
@@ -1768,30 +2056,75 @@ export class Hub {
           reapable.push(c);
         }
 
-        // 回收哪些：① 空闲超过 TTL 的；② 超过 MAX_LIVE 上限时，最久没用过的那些
+        // 回收哪些：① 空闲超过 TTL；② 超过 MAX_LIVE；③ 超过全局 RSS 预算。
+        // keep_alive 会话不受 ① ② 约束；③ 是系统级硬上限，最后仍可能回收它。
         const victims = new Set();
+        const reapableNormal = reapable.filter((c) => !c.keepAlive);
         if (IDLE_TTL_MS > 0) {
-          for (const c of reapable) if (c.lastUsedAt <= cutoff) victims.add(c);
+          for (const c of reapableNormal) if (c.lastUsedAt <= cutoff) victims.add(c);
         }
         if (MAX_LIVE > 0) {
           // 保活窗口 = 最近用过的 MAX_LIVE 个；超出的按"最久没用"先回收
-          const byAge = reapable.slice().sort((a, b) => a.lastUsedAt - b.lastUsedAt);
+          const byAge = reapableNormal.slice().sort((a, b) => a.lastUsedAt - b.lastUsedAt);
           const excess = byAge.length - MAX_LIVE;
           for (let i = 0; i < excess; i++) victims.add(byAge[i]);
         }
+        if (MAX_RSS_MB > 0) {
+          // 按实际 RSS 而不是会话数：上下文大小差异很大，按个数限制经常低估。
+          let total = 0;
+          const rss = new Map();
+          const seenPid = new Set();
+          for (const c of this.conversations.values()) {
+            if (!c.proc?.alive) continue;
+            const pid = c.proc.pid;
+            const mb = rssMb(pid) ?? 0;
+            rss.set(c, mb);
+            // 共享进程只算一次
+            if (pid && seenPid.has(pid)) continue;
+            if (pid) seenPid.add(pid);
+            total += mb;
+          }
+          if (total > MAX_RSS_MB) {
+            // 先收非 keep_alive 的最久未用者；仍然超预算才动 keep_alive。
+            const pool = reapable
+              .filter((c) => !victims.has(c))
+              .sort((a, b) =>
+                a.keepAlive === b.keepAlive ? a.lastUsedAt - b.lastUsedAt : a.keepAlive ? 1 : -1,
+              );
+            for (const c of pool) {
+              victims.add(c);
+              total -= rss.get(c) ?? 0;
+              if (total <= MAX_RSS_MB) break;
+            }
+          }
+        }
 
         for (const c of victims) {
+          if (c.recycling) await c.recycling;
           if (!c.proc?.alive) continue;
           this.log.info(
             `[hub] 回收会话 ${c.id} 的进程（${IDLE_TTL_MS > 0 && c.lastUsedAt <= cutoff ? '空闲超时' : `保活上限 ${MAX_LIVE}`}；可 resume 复活）`,
           );
           const proc = c.proc;
-          c.proc = null;
-          // ★ 顺序要紧：**先确认子进程真的退出（写锁真的释放），再删登记**。
-          //   反过来的话，一旦它没死透，锁的持有者就变成"无登记的未知进程" ——
-          //   既报不清是谁，连 dsh_takeover 都会拒绝（判成 none）。
-          const stopped = await proc.stop().catch(() => false);
-          if (stopped) removeMarker(c.id);
+          // ★ 先把 stop 登记成 recycling，再 await：stop 可能要几秒，这个窗口里到达的
+          //   dsh_send 会在 ensureAlive 里 await 它，而不是为同一会话再拉一个进程去抢
+          //   **尚未释放**的写锁。proc 也要等 stop 落定后才置空，否则快路径会拿到垂死进程。
+          // 共享进程：detach 只摘掉这个会话（内部 session/close），最后一个离开才停进程。
+          const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
+          c.recycling = stopping
+            .catch(() => false)
+            .then((stopped) => {
+              // ★ 顺序要紧：**先确认子进程真的退出（写锁真的释放），再删登记**。
+              //   反过来的话，一旦它没死透，锁的持有者就变成"无登记的未知进程" ——
+              //   既报不清是谁，连 dsh_takeover 都会拒绝（判成 none）。
+              if (stopped) removeMarker(c.id);
+              return stopped;
+            })
+            .finally(() => {
+              if (c.proc === proc) c.proc = null;
+              c.recycling = null;
+            });
+          await c.recycling;
         }
       } catch (e) {
         this.log.info(`[hub] 回收周期异常（已忽略，下个周期继续）: ${e.message}`);
@@ -1811,6 +2144,7 @@ export class Hub {
     const skippedBusy = [];
     const failed = [];
     for (const c of this.conversations.values()) {
+      if (c.recycling) await c.recycling;
       if (!c.proc?.alive) continue;
       // ★ 默认不打断正在跑的回合：all=true 是"腾内存"，不是"取消任务"。
       //   确实要连跑着的也停掉时传 force=true。
@@ -1819,8 +2153,15 @@ export class Hub {
         continue;
       }
       const proc = c.proc;
-      c.proc = null;
-      const stopped = await proc.stop().catch(() => false);
+      // stop 期间保持 proc 可见 + recycling 屏障，落定后再置空。
+      const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
+      c.recycling = stopping
+        .catch(() => false)
+        .finally(() => {
+          if (c.proc === proc) c.proc = null;
+          c.recycling = null;
+        });
+      const stopped = await c.recycling;
       if (stopped) {
         removeMarker(c.id);
         released.push(c.id);
@@ -1838,12 +2179,21 @@ export class Hub {
     if (this.#reaper) clearInterval(this.#reaper);
     this.#reaper = null;
     for (const c of this.conversations.values()) {
+      if (c.recycling) await c.recycling;
       const proc = c.proc;
-      c.proc = null;
-      const stopped = await proc?.stop().catch(() => false);
-      // 只有确认子进程退出、锁真的释放后才删登记；否则留给下个实例归因。
-      if (stopped) removeMarker(c.id);
-      else this.log.info(`[hub] 关闭 ${c.id} 时进程未确认退出，保留写锁登记`);
+      if (proc) {
+        const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
+        c.recycling = stopping
+          .catch(() => false)
+          .finally(() => {
+            if (c.proc === proc) c.proc = null;
+            c.recycling = null;
+          });
+        const stopped = await c.recycling;
+        // 只有确认子进程退出、锁真的释放后才删登记；否则留给下个实例归因。
+        if (stopped) removeMarker(c.id);
+        else this.log.info(`[hub] 关闭 ${c.id} 时进程未确认退出，保留写锁登记`);
+      }
     }
     this.save();
   }

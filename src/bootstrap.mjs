@@ -23,7 +23,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { BOOTSTRAP_ENABLED, DSH_HOME, DSH_PROFILE, ROUTE_SOURCE_PROFILE } from './config.mjs';
+import {
+  BOOTSTRAP_ENABLED,
+  DSH_HOME,
+  DSH_PROFILE,
+  ROUTE_SOURCE_PROFILE,
+  TEAM_ACTIVE,
+} from './config.mjs';
 import { load as yamlLoad, dump as yamlDump } from './yaml-lite.mjs';
 
 /** 与 dsh 内置 acp 模板一致的组合包列表。 */
@@ -279,6 +285,25 @@ function buildEntries(routing) {
       },
     },
   });
+
+  // ★ 团队模式（默认开）：官方 team profile 层会关掉旧的 subagent 工具，
+  //   换成 9 个 Agent Teams 工具。DSH < 0.1.7 时 TEAM_ACTIVE=false，不写这些行。
+  if (TEAM_ACTIVE) {
+    entries.push({ id: 'tool-subagent-control', disabled: true });
+    entries.push({ id: 'tool-subagent-list-agents', disabled: true });
+    entries.push({ id: 'tool-subagent', disabled: true });
+    entries.push({ id: 'tool-subagent-fork', disabled: true });
+    entries.push({
+      id: 'agent-team',
+      name: '@deepseek-ai/dsh-experimental-agent-team',
+      config: { maxMembers: 8 },
+    });
+    entries.push({
+      id: 'tool-agent-team',
+      name: '@deepseek-ai/dsh-experimental-tool-agent-team',
+      config: { freshProvider: 'spawn', forkProvider: 'fork' },
+    });
+  }
   return entries;
 }
 

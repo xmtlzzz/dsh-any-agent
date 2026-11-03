@@ -33,6 +33,18 @@ if (code === 0) {
   code = await run('approval-details.mjs');
 }
 if (code === 0) {
+  // 失败路径的终态：唤醒插话等待者、error 哨兵、审批 effective、dsh_get 回读哨兵。
+  code = await run('failure-terminal.mjs');
+}
+if (code === 0) {
+  // 共享 ACP 进程宿主：通知/审批路由、进程退出扇出、refcount 停进程。
+  code = await run('shared-host.mjs');
+}
+if (code === 0) {
+  // 派发面：dsh_inbox、client_run_id 幂等、会话队列、dsh_get 正文预算。
+  code = await run('dispatch-tools.mjs');
+}
+if (code === 0) {
   // dsh_read 游标语义：纯内存，不花 token；守住“合并追加后增量必须能看到全文”。
   code = await run('read-cursor.mjs');
 }
@@ -138,6 +150,10 @@ if (code === 0 && all) {
 }
 if (code === 0 && all) {
   code = await run('permission.mjs');
+}
+if (code === 0 && all) {
+  // 共享进程池的真机验证：没有 DSH 时套件自己 skip（退出 0）。
+  code = await run('shared-process.mjs');
 }
 if (code === 0 && all) {
   code = await run('cycle.mjs');
