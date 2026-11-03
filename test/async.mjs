@@ -13,7 +13,7 @@
  *   5) 会话忙时再发 wait=false 会被明确拒绝（而不是静默排队）
  */
 
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
@@ -63,6 +63,12 @@ try {
   check('立刻拿到 run_id', typeof runId === 'string' && runId.startsWith('run-'), String(runId));
   check('立刻返回（没有阻塞）', fireMs < 20000, `${fireMs}ms`);
   check('标记为后台执行', fired?.structuredContent?.background === true);
+  check(
+    '后台收据带待审核单',
+    fired?.structuredContent?.review?.status === 'pending' &&
+      fired.structuredContent.review.review_id === `review-${runId}`,
+    JSON.stringify(fired?.structuredContent?.review),
+  );
   console.log(`    run_id = ${runId}，派活仅耗时 ${fireMs}ms`);
 
   console.log('\n[2] 趁它跑着，在另一个会话上正常干活（证明互不阻塞）');
@@ -122,6 +128,28 @@ try {
     JSON.stringify(run?.result?.answer?.slice(0, 200)),
   );
   console.log(`    耗时 ${(run?.elapsed_ms / 1000).toFixed(1)}s，答复: ${JSON.stringify(run?.result?.answer?.slice(0, 160))}`);
+
+  check(
+    '★ 完成结果带审核单（清单 + 证据）',
+    run?.result?.review?.status === 'pending' &&
+      Array.isArray(run.result.review.checklist) &&
+      run.result.review.checklist.length > 0,
+    JSON.stringify(run?.result?.review),
+  );
+  const reviewed = await client.callTool(
+    'dsh_review',
+    { conversation_id: convA, run_id: runId, verdict: 'pass', notes: '已核对最终答复包含"异步任务完成"' },
+    60_000,
+  );
+  check(
+    '★ dsh_review 记录裁决',
+    reviewed?.structuredContent?.status === 'pass' && reviewed?.structuredContent?.verdict === 'pass',
+    McpClient.text(reviewed).slice(0, 240),
+  );
+  const reread = await client.callTool('dsh_get', { conversation_id: convA, run_id: runId });
+  check('★ dsh_get 反映已审核', reread?.structuredContent?.run?.review?.status === 'pass', JSON.stringify(reread?.structuredContent?.run?.review));
+  const sentinelDoc = JSON.parse(readFileSync(fired?.structuredContent?.sentinel_file, 'utf8'));
+  check('★ 哨兵文件回写审核状态', sentinelDoc.result?.review?.status === 'pass', JSON.stringify(sentinelDoc.result?.review));
 
   console.log('\n[6] 不传 run_id 时 dsh_get 取最近一次回合');
   const latest = await client.callTool('dsh_get', { conversation_id: convA });

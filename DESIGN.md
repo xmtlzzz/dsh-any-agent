@@ -238,6 +238,7 @@ Profile = `~/.dsh/profiles/<name>/`，由 `package.json` 的 `dsh.profile.bundle
 | B8 | 上下文注入 | `contentBlocks` 支持文本与图片；支持 DSH 的 `@路径` 引用语法把文件带进会话 |
 | B9 | 异步完成哨兵 | `wait=false` 的 run 终止（done/error/cancelled）时，往 `<RUNS_DIR>/<conversation_id>/<run_id>.json` 原子写出含 `status`+`result` 的文件；调用方（Claude/Codex）用后台任务 `until [ -f ]` 等它出现即被唤醒，无需轮询、也不占轮次 |
 | B10 | 写锁抢占 | 写锁是跨进程内核信号量（持有者活着不过期、**无夺锁 API**），所以"抢"= 杀掉持有者。本服务登记自己拉起的子进程（`<状态目录>/locks/<会话id>.json`：pid + token + 心跳），据此把持有者分成四类，只对**判定为本服务残留的孤儿**自动动手；无法识别的一律不杀（见下） |
+| B11 | 调用方审核 | 每个完成的回合在 `result.review` 带一张审核单（核验清单 + 证据摘要 + `dsh_review` 入口）；调用方独立核验后提交 `pass`/`partial`/`fail`，裁决落盘 `<状态目录>/reviews/<会话id>/<run_id>.review.json`，并回写内存 run 与哨兵。默认 advisory：**不阻塞**后续派活，也不自动回灌给 DSH |
 
 **B9 设计要点（并发正确性）**：本服务在 MCP 协议上只应答请求、**不主动推通知**，"跑完通知"由哨兵文件 + 调用方后台等待任务共同实现。
 - **按会话分目录**：`run_id` 序号是每会话独立计数的，不同会话可能同毫秒生成同名 `run_id`；`<conversation_id>/` 前缀使其各写各的、不串台。会话内 `dsh_send` 忙时直接拒绝、序号单调，故会话内唯一。
@@ -248,6 +249,14 @@ Profile = `~/.dsh/profiles/<name>/`，由 `package.json` 的 `dsh.profile.bundle
 - **留存**：哨兵是闩锁、不会自行消失，且内含正文，故服务**启动时**按 `DSH_MCP_SENTINEL_TTL_MS`（默认 7 天）清理过期哨兵与崩溃残留的 `.tmp`（`pruneSentinels`）。只在启动做一次，因此绝不会误删"当前正在等待的"哨兵。
 - **给调用方的便利**：返回值同时给出 `sentinel_file_posix`（`D:\a\b` → `/d/a/b`）。手工转换 Windows 路径是等待任务白等到超时最常见的原因。
 - **落点**：`tools.dsh_send` 的 `wait=false` 分支在 `.then`/`.catch` 各调一次 `hub.writeRunSentinel()`（覆盖所有终止态）；`createRun` 起跑前 `clearRunSentinel()` 防御历史残留。
+
+**B11 设计要点（调用方审核）**
+- **为什么放进返回载荷**：返回值是"另一个 agent 的自述"。调用方最常见的失败模式是直接转述"已完成/已修好"。审核要求必须和结果出现在同一条消息里（`content.text`、`structuredContent`、哨兵 `result.review`），才可能改变调用方的下一步动作；单独一个"记得审核"的约定会被忽略。
+- **审核单形状**：`{review_id, mode, status, run_id, prompt_preview, checklist, evidence, submit:{tool:"dsh_review", arguments}, instructions}`。清单随回合形状变化（有没有改工作区、有没有错误、用了哪些工具）；`evidence` 只放核对所需的最小事实（stop_reason、error、changed_files、工具名）。
+- **默认 advisory，不阻塞**：这是刻意的产品选择。强制门禁会打断"审核失败 → 派修复回合"的自然流程，也会破坏既有调用方；advisory 只把审核请求显性化。`review=off` 可按会话/单次派活关闭；即使 off，`dsh_review` 仍可对旧 run 显式补审核。
+- **裁决落盘与回写**：`reviews/<会话id>/<run_id>.review.json` 原子写入（tmp + rename，唯一 tmp 名），含裁决、理由/findings、清单与证据。`submitReview` 依次从内存 run → 哨兵 → 已有审核记录取事实，所以服务重启、run 被挤出内存后仍可审核。提交后 **原子重写哨兵里的 `result.review`**，避免异步调用方下次读文件看到与事实相反的 `pending`。
+- **隐私**：审核单不含思考正文；理由、findings、任务预览与证据在落盘前走 `redact.sanitizeApprovalContext`（与审批上下文同一套规则）。审核记录与哨兵共用 `DSH_MCP_SENTINEL_TTL_MS` 的 7 天清理。
+- **失败语义**：fail/partial 必须有 notes 或 findings；对 `running`/`queued` 的 run 提交会被拒绝；写盘失败直接抛错（审核本身就是这次操作，静默失败比报错更糟）。
 
 **B10 设计要点（写锁与抢占）**
 - **为什么需要**：DSH 的 `SessionWriteLease` 是 Windows 命名内核信号量，**持有者活着就永不过期**，且**没有 API 能从活进程手里夺走** —— 唯一手段是杀掉持有者进程。既然要杀，就必须先判定那是谁。

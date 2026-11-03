@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Features
+
+- **Caller review (`dsh_review`).** Every completed turn now carries a
+  `review` ticket in its result, `structuredContent`, `dsh_get` output and
+  async sentinel: a checklist derived from the turn (workspace changed? normal
+  stop? which tools ran?), the evidence needed to check it, and a `dsh_review`
+  entry. The calling agent can record `pass` / `partial` / `fail` with notes
+  and findings; the verdict is written atomically to
+  `<state dir>/reviews/<conversation_id>/<run_id>.review.json` and written back
+  into the in-memory run and the sentinel (so an async caller no longer sees a
+  stale `pending`). `fail`/`partial` require a reason; running/unknown runs are
+  refused. Default `advisory`: the ticket is loud but **does not block** the
+  next `dsh_send`, and a failed review is not fed back to DSH automatically.
+  Set `DSH_MCP_REVIEW=off` (or pass `review: "off"`) to disable tickets.
+  Review records share the sentinel's 7-day TTL and credential redaction.
+
 ## [0.5.0] — 2026-11-03
 
 ### Process model

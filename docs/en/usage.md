@@ -17,14 +17,20 @@ MCP tool calls **block**, so `dsh_send` **does not block by default** (`wait=fal
      → [me] … | [turn] turn 1 started | [tool] pwsh [in_progress]
 
 5. dsh_get(conversation_id, run_id)                       # collect the result
-     → status=done, elapsed=20.3s, full answer
+     → status=done, elapsed=20.3s, full answer,
+       review: { status: "pending", checklist: [...], submit: { tool: "dsh_review", ... } }
+
+6. dsh_review(conversation_id, run_id, verdict="pass", notes="checked the diff and ran the tests")
+     → review: { status: "pass", reviewed_at: "...", review_file: "..." }
 ```
 
-`run_id` is the receipt. Run records are **memory-only, last 20 kept**; under many concurrent runs old ones get evicted and `dsh_get` will fail — which is exactly why the completion sentinel below carries the result.
+**A returned result is not "done" until the caller has reviewed it.** Every result carries a `review` ticket: a checklist derived from the turn (did it change files? did it end normally? which tools ran?) plus the evidence needed to check it. Use your own tools to verify at least one claim — read the changed files, inspect `git diff`, run the relevant test — then submit a verdict with `dsh_review`. The default `advisory` mode does **not** block the next `dsh_send`; it only makes the review request part of the returned payload instead of something the caller has to remember. `fail` / `partial` require `notes` (or `findings`). A failed review is **not** fed back to DSH automatically — dispatch a fix with `dsh_send` when you decide to.
+
+`run_id` is the receipt. Run records are **memory-only, last 20 kept**; under many concurrent runs old ones get evicted and `dsh_get` will fail — which is exactly why the completion sentinel below carries the result (and why `dsh_review` can still read the run from the sentinel).
 
 ## 🔔 Workflow: get notified on completion (no polling)
 
-Besides `run_id`, `wait=false` returns a **`sentinel_file`** path plus **`sentinel_file_posix`** (the Bash/MSYS form — use it directly; hand-converting Windows paths is the easiest way to make your waiter hang until timeout). When the turn ends — **whether it succeeds, fails, or is cancelled** — the service **atomically writes** a small file there containing the final `status` and `result`. So you neither poll nor block: **wait for that file with a background task in your own host (Claude/Codex); the moment it appears, you're woken up.**
+Besides `run_id`, `wait=false` returns a **`sentinel_file`** path plus **`sentinel_file_posix`** (the Bash/MSYS form — use it directly; hand-converting Windows paths is the easiest way to make your waiter hang until timeout). When the turn ends — **whether it succeeds, fails, or is cancelled** — the service **atomically writes** a small file there containing the final `status`, `result` and the **review ticket** (`result.review`). So you neither poll nor block: **wait for that file with a background task in your own host (Claude/Codex); the moment it appears, you're woken up.**
 
 ```bash
 # sent="$sentinel_file_posix"   ← copy it straight from the tool result
@@ -45,9 +51,10 @@ Design notes (especially under **concurrent multi-session** use):
 - **Latch semantics**: the file is written once and kept. Even if the run finishes *before* you arm the waiter, `[ -f ]` is immediately true — you never miss it.
 - **Atomic write**: `tmp` + `rename`; if the file exists its contents are complete. Each run uses its own tmp, so concurrent writes never clobber.
 - **No server push**: the service only answers requests over MCP (it sends no notifications). "Completion notification" is entirely the sentinel file plus your background waiter.
+- **Review survives the sentinel**: `result.review` is written with the result, so a caller that only reads the file still sees the checklist. `dsh_review` then **atomically rewrites** that review block (`status` → `pass`/`partial`/`fail`, plus `notes`, `reviewed_at`, `review_file`); the latch itself never disappears. Review records live under `<state dir>/reviews/` and are pruned on the same 7-day TTL as sentinels.
 - **★ No reasoning in the sentinel**: the payload carries the answer, thinking *statistics*, usage and (credential-redacted) tool inputs, but never reasoning text — `result.thinking` is stripped and replaced by a boolean `thinking_omitted` (`true` when reasoning was removed, `false` when there was none), because this server's rule is that reasoning never reaches its own disk artifacts. `dsh_get(run_id)` still returns it from memory while the record lives. `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` breaks that guarantee deliberately. Note that **DSH's own session log does contain reasoning** — see [Logging and privacy](security.md#-logging-and-privacy).
 
-> Cleanup: sentinels contain full answers, so the service **prunes sentinels older than 7 days at startup** (tune with `DSH_MCP_SENTINEL_TTL_MS`; `0` disables). Your waiter should still `rm` the file after consuming it.
+> Cleanup: sentinels and review records contain full answers/notes, so the service **prunes them once they are older than 7 days at startup** (tune with `DSH_MCP_SENTINEL_TTL_MS`; `0` disables). Your waiter should still `rm` the file after consuming it.
 
 ## 🧵 Workflow: many conversations at once
 

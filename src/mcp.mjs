@@ -47,11 +47,16 @@ DSH 自己有文件读写、shell、搜索、技能、子代理等全套工具�
 3. 之后按需：
    dsh_status(conversation_id)                还在跑吗？跑到哪了？写锁在谁手上？
    dsh_read(conversation_id, cursor)          中途看它当前吐出的内容（增量）
-   dsh_get(conversation_id, run_id)           验收：取那一次派活的完整结果
-4. dsh_interject / dsh_interrupt              跑偏了就插话改口 / 直接打断
+   dsh_get(conversation_id, run_id)           验收：取那一次派活的完整结果 + 审核单
+4. **dsh_review(conversation_id, run_id, verdict, notes?)**  调用方审核裁决。
+   结果里的 review 字段是审核单（核验清单 + 证据 + review_id）。在把结果当作完成之前，
+   先用你自己的工具独立核验（读改动的文件、看 git diff、跑相关测试），再提交
+   verdict=pass / partial / fail。默认是**建议式**：不阻塞后续派活，也不会自动回灌给 DSH；
+   但未审核的结果不应直接转述成"已完成"。fail/partial 必须写 notes 说明理由。
+5. dsh_interject / dsh_interrupt              跑偏了就插话改口 / 直接打断
                                               （会话空闲时 interject 等价于 wait=true，会阻塞到回合结束）
-5. dsh_release                                交还会话（释放写锁，之后仍可 resume）
-6. dsh_takeover                               写锁被别人占着时的**抢占**（见下）
+6. dsh_release                                交还会话（释放写锁，之后仍可 resume）
+7. dsh_takeover                               写锁被别人占着时的**抢占**（见下）
 
 【写锁：一个会话同一时刻只能有一个写者】
 DSH 的会话目录有跨进程写锁，**持有者活着就永不过期，且没有 API 能直接夺走**。所以：
@@ -75,7 +80,8 @@ dsh_interject —— 一个回合 = 一个哨兵，没有例外）。dsh_send �
   你再读文件即得结果。示例（Bash；直接用返回里的 sentinel_file_posix，别手工转换路径）：
     sent="$sentinel_file_posix"
     dl=$(( $(date +%s)+2100 )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE
-  读文件即可拿到 status 和 result；**不受内存窗口限制、也扛本服务重启**。文件里 status=error 表示失败。
+  读文件即可拿到 status 和 result（result.review 是审核单）；**不受内存窗口限制、也扛本服务重启**。文件里 status=error 表示失败。
+  拿到结果后先按审核单独立核验，再调用 dsh_review 提交裁决；审核状态会回写进哨兵。
 - 想阻塞拿结果 → 传 **wait=true**；即使等超时也不会丢结果：返回会变成收据（still_running + sentinel_file），
   回合继续跑，结果照常由哨兵送达。
 - 临时查一下 → dsh_get(conversation_id, run_id) / dsh_status / dsh_read。

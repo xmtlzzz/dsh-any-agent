@@ -12,12 +12,14 @@ import {
   DEFAULT_PERMISSION,
   DEFAULT_REASONING,
   DEFAULT_REASONING_EFFORT,
+  DEFAULT_REVIEW,
   IDLE_TTL_MS,
   MAX_LIVE,
   MAX_RSS_MB,
   PERMISSION_TIERS,
   REASONING_EFFORTS,
   REASONING_MODES,
+  REVIEW_MODES,
   RUNS_DIR,
   SHARED_PROCESS,
   STATE_FILE,
@@ -31,6 +33,7 @@ import { inspectProfile } from './bootstrap.mjs';
 import { audit } from './audit.mjs';
 import { listOrphans, LOCKS_DIR } from './locks.mjs';
 import { rssMb } from './procstat.mjs';
+import { REVIEW_VERDICTS, normalizeReviewMode } from './review.mjs';
 
 const S = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
 
@@ -102,6 +105,13 @@ export const TOOL_DEFS = [
           enum: REASONING_EFFORTS,
           description: `思考深度，默认 ${DEFAULT_REASONING_EFFORT}。注意 ACP 自身的默认是"Provider default"（不设），本服务会显式设成 max。想省钱可调低。`,
         },
+        review: {
+          type: 'string',
+          enum: REVIEW_MODES,
+          description:
+            `调用方审核策略，默认 ${DEFAULT_REVIEW}。advisory：每次派活的结果/哨兵都会附审核单（核验清单 + 证据 + dsh_review 入口），` +
+            '但**不阻塞**后续派活；off：不生成审核单。可被单次 dsh_send 覆盖。',
+        },
         provider: { type: 'string', description: '模型提供方名（如 deepseek-official）。留空用 profile 默认。' },
         model: { type: 'string', description: '模型名（如 deepseek-flash）。指定时必须同时给 provider。' },
         keep_alive: {
@@ -131,7 +141,8 @@ export const TOOL_DEFS = [
       '**推荐用后台任务（Bash run_in_background + `until [ -f sentinel_file ]`）等它，跑完自动通知你，无需轮询**；' +
       '文件出现后读它即得结果，或用 dsh_get(conversation_id, run_id) 验收，dsh_read 可中途看输出。' +
       '默认隐藏思考内容（只返回正文 + 思考统计）。' +
-      '若会话正在忙，本工具会报错——改用 dsh_interject 插话，或用 dsh_interrupt 先打断。',
+      '结果与后台收据都会带 `review` 审核单（默认 advisory）：调用方核验后用 dsh_review 提交裁决。' +
+      '若会话正在忙，本工具会报错——改用 dsh_interject 插话、dsh_send(queue=true) 入队，或用 dsh_interrupt 先打断。',
     inputSchema: S(
       {
         conversation_id: CONV_ID,
@@ -150,6 +161,12 @@ export const TOOL_DEFS = [
           type: 'number',
           description:
             '仅 wait=true 时的**等待**上限（毫秒），**默认 0 = 一直等**（不会凭空发明 30 分钟）。到期不会取消回合，只会转成后台并给你 run_id。',
+        },
+        review: {
+          type: 'string',
+          enum: REVIEW_MODES,
+          description:
+            '本次派活的审核策略，覆盖会话默认（默认 advisory）。advisory：结果/哨兵附审核单，提示调用方独立核验后用 dsh_review 提交裁决；off：本次不附。',
         },
         queue: {
           type: 'boolean',
@@ -218,8 +235,8 @@ export const TOOL_DEFS = [
     description:
       '查看单个会话的详情；带 run_id 时**取那一次派活的最终结果**（异步模式的验收入口）。' +
       '不传 run_id 则取最近一次回合。返回：标题、工作区、权限档、状态、轮数、token 用量、' +
-      '上下文压力、待决审批，以及该回合的完整结果（正文/工具/用量/错误）。' +
-      '**run 记录只在内存、最多保留最近 20 条**；服务重启或记录被挤掉后请改读哨兵文件（它落盘且扛重启）。',
+      '上下文压力、待决审批，以及该回合的完整结果（正文/工具/用量/错误）和 **review 审核单**。' +
+      '**run 记录只在内存、最多保留最近 20 条**；服务重启或记录被挤掉后会从哨兵文件回读（它落盘且扛重启）。',
     inputSchema: S(
       {
         conversation_id: CONV_ID,
@@ -236,6 +253,33 @@ export const TOOL_DEFS = [
         },
       },
       ['conversation_id'],
+    ),
+  },
+  {
+    name: 'dsh_review',
+    description:
+      '提交对一次回合结果的**调用方审核裁决**。dsh_send / dsh_interject / 哨兵里的 result 会带 `review` 审核单' +
+      '（核验清单 + 证据摘要 + review_id）。在把结果当作完成之前，调用方应自己核验（读改动的文件、看 git diff、跑测试等），' +
+      '再调用本工具记录 pass / partial / fail。' +
+      '**默认是建议式审核**：不阻塞后续 dsh_send，也不会自动把审核意见回灌给 DSH；需要修就再 dsh_send。' +
+      'run 记录被内存挤出或服务重启后仍可提交（以哨兵文件为准）。',
+    inputSchema: S(
+      {
+        conversation_id: CONV_ID,
+        run_id: { type: 'string', description: '要审核的那次派活（审核单里的 run_id）。' },
+        verdict: {
+          type: 'string',
+          enum: REVIEW_VERDICTS,
+          description: 'pass=可直接采用；partial=部分可用、需补充；fail=不可用、需重做。fail/partial 必须说明理由。',
+        },
+        notes: { type: 'string', description: '审核理由。fail/partial 必填（或改用 findings），最多 8000 字。' },
+        findings: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '逐条问题清单，可选；最多 50 条、每条 2000 字。',
+        },
+      },
+      ['conversation_id', 'run_id', 'verdict'],
     ),
   },
   {
@@ -261,6 +305,11 @@ export const TOOL_DEFS = [
           description: `思考内容展示档位，默认 ${DEFAULT_REASONING}。`,
         },
         timeout_ms: { type: 'number', description: '新回合的**等待**上限（毫秒），**默认 0 = 一直等**；queue 模式也用它限制等待上一轮结束。忙时等待超时会报错（本次插话未发送，会话不受损）；空闲时到期只转后台，不取消回合。' },
+        review: {
+          type: 'string',
+          enum: REVIEW_MODES,
+          description: '本次插话回合的审核策略，覆盖会话默认（默认 advisory）；off 可关闭本次审核单。',
+        },
         client_run_id: {
           type: 'string',
           description: '调用方生成的幂等键（≤128 字符，作用域=本会话）。重复提交返回首次的 run，不会重复插话。',
@@ -380,6 +429,43 @@ export const TOOL_DEFS = [
   },
 ];
 
+/**
+ * 把审核单渲染成调用方一眼能看到的文本块。
+ *
+ * 为什么放在正文后面而不是单独一次工具调用：MCP 调用方拿到结果后往往直接转述，
+ * 审核要求必须和结果出现在同一条消息里，才有机会改变它的下一步动作。
+ */
+function renderReviewSection(review) {
+  if (!review || typeof review !== 'object') return '';
+  const lines = [];
+  const pending = review.status === 'pending';
+  lines.push(`【调用方审核${pending ? ' · 待提交' : ` · ${review.status}`}】`);
+  if (review.prompt_preview) lines.push(`原任务: ${review.prompt_preview}`);
+  const ev = review.evidence ?? {};
+  const bits = [];
+  if (ev.stop_reason) bits.push(`stop=${ev.stop_reason}`);
+  if (ev.workspace_changed != null) bits.push(`工作区变化=${ev.workspace_changed ? '是' : '否'}`);
+  if (ev.changed_files != null) bits.push(`改动文件=${ev.changed_files}`);
+  if (Array.isArray(ev.tools) && ev.tools.length) bits.push(`工具=[${ev.tools.join(', ')}]`);
+  if (bits.length) lines.push(`证据: ${bits.join(' · ')}`);
+  if (pending) {
+    lines.push('在把这次结果当作完成之前，请独立核验：');
+    (review.checklist ?? []).forEach((item, i) => lines.push(`${i + 1}. ${item}`));
+    if (review.instructions) lines.push(review.instructions);
+    lines.push(
+      `提交裁决: dsh_review(conversation_id="${review.conversation_id}", run_id="${review.run_id}", ` +
+        'verdict="pass|partial|fail", notes="审核理由")',
+    );
+  } else {
+    if (review.notes) lines.push(`审核理由: ${review.notes}`);
+    if (Array.isArray(review.findings) && review.findings.length) {
+      lines.push(`审核问题: ${review.findings.join('；')}`);
+    }
+    if (review.review_file) lines.push(`审核记录: ${review.review_file}`);
+  }
+  return lines.join('\n');
+}
+
 /** 把结构化结果渲染成给模型看的文本。 */
 function renderSendResult(r) {
   const lines = [];
@@ -408,6 +494,11 @@ function renderSendResult(r) {
   lines.push('');
   lines.push(`[${meta.join(' · ')}]`);
 
+  if (r.review) {
+    lines.push('');
+    lines.push(renderReviewSection(r.review));
+  }
+
   if (r.error) {
     lines.push('');
     lines.push(`⚠️ 回合失败: ${r.error}`);
@@ -423,6 +514,7 @@ function renderSendResult(r) {
 function backgroundReceipt(hub, conv, res) {
   const sentinel = res.sentinel_file ?? hub.runSentinelPath(conv.id, res.run_id);
   const sentinelPosix = toPosixPath(sentinel);
+  const review = conv.pendingReviewTicket?.(res.run_id) ?? null;
   const waited = res.waited_ms
     ? `已等待 ${(res.waited_ms / 1000).toFixed(0)}s 仍未结束，改为后台继续（**回合没有被取消**）。`
     : '已在后台执行（**回合没有被取消**）。';
@@ -436,6 +528,7 @@ function backgroundReceipt(hub, conv, res) {
       sentinel_file: sentinel,
       /** Bash/MSYS 形式（D:\a\b → /d/a/b）；非 Windows 等于 sentinel_file。 */
       sentinel_file_posix: sentinelPosix,
+      ...(review ? { review } : {}),
     },
     text:
       `${waited}（run_id=${res.run_id}）\n\n` +
@@ -448,6 +541,7 @@ function backgroundReceipt(hub, conv, res) {
       `    dl=$(( $(date +%s)+2100 )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE\n` +
       `文件出现后：直接读它拿结果（推荐——不受内存窗口限制、还扛服务重启），或 dsh_get(conversation_id, run_id) 验收。\n` +
       `消费完可以 rm 掉它。其它随时可用：dsh_status（是否在跑）、dsh_read（增量看输出）。` +
+      (review ? `\n\n${renderReviewSection(review)}` : '') +
       (res.waited_ms
         ? `\n\n下次想立刻返回就传 wait=false；想等更久就调大 timeout_ms（**0 = 一直等**）。`
         : ''),
@@ -471,6 +565,7 @@ function replayRun(hub, conv, run, wantResult) {
         `\n哨兵文件: ${sentinel}`,
     };
   }
+  const review = conv.pendingReviewTicket?.(run.run_id) ?? null;
   return {
     structured: {
       conversation_id: conv.id,
@@ -482,10 +577,12 @@ function replayRun(hub, conv, run, wantResult) {
       replayed: true,
       sentinel_file: sentinel,
       sentinel_file_posix: sentinelPosix,
+      ...(review ? { review } : {}),
     },
     text:
       `（幂等命中：同一个 client_run_id 已在跑或排队，未重复派活）run_id=${run.run_id} status=${run.status}\n` +
-      `哨兵文件: ${sentinel}`,
+      `哨兵文件: ${sentinel}` +
+      (review ? `\n\n${renderReviewSection(review)}` : ''),
   };
 }
 
@@ -493,6 +590,7 @@ function replayRun(hub, conv, run, wantResult) {
 function queuedReceipt(hub, conv, run, position) {
   const sentinel = hub.runSentinelPath(conv.id, run.run_id);
   const sentinelPosix = toPosixPath(sentinel);
+  const review = conv.pendingReviewTicket?.(run.run_id) ?? null;
   return {
     structured: {
       conversation_id: conv.id,
@@ -503,11 +601,13 @@ function queuedReceipt(hub, conv, run, position) {
       status: 'queued',
       sentinel_file: sentinel,
       sentinel_file_posix: sentinelPosix,
+      ...(review ? { review } : {}),
     },
     text:
       `已入队（第 ${position} 位）。当前回合结束后自动执行；**入队时不会写哨兵**，真正结束时才写：\n` +
       `  ${sentinel}\n` +
-      `用 dsh_queue list 查看/修改/删除；取消：dsh_queue(conversation_id, action="remove", run_id="${run.run_id}")。`,
+      `用 dsh_queue list 查看/修改/删除；取消：dsh_queue(conversation_id, action="remove", run_id="${run.run_id}")。` +
+      (review ? `\n\n${renderReviewSection(review)}` : ''),
   };
 }
 
@@ -539,6 +639,7 @@ export function createHandlers(hub, opts = {}) {
         onApproval: args.on_approval,
         titleHint: args.title_hint,
         reasoningEffort: args.reasoning_effort,
+        review: args.review,
         provider: args.provider,
         model: args.model,
         keepAlive: args.keep_alive === true,
@@ -587,7 +688,9 @@ export function createHandlers(hub, opts = {}) {
         throw new Error('prompt 不能为空：至少包含一个非空白字符');
       }
       const conv = await hub.get(args.conversation_id);
+      const review = args.review === undefined ? undefined : normalizeReviewMode(args.review, conv.review);
       const opts = { reasoning: args.reasoning ?? DEFAULT_REASONING };
+      if (review !== undefined) opts.review = review;
       if (args.timeout_ms !== undefined && args.timeout_ms !== null) opts.timeoutMs = parseTimeoutMs(args.timeout_ms);
 
       // ── 幂等：同一个 client_run_id 直接返回首次的 run，不重复执行 ──
@@ -615,6 +718,7 @@ export function createHandlers(hub, opts = {}) {
             reasoning: opts.reasoning,
             clientRunId: args.client_run_id ?? null,
             preview: args.prompt,
+            review: review ?? conv.review,
           });
           if (deduped) return replayRun(hub, conv, run, false);
           audit('send_queued', {
@@ -633,7 +737,10 @@ export function createHandlers(hub, opts = {}) {
 
       const wait = args.wait === true;
       // 记录与预览保留调用方原文；实际派发用 promptText（可能带团队提示）。
-      const run = conv.createRun(args.prompt, { clientRunId: args.client_run_id ?? null });
+      const run = conv.createRun(args.prompt, {
+        clientRunId: args.client_run_id ?? null,
+        review: review ?? conv.review,
+      });
       // prompt() 自己负责收尾与写哨兵。这里 await 是为了**同步暴露 resume/启动失败** ——
       // 否则调用方会拿到一个 accepted 但注定失败的收据（冷启动要几秒，热会话瞬时）。
       const r = await conv.prompt(promptText, { ...opts, run, wait });
@@ -833,6 +940,11 @@ export function createHandlers(hub, opts = {}) {
           meta.push(`  （思考 ${run.result.thinking_stats.chars} 字已隐藏）`);
         }
         if (run.result?.error) meta.push(`  ⚠️ 失败: ${run.result.error}`);
+        const review = run.review ?? run.result?.review;
+        if (review) {
+          meta.push('');
+          meta.push(renderReviewSection(review));
+        }
       }
       const sentinelFile = run ? hub.runSentinelPath(args.conversation_id, run.run_id) : null;
       const runView = run
@@ -848,6 +960,7 @@ export function createHandlers(hub, opts = {}) {
             answer_chars: answerFull.length,
             answer_truncated: truncated,
             next_offset: truncated ? cap : null,
+            review: run.review ?? run.result?.review ?? null,
             result: run.result,
           }
         : null;
@@ -862,6 +975,31 @@ export function createHandlers(hub, opts = {}) {
         },
         text: meta.join('\n'),
       };
+    },
+
+    async dsh_review(args) {
+      const conv = await hub.get(args.conversation_id);
+      const r = conv.submitReview(args.run_id, {
+        verdict: args.verdict,
+        notes: args.notes,
+        findings: args.findings,
+      });
+      audit('review', {
+        conversation_id: conv.id,
+        run_id: args.run_id,
+        verdict: args.verdict,
+      });
+      const lines = [
+        `审核已记录：${r.run_id} → ${r.status}（${r.review_id}）`,
+        r.notes ? `理由: ${r.notes}` : '理由: (未填写)',
+      ];
+      if (Array.isArray(r.findings) && r.findings.length) {
+        lines.push('问题:');
+        for (const f of r.findings) lines.push(`  - ${f}`);
+      }
+      lines.push(`审核记录: ${r.review_file}`);
+      lines.push('审核只记录裁决，不会自动回灌给 DSH；需要修复请用 dsh_send 再派活。');
+      return { structured: r, text: lines.join('\n') };
     },
 
     async dsh_interject(args) {
@@ -886,6 +1024,7 @@ export function createHandlers(hub, opts = {}) {
         reasoning: args.reasoning ?? DEFAULT_REASONING,
         clientRunId: args.client_run_id ?? null,
       };
+      if (args.review !== undefined) opts.review = normalizeReviewMode(args.review, conv.review);
       if (args.timeout_ms !== undefined && args.timeout_ms !== null) opts.timeoutMs = parseTimeoutMs(args.timeout_ms);
       const r = await conv.interject(args.message, opts);
       conv.lastResult = r;
@@ -986,6 +1125,7 @@ export function createHandlers(hub, opts = {}) {
       const conv = await hub.get(args.conversation_id);
       const snap = conv.snapshot();
       const run = conv.getRun();
+      const review = run ? (run.review ?? run.result?.review ?? null) : null;
       const bits = [`状态=${snap.state}`, `轮数=${snap.turns}`];
       if (snap.state === 'running') {
         bits.push(`已跑=${((snap.running_ms ?? 0) / 1000).toFixed(1)}s`);
@@ -993,6 +1133,9 @@ export function createHandlers(hub, opts = {}) {
         bits.push(`本轮输出=${snap.out_chars ?? 0}字`);
       }
       if (run) bits.push(`最近回合=${run.run_id}(${run.status})`);
+      if (review) {
+        bits.push(`审核=${review.status}${review.verdict ? `(${review.verdict})` : ''}${review.status === 'pending' ? '（待提交）' : ''}`);
+      }
       bits.push(`待决审批=${snap.pending_approvals.length}`);
       if (snap.rss_mb != null) bits.push(`rss=${snap.rss_mb}MB`);
       if (snap.keep_alive) bits.push('保活=是');
@@ -1037,6 +1180,9 @@ export function createHandlers(hub, opts = {}) {
           lock_holder: snap.lock_holder,
           lock_holder_reason: snap.lock_holder_reason,
           lock_conflict: snap.lock_conflict,
+          review: review
+            ? { review_id: review.review_id, status: review.status, verdict: review.verdict ?? null }
+            : null,
           run: run
             ? {
                 run_id: run.run_id,

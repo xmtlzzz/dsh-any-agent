@@ -34,6 +34,7 @@ import {
   APPROVAL_POLICIES,
   DEFAULT_PERMISSION,
   DEFAULT_REASONING_EFFORT,
+  DEFAULT_REVIEW,
   IDLE_TTL_MS,
   LIST_PROBE_TTL_MS,
   MAX_LIVE,
@@ -42,6 +43,8 @@ import {
   PROMPT_TIMEOUT_MS,
   REAP_INTERVAL_MS,
   REASONING_EFFORTS,
+  REVIEWS_DIR,
+  REVIEW_MODES,
   RUNS_DIR,
   SENTINEL_INCLUDE_REASONING,
   SENTINEL_TTL_MS,
@@ -53,6 +56,15 @@ import {
   assertWritableDir,
   defaultApprovalPolicy,
 } from './config.mjs';
+import {
+  REVIEW_VERDICTS,
+  buildReviewTicket,
+  normalizeReviewMode,
+  readReviewRecord,
+  reviewIdForRun,
+  writeReviewRecord,
+} from './review.mjs';
+import { sanitizeApprovalContext } from './redact.mjs';
 import { AcpProcess } from './acp.mjs';
 import { SessionHost } from './host.mjs';
 import { rssMb } from './procstat.mjs';
@@ -177,31 +189,51 @@ const MAX_RUNS = 20;
 /** 回合记录里 prompt 预览的长度。 */
 const MAX_RUN_PREVIEW = 200;
 
+/**
+ * 清掉 `dir` 下超过 TTL 的文件与空会话目录；`.tmp` 残留不论年龄都按同一 cutoff 清。
+ * 只遍历一层会话目录，绝不递归进别处 —— 调用方（哨兵/审核目录）都是本服务自己的。
+ */
+function pruneDirTree(dir, ttlMs) {
+  if (!ttlMs || !existsSync(dir)) return { pruned: 0, dirs_removed: 0 };
+  let pruned = 0;
+  let dirsRemoved = 0;
+  const cutoff = Date.now() - ttlMs;
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const sub = join(dir, entry.name);
+      for (const f of readdirSync(sub, { withFileTypes: true })) {
+        if (!f.isFile()) continue;
+        const fp = join(sub, f.name);
+        try {
+          if (statSync(fp).mtimeMs < cutoff) {
+            rmSync(fp, { force: true });
+            pruned++;
+          }
+        } catch {
+          /* 单个文件失败就跳过 */
+        }
+      }
+      try {
+        if (readdirSync(sub).length === 0) {
+          rmSync(sub, { recursive: true, force: true });
+          dirsRemoved++;
+        }
+      } catch {
+        /* 目录清理失败无所谓 */
+      }
+    }
+  } catch {
+    /* 目录读不了就跳过 */
+  }
+  return { pruned, dirs_removed: dirsRemoved };
+}
+
 /** 按 ACP 权限应答的规范形状挑选项。 */
 function pickOption(options, want) {
   const list = Array.isArray(options) ? options : [];
   const match = list.find((o) => typeof o?.kind === 'string' && o.kind.startsWith(want));
   return match?.optionId;
-}
-
-/** Only expose review context in memory; redact common credential fields and literals. */
-function sanitizeApprovalContext(value, key = '') {
-  if (/^(?:api[_-]?key|authorization|proxy[_-]?authorization|cookie|set[_-]?cookie|password|passwd|secret|token|access[_-]?token|refresh[_-]?token|credentials?|headers|env|environment)$/i.test(key)) {
-    return '[REDACTED]';
-  }
-  if (typeof value === 'string') {
-    return value
-      .replace(/\b(?:sk|ak)-[A-Za-z0-9_-]{8,}/g, '[REDACTED]')
-      .replace(/\bBearer\s+[^\s'";]+/gi, 'Bearer [REDACTED]')
-      .replace(/((?:api[_-]?key|password|passwd|secret|(?:access[_-]?)?token)\s*(?:=|:)\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s;]+)/gi, '$1[REDACTED]')
-      .replace(/(--(?:api[_-]?key|password|passwd|secret|token)\s+)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s;]+)/gi, '$1[REDACTED]')
-      .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[REDACTED]@');
-  }
-  if (Array.isArray(value)) return value.map((item) => sanitizeApprovalContext(item));
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, sanitizeApprovalContext(item, name)]));
-  }
-  return value ?? null;
 }
 
 function approvalContext(params, toolCall, desc, options) {
@@ -276,6 +308,17 @@ export function sanitizeResultForSentinel(result) {
       return input === undefined ? safeMeta : { ...safeMeta, input: sanitizeApprovalContext(input) };
     });
   }
+  // 审核单里可能有原任务预览、审核理由与证据摘要；哨兵会保留 7 天，同样要脱敏。
+  if (rest.review && typeof rest.review === 'object') {
+    const rv = { ...rest.review };
+    for (const key of ['prompt_preview', 'notes']) {
+      if (typeof rv[key] === 'string') rv[key] = sanitizeApprovalContext(rv[key], key);
+    }
+    if (Array.isArray(rv.checklist)) rv.checklist = rv.checklist.map((x) => sanitizeApprovalContext(x));
+    if (Array.isArray(rv.findings)) rv.findings = rv.findings.map((x) => sanitizeApprovalContext(x));
+    if (rv.evidence) rv.evidence = sanitizeApprovalContext(rv.evidence);
+    rest.review = rv;
+  }
   // 始终给出布尔值：调用方才能区分“思考被剥离”与“本来没有思考”。
   const out = { ...rest, thinking_omitted: Boolean(thinking) && !SENTINEL_INCLUDE_REASONING };
   if (SENTINEL_INCLUDE_REASONING && thinking !== undefined) out.thinking = thinking;
@@ -301,6 +344,8 @@ export class Conversation {
       provider: state.provider ?? null,
       model: state.model ?? null,
     };
+    /** 调用方审核策略（off / advisory）。可在 dsh_send 单次覆盖。 */
+    this.review = REVIEW_MODES.includes(state.review) ? state.review : DEFAULT_REVIEW;
     this.lastConfigApplied = null;
     /** 是否已回读并确认会话记录的权限档（null=尚未核对，true/false=结果）。 */
     this.permissionVerified = null;
@@ -367,6 +412,7 @@ export class Conversation {
       reasoningEffort: this.cfg.reasoningEffort,
       provider: this.cfg.provider,
       model: this.cfg.model,
+      review: this.review,
       workspace: this.workspace,
     };
   }
@@ -398,6 +444,8 @@ export class Conversation {
       title_hint: this.titleHint ?? null,
       cwd: this.cwd,
       permission: this.permission,
+      /** 会话默认审核策略；单次 dsh_send 可以覆盖。 */
+      review: this.review,
       /** true=已回读会话记录且一致；false/null=缓存暂时没有记录（read-only 仍由审批层兜底）。 */
       permission_verified: this.permissionVerified,
       on_approval: this.onApproval,
@@ -854,6 +902,17 @@ export class Conversation {
       workspace_changed: false,
       elapsed_ms: 0,
     };
+    const reviewMode = runRecord.review_mode ?? this.review;
+    if (reviewMode !== 'off') {
+      runRecord.result.review = buildReviewTicket({
+        conversationId: this.id,
+        runId: runRecord.run_id,
+        promptPreview: runRecord.prompt_preview,
+        result: runRecord.result,
+        mode: reviewMode,
+        permission: this.permission,
+      });
+    }
     try {
       if (typeof this.#hub.writeRunSentinel === 'function') {
         const file = this.#hub.writeRunSentinel(this.id, runRecord);
@@ -902,13 +961,15 @@ export class Conversation {
    *
    * @returns 等到回合结束 → 完整 result；没等到（wait=false 或等超时）→ 收据对象
    */
-  async prompt(text, { reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, run, wait = true } = {}) {
+  async prompt(text, { reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, run, wait = true, review } = {}) {
     if (this.busy) {
       throw new Error(
         `会话 ${this.id} 正在跑另一个回合。可以：dsh_interject 插话（打断并改口 / 排队），或 dsh_interrupt 打断。`,
       );
     }
-    const runRecord = run ?? this.createRun(text);
+    const runRecord = run ?? this.createRun(text, { review });
+    const reviewMode = runRecord.review_mode ?? normalizeReviewMode(review ?? this.review);
+    runRecord.review_mode = reviewMode;
     runRecord.status = 'running';
     runRecord.started_at = now();
     this.currentRun = runRecord;
@@ -954,6 +1015,26 @@ export class Conversation {
     this.collector = c;
     const t0 = now();
     let settled = false;
+
+    /**
+     * 把"调用方审核单"挂到回合结果上。
+     *
+     * 审核单必须随结果一起返回（正文、structuredContent、哨兵都是同一份 result），
+     * 否则调用方在异步收活时只会看到一段自述，很容易直接把它当成完成事实。
+     */
+    const attachReview = (result) => {
+      if (reviewMode !== 'off') {
+        result.review = buildReviewTicket({
+          conversationId: this.id,
+          runId: runRecord.run_id,
+          promptPreview: runRecord.prompt_preview,
+          result,
+          mode: reviewMode,
+          permission: this.permission,
+        });
+      }
+      return result;
+    };
 
     /** 回合真正结束时收尾。无论有没有人在等，都**只执行一次**。 */
     const finalize = (stopReason, failure) => {
@@ -1008,6 +1089,7 @@ export class Conversation {
           diff_stat: after,
           elapsed_ms: now() - t0,
         };
+        attachReview(result);
         runRecord.ended_at = now();
         runRecord.elapsed_ms = result.elapsed_ms;
         runRecord.status = failure ? 'error' : stopReason === 'cancelled' ? 'cancelled' : 'done';
@@ -1040,6 +1122,7 @@ export class Conversation {
           workspace_changed: false,
           elapsed_ms: now() - t0,
         };
+        attachReview(fallback);
         runRecord.ended_at = now();
         runRecord.status = 'error';
         runRecord.error = fallback.error;
@@ -1152,13 +1235,15 @@ export class Conversation {
   }
 
   /** 建一条回合记录。派活时先建，好让调用方立刻拿到 run_id（异步模式的关键）。 */
-  createRun(text, { clientRunId = null } = {}) {
+  createRun(text, { clientRunId = null, review = this.review } = {}) {
     const run = {
       run_id: `run-${Date.now().toString(36)}-${++this.runSeq}`,
       conversation_id: this.id,
       client_run_id: clientRunId ?? null,
       prompt_preview: text.length > MAX_RUN_PREVIEW ? `${text.slice(0, MAX_RUN_PREVIEW)}…` : text,
       status: 'queued',
+      /** 本回合的审核策略（off / advisory）；由 dsh_send / dsh_interject 或会话默认决定。 */
+      review_mode: normalizeReviewMode(review, this.review),
       started_at: null,
       ended_at: null,
       elapsed_ms: null,
@@ -1189,7 +1274,7 @@ export class Conversation {
   // ── 会话级队列（忙时非阻塞入队）────────────────────────────────
 
   /** 入队；返回 run 记录与 1-based 位置。队列只在内存，重启丢失。 */
-  enqueue(text, { reasoning = 'hide', clientRunId = null, preview = null } = {}) {
+  enqueue(text, { reasoning = 'hide', clientRunId = null, preview = null, review = this.review } = {}) {
     const MAX_QUEUE = 8;
     if (clientRunId) {
       const existing = this.getRunByClientId(clientRunId);
@@ -1199,7 +1284,7 @@ export class Conversation {
       throw new Error(`队列已满（最多 ${MAX_QUEUE} 条）；先用 dsh_queue list 清理，或等当前回合结束`);
     }
     // 预览用调用方原文，执行用可能已注入团队前缀的 text。
-    const run = this.createRun(preview ?? text, { clientRunId });
+    const run = this.createRun(preview ?? text, { clientRunId, review });
     run.status = 'queued';
     this.queue.push({ run, text, reasoning, clientRunId, enqueued_at: now() });
     return { run, position: this.queue.length, deduped: false };
@@ -1236,6 +1321,16 @@ export class Conversation {
         workspace_changed: false,
         elapsed_ms: 0,
       };
+      if (run.review_mode !== 'off') {
+        run.result.review = buildReviewTicket({
+          conversationId: this.id,
+          runId: run.run_id,
+          promptPreview: run.prompt_preview,
+          result: run.result,
+          mode: run.review_mode,
+          permission: this.permission,
+        });
+      }
       // 取消也是终态 → 写哨兵，避免等待方永远空等。
       const file = this.#hub.writeRunSentinel(this.id, run);
       run.result.sentinel_file = file ?? this.#hub.runSentinelPath(this.id, run.run_id);
@@ -1289,6 +1384,141 @@ export class Conversation {
     return this.runs.length ? this.runs[this.runs.length - 1] : null;
   }
 
+  /**
+   * 异步收据里的"待审核"审核单：回合还没结束，只有清单和 run_id，
+   * 告诉调用方"拿到哨兵结果后先审核，再当完成"。
+   */
+  pendingReviewTicket(runId) {
+    const run = this.runs.find((x) => x.run_id === runId) ?? null;
+    const mode = run?.review_mode ?? this.review;
+    if (mode === 'off') return null;
+    return buildReviewTicket({
+      conversationId: this.id,
+      runId,
+      promptPreview: run?.prompt_preview ?? null,
+      result: null,
+      mode,
+      permission: this.permission,
+      pending: true,
+    });
+  }
+
+  /**
+   * 记录调用方对某个已完成回合的审核裁决。
+   *
+   * 三种来源按优先级取事实：
+   *   1) 内存里的 run（含完整 result）；
+   *   2) 哨兵文件（服务重启 / run 记录被挤出内存后仍然可审核）；
+   *   3) 已有的审核记录（允许修订裁决）。
+   *
+   * 注意：**不阻塞后续派活，也不自动回灌给 DSH**。审核只是把"调用方已经看过并给出结论"
+   * 这件事落成可审计的事实；要修就由调用方再 dsh_send。
+   */
+  submitReview(runId, { verdict, notes, findings } = {}) {
+    if (typeof runId !== 'string' || runId.trim() === '') {
+      throw new Error('run_id 不能为空');
+    }
+    if (!REVIEW_VERDICTS.includes(verdict)) {
+      throw new Error(`verdict 必须是 ${REVIEW_VERDICTS.join(' | ')} 之一`);
+    }
+    const cleanNotes = typeof notes === 'string' ? notes.trim() : '';
+    const cleanFindings = Array.isArray(findings)
+      ? findings.filter((f) => typeof f === 'string' && f.trim() !== '').map((f) => f.trim())
+      : [];
+    if (verdict !== 'pass' && !cleanNotes && !cleanFindings.length) {
+      throw new Error('verdict=fail/partial 时必须提供 notes（或 findings）说明理由');
+    }
+
+    const run = this.runs.find((x) => x.run_id === runId) ?? null;
+    let result = run?.result ?? null;
+    let promptPreview = run?.prompt_preview ?? null;
+    let mode = run?.review_mode ?? this.review;
+
+    if (run) {
+      if (run.status === 'running' || run.status === 'queued') {
+        throw new Error(`回合 ${runId} 还没结束，不能审核（等哨兵文件出现或 dsh_get 显示完成后重试）`);
+      }
+      if (!result) throw new Error(`回合 ${runId} 没有可用结果，无法审核`);
+    } else {
+      // 内存里没有这条 run：以哨兵为准。它只在回合终止时写入，所以天然是"已完成"。
+      let sentinel = null;
+      try {
+        sentinel = JSON.parse(readFileSync(this.#hub.runSentinelPath(this.id, runId), 'utf8'));
+      } catch {
+        /* 下面的审核记录回退会给出更准确的错误 */
+      }
+      if (sentinel) {
+        result = sentinel.result ?? null;
+        if (result?.review && typeof result.review === 'object') {
+          promptPreview = result.review.prompt_preview ?? promptPreview;
+          mode = result.review.mode ?? mode;
+        }
+      }
+    }
+
+    const existing = readReviewRecord(this.id, runId);
+    if (!result && !existing) {
+      throw new Error(
+        `未知 run_id: ${runId}（内存里没有、也没有哨兵/审核记录；请确认 run_id 是否正确，` +
+          `或先用 dsh_get / 哨兵文件取回结果）`,
+      );
+    }
+
+    const ticket =
+      result?.review && typeof result.review === 'object'
+        ? { ...result.review }
+        : existing
+          ? { ...existing }
+          : buildReviewTicket({
+              conversationId: this.id,
+              runId,
+              promptPreview,
+              result: result ?? {},
+              mode,
+              permission: this.permission,
+            });
+    if (!ticket.review_id) ticket.review_id = reviewIdForRun(runId);
+    ticket.conversation_id = ticket.conversation_id ?? this.id;
+    ticket.run_id = ticket.run_id ?? runId;
+    ticket.mode = ticket.mode ?? mode;
+
+    const reviewedAt = new Date().toISOString();
+    const { file, payload } = writeReviewRecord({
+      ticket,
+      verdict,
+      notes: cleanNotes,
+      findings: cleanFindings,
+      reviewedAt,
+    });
+    const review = {
+      ...ticket,
+      status: verdict,
+      verdict,
+      notes: payload.notes,
+      findings: payload.findings,
+      reviewed_at: reviewedAt,
+      review_file: file,
+    };
+    if (run) {
+      run.review = review;
+      if (run.result && typeof run.result === 'object') run.result.review = review;
+    }
+    // 哨兵是调用方异步收活的来源；把裁决回写进去，避免它一直显示 pending。
+    this.#hub.updateRunSentinelReview(this.id, runId, {
+      status: review.status,
+      verdict: review.verdict,
+      notes: review.notes,
+      findings: review.findings,
+      reviewed_at: reviewedAt,
+      review_file: file,
+    });
+    return {
+      ...review,
+      review_file: file,
+      sentinel_file: this.#hub.runSentinelPath(this.id, runId),
+    };
+  }
+
   /** 等到当前回合结束（不忙则立即返回 true；`timeoutMs <= 0` 一直等；超时返回 false）。 */
   async waitIdle(timeoutMs = 30 * 60 * 1000) {
     if (!this.busy) return true;
@@ -1327,9 +1557,9 @@ export class Conversation {
    * 之所以无竞态：dsh-acp 在让 prompt 请求返回**之前**就清空了 inflight 槽位，
    * 且只在 agent 完全 idle 后才 settle（lib/index.js:1003-1011）。
    */
-  async interject(message, { mode = 'interject', reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, clientRunId = null } = {}) {
+  async interject(message, { mode = 'interject', reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, clientRunId = null, review } = {}) {
     // 先建 run：幂等键要在"等待上一轮"之前就登记，否则重试会造出第二个 run。
-    const run = this.createRun(message, { clientRunId });
+    const run = this.createRun(message, { clientRunId, review });
     if (!this.busy) {
       const r = await this.prompt(message, { reasoning, timeoutMs, run });
       return { ...r, interjected: 'idle', waited_ms: 0 };
@@ -1338,7 +1568,7 @@ export class Conversation {
     if (mode === 'interject') {
       this.proc?.notify('session/cancel', { sessionId: this.id });
     }
-    // 排队等待的时长跟随调用方的 timeout_ms（0 = 一直等），不再固定 30 分钟。
+    // 排队等待的时长跟随调用方的 timeoutMs（0 = 一直等），不再固定 30 分钟。
     const idle = await this.waitIdle(timeoutMs);
     const waited = now() - t0;
     if (!idle) {
@@ -1358,6 +1588,17 @@ export class Conversation {
         workspace_changed: false,
         elapsed_ms: 0,
       };
+      // 取消同样是一次终态结果：审核单照挂，调用方仍可记录"这次没跑成"。
+      if (run.review_mode !== 'off') {
+        run.result.review = buildReviewTicket({
+          conversationId: this.id,
+          runId: run.run_id,
+          promptPreview: run.prompt_preview,
+          result: run.result,
+          mode: run.review_mode,
+          permission: this.permission,
+        });
+      }
       const file = this.#hub.writeRunSentinel?.(this.id, run);
       run.result.sentinel_file = file ?? this.#hub.runSentinelPath?.(this.id, run.run_id) ?? null;
       throw err;
@@ -1557,6 +1798,7 @@ export class Hub {
     //   看起来正常，但注册表/哨兵/锁登记全部丢失，异步等待永远醒不过来。
     assertWritableDir(dirname(STATE_FILE), '状态目录');
     assertWritableDir(RUNS_DIR, '哨兵目录');
+    assertWritableDir(REVIEWS_DIR, '审核记录目录');
     assertWritableDir(LOCKS_DIR, '锁登记目录');
 
     // 旧版本的默认状态文件在包安装目录里；一次性迁移到新的用户可写目录。
@@ -1667,45 +1909,50 @@ export class Hub {
   }
 
   /**
+   * 把调用方的审核裁决回写进该 run 的哨兵文件（best-effort）。
+   *
+   * 为什么回写：异步调用方收活主要靠读哨兵。若审核后哨兵仍写着 `review.status=pending`，
+   * 下一次读文件会得到一个与事实相反的状态。原子重写不破坏闩锁语义：文件始终存在，
+   * 内容要么是旧的完整版本，要么是新的完整版本。
+   */
+  updateRunSentinelReview(conversationId, runId, review) {
+    const file = this.runSentinelPath(conversationId, runId);
+    try {
+      const payload = JSON.parse(readFileSync(file, 'utf8'));
+      const result = payload.result && typeof payload.result === 'object' ? payload.result : {};
+      result.review = {
+        ...(result.review && typeof result.review === 'object' ? result.review : {}),
+        ...review,
+      };
+      payload.result = result;
+      payload.reviewed_at = review.reviewed_at ?? null;
+      const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
+      writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
+      renameSync(tmp, file);
+      return true;
+    } catch (e) {
+      this.log.info(`[hub] 回写哨兵审核状态失败（${file}）: ${e.message}`);
+      return false;
+    }
+  }
+
+  /**
    * 启动时清理过期哨兵（默认 7 天前）与崩溃残留的 .tmp 文件。
    *
    * 哨兵内含完整正文，不清理会无声堆积。设为 DSH_MCP_SENTINEL_TTL_MS=0 可关闭。
    * 只在服务启动时做一次，因此绝不会删掉"当前正在等待的"哨兵（那时它还不需要存在）。
    */
   pruneSentinels({ ttlMs = SENTINEL_TTL_MS } = {}) {
-    if (!ttlMs || !existsSync(RUNS_DIR)) return { pruned: 0, dirs_removed: 0 };
-    let pruned = 0;
-    let dirsRemoved = 0;
-    const cutoff = Date.now() - ttlMs;
-    try {
-      for (const entry of readdirSync(RUNS_DIR, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        const dir = join(RUNS_DIR, entry.name);
-        for (const f of readdirSync(dir, { withFileTypes: true })) {
-          if (!f.isFile()) continue;
-          const fp = join(dir, f.name);
-          try {
-            if (statSync(fp).mtimeMs < cutoff) {
-              rmSync(fp, { force: true });
-              pruned++;
-            }
-          } catch {
-            /* 单个文件失败就跳过 */
-          }
-        }
-        try {
-          if (readdirSync(dir).length === 0) {
-            rmSync(dir, { recursive: true, force: true });
-            dirsRemoved++;
-          }
-        } catch {
-          /* 目录清理失败无所谓 */
-        }
-      }
-    } catch (e) {
-      this.log.info(`[hub] 清理哨兵失败: ${e.message}`);
-    }
-    return { pruned, dirs_removed: dirsRemoved };
+    const runs = pruneDirTree(RUNS_DIR, ttlMs);
+    // 审核记录同样含正文/理由，按同一 TTL 清理；目录分开是为了语义清晰，
+    // 也避免一次清理把"刚提交的裁决"和"已完成的哨兵"混为一谈。
+    const reviews = pruneDirTree(REVIEWS_DIR, ttlMs);
+    return {
+      pruned: runs.pruned,
+      dirs_removed: runs.dirs_removed,
+      reviews_pruned: reviews.pruned,
+      review_dirs_removed: reviews.dirs_removed,
+    };
   }
 
   /** 删除某个 run 的哨兵（起跑前防御性清残留；调用方消费后也可自行删）。 */
@@ -1793,6 +2040,7 @@ export class Hub {
             createdAt: persisted?.createdAt,
             lastUsedAt: persisted?.lastUsedAt,
             turnCount: persisted?.turnCount,
+            review: REVIEW_MODES.includes(persisted?.review) ? persisted.review : DEFAULT_REVIEW,
             workspace: persisted?.workspace ?? null,
           },
           this,
@@ -1880,7 +2128,7 @@ export class Hub {
   }
 
   /** 新建一个会话：拉起进程 + ACP 初始化 + session/new。 */
-  async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false } = {}) {
+  async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false, review } = {}) {
     if (!cwd) {
       throw new Error(
         '没有可用的工作目录。你既没传 cwd，客户端也没有提供当前打开的项目（MCP roots）。\n' +
@@ -1922,6 +2170,10 @@ export class Hub {
     if (!REASONING_EFFORTS.includes(effort)) {
       throw new Error(`reasoning_effort 必须是 ${REASONING_EFFORTS.join(' | ')} 之一`);
     }
+    const reviewMode = normalizeReviewMode(review ?? DEFAULT_REVIEW);
+    if (!REVIEW_MODES.includes(reviewMode)) {
+      throw new Error(`review 必须是 ${REVIEW_MODES.join(' | ')} 之一`);
+    }
     if (model && !provider) {
       throw new Error('指定 model 时必须同时给 provider（ACP 的模型标识是 [provider, model] 二元组）');
     }
@@ -1957,6 +2209,7 @@ export class Hub {
           reasoningEffort: effort,
           provider: provider ?? null,
           model: model ?? null,
+          review: reviewMode,
         },
         this,
       );
