@@ -20,7 +20,7 @@ import { join, sep } from 'node:path';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { Conversation, Hub, homeWorkspaceProblem } from '../src/hub.mjs';
+import { Conversation, Hub, homeWorkspaceProblem, fsCaseInsensitive } from '../src/hub.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 void HERE;
@@ -45,13 +45,13 @@ check('read-only 下放行（不写盘，不需要 ACL 沙箱）',
   homeWorkspaceProblem(home, 'read-only') === null);
 check('普通项目目录放行',
   homeWorkspaceProblem(join(home, 'some-project'), 'workspace-write') === null);
-// 大小写是否等价取决于文件系统：Windows / macOS 默认不区分，Linux 区分。
-// 只有确实不区分时，改大小写才仍然指向家目录 —— 在 Linux 上这不是漏洞。
-// 用 realpath 判断不靠谱：Node 在 Windows 上并不规范化大小写，
-// C:\\Users\\xmtlz 与 C:\\USERS\\XMTLZ 会返回各自的原样字符串。
-// 直接按平台判定，并且只在真正不区分大小写的平台上断言。
+// 大小写是否等价取决于**文件系统**，不能按平台猜：
+//   - Windows 一定不区分；
+//   - Linux 一般区分；
+//   - macOS 普通卷不区分，但 GitHub 的 macos-latest runner 是**区分**的。
+// 所以用一个临时文件探针判断，只在真正不区分时才断言。
 {
-  const caseInsensitiveFs = process.platform === 'win32' || process.platform === 'darwin';
+  const caseInsensitiveFs = fsCaseInsensitive();
   if (caseInsensitiveFs) {
     check('不区分大小写的平台上，改大小写也认得出',
       Boolean(homeWorkspaceProblem(home.toUpperCase(), 'workspace-write')));

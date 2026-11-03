@@ -17,6 +17,7 @@ import {
   copyFileSync,
   cpSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   writeFileSync,
   existsSync,
@@ -1460,13 +1461,38 @@ export function formatReasoning(c, mode) {
  *
  * @returns {string|null} null 表示没问题，否则返回一段可直接抛出的说明。
  */
+/**
+ * 当前文件系统是否大小写不敏感（缓存一次）。
+ *
+ * 不能按平台猜：GitHub 的 `macos-latest` 是**大小写敏感的 APFS**，而普通 macOS
+ * 默认又不敏感；Windows 一定不敏感；Linux 一定敏感。用临时文件探针最稳。
+ */
+let caseInsensitiveCache = null;
+export function fsCaseInsensitive() {
+  if (caseInsensitiveCache !== null) return caseInsensitiveCache;
+  if (process.platform === 'win32') {
+    caseInsensitiveCache = true;
+    return true;
+  }
+  try {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-any-agent-case-'));
+    writeFileSync(join(dir, 'probe'), '');
+    caseInsensitiveCache = existsSync(join(dir, 'PROBE'));
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    caseInsensitiveCache = false;
+  }
+  return caseInsensitiveCache;
+}
+
 export function homeWorkspaceProblem(cwd, permission) {
   if (permission === 'read-only') return null;
   const home = homedir();
   if (!home) return null;
+  const caseInsensitive = process.platform === 'win32' || fsCaseInsensitive();
   const norm = (p) => {
     const r = resolve(p);
-    return process.platform === 'win32' ? r.toLowerCase() : r;
+    return caseInsensitive ? r.toLowerCase() : r;
   };
   if (norm(cwd) !== norm(home)) return null;
 
