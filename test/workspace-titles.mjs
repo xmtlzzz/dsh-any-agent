@@ -16,7 +16,7 @@
  */
 
 import { homedir, tmpdir } from 'node:os';
-import { join, sep } from 'node:path';
+import { join, parse, sep } from 'node:path';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -60,6 +60,17 @@ check('普通项目目录放行',
   }
 }
 check('带尾部分隔符也认得出', Boolean(homeWorkspaceProblem(home + sep, 'workspace-write')));
+
+// 文件系统根目录 = 整个磁盘；workspace-write 的沙箱根会跟着 cwd 走。
+{
+  const fsRoot = parse(home).root;
+  check('workspace-write 下拒绝文件系统根目录',
+    Boolean(homeWorkspaceProblem(fsRoot, 'workspace-write')));
+  check('read-only 下根目录放行（不写盘，不需要 ACL 沙箱）',
+    homeWorkspaceProblem(fsRoot, 'read-only') === null);
+  check('根目录文案说明了沙箱后果',
+    /整个磁盘|沙箱根/.test(homeWorkspaceProblem(fsRoot, 'workspace-write') || ''));
+}
 
 {
   const msg = homeWorkspaceProblem(home, 'workspace-write') || '';

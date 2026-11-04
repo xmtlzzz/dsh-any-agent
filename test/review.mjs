@@ -339,6 +339,27 @@ try {
   check('★ 过期审核记录被清理', !existsSync(oldReview), oldReview);
   check('★ 新鲜审核记录保留', existsSync(freshReview), freshReview);
   check('prune 返回 reviews_pruned', pruned.reviews_pruned >= 1, JSON.stringify(pruned));
+
+  console.log('\n[12] 路径安全：id 不能逃出状态目录');
+  await assert.rejects(() => hub.get('../../escape'), /conversation_id 非法/);
+  check('Hub.get 拒绝路径穿越 id', true);
+  assert.throws(() => hub.runSentinelPath(conv.id, '../../escape'), /run_id 非法/);
+  check('runSentinelPath 拒绝路径穿越 run_id', true);
+  await assert.rejects(
+    () => handlers.dsh_get({ conversation_id: conv.id, run_id: '../../escape' }),
+    /run_id 非法/,
+  );
+  check('dsh_get 拒绝路径穿越 run_id', true);
+  await assert.rejects(
+    () => handlers.dsh_review({ conversation_id: conv.id, run_id: '../../escape', verdict: 'pass', notes: 'x' }),
+    /run_id 非法/,
+  );
+  check('dsh_review 拒绝路径穿越 run_id', true);
+  await assert.rejects(
+    () => hub.create({ cwd: root, permission: 'workspace-write', titleHint: 'x'.repeat(201) }),
+    /title_hint/,
+  );
+  check('title_hint 超长被拒绝', true);
 } catch (e) {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

@@ -91,6 +91,12 @@ try {
   console.log('\n[6] 未知工具应返回 isError 而不是崩溃');
   const bad = await client.callTool('dsh_nope', {});
   check('未知工具 isError', bad?.isError === true);
+  const protoTool = await client.callTool('constructor', {});
+  check(
+    '原型链名字不会被当成工具',
+    protoTool?.isError === true && /未知工具/.test(McpClient.text(protoTool)),
+    McpClient.text(protoTool).slice(0, 120),
+  );
 
   console.log('\n[7] 默认日志静默（stderr 必须干净）');
   check(

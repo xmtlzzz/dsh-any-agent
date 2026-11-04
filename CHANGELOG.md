@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Path-safe ids before any state-file join.** `conversation_id` and `run_id`
+  are now validated as single path segments before building sentinel, review,
+  metadata or tombstone paths. Values containing `/`, `\`, `:`, `..` or other
+  separators are rejected instead of being passed to `path.join`; this closes
+  a traversal in `dsh_get`'s sentinel read-back and in `dsh_review`'s
+  `<state>/reviews/<conv>/<run>.review.json` write.
+- **Filesystem-root `cwd` is rejected for writable tiers.** Choosing `/` or
+  `C:\` with `workspace-write` made the sandbox root the whole disk; symlinked
+  paths are resolved before the home/root guard, so a symlink to the root or
+  home cannot bypass it.
+- **`title_hint` is capped at 200 characters** (schema + runtime). It is
+  persisted in the registry and sidecar on every turn; an unbounded value was
+  a stable disk/memory amplifier.
+- **`dsh_doctor` checks `reviews/` writability**, alongside `runs/` and
+  `locks/`.
+- **MCP tool dispatch only accepts own handler properties**, so names such as
+  `constructor`, `toString` or `__proto__` are reported as unknown tools
+  instead of reaching the prototype chain.
+
 ### Features
 
 - **Caller review (`dsh_review`).** Every completed turn now carries a

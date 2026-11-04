@@ -15,7 +15,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 
 | 套件 | 检查数 | 覆盖 |
 |---|---|---|
-| `smoke` | 30 | 握手、工具表（15 个工具）、建会话、配置、注册表纯净性 |
+| `smoke` | 31 | 握手、工具表（15 个工具）、建会话、配置、注册表纯净性、原型链工具名拒绝 |
 | `boundary` | 46 | 协议边界（重复 initialize、脏行、未知方法）、参数校验（含 read-only + 宽松审批必须拒绝、未知 provider/model、失败创建不留下写锁登记）、未知 id、游标边界、生命周期幂等、unicode |
 | `integration` | 30 | 跨进程 resume 与记忆、中断、两种插话 |
 | `async` | 21 | fire-and-forget + 事后验收，含收据/结果/哨兵里的审核单，以及一次真实 `dsh_review` 往返 |
@@ -31,7 +31,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `read-cursor` | 10 | **`dsh_read` 游标语义**：追加到已读条目里的文本必须再次返回（修订号游标，按 `seq` 替换全文）；`limit` 钳到 1..500，`0`/负数不会空转或丢尾（不花 token） |
 | `line-decoder` | 4 | **UTF-8 行分帧**：MCP/ACP 的 chunk 边界不能把中文/emoji 截成 U+FFFD；覆盖逐字节、任意 chunk、CRLF 与 EOF 残留（不花 token） |
 | `sentinel-redaction` | 19 | **哨兵落盘卫生**：`result.thinking` 被剥掉、`thinking_omitted` 始终是布尔值、`answer`/`error`/`title`/`tools_used[].input` 都走与审批相同的凭据脱敏（不花 token） |
-| `review` | 65 | **调用方审核**：默认 `advisory` 审核单带清单 + 证据 + `dsh_review` 入口；`dsh_review` 把裁决落盘并回写内存 run 与哨兵；`fail`/`partial` 必须给理由；未完成/未知 run 被拒绝；重启后仍可凭哨兵审核；队列与 `client_run_id` 重放收据也带审核单；审核记录与哨兵共享 TTL；理由、预览、证据**与清单项**都凭据脱敏（不花 token） |
+| `review` | 70 | **调用方审核**：默认 `advisory` 审核单带清单 + 证据 + `dsh_review` 入口；`dsh_review` 把裁决落盘并回写内存 run 与哨兵；`fail`/`partial` 必须给理由；未完成/未知 run 被拒绝；重启后仍可凭哨兵审核；队列与 `client_run_id` 重放收据也带审核单；审核记录与哨兵共享 TTL；理由、预览、证据**与清单项**都凭据脱敏；**路径穿越 id 在触盘前就被拒绝**（不花 token） |
 | `forget-tombstone` | 10 | **`forget` 是终态**：`release(forget=true)` 写墓碑，按 id 查询明确失败并给出恢复路径，列表不再展示；删除墓碑后回到常规“未知会话”路径（不花 token） |
 | `bootstrap-profile` | 24 | **首启 profile 在零依赖发布形态下可用**：内置 YAML 子集解析器复制路由、剥掉 `apiKey`/`headers`/字面密钥、绝不写 `defaultPreset`、幂等；用户手写文件逐字节不动（不花 token） |
 | `workspace-safety` | 23 | **数据丢失边界**：`isTempPath` 按路径分段（`tmpdir()+'Suffix'`、`/tmpfoo` 都不算临时目录）、坏 `workspace.json` 绝不覆盖、会话根不可读时绝不清空 `sessionIds`、自动清理只删测试造的会话（不花 token） |
@@ -43,7 +43,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `real-configs` | 84（7/9 配置时 66，本机 5/9 时 48） | **拿真家伙做往返**：把本机**真实**的客户端配置复制进临时目录（18 万字节、含几百个 `projects` 条目与大小写重复键的 `~/.claude.json`，238 行的 Codex TOML，Zed 的完整 `settings.json`），注册再撤销，要求每个文件**逐字节**还原；条目是否存在按**键**判断而不是裸子串；缺少 fixture 时明确打印 `skipped`，绝不假绿（不花 token） |
 | `commit-script` | 26 | 提交信息走 stdin，绝不落临时文件让 `git add -A` 卷进发布提交（不花 token） |
 | `roots` | 12 | 不传 `cwd` 时通过 MCP roots 取客户端当前项目；不支持 roots 的客户端得到可操作的报错（不花 token） |
-| `workspace-titles` | 15 | 家目录当工作区会被提前拦住；`title_hint` 与 DSH 自动标题分开返回（不花 token） |
+| `workspace-titles` | 18 | 家目录**与文件系统根目录**当工作区都会在 DSH 启动前被拦住；`title_hint` 与 DSH 自动标题分开返回（不花 token） |
 | `package-check` | 14 | `files` 白名单、零运行时依赖、Node 下限、bin shebang（不花 token） |
 | `timeout` | 38 | **超时语义**：`wait=false` 不受 `timeout_ms` 影响、`wait=true` 到期只转后台（不取消/不丢结果、`busy` 不说谎）、`timeout_ms<=0` 一直等、resume 失败会作废进程而不永久卡死、空 prompt 给清晰错误 |
 | `lock` | 79 | **写锁与抢占**：四类持有者判定、`writeMarker` 不覆盖活着的持有者、登记文件损坏/目录缺失等边界；**端到端**两实例抢锁 → 清晰报错 → 拒绝 → `force` 夺锁；**崩溃自动释放锁**、**卡死持有者无 force 自动抢占**；以及"一个回合 = 一个哨兵"的不变量（含内联回合与空闲插话） |
@@ -57,13 +57,13 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
 | `reasoning-check` | 8 | **思考可见性**：`reasoning=hide` 不返回思考正文但统计非零；`reasoning=full` 返回正文且渲染出思考段 |
 
-**`node test/run.mjs` 在本机 7/9 客户端配置时跑 1003 项（九种齐全时 1021 项）** —— smoke 30 + 离线套件 973 项（九种齐全时 991 项）。**0.5.0 加调用方审核后全部退出码 0**（2026-11-03，Windows / Node 22.19.0；本机 5/9 配置时实测 985 项）；都不需要 provider（没有 DSH 时 smoke 自动跳过建会话段）。
+**`node test/run.mjs` 在本机 7/9 客户端配置时跑 1012 项（九种齐全时 1030 项）** —— smoke 31 + 离线套件 981 项（九种齐全时 999 项）。**0.5.0 加调用方审核后全部退出码 0**（2026-11-04，Windows / Node 22.19.0；本机 5/9 配置时实测 994 项）；都不需要 provider（没有 DSH 时 smoke 自动跳过建会话段）。
 
 其中 **542 项属于客户端注册器套件**（`setup` 45、`removal-scope` 24、`config-safety` 407、`real-configs` 66；九种齐全时 560 项）—— 0.3 的活其实都在这里。
 
-需要模型的套件（`smoke` 30、`boundary` 46、`integration` 30、`async` 21、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13、`reasoning-check` 8、`shared-process` 8）合计 488 项。多数最近一次完整实测在 0.3.9；与调用方审核相关的 `smoke`/`integration`/`async`/`sentinel`/`boundary` 已在本树重跑。它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**；`shared-process` 没有 DSH 时也会 skip。
+需要模型的套件（`smoke` 31、`boundary` 46、`integration` 30、`async` 21、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13、`reasoning-check` 8、`shared-process` 8）合计 489 项。多数最近一次完整实测在 0.3.9；与调用方审核相关的 `smoke`/`integration`/`async`/`sentinel`/`boundary` 已在本树重跑。它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**；`shared-process` 没有 DSH 时也会 skip。
 
-> 三个总数是刻意分开的：`node test/run.mjs`（1003/1021）、CI 离线 job（名义 973/991，不含 smoke；hosted runner 没有客户端 fixture 时 `real-configs` 会整体跳过）、需要模型的集合（名义 488）。数字取各套件自己打印的汇总，不在这里手抄；不要把一个数字套到另一个 runner 上。
+> 三个总数是刻意分开的：`node test/run.mjs`（1012/1030）、CI 离线 job（名义 981/999，不含 smoke；hosted runner 没有客户端 fixture 时 `real-configs` 会整体跳过）、需要模型的集合（名义 489）。数字取各套件自己打印的汇总，不在这里手抄；不要把一个数字套到另一个 runner 上。
 
 ### 🧯 为什么会有 `sandbox-guard`
 

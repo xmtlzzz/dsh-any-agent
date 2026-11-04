@@ -5,7 +5,7 @@ name: tests
 # This project's suite has two halves, and only one of them can run here.
 #
 #   OFFLINE (runs in CI)
-#     smoke             protocol (30 checks without DSH)
+#     smoke             protocol (31 checks without DSH)
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     guards            env-var edge cases            40 checks
 #     prune             sentinel retention            11 checks
@@ -15,7 +15,7 @@ name: tests
 #     dispatch-tools    dispatch surface              31 checks
 #     read-cursor       dsh_read revision cursor      10 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
-#     review            caller review tickets        65 checks
+#     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            10 checks
 #     bootstrap-profile zero-dependency bootstrap     24 checks
 #     workspace-safety  data-loss boundaries          23 checks
@@ -24,7 +24,7 @@ name: tests
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     roots             cwd from MCP roots            12 checks
-#     workspace-titles  home cwd guard, title_hint    15 checks
+#     workspace-titles  home/root cwd guard, title_hint 18 checks
 #     setup             client config writer          45 checks
 #     removal-scope     --remove only touches its own   24 checks
 #     config-safety     in-place edits, format        407 checks
