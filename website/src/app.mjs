@@ -84,17 +84,25 @@ function schedule() {
   timer = setTimeout(() => { step = advance(mode, step, scenarios); render(); schedule(); }, 3100);
 }
 function formatCode(raw) {
-  const escaped = raw
+  // 单次 token 化：先 HTML 转义，再用一个 alternation 一次性包 span。
+  // 不要逐条 replace —— 先插入的 `<span class="code-str">` 会被后面的 key/boolean
+  // 正则再次匹配，产生嵌套 span，把 JSON 字符串里的 `key: value` 也误染成键。
+  const escaped = String(raw ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
   return escaped.split('\n').map(line => {
     if (line.trim().startsWith('//')) return `<span class="code-comment">${line}</span>`;
-    let res = line.replace(/"([^"]*)"/g, '<span class="code-str">"$1"</span>');
-    res = res.replace(/\b([a-zA-Z0-9_]+):(?=\s)/g, '<span class="code-key">$1</span>:');
-    res = res.replace(/\b(true|false|null)\b/g, '<span class="code-val">$1</span>');
-    res = res.replace(/(→)/g, '<span class="code-arrow">$1</span>');
-    return res;
+    return line.replace(
+      /("(?:[^"\\]|\\.)*")(?=\s*:)|("(?:[^"\\]|\\.)*")|(\b[a-zA-Z0-9_]+(?=\s*:))|(\btrue\b|\bfalse\b|\bnull\b)|(→)/g,
+      (match, quotedKey, str, key, val, arrow) => {
+        if (quotedKey) return `<span class="code-key">${quotedKey}</span>`;
+        if (str) return `<span class="code-str">${str}</span>`;
+        if (key) return `<span class="code-key">${key}</span>`;
+        if (val) return `<span class="code-val">${val}</span>`;
+        return `<span class="code-arrow">${arrow}</span>`;
+      },
+    );
   }).join('\n');
 }
 

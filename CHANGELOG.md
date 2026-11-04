@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Website
+
+- Playground: step backward, stateful connection-line status, sentinel receipt
+  pulse, and a "try interject" cross-scenario action on dispatch frames.
+- Code snippets now use one-pass syntax highlighting (quoted keys, values,
+  comments and arrows) without nested spans; the Cursor config tab and copy
+  success icon were added; `/en/` HTML is explicitly revalidated.
+- Navigation now surfaces the FAQ; English and Chinese nav order match.
+
+### Documentation
+
+- Fix the profile-creation command in `USAGE-NOTES.md` / `.en.md`: it needs
+  `dsh --profile dsh-mcp --from-default-profile acp`, and 0.5.0+ normally
+  bootstraps the profile automatically.
+- Correct the team-mode profile default in `docs/zh/limits.md` and the
+  architecture diagrams: `dsh-mcp` is default; `dsh-team` is used only when
+  team mode is on.
+- Clarify the website README's Node.js floor (website build ≥ 22; the MCP
+  server itself requires ≥ 22.15).
+
 ## [0.5.1] — 2026-11-04
 
 ### Security

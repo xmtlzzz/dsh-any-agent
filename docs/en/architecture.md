@@ -24,9 +24,9 @@ DSH ships two programmable entry points. The `sdk` profile looks simpler, but it
          │ MCP over stdio              │ newline-delimited JSON-RPC (ACP)
          ▼                             ▼
    ┌─────────────┐            ┌──────────────────────────┐
-   │dsh-any-agent│───────────▶│ dsh --profile dsh-team   │  sessions with the same
-   └─────────────┘            │                          │  (cwd, permission) share
-                              └────────────┬─────────────┘  one process (default since 0.5.0)
+   │dsh-any-agent│───────────▶│ dsh --profile dsh-mcp     │  sessions with the same
+   └─────────────┘            │ (dsh-team when team on)   │  (cwd, permission) share
+                              └────────────┬──────────────┘  one process (default since 0.5.0)
                                            │
                               ┌────────────┴─────────────┐
                               │ DSH's own tools          │ files, shell, search,
