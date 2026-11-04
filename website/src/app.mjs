@@ -23,9 +23,9 @@ const UI = {
     identityDefault: '会话身份 · 已落盘保留', identityPersisted: 'sessionId 已落盘 · 可恢复', identityPreserved: '同一会话 · 历史已保留',
     receiptWait: '等待回执', receiptSent: '派活回执已收到', receiptInterrupted: '回合已中断',
     receiptLanded: '完成哨兵已落地', receiptCollected: '结果已收取',
-    actionInterject: '插话：先补测试 ↗', actionInterrupt: '模拟进程中断 ↗',
+    actionInterject: '插话：先补测试 ↗', actionInterrupt: '模拟进程中断 ↗', actionInterjectBranch: '需求变了？试试中途插话 ↗',
     step: '步', copied: '已复制到剪贴板', selected: '已选中文本，请按 Ctrl/Cmd + C 复制',
-    terminal: '终端执行', genericPath: '客户端 MCP 配置 · mcpServers',
+    terminal: '终端执行', genericPath: '通用 JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
     conversations: ['配置加载器重构', '配置模块回归测试', '配置使用文档'],
     goals: ['完成配置模块重构。', '补齐回归测试并核对行为。', '更新使用说明与配置示例。'],
     interjectGoal: '先补回归测试，再继续配置加载器重构。',
@@ -39,9 +39,9 @@ const UI = {
     identityDefault: 'Session identity · persisted on disk', identityPersisted: 'sessionId persisted · resumable', identityPreserved: 'Same session · history preserved',
     receiptWait: 'Waiting for a receipt', receiptSent: 'Dispatch receipt received', receiptInterrupted: 'Turn interrupted',
     receiptLanded: 'Completion sentinel landed', receiptCollected: 'Result collected',
-    actionInterject: 'Interject: tests first ↗', actionInterrupt: 'Simulate process exit ↗',
+    actionInterject: 'Interject: tests first ↗', actionInterrupt: 'Simulate process exit ↗', actionInterjectBranch: 'Need to steer? Try interject ↗',
     step: 'Step', copied: 'Copied to clipboard', selected: 'Text selected; press Ctrl/Cmd + C to copy',
-    terminal: 'Terminal command', genericPath: 'Client MCP config · mcpServers',
+    terminal: 'Terminal command', genericPath: 'Generic JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
     conversations: ['Config loader refactor', 'Config module regression tests', 'Config usage docs'],
     goals: ['Finish the config module refactor.', 'Add regression tests and verify behaviour.', 'Update docs and config examples.'],
     interjectGoal: 'Add regression tests first, then continue the config loader refactor.',
@@ -75,18 +75,43 @@ function renderPlayback() {
   $('#play-label').textContent = ended ? t('play') : playing ? t('pause') : t('play');
   $('#play-pause').setAttribute('aria-pressed', String(playing && !ended));
   $('#next-step').disabled = ended;
+  const prev = $('#prev-step');
+  if (prev) prev.disabled = step === 0;
 }
 function schedule() {
   clearTimeout(timer); renderPlayback();
   if (!playing || !inView || document.hidden || isFinished(mode, step, scenarios)) return;
   timer = setTimeout(() => { step = advance(mode, step, scenarios); render(); schedule(); }, 3100);
 }
+function formatCode(raw) {
+  // 单次 token 化：先 HTML 转义，再用一个 alternation 一次性包 span。
+  // 不要逐条 replace —— 先插入的 `<span class="code-str">` 会被后面的 key/boolean
+  // 正则再次匹配，产生嵌套 span，把 JSON 字符串里的 `key: value` 也误染成键。
+  const escaped = String(raw ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return escaped.split('\n').map(line => {
+    if (line.trim().startsWith('//')) return `<span class="code-comment">${line}</span>`;
+    return line.replace(
+      /("(?:[^"\\]|\\.)*")(?=\s*:)|("(?:[^"\\]|\\.)*")|(\b[a-zA-Z0-9_]+(?=\s*:))|(\btrue\b|\bfalse\b|\bnull\b)|(→)/g,
+      (match, quotedKey, str, key, val, arrow) => {
+        if (quotedKey) return `<span class="code-key">${quotedKey}</span>`;
+        if (str) return `<span class="code-str">${str}</span>`;
+        if (key) return `<span class="code-key">${key}</span>`;
+        if (val) return `<span class="code-val">${val}</span>`;
+        return `<span class="code-arrow">${arrow}</span>`;
+      },
+    );
+  }).join('\n');
+}
+
 function render() {
   const frame = getFrame(mode, step, scenarios), scenario = scenarios[mode];
   $('#frame-title').textContent = frame.title;
   $('#frame-detail').textContent = frame.detail;
   $('#tool-name').textContent = frame.tool;
-  $('#tool-code').textContent = frame.code;
+  $('#tool-code').innerHTML = formatCode(frame.code);
   $('#tool-client').textContent = `${client} → DSH`;
   $('#step-number').textContent = String(step + 1).padStart(2, '0');
   $('#scenario-summary').textContent = scenario.summary;
@@ -111,15 +136,25 @@ function render() {
   $('#progress-fill').style.width = `${progress}%`;
   $('#progress-track').setAttribute('aria-valuenow', String(progress));
   $('#progress-track').classList.toggle('done', status === 'done');
+  const connLine = $('.connection-line');
+  if (connLine) connLine.dataset.status = frame.status;
   $('#identity-note').textContent = frame.preserved ? t('identityPreserved') : frame.persisted ? t('identityPersisted') : t('identityDefault');
-  $('.identity-card code').textContent = mode === 'parallel' ? ['conv-app', 'conv-test', 'conv-docs'][selectedJob] : 'conv-app';
+  const sessionCode = mode === 'parallel' ? ['conv-app', 'conv-test', 'conv-docs'][selectedJob] : 'conv-app';
+  $('.identity-card code').textContent = sessionCode;
+  const mobileTag = $('#mobile-session-tag');
+  if (mobileTag) mobileTag.textContent = sessionCode;
   $('.receipt-row').classList.toggle('received', Boolean(frame.sentinel));
+  $('.receipt-row').classList.toggle('landed', Boolean(frame.sentinel && !frame.collected));
   $('#receipt-icon').textContent = frame.collected ? '✓' : frame.sentinel ? '●' : step ? '↳' : '○';
   $('#receipt-label').textContent = frame.collected ? t('receiptCollected') : frame.sentinel ? t('receiptLanded') : frame.status === 'interrupted' ? t('receiptInterrupted') : step ? t('receiptSent') : t('receiptWait');
   $('#receipt-value').textContent = frame.sentinel ? `run-${mode === 'dispatch' || mode === 'parallel' ? '001' : '002'}.json` : step ? 'run_id: run-001' : 'conversation_id: conv-app';
   const action = $('#context-action');
-  action.hidden = !(mode === 'interject' && step < 2 || mode === 'resume' && step === 0);
-  action.textContent = mode === 'resume' ? t('actionInterrupt') : t('actionInterject');
+  const showBranch = mode === 'dispatch' && (step === 2 || step === 3);
+  const showAction = (mode === 'interject' && step < 2) || (mode === 'resume' && step === 0) || showBranch;
+  action.hidden = !showAction;
+  if (showAction) {
+    action.textContent = mode === 'resume' ? t('actionInterrupt') : showBranch ? t('actionInterjectBranch') : t('actionInterject');
+  }
   $('#job-stack').hidden = mode !== 'parallel';
   if (jobProgress) $$('[data-job]').forEach((button, index) => {
     button.setAttribute('aria-pressed', String(index === selectedJob));
@@ -154,8 +189,21 @@ $('#play-pause').addEventListener('click', () => {
   render(); schedule();
 });
 $('#replay').addEventListener('click', () => { step = 0; playing = !motion.matches; render(); schedule(); });
+$('#prev-step')?.addEventListener('click', () => {
+  if (step > 0) { step -= 1; playing = false; render(); schedule(); }
+});
 $('#next-step').addEventListener('click', () => { step = advance(mode, step, scenarios); playing = false; render(); schedule(); });
-$('#context-action').addEventListener('click', () => { step = mode === 'resume' ? 1 : 2; playing = !motion.matches; render(); schedule(); });
+$('#context-action').addEventListener('click', () => {
+  if (mode === 'dispatch') {
+    selectScenario('interject');
+    step = 1;
+  } else {
+    step = mode === 'resume' ? 1 : 2;
+  }
+  playing = !motion.matches;
+  render();
+  schedule();
+});
 document.addEventListener('visibilitychange', schedule);
 motion.addEventListener('change', () => { if (motion.matches) { playing = false; schedule(); } });
 if ('IntersectionObserver' in window) new IntersectionObserver(entries => { inView = entries[0].isIntersecting; schedule(); }, { threshold: .12 }).observe($('#demo-panel'));
@@ -164,6 +212,7 @@ else { inView = true; schedule(); }
 const configs = {
   codex: { path: '~/.codex/config.toml', code: '[mcp_servers.dsh-any-agent]\ncommand = "dsh-any-agent"\nargs = []\nstartup_timeout_sec = 20.0\ntool_timeout_sec = 120.0' },
   claude: { path: t('terminal'), code: 'claude mcp add dsh-any-agent -- dsh-any-agent' },
+  cursor: { path: '~/.cursor/mcp.json', code: '{\n  "mcpServers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
   generic: { path: t('genericPath'), code: '{\n  "mcpServers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
 };
 let config = 'codex';
@@ -188,8 +237,14 @@ $$('[role="tablist"]').forEach(list => {
 async function copy(text, button) {
   try {
     if (!navigator.clipboard?.writeText) throw Error('Clipboard unavailable');
-    await navigator.clipboard.writeText(text); button.classList.add('copied'); announce(t('copied'));
-    setTimeout(() => button.classList.remove('copied'), 1800);
+    await navigator.clipboard.writeText(text); button.classList.add('copied');
+    const use = button.querySelector('use');
+    if (use) use.setAttribute('href', '#check');
+    announce(t('copied'));
+    setTimeout(() => {
+      button.classList.remove('copied');
+      if (use) use.setAttribute('href', '#copy');
+    }, 1800);
   } catch {
     const pre = button.closest('.command-row')?.querySelector('code') || $('#config-code');
     const range = document.createRange(); range.selectNodeContents(pre); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);

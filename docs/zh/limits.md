@@ -17,7 +17,7 @@
 
 因为改名会打断一堆已经落盘的东西。
 
-本服务首次启动时会在 `~/.dsh/profiles/dsh-mcp/` 建一个 DSH profile。0.4.0 起团队模式默认改用 `dsh-team`（同样由本服务自动创建）；`dsh-mcp` 仍用于团队关闭或既有部署。两者共用同一套 `DSH_MCP_*` 变量与 `# dsh-mcp:managed` 标记。
+本服务首次启动时会在 `~/.dsh/profiles/dsh-mcp/` 建一个 DSH profile。0.5.0 起团队模式按需开启：开启时 profile 切到 `dsh-team`（同样由本服务自动创建），默认或关闭时仍用 `dsh-mcp`。两者共用同一套 `DSH_MCP_*` 变量与 `# dsh-mcp:managed` 标记。
 
 这个目录名被另外三样持久化标识引用着：
 

@@ -4,7 +4,7 @@
 
 ## 本地开发
 
-需要 Node.js 22 或以上，无需安装前端依赖。
+需要 Node.js ≥ 22（仅官网构建；MCP 服务本体要求 Node.js ≥ 22.15），无需安装前端依赖。
 
 ```bash
 cd website

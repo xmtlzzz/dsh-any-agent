@@ -11,7 +11,7 @@
 ### 1.1 profile 必须先建，否则连不上模型
 - **现象**：所有回合都失败，报 `no adapter registered for provider "xxx"`。
 - **原因**：本服务不自带任何 provider 配置，它驱动的是 `~/.dsh/profiles/dsh-mcp/` 这个 profile。
-- **对策**：`dsh dsh-mcp --from-default-profile acp`，然后照 [`profile-example/cordis.patch.yml`](profile-example/cordis.patch.yml) 填上你自己的 provider。
+- **对策**：`dsh --profile dsh-mcp --from-default-profile acp`，然后照 [`profile-example/cordis.patch.yml`](profile-example/cordis.patch.yml) 填上你自己的 provider。0.5.0+ 首次启动会自动 bootstrap 这个 profile，通常无需手工执行；只有在 `DSH_MCP_BOOTSTRAP=0` 或 profile 损坏时才需要。
 
 ### 1.2 ★ 最常见的坑：ACP 的模型不走 `agent-default-model`
 - **现象**：明明在 `agent-default-model` 里配了自己的 provider，会话却报 `no API key for provider route "deepseek-official"`。
