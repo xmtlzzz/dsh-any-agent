@@ -15,7 +15,7 @@
 
 </div>
 
-🧪 0.5.0 offline suite green, including caller review (memory controls, team mode and the dispatch surface are all covered) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 0.5.1 offline suite green, including caller review and input-boundary hardening · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Hand it a goal, let it write code and run scripts, steer it mid-flight, and collect the result when you are ready.
 
