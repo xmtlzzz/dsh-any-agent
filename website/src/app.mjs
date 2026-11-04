@@ -23,7 +23,7 @@ const UI = {
     identityDefault: '会话身份 · 已落盘保留', identityPersisted: 'sessionId 已落盘 · 可恢复', identityPreserved: '同一会话 · 历史已保留',
     receiptWait: '等待回执', receiptSent: '派活回执已收到', receiptInterrupted: '回合已中断',
     receiptLanded: '完成哨兵已落地', receiptCollected: '结果已收取',
-    actionInterject: '插话：先补测试 ↗', actionInterrupt: '模拟进程中断 ↗',
+    actionInterject: '插话：先补测试 ↗', actionInterrupt: '模拟进程中断 ↗', actionInterjectBranch: '需求变了？试试中途插话 ↗',
     step: '步', copied: '已复制到剪贴板', selected: '已选中文本，请按 Ctrl/Cmd + C 复制',
     terminal: '终端执行', genericPath: '通用 JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
     conversations: ['配置加载器重构', '配置模块回归测试', '配置使用文档'],
@@ -39,7 +39,7 @@ const UI = {
     identityDefault: 'Session identity · persisted on disk', identityPersisted: 'sessionId persisted · resumable', identityPreserved: 'Same session · history preserved',
     receiptWait: 'Waiting for a receipt', receiptSent: 'Dispatch receipt received', receiptInterrupted: 'Turn interrupted',
     receiptLanded: 'Completion sentinel landed', receiptCollected: 'Result collected',
-    actionInterject: 'Interject: tests first ↗', actionInterrupt: 'Simulate process exit ↗',
+    actionInterject: 'Interject: tests first ↗', actionInterrupt: 'Simulate process exit ↗', actionInterjectBranch: 'Need to steer? Try interject ↗',
     step: 'Step', copied: 'Copied to clipboard', selected: 'Text selected; press Ctrl/Cmd + C to copy',
     terminal: 'Terminal command', genericPath: 'Generic JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
     conversations: ['Config loader refactor', 'Config module regression tests', 'Config usage docs'],
@@ -75,6 +75,8 @@ function renderPlayback() {
   $('#play-label').textContent = ended ? t('play') : playing ? t('pause') : t('play');
   $('#play-pause').setAttribute('aria-pressed', String(playing && !ended));
   $('#next-step').disabled = ended;
+  const prev = $('#prev-step');
+  if (prev) prev.disabled = step === 0;
 }
 function schedule() {
   clearTimeout(timer); renderPlayback();
@@ -126,15 +128,25 @@ function render() {
   $('#progress-fill').style.width = `${progress}%`;
   $('#progress-track').setAttribute('aria-valuenow', String(progress));
   $('#progress-track').classList.toggle('done', status === 'done');
+  const connLine = $('.connection-line');
+  if (connLine) connLine.dataset.status = frame.status;
   $('#identity-note').textContent = frame.preserved ? t('identityPreserved') : frame.persisted ? t('identityPersisted') : t('identityDefault');
-  $('.identity-card code').textContent = mode === 'parallel' ? ['conv-app', 'conv-test', 'conv-docs'][selectedJob] : 'conv-app';
+  const sessionCode = mode === 'parallel' ? ['conv-app', 'conv-test', 'conv-docs'][selectedJob] : 'conv-app';
+  $('.identity-card code').textContent = sessionCode;
+  const mobileTag = $('#mobile-session-tag');
+  if (mobileTag) mobileTag.textContent = sessionCode;
   $('.receipt-row').classList.toggle('received', Boolean(frame.sentinel));
+  $('.receipt-row').classList.toggle('landed', Boolean(frame.sentinel && !frame.collected));
   $('#receipt-icon').textContent = frame.collected ? '✓' : frame.sentinel ? '●' : step ? '↳' : '○';
   $('#receipt-label').textContent = frame.collected ? t('receiptCollected') : frame.sentinel ? t('receiptLanded') : frame.status === 'interrupted' ? t('receiptInterrupted') : step ? t('receiptSent') : t('receiptWait');
   $('#receipt-value').textContent = frame.sentinel ? `run-${mode === 'dispatch' || mode === 'parallel' ? '001' : '002'}.json` : step ? 'run_id: run-001' : 'conversation_id: conv-app';
   const action = $('#context-action');
-  action.hidden = !(mode === 'interject' && step < 2 || mode === 'resume' && step === 0);
-  action.textContent = mode === 'resume' ? t('actionInterrupt') : t('actionInterject');
+  const showBranch = mode === 'dispatch' && (step === 2 || step === 3);
+  const showAction = (mode === 'interject' && step < 2) || (mode === 'resume' && step === 0) || showBranch;
+  action.hidden = !showAction;
+  if (showAction) {
+    action.textContent = mode === 'resume' ? t('actionInterrupt') : showBranch ? t('actionInterjectBranch') : t('actionInterject');
+  }
   $('#job-stack').hidden = mode !== 'parallel';
   if (jobProgress) $$('[data-job]').forEach((button, index) => {
     button.setAttribute('aria-pressed', String(index === selectedJob));
@@ -169,8 +181,21 @@ $('#play-pause').addEventListener('click', () => {
   render(); schedule();
 });
 $('#replay').addEventListener('click', () => { step = 0; playing = !motion.matches; render(); schedule(); });
+$('#prev-step')?.addEventListener('click', () => {
+  if (step > 0) { step -= 1; playing = false; render(); schedule(); }
+});
 $('#next-step').addEventListener('click', () => { step = advance(mode, step, scenarios); playing = false; render(); schedule(); });
-$('#context-action').addEventListener('click', () => { step = mode === 'resume' ? 1 : 2; playing = !motion.matches; render(); schedule(); });
+$('#context-action').addEventListener('click', () => {
+  if (mode === 'dispatch') {
+    selectScenario('interject');
+    step = 1;
+  } else {
+    step = mode === 'resume' ? 1 : 2;
+  }
+  playing = !motion.matches;
+  render();
+  schedule();
+});
 document.addEventListener('visibilitychange', schedule);
 motion.addEventListener('change', () => { if (motion.matches) { playing = false; schedule(); } });
 if ('IntersectionObserver' in window) new IntersectionObserver(entries => { inView = entries[0].isIntersecting; schedule(); }, { threshold: .12 }).observe($('#demo-panel'));

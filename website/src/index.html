@@ -75,7 +75,7 @@
         <div class="runtime-node"><div class="runtime-icon"><svg><use href="#whale"/></svg></div><strong>DeepSeek Harness</strong><span>你的长驻编码搭子</span><small id="runtime-state"><i></i> 待命</small></div>
         <div class="identity-card"><span>SESSION ID</span><code>conv-app</code><small id="identity-note">会话身份 · 已落盘保留</small></div>
       </aside>
-      <div class="task-panel"><div class="task-panel-header"><div><span class="panel-label">当前会话</span><h3 id="conversation-title">配置加载器重构</h3></div><span class="status-badge" id="status-badge" data-status="idle"><i></i> 待命</span></div>
+      <div class="task-panel"><div class="task-panel-header"><div><div class="panel-title-wrap"><span class="panel-label">当前会话</span><span class="mobile-session-tag" id="mobile-session-tag">conv-app</span></div><h3 id="conversation-title">配置加载器重构</h3></div><span class="status-badge" id="status-badge" data-status="idle"><i></i> 待命</span></div>
         <div class="task-goal"><span>任务目标</span><p id="task-goal">重构配置加载器，补齐回归测试。</p></div>
         <div class="demo-story"><div class="step-number" id="step-number">01</div><div><h4 id="frame-title">在项目里，认识你的新搭子</h4><p id="frame-detail">一个会话，一份可恢复的工作上下文。</p></div></div>
         <div class="tool-card"><div class="tool-heading"><span class="tool-dot"></span><code id="tool-name">dsh_start</code><span id="tool-client">Codex → DSH</span></div><pre><code id="tool-code">{ cwd: "/workspace/app" }</code></pre></div>
@@ -85,7 +85,7 @@
       </div>
     </div>
     <div class="event-log"><span class="log-label">EVENT LOG</span><div id="event-log" aria-label="演示事件记录"><p><span>00:00</span> 创建会话 conv-app · 工作区 /workspace/app</p></div><span class="log-indicator" aria-hidden="true"></span></div>
-    <div class="demo-footer"><div class="timeline" id="timeline" role="group" aria-label="演示步骤"></div><div class="playback-controls"><button type="button" id="replay" aria-label="重新开始演示">↺ <span>重播</span></button><button type="button" id="play-pause" aria-pressed="false"><span id="play-icon">Ⅱ</span> <span id="play-label">暂停</span></button><button type="button" id="next-step">下一步 <span>→</span></button></div></div>
+    <div class="demo-footer"><div class="timeline" id="timeline" role="group" aria-label="演示步骤"></div><div class="playback-controls"><button type="button" id="replay" aria-label="重新开始演示">↺ <span>重播</span></button><button type="button" id="play-pause" aria-pressed="false"><span id="play-icon">Ⅱ</span> <span id="play-label">暂停</span></button><button type="button" id="prev-step" disabled><span>←</span> 上一步</button><button type="button" id="next-step">下一步 <span>→</span></button></div></div>
   </div>
   <div class="scenario-explanation"><h3 id="scenario-summary">把任务交出去，你的工作继续。</h3><p id="scenario-description">拿到回执就能离开。进度随时可读，回合结束后，哨兵文件带回完整结果。</p></div>
   <p class="demo-disclosure">演示数据仅在浏览器内运行，不会连接本机 DSH 或修改文件。</p>

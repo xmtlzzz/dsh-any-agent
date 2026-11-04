@@ -75,7 +75,7 @@
         <div class="runtime-node"><div class="runtime-icon"><svg><use href="#whale"/></svg></div><strong>DeepSeek Harness</strong><span>Your long-lived coding buddy</span><small id="runtime-state"><i></i> Standby</small></div>
         <div class="identity-card"><span>SESSION ID</span><code>conv-app</code><small id="identity-note">Session identity · persisted on disk</small></div>
       </aside>
-      <div class="task-panel"><div class="task-panel-header"><div><span class="panel-label">Current session</span><h3 id="conversation-title">Config loader refactor</h3></div><span class="status-badge" id="status-badge" data-status="idle"><i></i> Standby</span></div>
+      <div class="task-panel"><div class="task-panel-header"><div><div class="panel-title-wrap"><span class="panel-label">Current session</span><span class="mobile-session-tag" id="mobile-session-tag">conv-app</span></div><h3 id="conversation-title">Config loader refactor</h3></div><span class="status-badge" id="status-badge" data-status="idle"><i></i> Standby</span></div>
         <div class="task-goal"><span>Goal</span><p id="task-goal">Refactor the config loader and add regression tests.</p></div>
         <div class="demo-story"><div class="step-number" id="step-number">01</div><div><h4 id="frame-title">Meet your new buddy in the project</h4><p id="frame-detail">One session, one recoverable working context.</p></div></div>
         <div class="tool-card"><div class="tool-heading"><span class="tool-dot"></span><code id="tool-name">dsh_start</code><span id="tool-client">Codex → DSH</span></div><pre><code id="tool-code">{ cwd: "/workspace/app" }</code></pre></div>
@@ -85,7 +85,7 @@
       </div>
     </div>
     <div class="event-log"><span class="log-label">EVENT LOG</span><div id="event-log" aria-label="Demo event log"><p><span>00:00</span> Created session conv-app · workspace /workspace/app</p></div><span class="log-indicator" aria-hidden="true"></span></div>
-    <div class="demo-footer"><div class="timeline" id="timeline" role="group" aria-label="Demo steps"></div><div class="playback-controls"><button type="button" id="replay" aria-label="Restart the demo">↺ <span>Replay</span></button><button type="button" id="play-pause" aria-pressed="false"><span id="play-icon">Ⅱ</span> <span id="play-label">Pause</span></button><button type="button" id="next-step">Next <span>→</span></button></div></div>
+    <div class="demo-footer"><div class="timeline" id="timeline" role="group" aria-label="Demo steps"></div><div class="playback-controls"><button type="button" id="replay" aria-label="Restart the demo">↺ <span>Replay</span></button><button type="button" id="play-pause" aria-pressed="false"><span id="play-icon">Ⅱ</span> <span id="play-label">Pause</span></button><button type="button" id="prev-step" disabled><span>←</span> Prev</button><button type="button" id="next-step">Next <span>→</span></button></div></div>
   </div>
   <div class="scenario-explanation"><h3 id="scenario-summary">Hand off the task. Your work continues.</h3><p id="scenario-description">Leave with a receipt. Progress is always readable, and when the turn ends the sentinel file brings the full result.</p></div>
   <p class="demo-disclosure">The demo runs entirely in your browser. It does not connect to your local DSH or modify files.</p>
