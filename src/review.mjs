@@ -19,6 +19,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DEFAULT_REVIEW, REVIEWS_DIR, REVIEW_MODES } from './config.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
+import { assertSafeId } from './ids.mjs';
 
 /** dsh_review 允许的裁决。 */
 export const REVIEW_VERDICTS = ['pass', 'partial', 'fail'];
@@ -45,6 +46,8 @@ export function reviewIdForRun(runId) {
 
 /** 审核记录的落盘路径（按会话分目录，与哨兵同样的命名空间思路）。 */
 export function reviewFilePath(conversationId, runId) {
+  assertSafeId(conversationId, 'conversation_id');
+  assertSafeId(runId, 'run_id');
   return join(REVIEWS_DIR, conversationId, `${runId}.review.json`);
 }
 

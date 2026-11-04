@@ -20,6 +20,7 @@ import {
   REASONING_EFFORTS,
   REASONING_MODES,
   REVIEW_MODES,
+  REVIEWS_DIR,
   RUNS_DIR,
   SHARED_PROCESS,
   STATE_FILE,
@@ -96,8 +97,9 @@ export const TOOL_DEFS = [
         },
         title_hint: {
           type: 'string',
+          maxLength: 200,
           description:
-            '可读的会话标签。注意 DSH 自己的标题是首条消息的截断前缀（约 13–15 字），会优先显示；' +
+            '可读的会话标签（最长 200 字）。注意 DSH 自己的标题是首条消息的截断前缀（约 13–15 字），会优先显示；' +
             '这里给的值不会被覆盖，而是在 dsh_get / dsh_start 里作为「标题提示」一并返回。',
         },
         reasoning_effort: {
@@ -176,6 +178,7 @@ export const TOOL_DEFS = [
         },
         client_run_id: {
           type: 'string',
+          maxLength: 128,
           description:
             '调用方生成的幂等键（≤128 字符，作用域=本会话）。重复提交同一个键不会创建第二个 run，' +
             '而是返回首次 run 的结果或收据（replayed=true）。用于"响应在传输层丢了、想安全重发"的场景。',
@@ -240,9 +243,10 @@ export const TOOL_DEFS = [
     inputSchema: S(
       {
         conversation_id: CONV_ID,
-        run_id: { type: 'string', description: 'dsh_send 返回的 run_id；不传则取最近一次回合。' },
+        run_id: { type: 'string', maxLength: 200, description: 'dsh_send 返回的 run_id；不传则取最近一次回合。' },
         client_run_id: {
           type: 'string',
+          maxLength: 128,
           description: '按调用方幂等键取 run（与 run_id 二选一；只对仍在内存里的 run 有效，最多最近 20 条）。',
         },
         max_chars: {
@@ -266,7 +270,7 @@ export const TOOL_DEFS = [
     inputSchema: S(
       {
         conversation_id: CONV_ID,
-        run_id: { type: 'string', description: '要审核的那次派活（审核单里的 run_id）。' },
+        run_id: { type: 'string', maxLength: 200, description: '要审核的那次派活（审核单里的 run_id）。' },
         verdict: {
           type: 'string',
           enum: REVIEW_VERDICTS,
@@ -312,6 +316,7 @@ export const TOOL_DEFS = [
         },
         client_run_id: {
           type: 'string',
+          maxLength: 128,
           description: '调用方生成的幂等键（≤128 字符，作用域=本会话）。重复提交返回首次的 run，不会重复插话。',
         },
       },
@@ -414,7 +419,7 @@ export const TOOL_DEFS = [
       {
         conversation_id: CONV_ID,
         action: { type: 'string', enum: ['list', 'remove', 'update', 'promote'] },
-        run_id: { type: 'string', description: 'remove / update / promote 必填' },
+        run_id: { type: 'string', maxLength: 200, description: 'remove / update / promote 必填' },
         text: { type: 'string', description: 'update 时的新文本' },
       },
       ['conversation_id', 'action'],
@@ -1321,6 +1326,7 @@ export function createHandlers(hub, opts = {}) {
 
       for (const [id, dir] of [
         ['runs_dir', RUNS_DIR],
+        ['reviews_dir', REVIEWS_DIR],
         ['locks_dir', LOCKS_DIR],
       ]) {
         try {
