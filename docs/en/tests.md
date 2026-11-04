@@ -62,9 +62,9 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 
 That is **542 assertions in the client-registration suites alone** (`setup` 45, `removal-scope` 24, `config-safety` 407, `real-configs` 66; 560 with all nine fixtures), which is where the 0.3 work actually is.
 
-The model-backed suites (`smoke` 30, `boundary` 46, `integration` 30, `async` 21, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8) total 480. Most were last measured in full on 0.3.9; the suites touched by caller review (`smoke`, `integration`, `async`, `sentinel`, `boundary`) were re-run on this tree. They need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`).
+The model-backed suites (`smoke` 30, `boundary` 46, `integration` 30, `async` 21, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8, `shared-process` 8) total 488. Most were last measured in full on 0.3.9; the suites touched by caller review (`smoke`, `integration`, `async`, `sentinel`, `boundary`) were re-run on this tree. They need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`); `shared-process` also skips without DSH.
 
-> Three different totals are intentional: `node test/run.mjs` (1003/1021), the CI offline job (nominal 973/991, no smoke; hosted runners without client fixtures skip `real-configs` entirely), and the model-backed set (480 nominal). Counts are the numbers each suite prints itself; don't use one number for a different runner.
+> Three different totals are intentional: `node test/run.mjs` (1003/1021), the CI offline job (nominal 973/991, no smoke; hosted runners without client fixtures skip `real-configs` entirely), and the model-backed set (488 nominal). Counts are the numbers each suite prints itself; don't use one number for a different runner.
 
 ### 🧯 Why `sandbox-guard` exists
 

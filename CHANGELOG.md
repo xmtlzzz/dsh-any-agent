@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused. Default `advisory`: the ticket is loud but **does not block** the
   next `dsh_send`, and a failed review is not fed back to DSH automatically.
   Set `DSH_MCP_REVIEW=off` (or pass `review: "off"`) to disable tickets.
-  Review records share the sentinel's 7-day TTL and credential redaction.
+  Review records share the sentinel's 7-day TTL and credential redaction,
+  including checklist items interpolated from `result.error` (Codex review
+  finding on #2).
 
 ## [0.5.0] — 2026-11-03
 

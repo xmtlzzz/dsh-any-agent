@@ -255,7 +255,7 @@ Profile = `~/.dsh/profiles/<name>/`，由 `package.json` 的 `dsh.profile.bundle
 - **审核单形状**：`{review_id, mode, status, run_id, prompt_preview, checklist, evidence, submit:{tool:"dsh_review", arguments}, instructions}`。清单随回合形状变化（有没有改工作区、有没有错误、用了哪些工具）；`evidence` 只放核对所需的最小事实（stop_reason、error、changed_files、工具名）。
 - **默认 advisory，不阻塞**：这是刻意的产品选择。强制门禁会打断"审核失败 → 派修复回合"的自然流程，也会破坏既有调用方；advisory 只把审核请求显性化。`review=off` 可按会话/单次派活关闭；即使 off，`dsh_review` 仍可对旧 run 显式补审核。
 - **裁决落盘与回写**：`reviews/<会话id>/<run_id>.review.json` 原子写入（tmp + rename，唯一 tmp 名），含裁决、理由/findings、清单与证据。`submitReview` 依次从内存 run → 哨兵 → 已有审核记录取事实，所以服务重启、run 被挤出内存后仍可审核。提交后 **原子重写哨兵里的 `result.review`**，避免异步调用方下次读文件看到与事实相反的 `pending`。
-- **隐私**：审核单不含思考正文；理由、findings、任务预览与证据在落盘前走 `redact.sanitizeApprovalContext`（与审批上下文同一套规则）。审核记录与哨兵共用 `DSH_MCP_SENTINEL_TTL_MS` 的 7 天清理。
+- **隐私**：审核单不含思考正文；理由、findings、任务预览、证据**与每个 checklist 项**在落盘前都走 `redact.sanitizeApprovalContext`（与审批上下文同一套规则）——checklist 会拼接 `result.error`，漏掉它就会成为第二个明文泄漏点。审核记录与哨兵共用 `DSH_MCP_SENTINEL_TTL_MS` 的 7 天清理。
 - **失败语义**：fail/partial 必须有 notes 或 findings；对 `running`/`queued` 的 run 提交会被拒绝；写盘失败直接抛错（审核本身就是这次操作，静默失败比报错更糟）。
 
 **B10 设计要点（写锁与抢占）**
