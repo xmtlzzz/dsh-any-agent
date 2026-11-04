@@ -5,14 +5,17 @@ name: tests
 # This project's suite has two halves, and only one of them can run here.
 #
 #   OFFLINE (runs in CI)
-#     smoke             protocol (16 checks without DSH)
+#     smoke             protocol (30 checks without DSH)
 #     line-decoder      UTF-8 chunk boundaries          4 checks
-#     guards            env-var edge cases            31 checks
+#     guards            env-var edge cases            40 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          27 checks
+#     failure-terminal  terminal state on failure     11 checks
+#     shared-host       shared process host           25 checks
+#     dispatch-tools    dispatch surface              31 checks
 #     read-cursor       dsh_read revision cursor      10 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
-#     review            caller review tickets        63 checks
+#     review            caller review tickets        65 checks
 #     forget-tombstone  forget is terminal            10 checks
 #     bootstrap-profile zero-dependency bootstrap     24 checks
 #     workspace-safety  data-loss boundaries          23 checks
@@ -25,7 +28,7 @@ name: tests
 #     setup             client config writer          45 checks
 #     removal-scope     --remove only touches its own   24 checks
 #     config-safety     in-place edits, format        407 checks
-#     real-configs      real config round-trip        48 checks (5 fixtures)
+#     real-configs      real config round-trip        skips without client fixtures
 #     package-check     publishability                14 checks
 #     package job       pack -> install -> --version
 #     website job       build + 29 site/a11y tests + bilingual pages
@@ -36,7 +39,7 @@ name: tests
 #   NEEDS DSH (does NOT run in CI)
 #     boundary, integration, async, sentinel, timeout, lock, cycle,
 #     concurrency, capability, workspace-effect, acceptance, multi,
-#     permission, list, reasoning-check
+#     permission, list, reasoning-check, shared-process
 #
 #     Each spawns a real DSH process. smoke is in the offline job: it runs
 #     handshake/tools/list/unknown-tool checks and skips session sections when
@@ -112,6 +115,18 @@ jobs:
       - name: approval-details (credential redaction)
         env: { DSH_MCP_LOG: silent }
         run: node test/approval-details.mjs
+
+      - name: failure-terminal (terminal state on failure)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/failure-terminal.mjs
+
+      - name: shared-host (shared process host)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/shared-host.mjs
+
+      - name: dispatch-tools (dsh_inbox, idempotency, queue)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/dispatch-tools.mjs
 
       - name: read-cursor (revision cursor semantics)
         env: { DSH_MCP_LOG: silent }

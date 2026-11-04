@@ -61,9 +61,9 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 
 其中 **542 项属于客户端注册器套件**（`setup` 45、`removal-scope` 24、`config-safety` 407、`real-configs` 66；九种齐全时 560 项）—— 0.3 的活其实都在这里。
 
-需要模型的套件（`smoke` 30、`boundary` 46、`integration` 30、`async` 21、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13、`reasoning-check` 8）合计 480 项。多数最近一次完整实测在 0.3.9；与调用方审核相关的 `smoke`/`integration`/`async`/`sentinel`/`boundary` 已在本树重跑。它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**。
+需要模型的套件（`smoke` 30、`boundary` 46、`integration` 30、`async` 21、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13、`reasoning-check` 8、`shared-process` 8）合计 488 项。多数最近一次完整实测在 0.3.9；与调用方审核相关的 `smoke`/`integration`/`async`/`sentinel`/`boundary` 已在本树重跑。它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**；`shared-process` 没有 DSH 时也会 skip。
 
-> 三个总数是刻意分开的：`node test/run.mjs`（1003/1021）、CI 离线 job（名义 973/991，不含 smoke；hosted runner 没有客户端 fixture 时 `real-configs` 会整体跳过）、需要模型的集合（名义 480）。数字取各套件自己打印的汇总，不在这里手抄；不要把一个数字套到另一个 runner 上。
+> 三个总数是刻意分开的：`node test/run.mjs`（1003/1021）、CI 离线 job（名义 973/991，不含 smoke；hosted runner 没有客户端 fixture 时 `real-configs` 会整体跳过）、需要模型的集合（名义 488）。数字取各套件自己打印的汇总，不在这里手抄；不要把一个数字套到另一个 runner 上。
 
 ### 🧯 为什么会有 `sandbox-guard`
 
