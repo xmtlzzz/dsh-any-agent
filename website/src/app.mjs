@@ -25,7 +25,7 @@ const UI = {
     receiptLanded: '完成哨兵已落地', receiptCollected: '结果已收取',
     actionInterject: '插话：先补测试 ↗', actionInterrupt: '模拟进程中断 ↗',
     step: '步', copied: '已复制到剪贴板', selected: '已选中文本，请按 Ctrl/Cmd + C 复制',
-    terminal: '终端执行', genericPath: '客户端 MCP 配置 · mcpServers',
+    terminal: '终端执行', genericPath: '通用 JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
     conversations: ['配置加载器重构', '配置模块回归测试', '配置使用文档'],
     goals: ['完成配置模块重构。', '补齐回归测试并核对行为。', '更新使用说明与配置示例。'],
     interjectGoal: '先补回归测试，再继续配置加载器重构。',
@@ -41,7 +41,7 @@ const UI = {
     receiptLanded: 'Completion sentinel landed', receiptCollected: 'Result collected',
     actionInterject: 'Interject: tests first ↗', actionInterrupt: 'Simulate process exit ↗',
     step: 'Step', copied: 'Copied to clipboard', selected: 'Text selected; press Ctrl/Cmd + C to copy',
-    terminal: 'Terminal command', genericPath: 'Client MCP config · mcpServers',
+    terminal: 'Terminal command', genericPath: 'Generic JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
     conversations: ['Config loader refactor', 'Config module regression tests', 'Config usage docs'],
     goals: ['Finish the config module refactor.', 'Add regression tests and verify behaviour.', 'Update docs and config examples.'],
     interjectGoal: 'Add regression tests first, then continue the config loader refactor.',
@@ -81,12 +81,27 @@ function schedule() {
   if (!playing || !inView || document.hidden || isFinished(mode, step, scenarios)) return;
   timer = setTimeout(() => { step = advance(mode, step, scenarios); render(); schedule(); }, 3100);
 }
+function formatCode(raw) {
+  const escaped = raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return escaped.split('\n').map(line => {
+    if (line.trim().startsWith('//')) return `<span class="code-comment">${line}</span>`;
+    let res = line.replace(/"([^"]*)"/g, '<span class="code-str">"$1"</span>');
+    res = res.replace(/\b([a-zA-Z0-9_]+):(?=\s)/g, '<span class="code-key">$1</span>:');
+    res = res.replace(/\b(true|false|null)\b/g, '<span class="code-val">$1</span>');
+    res = res.replace(/(→)/g, '<span class="code-arrow">$1</span>');
+    return res;
+  }).join('\n');
+}
+
 function render() {
   const frame = getFrame(mode, step, scenarios), scenario = scenarios[mode];
   $('#frame-title').textContent = frame.title;
   $('#frame-detail').textContent = frame.detail;
   $('#tool-name').textContent = frame.tool;
-  $('#tool-code').textContent = frame.code;
+  $('#tool-code').innerHTML = formatCode(frame.code);
   $('#tool-client').textContent = `${client} → DSH`;
   $('#step-number').textContent = String(step + 1).padStart(2, '0');
   $('#scenario-summary').textContent = scenario.summary;
@@ -164,6 +179,7 @@ else { inView = true; schedule(); }
 const configs = {
   codex: { path: '~/.codex/config.toml', code: '[mcp_servers.dsh-any-agent]\ncommand = "dsh-any-agent"\nargs = []\nstartup_timeout_sec = 20.0\ntool_timeout_sec = 120.0' },
   claude: { path: t('terminal'), code: 'claude mcp add dsh-any-agent -- dsh-any-agent' },
+  cursor: { path: '~/.cursor/mcp.json', code: '{\n  "mcpServers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
   generic: { path: t('genericPath'), code: '{\n  "mcpServers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
 };
 let config = 'codex';
@@ -188,8 +204,14 @@ $$('[role="tablist"]').forEach(list => {
 async function copy(text, button) {
   try {
     if (!navigator.clipboard?.writeText) throw Error('Clipboard unavailable');
-    await navigator.clipboard.writeText(text); button.classList.add('copied'); announce(t('copied'));
-    setTimeout(() => button.classList.remove('copied'), 1800);
+    await navigator.clipboard.writeText(text); button.classList.add('copied');
+    const use = button.querySelector('use');
+    if (use) use.setAttribute('href', '#check');
+    announce(t('copied'));
+    setTimeout(() => {
+      button.classList.remove('copied');
+      if (use) use.setAttribute('href', '#copy');
+    }, 1800);
   } catch {
     const pre = button.closest('.command-row')?.querySelector('code') || $('#config-code');
     const range = document.createRange(); range.selectNodeContents(pre); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
