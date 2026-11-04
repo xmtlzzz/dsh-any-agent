@@ -235,8 +235,10 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
       case 'tools/call': {
         const name = params?.name;
         const args = params?.arguments ?? {};
-        const fn = handlers[name];
-        if (!fn) {
+        // 只认 handlers 自己的属性：`constructor` / `toString` / `__proto__` 之类的
+        // 原型链名字不能被当成工具调用。
+        const fn = Object.hasOwn(handlers, name) ? handlers[name] : null;
+        if (typeof fn !== 'function') {
           ok(id, { content: [{ type: 'text', text: `未知工具: ${name}` }], isError: true });
           return;
         }

@@ -19,6 +19,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
   existsSync,
   renameSync,
@@ -26,7 +27,7 @@ import {
   rmSync,
   readdirSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import {
@@ -65,6 +66,7 @@ import {
   writeReviewRecord,
 } from './review.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
+import { assertSafeId } from './ids.mjs';
 import { AcpProcess } from './acp.mjs';
 import { SessionHost } from './host.mjs';
 import { rssMb } from './procstat.mjs';
@@ -1418,6 +1420,7 @@ export class Conversation {
     if (typeof runId !== 'string' || runId.trim() === '') {
       throw new Error('run_id 不能为空');
     }
+    assertSafeId(runId, 'run_id');
     if (!REVIEW_VERDICTS.includes(verdict)) {
       throw new Error(`verdict 必须是 ${REVIEW_VERDICTS.join(' | ')} 之一`);
     }
@@ -1752,9 +1755,26 @@ export function homeWorkspaceProblem(cwd, permission) {
   if (!home) return null;
   const caseInsensitive = process.platform === 'win32' || fsCaseInsensitive();
   const norm = (p) => {
-    const r = resolve(p);
+    // 解析 symlink：一个指向家目录/根目录的软链不能绕过这两个边界。
+    // 路径不存在时（测试里的 "some-project"）回落到 resolve。
+    let r;
+    try {
+      r = realpathSync(p);
+    } catch {
+      r = resolve(p);
+    }
     return caseInsensitive ? r.toLowerCase() : r;
   };
+  // 根目录 = 整个磁盘。workspace-write 的沙箱根会跟着 cwd 走，
+  // 于是“只写工作区”退化成“可写全盘”，必须显式要求 danger-full-access。
+  const fsRoot = resolve(parse(cwd).root);
+  if (norm(cwd) === norm(fsRoot)) {
+    return [
+      'cwd 不能是文件系统根目录: ' + cwd,
+      '  workspace-write 的沙箱根会变成整个磁盘，等于绕过“只写工作区”的权限档。',
+      '  请传一个具体的项目目录；确实要全盘访问请显式用 permission=danger-full-access。',
+    ].join('\n');
+  }
   if (norm(cwd) !== norm(home)) return null;
 
   const temp = tmpdir();
@@ -1873,6 +1893,8 @@ export class Hub {
 
   /** 某个 run 的完成哨兵文件路径。 */
   runSentinelPath(conversationId, runId) {
+    assertSafeId(conversationId, 'conversation_id');
+    assertSafeId(runId, 'run_id');
     return join(RUNS_DIR, conversationId, `${runId}.json`);
   }
 
@@ -1965,6 +1987,8 @@ export class Hub {
   }
 
   async get(id) {
+    // 会话 id 会参与 meta/tombstone/会话存储的路径拼接；先挡住路径分隔符与 `..`。
+    assertSafeId(id, 'conversation_id');
     // ★ forget 是终态：墓碑存在时，任何按 id 的查询都必须明确失败，
     //   否则 DSH 会话存储里的记录会让它悄悄复活（"forget 不持久"）。
     if (isForgotten(id)) {
@@ -2145,6 +2169,12 @@ export class Hub {
     }
     if (!PERMISSION_TIERS.includes(permission)) {
       throw new Error(`permission 必须是 ${PERMISSION_TIERS.join(' | ')} 之一`);
+    }
+    // title_hint 会写进注册表与侧车，每一轮 save() 都会重复落盘；不设上限就是一个
+    // 稳定的磁盘/内存放大点（调用方可以传任意长度）。可读标签 200 字足够。
+    if (titleHint !== undefined && titleHint !== null) {
+      if (typeof titleHint !== 'string') throw new Error('title_hint 必须是字符串');
+      if (titleHint.length > 200) throw new Error('title_hint 最长 200 字符');
     }
     // ★ 0.5.0：danger-full-access 不再默认可用。它把整机写权限交给调用方，
     //   而本服务可能被任何 MCP 客户端拉起；必须由机器所有者显式放行。

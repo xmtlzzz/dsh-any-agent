@@ -12,6 +12,12 @@
 
 **`read-only` is enforced, not merely a default**: it always runs with `auto-deny`; passing `auto-allow` or `ask` for a read-only conversation is rejected at `dsh_start`, and the approval layer refuses any permission request from a read-only conversation. After create/resume the server reads back the session's recorded tier; for read-only it **fails closed** if the projection cache has no permission record within the DSH flush window, rather than relying on the approval layer alone. Without that, a profile `defaultPreset` plus a permissive approval policy could let a write through (found by the adversarial audit).
 
+## 🧷 Input boundaries
+
+- **`conversation_id` / `run_id` are path-safe ids.** They are used in sentinel, review, metadata and tombstone paths; the server accepts only a single segment (letters/digits/`._-`, max 200) and rejects separators or `..` before any `join()`. This covers `dsh_get`'s sentinel read-back and `dsh_review`'s `<state>/reviews/<conv>/<run>.review.json` write.
+- **`cwd` cannot be the filesystem root for writable tiers.** `workspace-write` at `/` or `C:\` would make the sandbox root the whole disk; the home/root guard resolves symlinks first, so a symlink to the root or home is rejected too. `danger-full-access` remains an explicit opt-in.
+- **`title_hint` is capped at 200 characters** (schema + runtime), because it is persisted in the registry and sidecar on every turn.
+
 ## 🪟 Workspace visibility in the DSH GUI
 
 Two different things — don't confuse them:
