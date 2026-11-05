@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`workspace_changed` no longer misses real edits.** The turn snapshot now
+  fingerprints every `git status` entry (status line + per-path size/mtime,
+  with untracked directories expanded recursively), not just the first 40
+  status lines. A file that was already dirty and changed again, or any change
+  past the 40th entry, is detected; `changed_files` and `entries` keep their
+  old meaning (`entries` is still display-truncated to 40).
+- **`gitStatus` is asynchronous.** Turn start/end snapshots now use `execFile`
+  instead of `spawnSync`, so a large repository's `git status` (up to 8 s) no
+  longer blocks the shared MCP event loop, ACP messages, approvals or other
+  conversations. `busy` is still set before any await; turn finalization keeps
+  releasing `busy`, waking interject waiters and scheduling the drain before
+  waiting for git, and only writes the sentinel after the result (including
+  `workspace_changed` and the review ticket) is complete.
+- `--no-optional-locks` is passed as a **global** git option (before the
+  subcommand); previously `git status ... --no-optional-locks` exited 129, so
+  every real snapshot was `null` and `workspace_changed` stayed false.
+
 ### Website
 
 - Playground: step backward, stateful connection-line status, sentinel receipt

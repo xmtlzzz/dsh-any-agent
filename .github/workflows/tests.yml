@@ -21,6 +21,7 @@ name: tests
 #     workspace-safety  data-loss boundaries          23 checks
 #     permission-adopt  no silent privilege escalation 17 checks
 #     state-safety      state/sentinel/lock storage   26 checks
+#     workspace-snapshot workspace_changed full fingerprint  18 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     roots             cwd from MCP roots            12 checks
@@ -159,6 +160,12 @@ jobs:
       - name: state-safety (state/sentinel/lock storage)
         env: { DSH_MCP_LOG: silent }
         run: node test/state-safety.mjs
+
+      # workspace_changed：比较必须覆盖全量条目（同一状态行但内容变了、
+      # 第 41 条之后的改动、未跟踪目录内部），且 gitStatus 不能阻塞事件循环。
+      - name: workspace-snapshot (full fingerprint, async gitStatus)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/workspace-snapshot.mjs
 
       # Guards the sandbox itself, not the writer. A test suite that points its
       # "sandbox" at the real user profile deletes real data while reporting

@@ -24,12 +24,15 @@ import {
   existsSync,
   renameSync,
   statSync,
+  lstatSync,
   rmSync,
   readdirSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { promisify } from 'node:util';
 import {
   ALLOW_FULL_ACCESS,
   APPROVAL_POLICIES,
@@ -975,17 +978,22 @@ export class Conversation {
     runRecord.status = 'running';
     runRecord.started_at = now();
     this.currentRun = runRecord;
-    const before = gitStatus(this.cwd);
+    let before = null;
     let proc;
     // ★ `busy` 必须在 ensureAlive **之前**置位。
     //   否则"把进程拉起来"这段（spawn + initialize + resume，可能好几秒）是一个**裸奔窗口**：
     //     ① reaper 看到 busy=false 且 lastUsedAt 还是上一轮的时刻（已过期），会把这个**刚拉起来**
     //        的进程当空闲回收掉 → 紧接着 resume 就报"DSH 进程未运行"（test/cycle.mjs 实测抓到）；
     //     ② 第二个 dsh_send 同样能通过 busy 检查，于是为同一会话再拉一个子进程 → 互相撞锁 + 泄漏。
+    //   ★ 同理，git 快照的 await 也必须放在 busy 置位**之后**（见下面的 Promise.all）。
     this.busy = true;
     this.lastUsedAt = now();
+    const beforePromise = gitStatus(this.cwd);
     try {
-      proc = await this.ensureAlive();
+      // 快照与拉起进程并行：快照只是读盘，不改变生命周期，早取晚取语义一致。
+      const [beforeSnap, liveProc] = await Promise.all([beforePromise, this.ensureAlive()]);
+      before = beforeSnap;
+      proc = liveProc;
     } catch (e) {
       // 起不来（撞写锁 / 会话损坏）就**必须放开 busy**，否则这个会话被永久占住；
       // 同时别留一条永远 "running" 的幽灵记录。
@@ -1038,102 +1046,134 @@ export class Conversation {
       return result;
     };
 
-    /** 回合真正结束时收尾。无论有没有人在等，都**只执行一次**。 */
+    /**
+     * 回合真正结束时收尾。无论有没有人在等，都**只执行一次**。
+     *
+     * 现在是异步的（git 快照走异步子进程），但保持了三个不变量：
+     *   1. 幂等：重复调用返回同一个 Promise，不会重复写哨兵；
+     *   2. 不拖累生命周期：`busy=false`、唤醒 idleWaiters、#scheduleDrain
+     *      都在**第一个 await 之前**同步完成，git 最慢 8s 也影响不到 reaper/插话；
+     *   3. 防弹：内部异常一律兜底成 error 结果 + 哨兵，返回的 Promise 不会 reject
+     *      （wait=false 的调用方不会 await 它，不能让 unhandled rejection 杀掉服务）。
+     */
+    let finalizePromise = null;
     const finalize = (stopReason, failure) => {
-      if (settled) return runRecord.result;
+      if (finalizePromise) return finalizePromise;
       settled = true;
-      // ★ 收尾本身也必须防弹：它跑在 ACP 的异步回调里，一旦抛出去就是 unhandled
-      //   rejection —— Node ≥15 会直接杀掉进程，连带丢掉所有会话的活进程；
-      //   而且调用方会永远等不到哨兵。所以出错也要落一个"收尾异常"的哨兵。
-      try {
-        this.busy = false;
-        if (this.currentRun === runRecord) this.currentRun = null;
-        this.collector = null;
-        this.currentTool = null;
-        // 回合结束后，任何仍挂着的审批都已失效：统一取消并清空，避免状态里
-        // 留下一个 dsh_approval_decide 只会回"没有待决审批"的幽灵。
-        for (const [, p] of this.pendingApprovals) {
-          try {
-            p.resolve({ outcome: { outcome: 'cancelled' } });
-          } catch {}
+      finalizePromise = (async () => {
+        // ★ 先启动 after 快照：调用 gitStatus 时子进程立刻 spawn，但**不 await**；
+        //   这样 snapshot 的时间点仍贴近回合结束，而 busy 释放/唤醒不必等 git。
+        const afterPromise = gitStatus(this.cwd);
+        try {
+          this.busy = false;
+          if (this.currentRun === runRecord) this.currentRun = null;
+          this.collector = null;
+          this.currentTool = null;
+          // 回合结束后，任何仍挂着的审批都已失效：统一取消并清空，避免状态里
+          // 留下一个 dsh_approval_decide 只会回"没有待决审批"的幽灵。
+          for (const [, p] of this.pendingApprovals) {
+            try {
+              p.resolve({ outcome: { outcome: 'cancelled' } });
+            } catch {}
+          }
+          this.pendingApprovals.clear();
+          this.pushOut('turn', `第 ${this.currentTurn} 轮结束（${stopReason ?? 'unknown'}）`, {
+            phase: 'end',
+            stop_reason: stopReason,
+            error: failure ?? undefined,
+          });
+          this.turnCount += 1;
+          this.lastUsedAt = now();
+          this.#hub.save();
+          // 唤醒所有"等本轮结束"的插话请求（busy 已置 false，它们可以安全地发下一轮）
+          const waiters = this.idleWaiters;
+          this.idleWaiters = [];
+          for (const w of waiters) w();
+          this.#scheduleDrain();
+          // 到这里才允许被 git 拖慢；结果/审核单/哨兵必须等快照完成后再落。
+          const after = await afterPromise;
+          const result = {
+            conversation_id: this.id,
+            run_id: runRecord.run_id,
+            stop_reason: stopReason,
+            error: failure,
+            answer: c.answer,
+            thinking: formatReasoning(c, reasoning),
+            thinking_stats: {
+              hidden: reasoning === 'hide' || reasoning === 'marker',
+              chars: c.reasoning.length,
+              chunks: c.reasoningChunks,
+              ms: c.reasoningStartedAt ? now() - c.reasoningStartedAt : 0,
+            },
+            tools_used: [...c.tools.values()],
+            usage: c.usage,
+            workspace_changed: !sameWorkspaceSnapshot(before, after),
+            diff_stat: after,
+            elapsed_ms: now() - t0,
+          };
+          attachReview(result);
+          runRecord.ended_at = now();
+          runRecord.elapsed_ms = result.elapsed_ms;
+          runRecord.status = failure ? 'error' : stopReason === 'cancelled' ? 'cancelled' : 'done';
+          runRecord.result = result;
+          // ★ 无条件写哨兵：**一个回合 = 一个哨兵文件**，没有例外。
+          //   之前只在"调用方没在原地等"时才写，于是插话那一轮没有哨兵 —— 调用方的
+          //   等待逻辑（等文件出现）就永远空等，即使 run 早已 status=done（真实事故）。
+          //   统一规则也消除了整类"有 run_id 却没有哨兵"的坑。
+          const sentinelFile = this.#hub.writeRunSentinel(this.id, runRecord);
+          result.sentinel_file = sentinelFile ?? this.#hub.runSentinelPath(this.id, runRecord.run_id);
+          if (!sentinelFile) result.sentinel_error = runRecord.sentinel_error ?? '哨兵文件写入失败';
+          return result;
+        } catch (e) {
+          this.#hub.log.info(`[conv ${this.id}] 回合收尾异常（已兜底）: ${e.message}`);
+          this.busy = false;
+          if (this.currentRun === runRecord) this.currentRun = null;
+          this.collector = null;
+          const waiters = this.idleWaiters;
+          this.idleWaiters = [];
+          for (const w of waiters) w();
+          this.#scheduleDrain();
+          const fallback = {
+            conversation_id: this.id,
+            run_id: runRecord.run_id,
+            stop_reason: 'error',
+            error: `回合收尾异常: ${e.message}`,
+            answer: c.answer ?? '',
+            thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
+            tools_used: [...(c.tools?.values?.() ?? [])],
+            workspace_changed: false,
+            elapsed_ms: now() - t0,
+          };
+          attachReview(fallback);
+          runRecord.ended_at = now();
+          runRecord.status = 'error';
+          runRecord.error = fallback.error;
+          runRecord.result = fallback;
+          const sentinelFile = this.#hub.writeRunSentinel(this.id, runRecord);
+          fallback.sentinel_file = sentinelFile ?? this.#hub.runSentinelPath(this.id, runRecord.run_id);
+          if (!sentinelFile) fallback.sentinel_error = runRecord.sentinel_error ?? '哨兵文件写入失败';
+          return fallback;
         }
-        this.pendingApprovals.clear();
-        this.pushOut('turn', `第 ${this.currentTurn} 轮结束（${stopReason ?? 'unknown'}）`, {
-          phase: 'end',
-          stop_reason: stopReason,
-          error: failure ?? undefined,
-        });
-        this.turnCount += 1;
-        this.lastUsedAt = now();
-        this.#hub.save();
-        // 唤醒所有"等本轮结束"的插话请求（busy 已置 false，它们可以安全地发下一轮）
-        const waiters = this.idleWaiters;
-        this.idleWaiters = [];
-        for (const w of waiters) w();
-        this.#scheduleDrain();
-        const after = gitStatus(this.cwd);
-        const result = {
-          conversation_id: this.id,
-          run_id: runRecord.run_id,
-          stop_reason: stopReason,
-          error: failure,
-          answer: c.answer,
-          thinking: formatReasoning(c, reasoning),
-          thinking_stats: {
-            hidden: reasoning === 'hide' || reasoning === 'marker',
-            chars: c.reasoning.length,
-            chunks: c.reasoningChunks,
-            ms: c.reasoningStartedAt ? now() - c.reasoningStartedAt : 0,
-          },
-          tools_used: [...c.tools.values()],
-          usage: c.usage,
-          workspace_changed: !sameWorkspaceSnapshot(before, after),
-          diff_stat: after,
-          elapsed_ms: now() - t0,
-        };
-        attachReview(result);
-        runRecord.ended_at = now();
-        runRecord.elapsed_ms = result.elapsed_ms;
-        runRecord.status = failure ? 'error' : stopReason === 'cancelled' ? 'cancelled' : 'done';
-        runRecord.result = result;
-        // ★ 无条件写哨兵：**一个回合 = 一个哨兵文件**，没有例外。
-        //   之前只在"调用方没在原地等"时才写，于是插话那一轮没有哨兵 —— 调用方的
-        //   等待逻辑（等文件出现）就永远空等，即使 run 早已 status=done（真实事故）。
-        //   统一规则也消除了整类"有 run_id 却没有哨兵"的坑。
-        const sentinelFile = this.#hub.writeRunSentinel(this.id, runRecord);
-        result.sentinel_file = sentinelFile ?? this.#hub.runSentinelPath(this.id, runRecord.run_id);
-        if (!sentinelFile) result.sentinel_error = runRecord.sentinel_error ?? '哨兵文件写入失败';
-        return result;
-      } catch (e) {
-        this.#hub.log.info(`[conv ${this.id}] 回合收尾异常（已兜底）: ${e.message}`);
-        this.busy = false;
-        if (this.currentRun === runRecord) this.currentRun = null;
-        this.collector = null;
-        const waiters = this.idleWaiters;
-        this.idleWaiters = [];
-        for (const w of waiters) w();
-        this.#scheduleDrain();
-        const fallback = {
-          conversation_id: this.id,
-          run_id: runRecord.run_id,
-          stop_reason: 'error',
-          error: `回合收尾异常: ${e.message}`,
-          answer: c.answer ?? '',
-          thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
-          tools_used: [...(c.tools?.values?.() ?? [])],
-          workspace_changed: false,
-          elapsed_ms: now() - t0,
-        };
-        attachReview(fallback);
-        runRecord.ended_at = now();
-        runRecord.status = 'error';
-        runRecord.error = fallback.error;
-        runRecord.result = fallback;
-        const sentinelFile = this.#hub.writeRunSentinel(this.id, runRecord);
-        fallback.sentinel_file = sentinelFile ?? this.#hub.runSentinelPath(this.id, runRecord.run_id);
-        if (!sentinelFile) fallback.sentinel_error = runRecord.sentinel_error ?? '哨兵文件写入失败';
-        return fallback;
-      }
+      })().catch((e) => {
+        // 最后一层保险：收尾连兜底都失败时也绝不把 rejection 丢给事件循环。
+        this.#hub.log.info(`[conv ${this.id}] 回合收尾二次异常（已忽略）: ${e.message}`);
+        if (!runRecord.result) {
+          runRecord.result = {
+            conversation_id: this.id,
+            run_id: runRecord.run_id,
+            stop_reason: 'error',
+            error: `回合收尾异常: ${e.message}`,
+            answer: c.answer ?? '',
+            thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
+            tools_used: [],
+            workspace_changed: false,
+            elapsed_ms: now() - t0,
+          };
+          runRecord.status = 'error';
+        }
+        return runRecord.result;
+      });
+      return finalizePromise;
     };
 
     /** 没等到结果时给调用方的收据（它靠 run_id + 哨兵文件事后验收）。 */
@@ -1150,30 +1190,40 @@ export class Conversation {
 
     // 关键：第三个参数传 0 = **不设超时**。回合只能由它自己结束，或由 session/cancel 结束。
     const acp = proc.request('session/prompt', { sessionId: this.id, prompt: [{ type: 'text', text }] }, 0);
-    acp.then(
-      (res) => {
-        if (res?.usage) c.usage = c.usage ?? res.usage;
-        finalize(res?.stopReason ?? null, null);
-      },
-      (e) => finalize('error', e.message),
-    );
+    // 这个 Promise 在 finalize **真正完成**（含 workspace_changed、审核单、哨兵）后才 settle。
+    // 等待方必须等它，而不是只等 acp —— 否则会拿到还没填完的 runRecord.result。
+    const finished = acp
+      .then(
+        (res) => {
+          if (res?.usage) c.usage = c.usage ?? res.usage;
+          return finalize(res?.stopReason ?? null, null);
+        },
+        (e) => finalize('error', e.message),
+      )
+      .catch((e) => {
+        // finalize 自己是防弹的；这里只兜住同步抛出的极端情况。
+        this.#hub.log.info(`[conv ${this.id}] 回合回调异常（已兜底）: ${e.message}`);
+        return runRecord.result ?? null;
+      });
 
-    if (!wait) return settled ? runRecord.result : receipt(0);
+    if (!wait) {
+      // 同步走到这里时 finalize 还没开始（ACP 回调在微任务里），返回收据即可。
+      // 若极端情况下已经收尾，则等它给出完整结果，不要返回半成品。
+      return settled ? await (finalizePromise ?? runRecord.result) : receipt(0);
+    }
     if (timeoutMs <= 0) {
-      await acp.then(
-        () => {},
-        () => {},
-      );
+      await finished;
       return runRecord.result;
     }
     const timedOut = await Promise.race([
-      acp.then(
+      finished.then(
         () => false,
         () => false,
       ),
       new Promise((r) => setTimeout(() => r(true), timeoutMs)),
     ]);
-    if (timedOut && !settled) return receipt(timeoutMs);
+    // 超时发生在 finalize 完成之前（包括 git 快照还在跑）：给收据，不返回半成品结果。
+    if (timedOut) return receipt(timeoutMs);
     return runRecord.result;
   }
 
@@ -1667,30 +1717,178 @@ export class Conversation {
   }
 }
 
-/** 两次 git status 快照是否表示同一组工作区变更。 */
+/**
+ * 两次 workspace 快照是否表示同一组工作区变更。
+ *
+ * 优先比较 `fingerprint`（覆盖**全量**条目：状态行 + 每个路径的 size/mtime，
+ * 未跟踪目录递归展开）。只比较前 40 条 entries 会把"同一状态行但内容变了"
+ * 和第 41 条之后的改动都漏掉（workspace_changed 假阴性）。
+ */
 export function sameWorkspaceSnapshot(a, b) {
   if (!a && !b) return true;
   if (!a || !b) return false;
+  if (typeof a.fingerprint === 'string' && typeof b.fingerprint === 'string') {
+    return a.fingerprint === b.fingerprint;
+  }
+  // 兼容旧快照/测试里手写的 { changed_files, entries }。
   return JSON.stringify(a.entries ?? []) === JSON.stringify(b.entries ?? []);
 }
 
-/** 收集当前工作区的 git 变更摘要（非 git 目录返回 null）。 */
-export function gitStatus(cwd) {
+const GIT_TIMEOUT_MS = 8000;
+const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+const MAX_UNTRACKED_DIR_ENTRIES = 2000;
+const execFileAsync = promisify(execFile);
+
+/**
+ * 安全 git 参数（放 subcommand 之前）。
+ *
+ * `--no-optional-locks` 是 **git 全局选项**，放在 `status` 之后会被 git 当成
+ * 未知参数直接退出 129 —— 那样快照永远是 null，workspace_changed 恒为 false。
+ */
+const GIT_SAFE = ['--no-optional-locks', '-c', 'core.fsmonitor=false'];
+
+function gitEnv() {
+  return { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
+}
+
+/** 异步跑一次 git 并取 stdout；非 git 目录/超时/输出过大都抛给调用方。 */
+async function gitOutput(cwd, args) {
+  const { stdout } = await execFileAsync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    timeout: GIT_TIMEOUT_MS,
+    maxBuffer: GIT_MAX_BUFFER,
+    windowsHide: true,
+    env: gitEnv(),
+  });
+  return stdout;
+}
+
+/** 解析 porcelain v1 -z 状态行；rename/copy 的“原路径”是下一个 NUL 段。 */
+function parsePorcelainZ(stdout) {
+  const tokens = String(stdout ?? '').split('\0');
+  const rows = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token) continue;
+    // 形如 "XY path"；posix 允许路径里有空格，所以只切前三个字符。
+    if (token.length < 4 || token[2] !== ' ') continue;
+    const status = token.slice(0, 2);
+    const path = token.slice(3);
+    let orig = null;
+    if (/[RC]/.test(status)) orig = tokens[++i] || null;
+    rows.push({ status, path, orig });
+  }
+  return rows;
+}
+
+/**
+ * 把一个路径的当前状态（类型 + size + mtimeMs）混进指纹。
+ *
+ * - 普通文件：size + mtimeMs 足以识别"状态行没变、内容变了"；
+ * - 未跟踪目录（`?? dir/`）：目录 mtime 只在直接子项增删时变，光看它不够，
+ *   所以递归展开（只用 lstat，不跟随符号链接/不钻 .git，且有预算上限）；
+ * - 已跟踪的目录条目（子模块）：只看它自己的 lstat，避免把子模块整个走一遍。
+ */
+function hashPathStat(hash, full, label, budget) {
+  let st;
+  try {
+    st = lstatSync(full);
+  } catch {
+    hash.update(`${label}\0missing\0`);
+    return;
+  }
+  if (st.isDirectory() && budget) {
+    hash.update(`${label}\0dir\0${st.mtimeMs}\0`);
+    let entries;
+    try {
+      entries = readdirSync(full, { withFileTypes: true });
+    } catch {
+      hash.update('unreadable\0');
+      return;
+    }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const ent of entries) {
+      if (ent.name === '.git') continue;
+      if (budget.left <= 0) {
+        hash.update(`${label}\0truncated\0`);
+        return;
+      }
+      budget.left -= 1;
+      hashPathStat(hash, join(full, ent.name), `${label}/${ent.name}`, budget);
+    }
+    return;
+  }
+  const kind = st.isSymbolicLink() ? 'link' : st.isFile() ? 'file' : st.isDirectory() ? 'dir' : 'other';
+  hash.update(`${label}\0${kind}\0${st.size}\0${st.mtimeMs}\0`);
+}
+
+/**
+ * 收集当前工作区的 git 变更摘要（非 git 目录返回 null）。
+ *
+ * 异步实现：`execFile` 不占用事件循环 —— 一个 MCP 服务进程承载多个会话，
+ * 同步 `spawnSync` 最长 8s 会把所有会话的 ACP 消息/审批一起卡住。
+ *
+ * 返回对象向后兼容：`changed_files` = 全量状态条目数，`entries` = 前 40 条
+ * 展示用状态行；新增 `fingerprint` 覆盖**全量**条目（含逐路径 size/mtime），
+ * 供 `sameWorkspaceSnapshot` 判断"内容是否真的变了"。
+ */
+export async function gitStatus(cwd) {
   if (process.env.DSH_MCP_GIT_STATUS === '0') return null;
   try {
     // ★ 在不可信仓库里 `git status` 可能触发仓库配置的 fsmonitor/filter；这些
     //   命令发生在 DSH 沙箱与审批层之外。禁用可选锁与 fsmonitor，并允许用
     //   DSH_MCP_GIT_STATUS=0 完全关掉。
-    const r = spawnSync('git', ['-c', 'core.fsmonitor=false', 'status', '--porcelain', '--no-optional-locks'], {
-      cwd,
-      encoding: 'utf8',
-      timeout: 8000,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
-    });
-    if (r.status !== 0 || !r.stdout) return null;
-    const lines = r.stdout.split('\n').filter(Boolean);
-    if (!lines.length) return null;
-    return { changed_files: lines.length, entries: lines.slice(0, 40) };
+    // porcelain 的路径相对 **仓库根**（cwd 是子目录时也是），所以同时取 top-level。
+    const [statusOut, rootOut] = await Promise.all([
+      gitOutput(cwd, [...GIT_SAFE, 'status', '--porcelain', '-z']),
+      gitOutput(cwd, [...GIT_SAFE, 'rev-parse', '--show-toplevel']),
+    ]);
+    const rows = parsePorcelainZ(statusOut);
+    if (!rows.length) return null;
+    // git 输出的是 `C:/...` 风格，统一成原生分隔符，后面 startsWith 才不会误判越界。
+    const root = resolve(String(rootOut ?? '').trim() || cwd);
+
+    // 状态行按路径排序后参与指纹，避免依赖 git 的输出顺序。
+    const sorted = rows
+      .slice()
+      .sort((a, b) =>
+        a.path === b.path
+          ? a.status < b.status
+            ? -1
+            : a.status > b.status
+              ? 1
+              : 0
+          : a.path < b.path
+            ? -1
+            : 1,
+      );
+
+    const hash = createHash('sha256');
+    const budget = { left: MAX_UNTRACKED_DIR_ENTRIES };
+    const entries = [];
+    const rootPrefix = root.endsWith(sep) ? root : root + sep;
+    for (const row of sorted) {
+      const display = row.orig ? `${row.status} ${row.orig} -> ${row.path}` : `${row.status} ${row.path}`;
+      if (entries.length < 40) entries.push(display);
+      hash.update(display);
+      hash.update('\0');
+
+      const cleanPath = row.path.endsWith('/') ? row.path.slice(0, -1) : row.path;
+      const full = resolve(root, cleanPath);
+      if (full !== root && !full.startsWith(rootPrefix)) {
+        hash.update('outside-worktree\0');
+        continue;
+      }
+      // 只有未跟踪目录需要递归；已跟踪条目（含子模块）看 lstat 即可。
+      hashPathStat(hash, full, cleanPath, row.status === '??' ? budget : null);
+    }
+
+    return {
+      changed_files: rows.length,
+      entries,
+      fingerprint: hash.digest('hex'),
+    };
   } catch {
     return null;
   }

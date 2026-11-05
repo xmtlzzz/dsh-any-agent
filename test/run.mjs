@@ -86,6 +86,12 @@ if (code === 0) {
   code = await run('state-safety.mjs');
 }
 if (code === 0) {
+  // 工作区快照：workspace_changed 必须看全量文件内容（同一状态行、第 41 条之后、
+  // 未跟踪目录内部），且 gitStatus 异步执行不阻塞共享 MCP 事件循环。
+  // 纯文件系统 + 临时 git 仓库，不花 token。
+  code = await run('workspace-snapshot.mjs');
+}
+if (code === 0) {
   // 沙箱守卫先跑：任何把真实 HOME 当沙箱的写法必须立刻失败。
   // 2026-10-29 的事故就是少了这一条，一段临时脚本把 ~ 当沙箱递归删了。
   code = await run('sandbox-guard.mjs');

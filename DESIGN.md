@@ -252,7 +252,7 @@ Profile = `~/.dsh/profiles/<name>/`，由 `package.json` 的 `dsh.profile.bundle
 
 **B11 设计要点（调用方审核）**
 - **为什么放进返回载荷**：返回值是"另一个 agent 的自述"。调用方最常见的失败模式是直接转述"已完成/已修好"。审核要求必须和结果出现在同一条消息里（`content.text`、`structuredContent`、哨兵 `result.review`），才可能改变调用方的下一步动作；单独一个"记得审核"的约定会被忽略。
-- **审核单形状**：`{review_id, mode, status, run_id, prompt_preview, checklist, evidence, submit:{tool:"dsh_review", arguments}, instructions}`。清单随回合形状变化（有没有改工作区、有没有错误、用了哪些工具）；`evidence` 只放核对所需的最小事实（stop_reason、error、changed_files、工具名）。
+- **审核单形状**：`{review_id, mode, status, run_id, prompt_preview, checklist, evidence, submit:{tool:"dsh_review", arguments}, instructions}`。清单随回合形状变化（有没有改工作区、有没有错误、用了哪些工具）；`evidence` 只放核对所需的最小事实（stop_reason、error、changed_files、工具名）。`workspace_changed` 必须基于**全量**快照指纹（逐路径 size/mtime，未跟踪目录递归），只比前 40 条状态行会把"同一状态行但内容变了"误报成没落地，审核清单也就失去了证据价值。
 - **默认 advisory，不阻塞**：这是刻意的产品选择。强制门禁会打断"审核失败 → 派修复回合"的自然流程，也会破坏既有调用方；advisory 只把审核请求显性化。`review=off` 可按会话/单次派活关闭；即使 off，`dsh_review` 仍可对旧 run 显式补审核。
 - **裁决落盘与回写**：`reviews/<会话id>/<run_id>.review.json` 原子写入（tmp + rename，唯一 tmp 名），含裁决、理由/findings、清单与证据。`submitReview` 依次从内存 run → 哨兵 → 已有审核记录取事实，所以服务重启、run 被挤出内存后仍可审核。提交后 **原子重写哨兵里的 `result.review`**，避免异步调用方下次读文件看到与事实相反的 `pending`。
 - **隐私**：审核单不含思考正文；理由、findings、任务预览、证据**与每个 checklist 项**在落盘前都走 `redact.sanitizeApprovalContext`（与审批上下文同一套规则）——checklist 会拼接 `result.error`，漏掉它就会成为第二个明文泄漏点。审核记录与哨兵共用 `DSH_MCP_SENTINEL_TTL_MS` 的 7 天清理。
@@ -305,7 +305,7 @@ Profile = `~/.dsh/profiles/<name>/`，由 `package.json` 的 `dsh.profile.bundle
 
 | # | 功能 | 说明 |
 |---|---|---|
-| E1 | **返回变更 diff** | 回合结束后返回工作区变更（`workspace/changes` 事件 + `git diff --stat`）。**让调用方 agent 能审阅 DSH 的产出再决定是否接受**——这是"外包工程师"模式的关键 |
+| E1 | **返回工作区变更** | 回合结束后返回 `workspace_changed`（本回合前后 `git status` 的**全量**快照指纹：状态行 + 逐路径 size/mtime，未跟踪目录递归展开）与 `diff_stat`（当前脏文件摘要）。快照走异步子进程，不阻塞共享 MCP 事件循环。**让调用方 agent 能审阅 DSH 的产出再决定是否接受**——这是"外包工程师"模式的关键 |
 | E2 | 计划模式 | 只出计划不落地（`dsh-plan-mode`），调用方批准后再执行 |
 | E3 | 审查模式 | 对既有改动做对抗式审查 |
 | E4 | 接受/回滚 | 会话级 checkpoint（DSH 有 `dsh-session-checkpoint-policy`）配合 git 做回滚 |
