@@ -50,3 +50,54 @@ export async function fetchLatestVersion(fetchImpl = fetch) {
   }
   return { version: null, source: 'unavailable' };
 }
+
+export const GITHUB_REPO_URL = 'https://api.github.com/repos/xmtlzzz/dsh-any-agent';
+
+/**
+ * 格式化 Star 数量：
+ * count < 1000: 直接显示，例如 "4"
+ * count >= 1000: 显示 "1.2k"、"83.3k" 等
+ */
+export function formatStars(count) {
+  if (!Number.isFinite(count) || count < 0) return null;
+  if (count < 1000) return String(count);
+  return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+}
+
+/**
+ * 获取 GitHub Star 数量（无需任何 Access Token，GitHub 公开 API）。
+ * 支持 15 分钟 localStorage 缓存以避免未登录 IP 的 60 次/小时频控。
+ */
+export async function fetchGitHubStars(fetchImpl = fetch, storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
+  const CACHE_KEY = 'dsh_gh_stars_cache';
+  const CACHE_TTL_MS = 15 * 60 * 1000;
+  try {
+    const raw = storage?.getItem(CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.stars === 'number' && Date.now() - parsed?.ts < CACHE_TTL_MS) {
+        return { stars: parsed.stars, source: 'cache' };
+      }
+    }
+  } catch {}
+
+  try {
+    const res = await fetchImpl(GITHUB_REPO_URL, {
+      headers: { accept: 'application/vnd.github+json' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res?.ok) {
+      const data = await res.json();
+      if (typeof data?.stargazers_count === 'number') {
+        const stars = data.stargazers_count;
+        try {
+          storage?.setItem(CACHE_KEY, JSON.stringify({ stars, ts: Date.now() }));
+        } catch {}
+        return { stars, source: 'network' };
+      }
+    }
+  } catch {}
+
+  return { stars: null, source: 'unavailable' };
+}

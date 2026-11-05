@@ -99,3 +99,13 @@ test('Install card notes use block wrappers and manual config note resides insid
     assert.doesNotMatch(page, /<\/details>\s*<p class="install-card-note"/);
   }
 });
+
+test('GitHub Star badge is rendered in the header and queries repository stars', async () => {
+  for (const page of [html, enHtml]) {
+    assert.match(page, /<span class="github-star-badge"[^>]*>[\s\S]*?<span data-github-stars="true">\d+<\/span>/);
+    assert.match(page, /class="github-nav" href="https:\/\/github\.com\/xmtlzzz\/dsh-any-agent"/);
+  }
+  const releaseName = assets.find((name) => /^release\.[a-f0-9]{10}\.mjs$/.test(name));
+  const release = await readFile(resolve(dist, 'assets', releaseName), 'utf8');
+  assert.match(release, /api\.github\.com\/repos\/xmtlzzz\/dsh-any-agent/);
+});

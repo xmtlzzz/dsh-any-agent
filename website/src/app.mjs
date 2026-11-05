@@ -7,7 +7,7 @@ import {
   statusNames as statusNamesZh,
   statusNamesEn,
 } from './demo.mjs';
-import { fetchLatestVersion } from './release.mjs';
+import { fetchLatestVersion, fetchGitHubStars, formatStars } from './release.mjs';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -263,4 +263,12 @@ fetchLatestVersion().then(({ version, source }) => {
   if (!target) return;
   target.textContent = version ? `v${version}` : 'v—';
   target.dataset.source = source;
+});
+
+// GitHub Star 数量运行时同步：公开 API + localStorage 缓存；无 Token、免频控
+fetchGitHubStars().then(({ stars }) => {
+  if (typeof stars !== 'number') return;
+  const label = formatStars(stars);
+  if (!label) return;
+  $$('[data-github-stars]').forEach(el => { el.textContent = label; });
 });
