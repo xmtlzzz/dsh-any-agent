@@ -85,6 +85,15 @@ export function buildReviewChecklist({ result = {}, permission = null } = {}) {
       }），确认影响并决定是否重派。`,
     );
   }
+  const autoTotal = Number(result.auto_approvals_total) || 0;
+  if (autoTotal > 0) {
+    const esc = Number(result.auto_escalations_total) || 0;
+    items.push(
+      `本轮有 ${autoTotal} 次审批被自动放行（on_approval=auto-allow）` +
+        (esc > 0 ? `，其中 ${esc} 次申请了沙箱提权（如 danger-full-access），这些操作已在 ${permission ?? '权限档'} 之外执行` : '') +
+        '：对照 result.auto_approvals 逐条确认是否在预期内；需要逐次把关就用 on_approval=ask 新建会话。',
+    );
+  }
   if (permission) items.push(`确认操作没有超出会话权限档（${permission}）。`);
   items.push('裁决：pass（可直接采用）/ partial（部分可用，需补充）/ fail（不可用，需重做）；fail/partial 必须在 notes 里说明理由。');
   return items;
@@ -109,6 +118,8 @@ export function buildReviewTicket({
     workspace_changed: result?.workspace_changed ?? null,
     changed_files: result?.diff_stat?.changed_files ?? null,
     tools: toolNames(result),
+    auto_approvals: Number.isFinite(result?.auto_approvals_total) ? result.auto_approvals_total : null,
+    auto_escalations: Number.isFinite(result?.auto_escalations_total) ? result.auto_escalations_total : null,
     elapsed_ms: result?.elapsed_ms ?? null,
   };
   return {

@@ -34,7 +34,8 @@ dsh-any-agent team status        # 团队开关与 profile
 
 在 MCP 客户端里调用 `dsh_doctor`，重点看：
 
-- `dsh_bin`：DSH 入口与版本；
+- `dsh_bin`：DSH 入口与版本；入口落在 npx 缓存（`_npx/<hash>/`）时 **warn** —— 清缓存就会失效，建议全局安装 DSH 或固定 `DSH_BIN`；
+- `dsh_version`：按上表给版本定档 —— `verified` 为 ok；`partial` / `unsupported` / `unverified`（如 0.2.x）/ 读不到版本为 **warn**；
 - `profile`：是否存在、是否漂移、路由来源；
 - `team`：`on` / `off` / `requested but unavailable`（版本或 profile 不含 team 包）；
 - `config`：当前 permission、空闲回收、共享进程等生效值。

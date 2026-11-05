@@ -29,6 +29,8 @@ import {
   DSH_PROFILE,
   toPosixPath,
   resolveDshBin,
+  dshVersionStatus,
+  isNpxCachePath,
 } from './config.mjs';
 import { inspectProfile } from './bootstrap.mjs';
 import { audit } from './audit.mjs';
@@ -140,7 +142,7 @@ export const TOOL_DEFS = [
       '而是自动降级为后台：返回 run_id + sentinel_file，回合继续跑完，结果稍后由哨兵文件通知。' +
       '（timeout_ms=0 表示一直等。）所以任何时候你都能拿到结果，不用怕"超时了白干"。' +
       '等待模式与后台模式都在回合结束时原子落地一个含最终结果的小文件——' +
-      '**推荐用后台任务（Bash run_in_background + `until [ -f sentinel_file ]`）等它，跑完自动通知你，无需轮询**；' +
+      '**推荐用后台任务（Bash run_in_background + `until [ -f sentinel_file ]`；Windows/PowerShell 用 `Test-Path` 循环，收据里给出现成命令）等它，跑完自动通知你，无需轮询**；' +
       '文件出现后读它即得结果，或用 dsh_get(conversation_id, run_id) 验收，dsh_read 可中途看输出。' +
       '默认隐藏思考内容（只返回正文 + 思考统计）。' +
       '结果与后台收据都会带 `review` 审核单（默认 advisory）：调用方核验后用 dsh_review 提交裁决。' +
@@ -252,8 +254,10 @@ export const TOOL_DEFS = [
         max_chars: {
           type: 'number',
           description:
-            '正文在 **text** 里的最大字符数（默认 0 = 不截断）。' +
-            'structured.run.result 仍保留完整内容；截断时附带 answer_truncated/next_offset，可自行分页。',
+            '结果预算（默认 0 = 不截断，返回完整结果）。>0 时**同时**作用于 text 与 structured：' +
+            '正文截到该长度（附 answer_truncated/next_offset），structured.run.result.tools_used 只保留' +
+            '工具名/状态与 input_chars，不再带完整输入。完整结果始终在 sentinel_file 里。' +
+            '一个回合用了很多工具时，默认返回可能超过客户端单次工具结果上限，建议传 8000 左右。',
         },
       },
       ['conversation_id'],
@@ -452,6 +456,9 @@ function renderReviewSection(review) {
   if (ev.workspace_changed != null) bits.push(`工作区变化=${ev.workspace_changed ? '是' : '否'}`);
   if (ev.changed_files != null) bits.push(`改动文件=${ev.changed_files}`);
   if (Array.isArray(ev.tools) && ev.tools.length) bits.push(`工具=[${ev.tools.join(', ')}]`);
+  if (ev.auto_approvals) {
+    bits.push(`⚠ 自动放行审批=${ev.auto_approvals}${ev.auto_escalations ? `（含提权 ${ev.auto_escalations}）` : ''}`);
+  }
   if (bits.length) lines.push(`证据: ${bits.join(' · ')}`);
   if (pending) {
     lines.push('在把这次结果当作完成之前，请独立核验：');
@@ -469,6 +476,48 @@ function renderReviewSection(review) {
     if (review.review_file) lines.push(`审核记录: ${review.review_file}`);
   }
   return lines.join('\n');
+}
+
+/**
+ * 按 `max_chars` 预算压缩一份回合结果（只用于返回给调用方，不改原对象）。
+ *
+ * 体积大头是 tools_used[].input：edit/write 会带完整的新旧文本，几十次工具调用
+ * 轻松几万字。压缩后每个工具只留 id/title/name/status/kind 与 input_chars；
+ * 正文与思考截到预算长度。完整版本仍在哨兵文件里。
+ */
+export function compactResultForBudget(result, cap) {
+  if (!result || typeof result !== 'object' || !(cap > 0)) return result ?? null;
+  const out = { ...result };
+  if (typeof out.answer === 'string' && out.answer.length > cap) out.answer = out.answer.slice(0, cap);
+  if (typeof out.thinking === 'string' && out.thinking.length > cap) out.thinking = out.thinking.slice(0, cap);
+  if (Array.isArray(out.tools_used)) {
+    out.tools_used = out.tools_used.map((t) => {
+      if (!t || typeof t !== 'object') return t;
+      const { input, ...meta } = t;
+      if (input === undefined) return meta;
+      let chars = 0;
+      try {
+        chars = typeof input === 'string' ? input.length : JSON.stringify(input)?.length ?? 0;
+      } catch {
+        chars = 0;
+      }
+      return { ...meta, input_chars: chars };
+    });
+  }
+  return out;
+}
+
+/**
+ * PowerShell 版的哨兵等待命令（Windows 宿主上 Git Bash 可能不可用或挂住）。
+ * 路径放进单引号字面量：PowerShell 单引号里只有 `'` 需要转义（写成 `''`），
+ * `$`、反引号都不展开，所以不会被路径内容注入。
+ */
+export function psWaitCommand(sentinelPath, timeoutSec = 2100) {
+  const lit = `'${String(sentinelPath).replace(/'/g, "''")}'`;
+  return (
+    `$f=${lit}; $dl=(Get-Date).AddSeconds(${Math.max(1, Math.floor(timeoutSec))}); ` +
+    `while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit 1 }; Start-Sleep -Seconds 2 }; 'DONE'`
+  );
 }
 
 /** 把结构化结果渲染成给模型看的文本。 */
@@ -496,6 +545,12 @@ function renderSendResult(r) {
   const tools = (r.tools_used ?? []).map((t) => t.name ?? t.title).filter(Boolean);
   if (tools.length) meta.push(`工具=[${[...new Set(tools)].join(', ')}]`);
   if (r.workspace_changed) meta.push(`本轮工作区状态发生变化(当前共 ${r.diff_stat?.changed_files ?? '?'} 个文件有改动)`);
+  if (r.auto_approvals_total) {
+    meta.push(
+      `自动放行审批 ${r.auto_approvals_total} 次` +
+        (r.auto_escalations_total ? `(含沙箱提权 ${r.auto_escalations_total} 次)` : ''),
+    );
+  }
   lines.push('');
   lines.push(`[${meta.join(' · ')}]`);
 
@@ -533,6 +588,8 @@ function backgroundReceipt(hub, conv, res) {
       sentinel_file: sentinel,
       /** Bash/MSYS 形式（D:\a\b → /d/a/b）；非 Windows 等于 sentinel_file。 */
       sentinel_file_posix: sentinelPosix,
+      /** Windows 宿主：现成的 PowerShell 等待命令（路径已按单引号字面量转义）。 */
+      ...(process.platform === 'win32' ? { sentinel_wait_powershell: psWaitCommand(sentinel) } : {}),
       ...(review ? { review } : {}),
     },
     text:
@@ -544,6 +601,10 @@ function backgroundReceipt(hub, conv, res) {
       `推荐用后台任务等它出现，文件一到就会唤醒你：\n` +
       `  Bash(run_in_background): sent="${sentinelPosix}"; \\\n` +
       `    dl=$(( $(date +%s)+2100 )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE\n` +
+      (process.platform === 'win32'
+        ? `Windows 上 Bash 不可用（或会挂住）时，用 PowerShell 版本（原生路径，已转义好）：\n` +
+          `  PowerShell(run_in_background): ${psWaitCommand(sentinel)}\n`
+        : '') +
       `文件出现后：直接读它拿结果（推荐——不受内存窗口限制、还扛服务重启），或 dsh_get(conversation_id, run_id) 验收。\n` +
       `消费完可以 rm 掉它。其它随时可用：dsh_status（是否在跑）、dsh_read（增量看输出）。` +
       (review ? `\n\n${renderReviewSection(review)}` : '') +
@@ -917,7 +978,9 @@ export function createHandlers(hub, opts = {}) {
           `未知 run_id: ${args.run_id}（内存只留最近 20 条；哨兵文件 ${hub.runSentinelPath(args.conversation_id, args.run_id)} 也不存在或不可读）`,
         );
       }
-      // 正文预算只作用于 text；structured 里保留完整 result，调用方要做程序化处理时仍然拿得到。
+      // 预算同时作用于 text 与 structured：Claude Code 等客户端会把 structuredContent
+      // 一并塞进上下文，只截 text 时一次带几十个工具输入的回合仍会超过单次结果上限
+      // （实测 75K 字符被拒收）。完整结果始终在哨兵文件里。
       const answerFull = String(run?.result?.answer ?? '');
       const capRaw = Number(args.max_chars);
       const cap = Number.isFinite(capRaw) && capRaw > 0 ? Math.floor(capRaw) : 0;
@@ -966,10 +1029,14 @@ export function createHandlers(hub, opts = {}) {
             answer_truncated: truncated,
             next_offset: truncated ? cap : null,
             review: run.review ?? run.result?.review ?? null,
-            result: run.result,
+            result: cap > 0 ? compactResultForBudget(run.result, cap) : run.result,
+            ...(cap > 0 ? { result_compacted: true } : {}),
           }
         : null;
-      if (sentinelFile) meta.push(`\n哨兵文件: ${sentinelFile}`);
+      if (sentinelFile) {
+        meta.push(`\n哨兵文件: ${sentinelFile}`);
+        if (cap > 0) meta.push('（max_chars 已同时压缩 structured：正文截断、工具输入只留长度；完整结果读这个文件）');
+      }
       return {
         structured: {
           ...snap,
@@ -1296,7 +1363,26 @@ export function createHandlers(hub, opts = {}) {
           version =
             JSON.parse(readFileSync(join(dirname(bin), '..', 'package.json'), 'utf8')).version ?? null;
         } catch {}
-        add('dsh_bin', 'ok', `${bin}${version ? ` (DSH ${version})` : ''}`);
+        const fromNpx = isNpxCachePath(bin);
+        add(
+          'dsh_bin',
+          fromNpx ? 'warn' : 'ok',
+          `${bin}${version ? ` (DSH ${version})` : ''}${fromNpx ? ' —— 位于 npx 缓存，清缓存后会失效' : ''}`,
+          fromNpx
+            ? '全局安装 DSH（npm i -g @deepseek-ai/dsh）或把 DSH_BIN 指向一个固定位置的 lib/bin.js'
+            : null,
+        );
+        const vs = dshVersionStatus(version);
+        add(
+          'dsh_version',
+          vs.status,
+          `${vs.level}: ${vs.note}`,
+          vs.status === 'ok'
+            ? null
+            : vs.level === 'unverified'
+              ? '对照 docs/zh/compatibility.md；升级后跑一遍 npm test，必要时 npm run test:all'
+              : '升级到 DSH 0.1.7-rc.1 及以上',
+        );
       } catch (e) {
         add('dsh_bin', 'fail', e.message, '设置 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js');
       }

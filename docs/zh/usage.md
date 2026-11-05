@@ -43,7 +43,16 @@ done
 echo "DONE"                            # 后台任务退出 → 宿主唤醒你 → 读文件收活
 ```
 
-文件出现后：**直接读它**即得 `status` 和 `result`（推荐——不受内存窗口限制、还扛服务重启），或用 `dsh_get(conversation_id, run_id)` 验收。
+Windows 宿主上 Git Bash 不可用（或会挂住）时，用 PowerShell 等原生路径 `sentinel_file`。在 Windows 上，后台收据的 structured 里有拼好、已转义的 **`sentinel_wait_powershell`**，直接用它：
+
+```powershell
+$f='C:\Users\you\.dsh\.dsh-any-agent\runs\<conversation_id>\<run_id>.json'   # 路径里的 ' 写成 ''
+$dl=(Get-Date).AddSeconds(2100)
+while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit 1 }; Start-Sleep -Seconds 2 }
+'DONE'
+```
+
+文件出现后：**直接读它**即得 `status` 和 `result`（推荐——不受内存窗口限制、还扛服务重启），或用 `dsh_get(conversation_id, run_id)` 验收。一个回合用了很多工具时，完整结果（含每个工具的完整输入）可能超过客户端单次工具结果的上限；这时给 `dsh_get` 传 `max_chars`（如 8000）：预算**同时**作用于 text 与 structured，正文截断、工具只留名字/状态与 `input_chars`，完整版本始终在哨兵文件里。
 
 设计要点（尤其**多会话并发**）：
 

@@ -137,7 +137,11 @@ long.result = {
   error: null,
   answer: '0123456789',
   thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
-  tools_used: [],
+  tools_used: [
+    { id: 't1', title: 'edit', status: 'completed', input: { path: 'a.js', new_string: 'x'.repeat(50_000) } },
+    { id: 't2', title: 'pwsh', status: 'completed', input: { command: 'npm test' } },
+    { id: 't3', title: 'read', status: 'completed' },
+  ],
   workspace_changed: false,
   elapsed_ms: 10,
 };
@@ -150,7 +154,28 @@ check('text 只显示前 5 个字符', () => assert.match(got.text, /01234/));
 check('text 不显示后半段', () => assert.ok(!got.text.includes('56789')));
 check('structured 标记已截断', () => assert.equal(got.structured.run.answer_truncated, true));
 check('structured 给出 next_offset', () => assert.equal(got.structured.run.next_offset, 5));
-check('structured 保留完整正文', () => assert.equal(got.structured.run.result.answer, '0123456789'));
+check('★ structured 正文也按预算截断', () => assert.equal(got.structured.run.result.answer, '01234'));
+check('★ structured 去掉工具输入，只留 input_chars', () => {
+  const tools = got.structured.run.result.tools_used;
+  assert.equal(tools.length, 3);
+  assert.ok(tools.every((t) => !('input' in t)));
+  assert.ok(tools[0].input_chars > 50_000);
+  assert.equal(tools[0].title, 'edit');
+  assert.ok(!('input_chars' in tools[2]), '本来没有 input 的工具不凭空加字段');
+});
+check('★ 压缩后整个 structured 远小于工具输入体积', () =>
+  assert.ok(JSON.stringify(got.structured).length < 10_000, String(JSON.stringify(got.structured).length)));
+check('structured 标记 result_compacted', () => assert.equal(got.structured.run.result_compacted, true));
+check('压缩不改动内存里的原始结果', () => {
+  assert.equal(long.result.answer, '0123456789');
+  assert.equal(long.result.tools_used[0].input.path, 'a.js');
+});
+const gotFull = await handlers.dsh_get({ conversation_id: conv.id, run_id: long.run_id });
+check('max_chars=0 时仍返回完整结果（向后兼容）', () => {
+  assert.equal(gotFull.structured.run.result.answer, '0123456789');
+  assert.equal(gotFull.structured.run.result.tools_used[0].input.path, 'a.js');
+  assert.ok(!('result_compacted' in gotFull.structured.run));
+});
 
 console.log('\n[5] 审计日志（只记元数据）');
 
@@ -171,6 +196,76 @@ check('包含关键检查项', () => {
 });
 check('verdict 是 ok 或 fail', () => assert.ok(['ok', 'fail'].includes(doc.structured.verdict)));
 check('text 逐项列出结果', () => assert.match(doc.text, /dsh_bin/));
+// 本机/CI 都可能没有 DSH：dsh_bin 失败时不会产出 dsh_version，这是预期。
+if (doc.structured.checks.find((c) => c.id === 'dsh_bin')?.status !== 'fail') {
+  check('找到 DSH 时附带 dsh_version 检查', () => assert.ok(ids.includes('dsh_version')));
+}
+
+console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
+{
+  const { dshVersionStatus, isNpxCachePath } = await import('../src/config.mjs');
+  const lvl = (v) => dshVersionStatus(v).level;
+  check('null → unknown/warn', () => assert.equal(dshVersionStatus(null).status, 'warn'));
+  check('0.1.4 → unsupported', () => assert.equal(lvl('0.1.4'), 'unsupported'));
+  check('0.1.5-rc.1 → partial', () => assert.equal(lvl('0.1.5-rc.1'), 'partial'));
+  check('0.1.7-rc.1 → verified/ok', () => {
+    assert.equal(lvl('0.1.7-rc.1'), 'verified');
+    assert.equal(dshVersionStatus('0.1.7-rc.1').status, 'ok');
+  });
+  check('0.1.9 → verified', () => assert.equal(lvl('0.1.9'), 'verified'));
+  check('★ 0.2.0-rc.1 → unverified/warn（rc 也算进 0.2）', () => {
+    assert.equal(lvl('0.2.0-rc.1'), 'unverified');
+    assert.equal(dshVersionStatus('0.2.0-rc.1').status, 'warn');
+  });
+  check('★ 0.2.1-rc.5（本机实测版本）→ unverified', () => assert.equal(lvl('0.2.1-rc.5'), 'unverified'));
+  check('Windows npx 缓存路径被识别', () =>
+    assert.ok(isNpxCachePath('C:\\Users\\a\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js')));
+  check('POSIX npx 缓存路径被识别', () =>
+    assert.ok(isNpxCachePath('/home/a/.npm/_npx/abc/node_modules/@deepseek-ai/dsh/lib/bin.js')));
+  check('全局安装路径不算 npx 缓存', () =>
+    assert.ok(!isNpxCachePath('/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js')));
+  check('名字里含 _npx 但不是目录段时不误判', () =>
+    assert.ok(!isNpxCachePath('/opt/my_npx_tools/dsh/lib/bin.js')));
+}
+
+console.log('\n[6c] PowerShell 哨兵等待命令');
+{
+  const { psWaitCommand } = await import('../src/tools.mjs');
+  const cmd = psWaitCommand("C:\\Users\\o'neil\\runs\\a $b `c.json", 30);
+  check('单引号转义成两个单引号', () => assert.match(cmd, /o''neil/));
+  check('路径放在单引号字面量里（$ 与反引号不展开）', () =>
+    assert.match(cmd, /^\$f='C:\\Users\\o''neil\\runs\\a \$b `c\.json';/));
+  check('用 -LiteralPath，不按通配符解释路径', () => assert.match(cmd, /Test-Path -LiteralPath \$f/));
+  check('超时秒数写进命令', () => assert.match(cmd, /AddSeconds\(30\)/));
+
+  // 真跑一遍：只在 Windows 且有 powershell.exe 时执行（CI 的 windows-latest 会覆盖到）。
+  if (process.platform === 'win32') {
+    const { spawnSync } = await import('node:child_process');
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    const dir = mkdtempSync(join(tmpdir(), "dsh-any-agent-ps'wait-"));
+    try {
+      mkdirSync(join(dir, 'a $b [c]'), { recursive: true });
+      const present = join(dir, 'a $b [c]', 'run-1.json');
+      writeFileSync(present, '{}');
+      const ps = (c) =>
+        spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', c], { encoding: 'utf8', timeout: 30_000 });
+      const ok = ps(psWaitCommand(present, 5));
+      check('★ 文件已存在（路径含单引号/$/方括号）→ DONE、退出 0', () => {
+        assert.equal(ok.status, 0, ok.stderr);
+        assert.match(ok.stdout, /DONE/);
+      });
+      const missing = ps(psWaitCommand(join(dir, 'never.json'), 1));
+      check('★ 文件一直不出现 → TIMEOUT、退出 1', () => {
+        assert.equal(missing.status, 1, missing.stderr);
+        assert.match(missing.stdout, /TIMEOUT/);
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  } else {
+    console.log('  skipped: 非 Windows，不执行 PowerShell');
+  }
+}
 
 console.log('\n[7] 团队提示注入');
 

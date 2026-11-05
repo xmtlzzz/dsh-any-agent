@@ -43,7 +43,16 @@ done
 echo "DONE"                            # task exits → host wakes you → read the file to collect
 ```
 
-Once the file exists: **read it** for `status` and `result` (preferred — immune to the in-memory window and survives restarts), or use `dsh_get(conversation_id, run_id)`.
+On a Windows host where Git Bash is unavailable (or hangs), wait on the native `sentinel_file` with PowerShell. On Windows the background receipt's structured content carries a ready-made, escaped **`sentinel_wait_powershell`** — use it directly:
+
+```powershell
+$f='C:\Users\you\.dsh\.dsh-any-agent\runs\<conversation_id>\<run_id>.json'   # write ' as '' inside the path
+$dl=(Get-Date).AddSeconds(2100)
+while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit 1 }; Start-Sleep -Seconds 2 }
+'DONE'
+```
+
+Once the file exists: **read it** for `status` and `result` (preferred — immune to the in-memory window and survives restarts), or use `dsh_get(conversation_id, run_id)`. When a turn used many tools, the full result (every tool's complete input included) can exceed the client's per-call tool-result limit; pass `max_chars` (e.g. 8000) to `dsh_get`: the budget now applies to **both** text and structured — the answer is truncated and each tool keeps only its name/status plus `input_chars`. The full version is always in the sentinel file.
 
 Design notes (especially under **concurrent multi-session** use):
 
