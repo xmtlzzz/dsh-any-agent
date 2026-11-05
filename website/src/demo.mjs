@@ -5,7 +5,7 @@ export const scenarios = {
     label: '异步派活', summary: '把任务交出去，你的工作继续。',
     description: '拿到回执就能离开。进度随时可读，回合结束后，哨兵文件带回完整结果。',
     frames: [
-      frame('在项目里，认识你的新搭子', '一个会话，一份可恢复的工作上下文。', 'dsh_start', '{ cwd: "/workspace/app" }', 'idle', 0, '创建会话 conv-app · 工作区 /workspace/app'),
+      frame('在项目里，认识你的新搭子', '一个会话，一份可恢复的工作上下文（不传 cwd 时自动取当前客户端项目）。', 'dsh_start', '{ cwd: "/workspace/app" }', 'idle', 0, '创建会话 conv-app · 工作区 /workspace/app'),
       frame('派出任务，立即拿到回执', '不用等任务跑完，当前客户端可以继续做别的事。', 'dsh_send', '{ conversation_id: "conv-app",\n  prompt: "重构配置加载器，补齐回归测试",\n  wait: false }', 'running', 12, '收到 run-001 · background: true'),
       frame('它在工作，你不用守着', 'DSH 读取文件、修改代码、运行脚本。', 'files · shell', 'read src/config.mjs\nedit src/config.mjs\nnode --test test/config.test.mjs', 'running', 43, '读取配置模块 · 编写实现与测试'),
       frame('想看进度？只取新增部分', '游标增量读，不必反复把全部输出塞进上下文。', 'dsh_read', '{ conversation_id: "conv-app",\n  cursor: 12 }\n// → cursor: 18', 'running', 78, '增量输出 6 条 · 测试执行中'),
@@ -42,7 +42,7 @@ export const scenarios = {
     description: '为独立任务开启独立会话，切换查看增量输出。每个会话都有自己的工作区与回执。',
     frames: [
       frame('让独立任务各自开工', '分别为实现、测试和文档建立会话。', 'dsh_start × 3', 'conv-app  → /workspace/app\nconv-test → /workspace/tests\nconv-docs → /workspace/docs', 'idle', 0, '3 个独立会话就绪', { jobs: [0, 0, 0] }),
-      frame('一次派活，各自推进', '每个调用都会返回自己的 run_id。', 'dsh_send · wait=false', '实现 → run-001\n测试 → run-001\n文档 → run-001', 'running', 18, '3 个回合已在后台运行', { jobs: [18, 12, 25] }),
+      frame('一次派活，各自推进', '默认后台异步推进，每个调用立即返回自己的 run_id。', 'dsh_send', '实现 → run-001\n测试 → run-001\n文档 → run-001', 'running', 18, '3 个回合已在后台运行', { jobs: [18, 12, 25] }),
       frame('一眼看清谁在忙', '只列运行中的会话，再按需查看。', 'dsh_list', '{ only_running: true }\n// → app: running\n// → test: running, docs: running', 'running', 45, '切换会话即可查看独立增量输出', { jobs: [45, 35, 65] }),
       frame('文档先完成，其他任务继续', '每条会话独立运行、独立验收。', 'dsh_read', '{ conversation_id: "conv-test",\n  cursor: 8 }\n// → 测试执行进度…', 'running', 68, '文档哨兵已落地 · 实现和测试继续', { jobs: [68, 62, 100] }),
       frame('按会话分目录，不串结果', '即便 run_id 相同，哨兵也有独立路径。', 'sentinel_file', 'runs/conv-app/run-001.json\nruns/conv-test/run-001.json\nruns/conv-docs/run-001.json', 'running', 91, '实现完成 · 测试即将结束', { jobs: [100, 91, 100] }),
@@ -55,7 +55,7 @@ export const scenariosEn = {
     label: 'Async dispatch', summary: 'Hand off the task. Your work continues.',
     description: 'Leave with a receipt. Progress is always readable, and when the turn ends the sentinel file brings the full result.',
     frames: [
-      frame('Meet your new buddy in the project', 'One session, one recoverable working context.', 'dsh_start', '{ cwd: "/workspace/app" }', 'idle', 0, 'Created session conv-app · workspace /workspace/app'),
+      frame('Meet your new buddy in the project', 'One session, one recoverable context (cwd defaults to active project roots if omitted).', 'dsh_start', '{ cwd: "/workspace/app" }', 'idle', 0, 'Created session conv-app · workspace /workspace/app'),
       frame('Dispatch and get a receipt immediately', 'Do not wait for the task; your client can continue with other work.', 'dsh_send', '{ conversation_id: "conv-app",\n  prompt: "Refactor the config loader and add regression tests",\n  wait: false }', 'running', 12, 'Receipt run-001 · background: true'),
       frame('It works; you do not have to watch', 'DSH reads files, edits code, and runs scripts.', 'files · shell', 'read src/config.mjs\nedit src/config.mjs\nnode --test test/config.test.mjs', 'running', 43, 'Read config module · writing implementation and tests'),
       frame('Need progress? Read only what is new', 'Cursor-based increments keep the whole history out of context.', 'dsh_read', '{ conversation_id: "conv-app",\n  cursor: 12 }\n// → cursor: 18', 'running', 78, '6 new entries · tests running'),
@@ -92,7 +92,7 @@ export const scenariosEn = {
     description: 'Open a separate session for each independent task and switch between incremental outputs. Each has its own workspace and receipt.',
     frames: [
       frame('Let independent jobs start', 'Create sessions for implementation, tests, and docs.', 'dsh_start × 3', 'conv-app  → /workspace/app\nconv-test → /workspace/tests\nconv-docs → /workspace/docs', 'idle', 0, '3 independent sessions ready', { jobs: [0, 0, 0] }),
-      frame('One dispatch each, all progress independently', 'Every call returns its own run_id.', 'dsh_send · wait=false', 'build → run-001\ntests → run-001\ndocs → run-001', 'running', 18, '3 turns running in the background', { jobs: [18, 12, 25] }),
+      frame('One dispatch each, all progress independently', 'Dispatches in background by default; each call returns its own run_id.', 'dsh_send', 'build → run-001\ntests → run-001\ndocs → run-001', 'running', 18, '3 turns running in the background', { jobs: [18, 12, 25] }),
       frame('See who is busy at a glance', 'List only running sessions, then inspect as needed.', 'dsh_list', '{ only_running: true }\n// → app: running\n// → test: running, docs: running', 'running', 45, 'Switch sessions to read independent incremental output', { jobs: [45, 35, 65] }),
       frame('Docs finish first; the rest continue', 'Each session runs and is collected independently.', 'dsh_read', '{ conversation_id: "conv-test",\n  cursor: 8 }\n// → test progress…', 'running', 68, 'Docs sentinel landed · build and tests continue', { jobs: [68, 62, 100] }),
       frame('Per-session directories keep results apart', 'Even when run_ids collide, sentinels have independent paths.', 'sentinel_file', 'runs/conv-app/run-001.json\nruns/conv-test/run-001.json\nruns/conv-docs/run-001.json', 'running', 91, 'Build complete · tests almost done', { jobs: [100, 91, 100] }),

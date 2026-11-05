@@ -96,7 +96,7 @@
 <section class="capabilities-section wrap" id="capabilities">
   <div class="section-heading"><div><span class="tiny-label">BUILT FOR THE LONG RUN</span><h2>从一次调用，<br>到长期共事。</h2></div><p>把「会话」作为单位，而不是包一条命令。<br>DSH 的能力，由你熟悉的客户端来调度。</p></div>
   <div class="feature-grid">
-    <article class="feature-card"><span class="feature-index">01 / PERSISTENCE</span><div class="mini-persist" aria-hidden="true"><span class="process-chip">process A <i>×</i></span><div class="persist-wire"></div><span class="disk-chip">sessionId <b>✓</b></span><div class="persist-wire"></div><span class="process-chip">process B <i>↗</i></span></div><h3>进程是缓存，会话有身份</h3><p>已落盘的对话可跨进程恢复。下次调用自动 resume，延续上下文，不必从头介绍项目。</p><code>session/resume</code></article>
+    <article class="feature-card"><span class="feature-index">01 / PERSISTENCE</span><div class="mini-persist" aria-hidden="true"><span class="process-chip">process A <i>×</i></span><div class="persist-wire"></div><span class="disk-chip">sessionId <b>✓</b></span><div class="persist-wire"></div><span class="process-chip">process B <i>↗</i></span></div><h3>进程是缓存，会话有身份</h3><p>已落盘的对话可跨进程恢复。同工作区会话默认共享驻留进程，内存开销有界；下次调用自动 resume 延续上下文。干完可用 <code>dsh_release(all=true)</code> 批量回收。</p><code>session/resume</code></article>
     <article class="feature-card"><span class="feature-index">02 / OBSERVABILITY</span><div class="mini-output" aria-hidden="true"><div><span>cursor 12</span><span>+ 6 entries</span></div><i></i><i></i><i></i><b>cursor 18 <span>→</span></b></div><h3>只看新进展，不重复读历史</h3><p>运行状态轻量查询，输出按游标增量读取。全量快照比对工作区改动（含未跟踪与二次修改），思考内容默认隐藏只给统计。每个结果还带审核清单与证据——先核验，再用 <code>dsh_review</code> 记录 pass/partial/fail。</p><code>dsh_read · dsh_status · dsh_review</code></article>
     <article class="feature-card"><span class="feature-index">03 / COMPOSABILITY</span><div class="mini-tools" aria-hidden="true"><span>⌘ Shell</span><span>▤ Files</span><span>✦ Skills</span><span>⑂ Subagents</span><span>⌁ Workflows</span><span>↗ Other MCPs</span></div><h3>接进来的，是整个工具箱</h3><p>写代码、跑脚本、派子代理，需要时用 <code>dsh-any-agent team on</code> 开启团队（默认关闭）并调用 DSH 自带的技能；外部 MCP 服务需在 DSH profile 中配置。</p><code>DSH native tools + profile MCP</code></article>
   </div>
@@ -115,7 +115,7 @@ command = "dsh-any-agent"
 args = []
 startup_timeout_sec = 20.0
 tool_timeout_sec = 120.0</code></pre></div></div></details>
-  <p class="install-card-note"><span>↳</span> setup --yes 实际写入绝对 node 路径、入口文件，以及 DSH_MCP_PERMISSION/DSH_MCP_LOG；上面的手工示例要求 dsh-any-agent 已在 PATH 中。注意 VS Code 需使用 <code>servers</code> 键（非 <code>mcpServers</code>）。</p>
+  <p class="install-card-note"><span>↳</span> setup --yes 实际写入绝对 node 路径、入口文件，以及 DSH_MCP_PERMISSION/DSH_MCP_LOG；上面的手工示例要求 dsh-any-agent 已在 PATH 中。注意 VS Code 需使用 <code>servers</code> 键（非 <code>mcpServers</code>），opencode 需使用 <code>command: [...]</code> 数组（推荐使用 setup 自动注册）。</p>
 </div></section>
 
 <section class="faq-section wrap" id="faq"><div><span class="tiny-label">GOOD QUESTIONS</span><h2>开始前，你可能想知道。</h2></div><div class="faq-list">
@@ -123,8 +123,10 @@ tool_timeout_sec = 120.0</code></pre></div></div></details>
   <details><summary>编辑器关闭，或者进程崩溃，任务会怎样？<span>＋</span></summary><p>已经落盘的会话可在下次调用时恢复；进行中的回合会随服务或子进程退出而中断，未完成的哨兵也可能不会写入。恢复后应先核对工作区，再重新派活。正常完成的回合由原子哨兵文件唤醒（Windows 自动附带 PowerShell 原生等待命令），无需轮询。首次成功回合之前的会话可能尚未落盘。</p></details>
   <details><summary>需要指定的编辑器、模型或 API 服务吗？<span>＋</span></summary><p>任何能够启动 stdio MCP 服务的客户端都可以接入。模型路由复用你已有的 DSH 配置，本项目不附带模型凭据，也不代售模型服务。模型调用费用按你使用的服务计算。</p></details>
   <details><summary>如何控制写入权限和审批？<span>＋</span></summary><p>可选 read-only、workspace-write 和 danger-full-access。服务端未设置环境变量时默认 danger-full-access；setup 会把 <code>workspace-write</code> 写入客户端配置。越界审批默认 auto-allow，每次放行与提权均完整记录并汇总进审核单；需要逐条人工裁决时，在建会话时显式设置 on_approval=ask。外部 MCP 工具的副作用不受 DSH 沙箱约束，使用前请阅读<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.md" target="_blank" rel="noopener noreferrer">使用注意事项</a>。</p></details>
-  <details><summary>可以同时在 DSH 的 GUI 里操作同一个会话吗？<span>＋</span></summary><p>同一会话同时只有一个写者。服务持锁时，可以用 dsh_read 查看进展；需要在 GUI 接手时，在回合空闲后调用 dsh_release 释放写锁。不要让多个客户端同时写同一会话。</p></details>
+  <details><summary>可以同时在 DSH 的 GUI 里操作同一个会话吗？<span>＋</span></summary><p>同一会话同时只有一个写者。服务持锁时，在 GUI 中打开是只读的（内容可照常查看，但抢不走写锁）；若会话空闲未持锁，在 GUI 中点开会导致 GUI 永久获取写句柄直至重启 dsh web。看进度建议使用 <code>dsh_read</code> 增量读取；需在 GUI 交互接手时，先调用 <code>dsh_release</code>。完整机制见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/locking.md" target="_blank" rel="noopener noreferrer">写锁文档</a>。</p></details>
   <details><summary>团队模式是什么？怎么开启？<span>＋</span></summary><p>0.5.0 起默认关闭、按需开启：运行 <code>dsh-any-agent team on</code> 并重连，DSH 就能在需要并行或多角色时创建具名成员协作，简单任务不会组队。关闭用 <code>dsh-any-agent team off</code>，单次关闭用 <code>dsh_send(team=false)</code>。完整步骤见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/team.md" target="_blank" rel="noopener noreferrer">团队模式文档</a>。</p></details>
+  <details><summary>支持哪些 DSH 版本？升级时要注意什么？<span>＋</span></summary><p>官方验证并推荐 DSH 0.1.7 及以上版本（支持完整 ACP 接口与实验性 Agent Teams 包）；0.1.5 支持基础派发但无法开启团队模式；0.2.x 尚未验证。可在已连接客户端内运行 <code>dsh_doctor</code> 自检 DSH 版本评级与环境健康；若 DSH 解析自 npx 缓存，doctor 会提示固定路径以防缓存清理失效。完整对照见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/compatibility.md" target="_blank" rel="noopener noreferrer">兼容性矩阵</a>。</p></details>
+  <details><summary>如果不打算继续使用，如何安全撤销客户端配置？<span>＋</span></summary><p>随时运行 <code>dsh-any-agent-setup --remove --yes</code> 即可。工具会自动利用写入前留存的逐字节备份，仅精准剔除名为 dsh-any-agent 的条目，将所有客户端配置原样还原，绝不破坏你已有的其它 MCP 服务器与个人设置。</p></details>
   <details><summary>网页上的演示会实际运行任务吗？<span>＋</span></summary><p>这里是用于说明工作流的浏览器本地交互演示，不连接你的计算机，不调用模型。安装并配置 MCP 服务后，才可以在自己的客户端中真实派活。</p></details>
 </div></section>
 

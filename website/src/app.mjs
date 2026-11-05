@@ -96,7 +96,7 @@ function formatCode(raw) {
   return escaped.split('\n').map(line => {
     if (line.trim().startsWith('//')) return `<span class="code-comment">${line}</span>`;
     return line.replace(
-      /("(?:[^"\\]|\\.)*")(?=\s*:)|("(?:[^"\\]|\\.)*")|(\b[a-zA-Z0-9_]+(?=\s*:))|(\btrue\b|\bfalse\b|\bnull\b)|(→)/g,
+      /("(?:[^"\\]|\\.)*")(?=\s*:)|("(?:[^"\\]|\\.)*")|(\b[a-zA-Z0-9_]+(?=\s*:))|(\btrue\b|\bfalse\b|\bnull\b|\b\d+(?:\.\d+)?\b)|(→)/g,
       (match, quotedKey, str, key, val, arrow) => {
         if (quotedKey) return `<span class="code-key">${quotedKey}</span>`;
         if (str) return `<span class="code-str">${str}</span>`;
@@ -178,9 +178,9 @@ function render() {
   }));
   renderPlayback();
 }
-function selectScenario(value) {
+function selectScenario(value, initialStep = 0) {
   if (!scenarios[value]) return;
-  mode = value; step = 0; selectedJob = 0; playing = !motion.matches;
+  mode = value; step = initialStep; selectedJob = 0; playing = !motion.matches;
   render(); schedule();
 }
 $$('[data-scenario]').forEach(button => button.addEventListener('click', () => selectScenario(button.dataset.scenario)));
@@ -197,14 +197,13 @@ $('#prev-step')?.addEventListener('click', () => {
 $('#next-step').addEventListener('click', () => { step = advance(mode, step, scenarios); playing = false; render(); schedule(); });
 $('#context-action').addEventListener('click', () => {
   if (mode === 'dispatch') {
-    selectScenario('interject');
-    step = 1;
+    selectScenario('interject', 1);
   } else {
     step = mode === 'resume' ? 1 : 2;
+    playing = !motion.matches;
+    render();
+    schedule();
   }
-  playing = !motion.matches;
-  render();
-  schedule();
 });
 document.addEventListener('visibilitychange', schedule);
 motion.addEventListener('change', () => { if (motion.matches) { playing = false; schedule(); } });
