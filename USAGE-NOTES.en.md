@@ -130,7 +130,7 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 1. **Give goals, not commands.** DSH is an agent: say "add tests for this module and make them pass", not "run pytest". It picks tools, plans steps, and spawns subagents on its own.
 2. **One conversation per task** — mixing unrelated work pollutes history and costs more.
 3. **Split long work into dispatch + collect**: `wait=false` → do something else → `dsh_get(run_id)`.
-4. **Review output via workspace changes** — `workspace_changed` is true when the `git status` entry set changed across the turn; `diff_stat` lists the current dirty files (it is not a per-turn diff).
+4. **Review output via workspace changes** — `workspace_changed` compares a **full** `git status` snapshot fingerprint taken before and after the turn (status line plus each dirty/untracked path's size and mtime; untracked directories are expanded recursively), so an already-dirty file that changes again, or a change past the 40th entry, is still detected. `diff_stat` lists the current dirty files (it is not a per-turn diff).
 5. **Review the result, don't just relay it** — every result carries a `review` ticket. Check at least one claim with your own tools (read the changed file, inspect `git diff`, run the relevant test), then record `pass` / `partial` / `fail` with `dsh_review`. Default `advisory` does not block the next send; `fail`/`partial` need a reason, and a failed review is not fed back to DSH automatically.
 6. **Ask for a plan first** if you want to approve before execution (DSH has plan mode).
 7. **Three cost knobs**: lower `reasoning_effort`, keep `reasoning=hide`, release and start fresh.
