@@ -60,7 +60,8 @@ test('Demo snippets use the real MCP argument and response keys', () => {
   const interject = frames.filter(f => f.tool === 'dsh_interject');
   const reads = frames.filter(f => f.tool === 'dsh_read');
   const status = frames.filter(f => f.tool === 'dsh_status');
-  assert.ok(interject.length > 0 && reads.length > 0 && status.length > 0);
+  const gets = frames.filter(f => f.tool === 'dsh_get');
+  assert.ok(interject.length > 0 && reads.length > 0 && status.length > 0 && gets.length > 0);
   for (const f of interject) {
     assert.match(f.code, /message:/);
     assert.doesNotMatch(f.code, /\bprompt:/);
@@ -69,5 +70,12 @@ test('Demo snippets use the real MCP argument and response keys', () => {
     assert.match(f.code, /cursor:/);
     assert.doesNotMatch(f.code, /next_cursor/);
   }
-  for (const f of status) assert.doesNotMatch(f.code, /\bhistory:/);
+  for (const f of status) {
+    assert.match(f.code, /conversation_id:/);
+    assert.doesNotMatch(f.code, /\bhistory:/);
+  }
+  for (const f of gets) {
+    assert.match(f.code, /conversation_id:/);
+    assert.match(f.code, /run_id:/);
+  }
 });

@@ -26,6 +26,7 @@ const UI = {
     actionInterject: '插话：先补测试 ↗', actionInterrupt: '模拟进程中断 ↗', actionInterjectBranch: '需求变了？试试中途插话 ↗',
     step: '步', copied: '已复制到剪贴板', selected: '已选中文本，请按 Ctrl/Cmd + C 复制',
     terminal: '终端执行', genericPath: '通用 JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
+    vscodePath: '.vscode/mcp.json (VS Code · servers)',
     conversations: ['配置加载器重构', '配置模块回归测试', '配置使用文档'],
     goals: ['完成配置模块重构。', '补齐回归测试并核对行为。', '更新使用说明与配置示例。'],
     interjectGoal: '先补回归测试，再继续配置加载器重构。',
@@ -42,6 +43,7 @@ const UI = {
     actionInterject: 'Interject: tests first ↗', actionInterrupt: 'Simulate process exit ↗', actionInterjectBranch: 'Need to steer? Try interject ↗',
     step: 'Step', copied: 'Copied to clipboard', selected: 'Text selected; press Ctrl/Cmd + C to copy',
     terminal: 'Terminal command', genericPath: 'Generic JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
+    vscodePath: '.vscode/mcp.json (VS Code · servers)',
     conversations: ['Config loader refactor', 'Config module regression tests', 'Config usage docs'],
     goals: ['Finish the config module refactor.', 'Add regression tests and verify behaviour.', 'Update docs and config examples.'],
     interjectGoal: 'Add regression tests first, then continue the config loader refactor.',
@@ -94,7 +96,7 @@ function formatCode(raw) {
   return escaped.split('\n').map(line => {
     if (line.trim().startsWith('//')) return `<span class="code-comment">${line}</span>`;
     return line.replace(
-      /("(?:[^"\\]|\\.)*")(?=\s*:)|("(?:[^"\\]|\\.)*")|(\b[a-zA-Z0-9_]+(?=\s*:))|(\btrue\b|\bfalse\b|\bnull\b)|(→)/g,
+      /("(?:[^"\\]|\\.)*")(?=\s*:)|("(?:[^"\\]|\\.)*")|(\b[a-zA-Z0-9_]+(?=\s*:))|(\btrue\b|\bfalse\b|\bnull\b|\b\d+(?:\.\d+)?\b)|(→)/g,
       (match, quotedKey, str, key, val, arrow) => {
         if (quotedKey) return `<span class="code-key">${quotedKey}</span>`;
         if (str) return `<span class="code-str">${str}</span>`;
@@ -176,9 +178,9 @@ function render() {
   }));
   renderPlayback();
 }
-function selectScenario(value) {
+function selectScenario(value, initialStep = 0) {
   if (!scenarios[value]) return;
-  mode = value; step = 0; selectedJob = 0; playing = !motion.matches;
+  mode = value; step = initialStep; selectedJob = 0; playing = !motion.matches;
   render(); schedule();
 }
 $$('[data-scenario]').forEach(button => button.addEventListener('click', () => selectScenario(button.dataset.scenario)));
@@ -195,14 +197,13 @@ $('#prev-step')?.addEventListener('click', () => {
 $('#next-step').addEventListener('click', () => { step = advance(mode, step, scenarios); playing = false; render(); schedule(); });
 $('#context-action').addEventListener('click', () => {
   if (mode === 'dispatch') {
-    selectScenario('interject');
-    step = 1;
+    selectScenario('interject', 1);
   } else {
     step = mode === 'resume' ? 1 : 2;
+    playing = !motion.matches;
+    render();
+    schedule();
   }
-  playing = !motion.matches;
-  render();
-  schedule();
 });
 document.addEventListener('visibilitychange', schedule);
 motion.addEventListener('change', () => { if (motion.matches) { playing = false; schedule(); } });
@@ -213,6 +214,7 @@ const configs = {
   codex: { path: '~/.codex/config.toml', code: '[mcp_servers.dsh-any-agent]\ncommand = "dsh-any-agent"\nargs = []\nstartup_timeout_sec = 20.0\ntool_timeout_sec = 120.0' },
   claude: { path: t('terminal'), code: 'claude mcp add dsh-any-agent -- dsh-any-agent' },
   cursor: { path: '~/.cursor/mcp.json', code: '{\n  "mcpServers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
+  vscode: { path: t('vscodePath'), code: '{\n  "servers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
   generic: { path: t('genericPath'), code: '{\n  "mcpServers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
 };
 let config = 'codex';
