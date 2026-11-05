@@ -117,17 +117,51 @@ startup_timeout_sec = 20.0
 tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-note"><span>↳</span><div>setup --yes writes absolute node/entry paths plus DSH_MCP_PERMISSION/DSH_MCP_LOG; the manual example above assumes dsh-any-agent is on PATH. Note that VS Code requires the <code>servers</code> key rather than <code>mcpServers</code>, and opencode requires a <code>command: [...]</code> array (using setup --yes is recommended).</div></div></div></details>
 </div></section>
 
-<section class="faq-section wrap" id="faq"><div><span class="tiny-label">GOOD QUESTIONS</span><h2>What you may want to know first.</h2></div><div class="faq-list">
-  <details><summary>How is this different from calling the DSH CLI directly?<span>＋</span></summary><p>This project drives long-lived DSH sessions over ACP: resume history, interrupt turns, handle approvals, and dispatch now while collecting later. The client sees sessions and tasks, not a list of shell commands to execute one by one.</p></details>
-  <details><summary>What happens if the editor closes or a process crashes?<span>＋</span></summary><p>Persisted sessions can be resumed on the next call. In-flight turns stop when the server or child process exits, and a sentinel may not land. After resuming, check the workspace before dispatching again. Normal turns notify via atomic sentinel files (with ready-made PowerShell wait commands on Windows), avoiding polling. A session that dies before its first successful turn may not have reached disk.</p></details>
-  <details><summary>Do I need a specific editor, model, or API provider?<span>＋</span></summary><p>Any client that can launch a stdio MCP server can connect. Model routing reuses your existing DSH configuration; this project bundles no model credentials and resells no model service. Model usage is billed by your provider.</p></details>
-  <details><summary>How do I control write access and approvals?<span>＋</span></summary><p>Choose read-only, workspace-write, or danger-full-access. With no env override the server defaults to danger-full-access; setup writes <code>workspace-write</code> into the client config. Out-of-workspace approvals default to auto-allow with all auto-approvals and escalations audited in the review ticket; pass on_approval=ask when creating a session to adjudicate them. Side effects of external MCP tools are outside DSH's sandbox; read the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.en.md" target="_blank" rel="noopener noreferrer">usage notes</a> first.</p></details>
-  <details><summary>Can I operate the same session in the DSH GUI at the same time?<span>＋</span></summary><p>Only one writer per session at a time. While this server holds the lock, opening the session in the GUI is read-only (you can inspect turns and output safely without losing the lock); opening an idle, unlocked session in the GUI permanently acquires a write handle until dsh web is restarted. Use <code>dsh_read</code> to watch progress, and call <code>dsh_release</code> before taking over in the GUI. See the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/locking.md" target="_blank" rel="noopener noreferrer">write lock guide</a>.</p></details>
-  <details><summary>What is team mode, and how do I enable it?<span>＋</span></summary><p>Off by default since 0.5.0; opt in as needed: run <code>dsh-any-agent team on</code> and reconnect. DSH can then form named teams when a task needs parallel or multi-role work, while simple tasks stay single-agent. Turn it off globally with <code>dsh-any-agent team off</code>, or for a single turn with <code>dsh_send(team=false)</code>. Full steps are in the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/team.md" target="_blank" rel="noopener noreferrer">team mode guide</a>.</p></details>
-  <details><summary>Which DSH versions are supported, and how should I upgrade?<span>＋</span></summary><p>DSH 0.1.7 and above is verified and recommended (full ACP support and experimental Agent Teams); 0.1.5 supports basic dispatch without team mode; 0.2.x is unverified. Run <code>dsh_doctor</code> in any connected client to verify your version grade and environment health; doctor also warns if DSH resolves from an ephemeral npx cache. See the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/compatibility.md" target="_blank" rel="noopener noreferrer">compatibility matrix</a>.</p></details>
-  <details><summary>How do I safely uninstall or revert my client configs?<span>＋</span></summary><p>Run <code>dsh-any-agent-setup --remove --yes</code> anytime. The setup utility uses byte-for-byte pre-write backups to cleanly excise only the dsh-any-agent entry, restoring your editor configs exactly to their baseline without touching any other MCP servers.</p></details>
-  <details><summary>Does the browser demo actually run tasks?<span>＋</span></summary><p>It is a browser-local interactive explanation of the workflow. It does not connect to your machine or call a model. After installing and configuring the MCP server you can dispatch real work from your own client.</p></details>
-</div></section>
+<section class="faq-section wrap" id="faq">
+  <div class="faq-header">
+    <span class="tiny-label">GOOD QUESTIONS</span>
+    <h2>What you may want to know first.</h2>
+    <p>Key mechanisms and operational boundaries at a glance. Detailed guides are in the docs.</p>
+  </div>
+  <div class="faq-card">
+    <article class="faq-row">
+      <h3 class="faq-q">How is this different from calling the DSH CLI directly?</h3>
+      <div class="faq-a"><p>This project drives long-lived DSH sessions over ACP: resume history, interrupt turns, handle approvals, and dispatch now while collecting later. The client sees sessions and tasks, not a list of shell commands to execute one by one.</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">What happens if the editor closes or a process crashes?</h3>
+      <div class="faq-a"><p>Persisted sessions can be resumed on the next call. In-flight turns stop when the server or child process exits, and a sentinel may not land. After resuming, check the workspace before dispatching again. Normal turns notify via atomic sentinel files (with ready-made PowerShell wait commands on Windows), avoiding polling. A session that dies before its first successful turn may not have reached disk.</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">Do I need a specific editor, model, or API provider?</h3>
+      <div class="faq-a"><p>Any client that can launch a stdio MCP server can connect. Model routing reuses your existing DSH configuration; this project bundles no model credentials and resells no model service. Model usage is billed by your provider.</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">How do I control write access and approvals?</h3>
+      <div class="faq-a"><p>Choose read-only, workspace-write, or danger-full-access. With no env override the server defaults to danger-full-access; setup writes <code>workspace-write</code> into the client config. Out-of-workspace approvals default to auto-allow with all auto-approvals and escalations audited in the review ticket; pass on_approval=ask when creating a session to adjudicate them. Side effects of external MCP tools are outside DSH's sandbox; read the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.en.md" target="_blank" rel="noopener noreferrer">usage notes</a> first.</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">Can I operate the same session in the DSH GUI at the same time?</h3>
+      <div class="faq-a"><p>Only one writer per session at a time. While this server holds the lock, opening the session in the GUI is read-only (you can inspect turns and output safely without losing the lock); opening an idle, unlocked session in the GUI permanently acquires a write handle until dsh web is restarted. Use <code>dsh_read</code> to watch progress, and call <code>dsh_release</code> before taking over in the GUI. See the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/locking.md" target="_blank" rel="noopener noreferrer">write lock guide</a>.</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">What is team mode, and how do I enable it?</h3>
+      <div class="faq-a"><p>Off by default since 0.5.0; opt in as needed: run <code>dsh-any-agent team on</code> and reconnect. DSH can then form named teams when a task needs parallel or multi-role work, while simple tasks stay single-agent. Turn it off globally with <code>dsh-any-agent team off</code>, or for a single turn with <code>dsh_send(team=false)</code>. Full steps are in the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/team.md" target="_blank" rel="noopener noreferrer">team mode guide</a>.</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">Which DSH versions are supported, and how should I upgrade?</h3>
+      <div class="faq-a"><p>DSH 0.1.7 and above is verified and recommended (full ACP support and experimental Agent Teams); 0.1.5 supports basic dispatch without team mode; 0.2.x is unverified. Run <code>dsh_doctor</code> in any connected client to verify your version grade and environment health; doctor also warns if DSH resolves from an ephemeral npx cache. See the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/compatibility.md" target="_blank" rel="noopener noreferrer">compatibility matrix</a>.</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">How do I safely uninstall or revert my client configs?</h3>
+      <div class="faq-a"><p>Run <code>dsh-any-agent-setup --remove --yes</code> anytime. The setup utility uses byte-for-byte pre-write backups to cleanly excise only the dsh-any-agent entry, restoring your editor configs exactly to their baseline without touching any other MCP servers.</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">Does the browser demo actually run tasks?</h3>
+      <div class="faq-a"><p>It is a browser-local interactive explanation of the workflow. It does not connect to your machine or call a model. After installing and configuring the MCP server you can dispatch real work from your own client.</p></div>
+    </article>
+  </div>
+</section>
 
 <section class="closing-section wrap"><div class="closing-copy"><span class="tiny-label">A CODING BUDDY THAT STICKS AROUND.</span><h2>The next long task,<br>done together.</h2><p>It eats plain rice and writes code. You set the direction; it runs the distance.</p><div><a href="#install" class="button primary">Connect your coding buddy <svg><use href="#arrow"/></svg></a><a href="https://github.com/xmtlzzz/dsh-any-agent" class="button secondary" target="_blank" rel="noopener noreferrer"><svg><use href="#github"/></svg> GitHub</a></div></div><div class="closing-art"><img src="{{HERO}}" alt="A blue-haired whale girl eating white rice beside a coding laptop" width="1983" height="793" loading="lazy" decoding="async"></div></section>
 </main>

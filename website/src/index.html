@@ -117,17 +117,51 @@ startup_timeout_sec = 20.0
 tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-note"><span>↳</span><div>setup --yes 实际写入绝对 node 路径、入口文件，以及 DSH_MCP_PERMISSION/DSH_MCP_LOG；上面的手工示例要求 dsh-any-agent 已在 PATH 中。注意 VS Code 需使用 <code>servers</code> 键（非 <code>mcpServers</code>），opencode 需使用 <code>command: [...]</code> 数组（推荐使用 setup 自动注册）。</div></div></div></details>
 </div></section>
 
-<section class="faq-section wrap" id="faq"><div><span class="tiny-label">GOOD QUESTIONS</span><h2>开始前，你可能想知道。</h2></div><div class="faq-list">
-  <details><summary>它和直接调用 DSH 命令行有什么不同？<span>＋</span></summary><p>本项目通过 ACP 驱动长驻的 DSH 会话，支持恢复历史、中断回合、处理审批，以及先派活后收结果。对客户端暴露的是会话与任务，而不是一组逐条执行的 shell 命令。</p></details>
-  <details><summary>编辑器关闭，或者进程崩溃，任务会怎样？<span>＋</span></summary><p>已经落盘的会话可在下次调用时恢复；进行中的回合会随服务或子进程退出而中断，未完成的哨兵也可能不会写入。恢复后应先核对工作区，再重新派活。正常完成的回合由原子哨兵文件唤醒（Windows 自动附带 PowerShell 原生等待命令），无需轮询。首次成功回合之前的会话可能尚未落盘。</p></details>
-  <details><summary>需要指定的编辑器、模型或 API 服务吗？<span>＋</span></summary><p>任何能够启动 stdio MCP 服务的客户端都可以接入。模型路由复用你已有的 DSH 配置，本项目不附带模型凭据，也不代售模型服务。模型调用费用按你使用的服务计算。</p></details>
-  <details><summary>如何控制写入权限和审批？<span>＋</span></summary><p>可选 read-only、workspace-write 和 danger-full-access。服务端未设置环境变量时默认 danger-full-access；setup 会把 <code>workspace-write</code> 写入客户端配置。越界审批默认 auto-allow，每次放行与提权均完整记录并汇总进审核单；需要逐条人工裁决时，在建会话时显式设置 on_approval=ask。外部 MCP 工具的副作用不受 DSH 沙箱约束，使用前请阅读<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.md" target="_blank" rel="noopener noreferrer">使用注意事项</a>。</p></details>
-  <details><summary>可以同时在 DSH 的 GUI 里操作同一个会话吗？<span>＋</span></summary><p>同一会话同时只有一个写者。服务持锁时，在 GUI 中打开是只读的（内容可照常查看，但抢不走写锁）；若会话空闲未持锁，在 GUI 中点开会导致 GUI 永久获取写句柄直至重启 dsh web。看进度建议使用 <code>dsh_read</code> 增量读取；需在 GUI 交互接手时，先调用 <code>dsh_release</code>。完整机制见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/locking.md" target="_blank" rel="noopener noreferrer">写锁文档</a>。</p></details>
-  <details><summary>团队模式是什么？怎么开启？<span>＋</span></summary><p>0.5.0 起默认关闭、按需开启：运行 <code>dsh-any-agent team on</code> 并重连，DSH 就能在需要并行或多角色时创建具名成员协作，简单任务不会组队。关闭用 <code>dsh-any-agent team off</code>，单次关闭用 <code>dsh_send(team=false)</code>。完整步骤见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/team.md" target="_blank" rel="noopener noreferrer">团队模式文档</a>。</p></details>
-  <details><summary>支持哪些 DSH 版本？升级时要注意什么？<span>＋</span></summary><p>官方验证并推荐 DSH 0.1.7 及以上版本（支持完整 ACP 接口与实验性 Agent Teams 包）；0.1.5 支持基础派发但无法开启团队模式；0.2.x 尚未验证。可在已连接客户端内运行 <code>dsh_doctor</code> 自检 DSH 版本评级与环境健康；若 DSH 解析自 npx 缓存，doctor 会提示固定路径以防缓存清理失效。完整对照见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/compatibility.md" target="_blank" rel="noopener noreferrer">兼容性矩阵</a>。</p></details>
-  <details><summary>如果不打算继续使用，如何安全撤销客户端配置？<span>＋</span></summary><p>随时运行 <code>dsh-any-agent-setup --remove --yes</code> 即可。工具会自动利用写入前留存的逐字节备份，仅精准剔除名为 dsh-any-agent 的条目，将所有客户端配置原样还原，绝不破坏你已有的其它 MCP 服务器与个人设置。</p></details>
-  <details><summary>网页上的演示会实际运行任务吗？<span>＋</span></summary><p>这里是用于说明工作流的浏览器本地交互演示，不连接你的计算机，不调用模型。安装并配置 MCP 服务后，才可以在自己的客户端中真实派活。</p></details>
-</div></section>
+<section class="faq-section wrap" id="faq">
+  <div class="faq-header">
+    <span class="tiny-label">GOOD QUESTIONS</span>
+    <h2>开始前，你可能想知道。</h2>
+    <p>首页汇集最关键的机制与限制。深入指南与架构说明可在文档中查阅。</p>
+  </div>
+  <div class="faq-card">
+    <article class="faq-row">
+      <h3 class="faq-q">它和直接调用 DSH 命令行有什么不同？</h3>
+      <div class="faq-a"><p>本项目通过 ACP 驱动长驻的 DSH 会话，支持恢复历史、中断回合、处理审批，以及先派活后收结果。对客户端暴露的是会话与任务，而不是一组逐条执行的 shell 命令。</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">编辑器关闭，或者进程崩溃，任务会怎样？</h3>
+      <div class="faq-a"><p>已经落盘的会话可在下次调用时恢复；进行中的回合会随服务或子进程退出而中断，未完成的哨兵也可能不会写入。恢复后应先核对工作区，再重新派活。正常完成的回合由原子哨兵文件唤醒（Windows 自动附带 PowerShell 原生等待命令），无需轮询。首次成功回合之前的会话可能尚未落盘。</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">需要指定的编辑器、模型或 API 服务吗？</h3>
+      <div class="faq-a"><p>任何能够启动 stdio MCP 服务的客户端都可以接入。模型路由复用你已有的 DSH 配置，本项目不附带模型凭据，也不代售模型服务。模型调用费用按你使用的服务计算。</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">如何控制写入权限和审批？</h3>
+      <div class="faq-a"><p>可选 read-only、workspace-write 和 danger-full-access。服务端未设置环境变量时默认 danger-full-access；setup 会把 <code>workspace-write</code> 写入客户端配置。越界审批默认 auto-allow，每次放行与提权均完整记录并汇总进审核单；需要逐条人工裁决时，在建会话时显式设置 on_approval=ask。外部 MCP 工具的副作用不受 DSH 沙箱约束，使用前请阅读<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.md" target="_blank" rel="noopener noreferrer">使用注意事项</a>。</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">可以同时在 DSH 的 GUI 里操作同一个会话吗？</h3>
+      <div class="faq-a"><p>同一会话同时只有一个写者。服务持锁时，在 GUI 中打开是只读的（内容可照常查看，但抢不走写锁）；若会话空闲未持锁，在 GUI 中点开会导致 GUI 永久获取写句柄直至重启 dsh web。看进度建议使用 <code>dsh_read</code> 增量读取；需在 GUI 交互接手时，先调用 <code>dsh_release</code>。完整机制见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/locking.md" target="_blank" rel="noopener noreferrer">写锁文档</a>。</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">团队模式是什么？怎么开启？</h3>
+      <div class="faq-a"><p>0.5.0 起默认关闭、按需开启：运行 <code>dsh-any-agent team on</code> 并重连，DSH 就能在需要并行或多角色时创建具名成员协作，简单任务不会组队。关闭用 <code>dsh-any-agent team off</code>，单次关闭用 <code>dsh_send(team=false)</code>。完整步骤见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/team.md" target="_blank" rel="noopener noreferrer">团队模式文档</a>。</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">支持哪些 DSH 版本？升级时要注意什么？</h3>
+      <div class="faq-a"><p>官方验证并推荐 DSH 0.1.7 及以上版本（支持完整 ACP 接口与实验性 Agent Teams 包）；0.1.5 支持基础派发但无法开启团队模式；0.2.x 尚未验证。可在已连接客户端内运行 <code>dsh_doctor</code> 自检 DSH 版本评级与环境健康；若 DSH 解析自 npx 缓存，doctor 会提示固定路径以防缓存清理失效。完整对照见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/compatibility.md" target="_blank" rel="noopener noreferrer">兼容性矩阵</a>。</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">如果不打算继续使用，如何安全撤销客户端配置？</h3>
+      <div class="faq-a"><p>随时运行 <code>dsh-any-agent-setup --remove --yes</code> 即可。工具会自动利用写入前留存的逐字节备份，仅精准剔除名为 dsh-any-agent 的条目，将所有客户端配置原样还原，绝不破坏你已有的其它 MCP 服务器与个人设置。</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">网页上的演示会实际运行任务吗？</h3>
+      <div class="faq-a"><p>这里是用于说明工作流的浏览器本地交互演示，不连接你的计算机，不调用模型。安装并配置 MCP 服务后，才可以在自己的客户端中真实派活。</p></div>
+    </article>
+  </div>
+</section>
 
 <section class="closing-section wrap"><div class="closing-copy"><span class="tiny-label">A CODING BUDDY THAT STICKS AROUND.</span><h2>下一项长任务，<br>一起做完。</h2><p>它吃白饭，也写代码。你掌方向，它跑长途。</p><div><a href="#install" class="button primary">接上你的编码搭子 <svg><use href="#arrow"/></svg></a><a href="https://github.com/xmtlzzz/dsh-any-agent" class="button secondary" target="_blank" rel="noopener noreferrer"><svg><use href="#github"/></svg> GitHub</a></div></div><div class="closing-art"><img src="{{HERO}}" alt="蓝发鲸鱼娘一边吃白米饭，一边陪你在编程桌前工作" width="1983" height="793" loading="lazy" decoding="async"></div></section>
 </main>

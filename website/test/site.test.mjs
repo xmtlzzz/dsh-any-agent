@@ -109,3 +109,14 @@ test('GitHub Star badge is rendered in the header and queries repository stars',
   const release = await readFile(resolve(dist, 'assets', releaseName), 'utf8');
   assert.match(release, /api\.github\.com\/repos\/xmtlzzz\/dsh-any-agent/);
 });
+
+test('FAQ section uses expanded 2-column card rows without requiring clicks', () => {
+  for (const page of [html, enHtml]) {
+    const faqSection = /<section class="faq-section wrap" id="faq">([\s\S]*?)<\/section>/.exec(page);
+    assert.ok(faqSection, 'faq-section must exist');
+    assert.match(faqSection[1], /class="faq-card"/, 'faq-card must exist');
+    const rows = [...faqSection[1].matchAll(/<article class="faq-row">/g)];
+    assert.equal(rows.length, 9, 'must contain all 9 FAQ entries');
+    assert.doesNotMatch(faqSection[1], /<details>/, 'FAQ must be expanded by default without details/summary');
+  }
+});
