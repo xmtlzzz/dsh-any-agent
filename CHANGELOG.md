@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-11-05
+
 ### Fixed
 
 - **`workspace_changed` no longer misses real edits.** The turn snapshot now
