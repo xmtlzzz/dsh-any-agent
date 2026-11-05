@@ -129,6 +129,46 @@ export function resolveDshBin() {
 }
 
 /**
+ * 兼容性矩阵（docs/zh/compatibility.md）的机器可读版本，供 dsh_doctor 使用。
+ * 改矩阵时同步改这里：`[verifiedMin, verifiedBelow)` 是“已验证”区间。
+ * 用 `-0` 后缀是为了把同号的 rc 版本也算进去（semver 里 `0.1.7-rc.1 < 0.1.7`）。
+ */
+export const DSH_COMPAT = Object.freeze({
+  partialMin: '0.1.5-0',
+  verifiedMin: '0.1.7-0',
+  verifiedBelow: '0.2.0-0',
+});
+
+/**
+ * 给一个 DSH 版本打兼容性档位：ok（已验证）/ warn（部分可用、未验证或读不到）。
+ * 只是体检提示，不拦启动 —— 未验证不等于不能用。
+ */
+export function dshVersionStatus(version) {
+  if (!version) {
+    return { status: 'warn', level: 'unknown', note: '读不到 DSH 版本（package.json 缺失或不可读）' };
+  }
+  if (cmpVersion(version, DSH_COMPAT.partialMin) < 0) {
+    return { status: 'warn', level: 'unsupported', note: `DSH ${version} 低于已知可用的最低版本 0.1.5` };
+  }
+  if (cmpVersion(version, DSH_COMPAT.verifiedMin) < 0) {
+    return { status: 'warn', level: 'partial', note: `DSH ${version} 部分可用：ACP 基本路径可用，缺 team 包` };
+  }
+  if (cmpVersion(version, DSH_COMPAT.verifiedBelow) < 0) {
+    return { status: 'ok', level: 'verified', note: `DSH ${version} 在已验证区间（0.1.7 ~ 0.2.0 之前）` };
+  }
+  return {
+    status: 'warn',
+    level: 'unverified',
+    note: `DSH ${version} 未经本版本验证（兼容性矩阵只覆盖到 0.1.x），ACP session/* 面可能有变化`,
+  };
+}
+
+/** DSH 入口是不是落在 npx 缓存里（`_npx/<hash>/…`）：那里随 `npm cache clean` 或 npx 自身淘汰随时消失。 */
+export function isNpxCachePath(p) {
+  return /[\\/]_npx[\\/]/.test(String(p ?? ''));
+}
+
+/**
  * DSH 主目录。**默认就是本机用户自己的 ~/.dsh** —— 本服务不拥有独立的 home，
  * 因此凭据（.credentials.yaml）、会话历史、工作区登记与 GUI 完全共用一份。
  *

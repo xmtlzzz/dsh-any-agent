@@ -10,6 +10,8 @@
 
 `on_approval` can be `auto-allow`, `auto-deny`, or `ask` (which exposes a pending approval for `dsh_approval_decide` to adjudicate).
 
+**Under `auto-allow`, `workspace-write` is a soft boundary.** When DSH's sandbox blocks something (e.g. child-process pipes on Windows), DSH asks for `sandbox_permissions: danger-full-access` and `auto-allow` grants it. The default is unchanged, but the grant is **no longer silent**: every turn result carries `auto_approvals_total`, `auto_escalations_total` and up to 20 redacted `auto_approvals` summaries (tool, escalation tier, justification, command preview), and the review ticket's evidence and checklist call out "N auto-approved this turn, M of them escalations". To gate each one, start a conversation with `on_approval=ask`.
+
 **`read-only` is enforced, not merely a default**: it always runs with `auto-deny`; passing `auto-allow` or `ask` for a read-only conversation is rejected at `dsh_start`, and the approval layer refuses any permission request from a read-only conversation. After create/resume the server reads back the session's recorded tier; for read-only it **fails closed** if the projection cache has no permission record within the DSH flush window, rather than relying on the approval layer alone. Without that, a profile `defaultPreset` plus a permissive approval policy could let a write through (found by the adversarial audit).
 
 ## 🧷 Input boundaries

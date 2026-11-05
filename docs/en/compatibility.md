@@ -36,7 +36,8 @@ dsh-any-agent team status        # team switch and profile
 
 In an MCP client, call `dsh_doctor` and look at:
 
-- `dsh_bin`: DSH entry point and version;
+- `dsh_bin`: DSH entry point and version; **warn** when it resolves from an npx cache (`_npx/<hash>/`), which disappears on cache cleanup — install DSH globally or pin `DSH_BIN`;
+- `dsh_version`: the version graded against the table above — `verified` is ok; `partial` / `unsupported` / `unverified` (e.g. 0.2.x) / unreadable are **warn**;
 - `profile`: exists, drift, route source;
 - `team`: `on` / `off` / `requested but unavailable` (version or profile lacks the team package);
 - `config`: effective permission, idle reaping, shared process, and so on.

@@ -193,6 +193,10 @@ const MAX_PROMPT_ECHO = 4000;
 const MAX_RUNS = 20;
 /** 回合记录里 prompt 预览的长度。 */
 const MAX_RUN_PREVIEW = 200;
+/** 每个回合最多保留多少条"自动放行审批"摘要（总数另计，不受此限）。 */
+const MAX_AUTO_APPROVALS_KEPT = 20;
+/** 自动放行审批里命令预览的长度。 */
+const MAX_AUTO_APPROVAL_PREVIEW = 200;
 
 /**
  * 清掉 `dir` 下超过 TTL 的文件与空会话目录；`.tmp` 残留不论年龄都按同一 cutoff 清。
@@ -312,6 +316,10 @@ export function sanitizeResultForSentinel(result) {
       const safeMeta = sanitizeApprovalContext(meta);
       return input === undefined ? safeMeta : { ...safeMeta, input: sanitizeApprovalContext(input) };
     });
+  }
+  // 自动放行审批摘要记录时已脱敏；落盘前再过一遍，防止将来有人加字段漏掉。
+  if (Array.isArray(rest.auto_approvals)) {
+    rest.auto_approvals = rest.auto_approvals.map((a) => (a && typeof a === 'object' ? sanitizeApprovalContext(a) : a));
   }
   // 审核单里可能有原任务预览、审核理由与证据摘要；哨兵会保留 7 天，同样要脱敏。
   if (rest.review && typeof rest.review === 'object') {
@@ -825,6 +833,9 @@ export class Conversation {
     }
     if (this.onApproval === 'auto-allow') {
       this.#hub.log.info(`[conv ${this.id}] 审批放行: ${desc}`);
+      // ★ 自动放行必须对调用方可见：DSH 会借审批把沙箱提升到 danger-full-access，
+      //   不记下来的话 workspace-write 会话事后看起来像从未越界（实测一轮 6 次提权无人知晓）。
+      if (allowId) this.#recordAutoApproval(params, toolCall, desc, options);
       return allowId
         ? { outcome: { outcome: 'selected', optionId: allowId } }
         : { outcome: { outcome: 'cancelled' } };
@@ -854,6 +865,35 @@ export class Conversation {
           resolve(outcome);
         },
       });
+    });
+  }
+
+  /**
+   * 记一条"被自动放行的审批"到本回合收集器（只记摘要，且先脱敏）。
+   * 回合外到来的审批（没有收集器）不记 —— 没有结果可挂。
+   */
+  #recordAutoApproval(params, toolCall, desc, options) {
+    const c = this.collector;
+    if (!c) return;
+    c.autoApprovalTotal = (c.autoApprovalTotal ?? 0) + 1;
+    const input = toolCall.rawInput ?? toolCall.input ?? null;
+    const escalation =
+      input && typeof input === 'object' && typeof input.sandbox_permissions === 'string'
+        ? input.sandbox_permissions
+        : null;
+    if (escalation) c.autoEscalationTotal = (c.autoEscalationTotal ?? 0) + 1;
+    if (!Array.isArray(c.autoApprovals)) c.autoApprovals = [];
+    if (c.autoApprovals.length >= MAX_AUTO_APPROVALS_KEPT) return;
+    const ctx = approvalContext(params, toolCall, desc, options);
+    const cmd = input && typeof input === 'object' ? input.command ?? input.cmd ?? null : null;
+    c.autoApprovals.push({
+      tool: ctx.tool ?? desc,
+      tool_call_id: ctx.tool_call_id ?? null,
+      escalation,
+      reason: typeof ctx.reason === 'string' ? ctx.reason.slice(0, 300) : null,
+      command_preview:
+        typeof cmd === 'string' ? sanitizeApprovalContext(cmd, 'command').slice(0, MAX_AUTO_APPROVAL_PREVIEW) : null,
+      at: new Date().toISOString(),
     });
   }
 
@@ -1021,6 +1061,10 @@ export class Conversation {
       usage: null,
       plan: null,
       otherUpdates: [],
+      /** 本回合被 auto-allow 放行的审批摘要（最多 MAX_AUTO_APPROVALS_KEPT 条）与总数。 */
+      autoApprovals: [],
+      autoApprovalTotal: 0,
+      autoEscalationTotal: 0,
     };
     this.collector = c;
     const t0 = now();
@@ -1107,6 +1151,9 @@ export class Conversation {
             },
             tools_used: [...c.tools.values()],
             usage: c.usage,
+            auto_approvals_total: c.autoApprovalTotal,
+            auto_escalations_total: c.autoEscalationTotal,
+            auto_approvals: c.autoApprovals,
             workspace_changed: !sameWorkspaceSnapshot(before, after),
             diff_stat: after,
             elapsed_ms: now() - t0,

@@ -9,10 +9,10 @@ name: tests
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     guards            env-var edge cases            40 checks
 #     prune             sentinel retention            11 checks
-#     approval-details  credential redaction          27 checks
+#     approval-details  credential redaction          37 checks
 #     failure-terminal  terminal state on failure     11 checks
 #     shared-host       shared process host           25 checks
-#     dispatch-tools    dispatch surface              31 checks
+#     dispatch-tools    dispatch surface              55 checks (53 off Windows)
 #     read-cursor       dsh_read revision cursor      10 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
 #     review            caller review tickets        70 checks

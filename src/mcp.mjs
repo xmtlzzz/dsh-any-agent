@@ -80,6 +80,9 @@ dsh_interject —— 一个回合 = 一个哨兵，没有例外）。dsh_send �
   你再读文件即得结果。示例（Bash；直接用返回里的 sentinel_file_posix，别手工转换路径）：
     sent="$sentinel_file_posix"
     dl=$(( $(date +%s)+2100 )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE
+  宿主是 Windows、只有 PowerShell（或 Git Bash 不可用）时，用原生路径 sentinel_file：
+    $f='<sentinel_file>'; $dl=(Get-Date).AddSeconds(2100); while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit 1 }; Start-Sleep -Seconds 2 }; 'DONE'
+  （路径里有单引号时写成两个单引号；后台收据会直接给出拼好的这一行。）
   读文件即可拿到 status 和 result（result.review 是审核单）；**不受内存窗口限制、也扛本服务重启**。文件里 status=error 表示失败。
   拿到结果后先按审核单独立核验，再调用 dsh_review 提交裁决；审核状态会回写进哨兵。
 - 想阻塞拿结果 → 传 **wait=true**；即使等超时也不会丢结果：返回会变成收据（still_running + sentinel_file），

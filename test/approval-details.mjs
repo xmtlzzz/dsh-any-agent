@@ -141,6 +141,75 @@ try {
     assert.deepEqual(closing.snapshot().pending_approval_details, []);
   });
 
+  console.log('\n[3d] auto-allow records what it approved (visible to the caller, redacted)');
+  {
+    const { buildReviewTicket } = await import('../src/review.mjs');
+    const { sanitizeResultForSentinel } = await import('../src/hub.mjs');
+    const auto = new Conversation({ id: 'approval-auto-test', cwd: root, permission: 'workspace-write', onApproval: 'auto-allow' }, hub);
+    auto.collector = { tools: new Map(), autoApprovals: [], autoApprovalTotal: 0, autoEscalationTotal: 0 };
+    await auto.onPermissionRequest(request({
+      command: 'npm test --token sk-abcdefghijklmnop1234',
+      sandbox_permissions: 'danger-full-access',
+      justification: 'child_process pipes are blocked by the sandbox',
+    }));
+    await auto.onPermissionRequest(request({ command: 'git status' }));
+    const c = auto.collector;
+    check('every auto-allowed approval is counted', () => assert.equal(c.autoApprovalTotal, 2));
+    check('sandbox escalations are counted separately', () => assert.equal(c.autoEscalationTotal, 1));
+    check('summary keeps tool, escalation and reason', () => {
+      assert.equal(c.autoApprovals[0].tool, 'pwsh');
+      assert.equal(c.autoApprovals[0].escalation, 'danger-full-access');
+      assert.match(c.autoApprovals[0].reason, /child_process pipes/);
+      assert.equal(c.autoApprovals[1].escalation, null);
+    });
+    check('command preview is redacted', () => {
+      assert.match(c.autoApprovals[0].command_preview, /^npm test --token \[REDACTED\]/);
+      assert.ok(!JSON.stringify(c.autoApprovals).includes('sk-abcdefghijklmnop1234'));
+    });
+    for (let i = 0; i < 30; i++) await auto.onPermissionRequest(request({ command: `echo ${i}` }));
+    check('kept summaries are capped but the total keeps counting', () => {
+      assert.equal(c.autoApprovals.length, 20);
+      assert.equal(c.autoApprovalTotal, 32);
+    });
+    auto.collector = null;
+    const outsideTurn = await auto.onPermissionRequest(request());
+    check('approval outside a turn is still allowed and does not throw', () => assert.equal(outsideTurn.outcome.optionId, 'allow-once'));
+
+    const result = {
+      stop_reason: 'end_turn',
+      tools_used: [{ title: 'pwsh' }],
+      workspace_changed: true,
+      diff_stat: { changed_files: 1 },
+      auto_approvals_total: 32,
+      auto_escalations_total: 1,
+      auto_approvals: c.autoApprovals,
+    };
+    const ticket = buildReviewTicket({ conversationId: auto.id, runId: 'run-auto-1', result, permission: 'workspace-write' });
+    check('review evidence carries the auto-approval counts', () => {
+      assert.equal(ticket.evidence.auto_approvals, 32);
+      assert.equal(ticket.evidence.auto_escalations, 1);
+    });
+    check('review checklist names the escalations and points at on_approval=ask', () => {
+      const item = ticket.checklist.find((x) => x.includes('自动放行'));
+      assert.ok(item, JSON.stringify(ticket.checklist));
+      assert.match(item, /32 次/);
+      assert.match(item, /1 次申请了沙箱提权/);
+      assert.match(item, /on_approval=ask/);
+    });
+    const quiet = buildReviewTicket({ conversationId: auto.id, runId: 'run-auto-2', result: { ...result, auto_approvals_total: 0, auto_escalations_total: 0, auto_approvals: [] } });
+    check('no auto-approval item when nothing was auto-approved', () =>
+      assert.ok(!quiet.checklist.some((x) => x.includes('自动放行'))));
+    const sentinelCopy = sanitizeResultForSentinel({
+      ...result,
+      auto_approvals: [{ tool: 'pwsh', command_preview: 'curl -H "Authorization: Bearer abc.def.ghi" https://x', reason: 'password=hunter2' }],
+    });
+    check('sentinel copy re-redacts auto-approval summaries', () => {
+      const s = JSON.stringify(sentinelCopy.auto_approvals);
+      assert.ok(!s.includes('abc.def.ghi'), s);
+      assert.ok(!s.includes('hunter2'), s);
+    });
+  }
+
   console.log('\n[4] actual stdio MCP structuredContent preserves review context');
   const harness = `
     import { Hub, Conversation } from ${JSON.stringify(new URL('../src/hub.mjs', import.meta.url).href)};

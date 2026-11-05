@@ -25,6 +25,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--no-optional-locks` is passed as a **global** git option (before the
   subcommand); previously `git status ... --no-optional-locks` exited 129, so
   every real snapshot was `null` and `workspace_changed` stayed false.
+- **`dsh_get(max_chars)` now bounds the whole response.** The budget used to
+  apply only to the rendered text while `structured.run.result` kept every
+  tool's full input, so a 77-tool turn came back as ~75K characters and was
+  rejected by Claude Code's per-call limit even with `max_chars=8000`. With
+  `max_chars > 0`, structured is compacted too: the answer is truncated and
+  `tools_used[]` keeps `id/title/name/status/kind` plus `input_chars`
+  (`run.result_compacted: true`). `max_chars=0` (default) is unchanged; the
+  full result is always in the sentinel file.
+- **`dsh_doctor` flags unverified DSH versions and fragile entry points.** A new
+  `dsh_version` check grades the DSH version against the compatibility matrix
+  (`verified` 0.1.7 ≤ v < 0.2.0 → ok; `partial`, `unsupported`, `unverified`
+  such as 0.2.x, or unreadable → warn). `dsh_bin` warns when DSH resolves from
+  an npx cache (`_npx/<hash>/`), which disappears on cache cleanup.
+
+### Added
+
+- **Auto-approved approvals are visible.** Under `on_approval=auto-allow`, every
+  turn result now carries `auto_approvals_total`, `auto_escalations_total`
+  (requests with `sandbox_permissions`, e.g. `danger-full-access`) and up to 20
+  redacted `auto_approvals` summaries (tool, escalation, justification, command
+  preview). The review ticket's evidence and checklist call them out, so a
+  `workspace-write` session that silently escalated no longer looks like it
+  stayed in bounds. Defaults are unchanged; use `on_approval=ask` to gate each.
+- **PowerShell sentinel waiter.** On Windows the background receipt includes a
+  ready-made, quote-escaped `sentinel_wait_powershell` command (also in the
+  text), and the server instructions document it, for hosts where Git Bash is
+  missing or hangs.
 
 ### Website
 

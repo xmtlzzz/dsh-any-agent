@@ -10,6 +10,8 @@
 
 `on_approval` 可选 `auto-allow` / `auto-deny` / `ask`（`ask` 会把审批挂起，交给 `dsh_approval_decide` 裁决）。
 
+**`auto-allow` 下 `workspace-write` 是软边界。** DSH 碰到沙箱挡住的操作（例如 Windows 上子进程管道被拦）会申请 `sandbox_permissions: danger-full-access`，`auto-allow` 会直接放行。默认值不变，但放行**不再是静默的**：每个回合结果都带 `auto_approvals_total`、`auto_escalations_total` 和最多 20 条脱敏后的 `auto_approvals` 摘要（工具、提权档、理由、命令预览）；审核单的证据与清单会点名"本轮有 N 次自动放行，其中 M 次提权"。要逐次把关，就用 `on_approval=ask` 新建会话。
+
 **`read-only` 是强制边界，不只是默认值**：它固定使用 `auto-deny`；给只读会话传 `auto-allow` / `ask` 会在 `dsh_start` 被直接拒绝，审批层也会拒绝来自只读会话的任何权限请求。建会话/resume 后还会回读会话自己记录的权限档；只读档如果在 DSH 投影缓存刷盘窗口内仍读不到记录，会 **fail-closed 拒绝继续**，而不是只依赖审批层兜底。否则 profile 的 `defaultPreset` 加宽松审批策略可能放行写操作（对抗审计实测过）。
 
 ## 🧷 输入边界
