@@ -17,7 +17,7 @@ export const scenarios = {
     label: '中途改向', summary: '想法变了，随时把方向拨回来。',
     description: '插话会取消当前回合，再带着原有历史开启下一轮。也可以排队，等本轮结束再说。',
     frames: [
-      frame('重构进行到一半', '实现已经开始，但你想先验证旧行为。', 'dsh_status', '{ state: "running",\n  current_tool: "edit", turns: 3 }', 'running', 35, 'run-001 · 正在重构配置加载器'),
+      frame('重构进行到一半', '实现已经开始，但你想先验证旧行为。', 'dsh_status', '{ conversation_id: "conv-app" }\n// → state: "running", tool: "edit", turns: 3', 'running', 35, 'run-001 · 正在重构配置加载器'),
       frame('把新要求说清楚', '“先补回归测试，再继续重构。”', '你的新要求', '先补回归测试，确认旧行为不变，\n再继续重构配置加载器。', 'running', 38, '收到方向调整 · 准备插话'),
       frame('中止当前回合，历史保留', '通过 ACP 的取消路径结束当前回合，不销毁会话。', 'dsh_interject', '{ conversation_id: "conv-app",\n  mode: "interject",\n  message: "先补回归测试，再继续重构" }', 'interrupted', 38, 'run-001 已取消 · conversation_id 保持不变', { preserved: true }),
       frame('带着上下文，按新方向继续', '同一会话开启新回合，之前的工作仍在。', '新回合 run-002', 'history → preserved\nnext → write regression tests', 'running', 62, 'run-002 · 先补回归测试', { preserved: true }),
@@ -34,7 +34,7 @@ export const scenarios = {
       frame('会话身份仍然在', '历史保留，工作区里已经写入的文件也仍在。', '磁盘上的 sessionId', 'conversation_id: "conv-app"\nprocess: none\nhistory: persisted', 'detached', 56, '找到已落盘的会话 · 等待重新连接', { persisted: true }),
       frame('下次调用，自动接回对话', '拉起新进程，通过 ACP session/resume 恢复。', 'session/resume', '{ sessionId: "conv-app" }\n// → history restored', 'idle', 56, '新进程已连接 · 同一会话历史已恢复', { persisted: true, preserved: true }),
       frame('重新派活，继续剩下的工作', '先核对工作区状态，再给下一轮明确目标。', 'dsh_send', '{ conversation_id: "conv-app",\n  prompt: "检查已完成修改，继续剩余测试",\n  wait: false }', 'running', 80, 'run-002 · 核对修改后继续测试', { persisted: true, preserved: true }),
-      frame('恢复的是合作关系', '进程只是缓存，会话才是长期共事的单位。', 'dsh_get', '{ run_id: "run-002" }\n// → status: done', 'done', 100, '新回合完成 · 历史延续', { persisted: true, preserved: true, sentinel: true, collected: true }),
+      frame('恢复的是合作关系', '进程只是缓存，会话才是长期共事的单位。', 'dsh_get', '{ conversation_id: "conv-app",\n  run_id: "run-002" }\n// → status: done', 'done', 100, '新回合完成 · 历史延续', { persisted: true, preserved: true, sentinel: true, collected: true }),
     ],
   },
   parallel: {
@@ -67,7 +67,7 @@ export const scenariosEn = {
     label: 'Change course', summary: 'When the plan changes, steer back.',
     description: 'Interject cancels the current turn and starts the next one with history intact. You can also queue a message for after this turn.',
     frames: [
-      frame('Halfway through the refactor', 'Implementation started, but you want to verify old behaviour first.', 'dsh_status', '{ state: "running",\n  current_tool: "edit", turns: 3 }', 'running', 35, 'run-001 · refactoring the config loader'),
+      frame('Halfway through the refactor', 'Implementation started, but you want to verify old behaviour first.', 'dsh_status', '{ conversation_id: "conv-app" }\n// → state: "running", tool: "edit", turns: 3', 'running', 35, 'run-001 · refactoring the config loader'),
       frame('State the new requirement', '“Add regression tests first, then continue.”', 'your new requirement', 'Add regression tests first, confirm old behaviour,\nthen continue the config loader refactor.', 'running', 38, 'Direction change received · preparing to interject'),
       frame('Stop the turn, keep the history', 'End the current turn through ACP cancel; do not destroy the session.', 'dsh_interject', '{ conversation_id: "conv-app",\n  mode: "interject",\n  message: "Add regression tests first, then continue" }', 'interrupted', 38, 'run-001 cancelled · conversation_id unchanged', { preserved: true }),
       frame('Continue in the new direction with context', 'The same session starts a new turn; prior work remains.', 'new turn run-002', 'history → preserved\nnext → write regression tests', 'running', 62, 'run-002 · tests first', { preserved: true }),
@@ -84,7 +84,7 @@ export const scenariosEn = {
       frame('The session identity remains', 'History is kept, and files already written in the workspace remain.', 'sessionId on disk', 'conversation_id: "conv-app"\nprocess: none\nhistory: persisted', 'detached', 56, 'Persisted session found · waiting to reconnect', { persisted: true }),
       frame('The next call resumes automatically', 'A new process attaches through ACP session/resume.', 'session/resume', '{ sessionId: "conv-app" }\n// → history restored', 'idle', 56, 'New process attached · same session history restored', { persisted: true, preserved: true }),
       frame('Dispatch again and finish the remaining work', 'Check the workspace first, then give the next turn a clear goal.', 'dsh_send', '{ conversation_id: "conv-app",\n  prompt: "Check the completed edits and continue the remaining tests",\n  wait: false }', 'running', 80, 'run-002 · checking edits, then tests', { persisted: true, preserved: true }),
-      frame('What resumes is the collaboration', 'The process is a cache; the session is the long-lived unit.', 'dsh_get', '{ run_id: "run-002" }\n// → status: done', 'done', 100, 'New turn complete · history continues', { persisted: true, preserved: true, sentinel: true, collected: true }),
+      frame('What resumes is the collaboration', 'The process is a cache; the session is the long-lived unit.', 'dsh_get', '{ conversation_id: "conv-app",\n  run_id: "run-002" }\n// → status: done', 'done', 100, 'New turn complete · history continues', { persisted: true, preserved: true, sentinel: true, collected: true }),
     ],
   },
   parallel: {

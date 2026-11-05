@@ -26,6 +26,7 @@ const UI = {
     actionInterject: '插话：先补测试 ↗', actionInterrupt: '模拟进程中断 ↗', actionInterjectBranch: '需求变了？试试中途插话 ↗',
     step: '步', copied: '已复制到剪贴板', selected: '已选中文本，请按 Ctrl/Cmd + C 复制',
     terminal: '终端执行', genericPath: '通用 JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
+    vscodePath: '.vscode/mcp.json (VS Code · servers)',
     conversations: ['配置加载器重构', '配置模块回归测试', '配置使用文档'],
     goals: ['完成配置模块重构。', '补齐回归测试并核对行为。', '更新使用说明与配置示例。'],
     interjectGoal: '先补回归测试，再继续配置加载器重构。',
@@ -42,6 +43,7 @@ const UI = {
     actionInterject: 'Interject: tests first ↗', actionInterrupt: 'Simulate process exit ↗', actionInterjectBranch: 'Need to steer? Try interject ↗',
     step: 'Step', copied: 'Copied to clipboard', selected: 'Text selected; press Ctrl/Cmd + C to copy',
     terminal: 'Terminal command', genericPath: 'Generic JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
+    vscodePath: '.vscode/mcp.json (VS Code · servers)',
     conversations: ['Config loader refactor', 'Config module regression tests', 'Config usage docs'],
     goals: ['Finish the config module refactor.', 'Add regression tests and verify behaviour.', 'Update docs and config examples.'],
     interjectGoal: 'Add regression tests first, then continue the config loader refactor.',
@@ -213,6 +215,7 @@ const configs = {
   codex: { path: '~/.codex/config.toml', code: '[mcp_servers.dsh-any-agent]\ncommand = "dsh-any-agent"\nargs = []\nstartup_timeout_sec = 20.0\ntool_timeout_sec = 120.0' },
   claude: { path: t('terminal'), code: 'claude mcp add dsh-any-agent -- dsh-any-agent' },
   cursor: { path: '~/.cursor/mcp.json', code: '{\n  "mcpServers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
+  vscode: { path: t('vscodePath'), code: '{\n  "servers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
   generic: { path: t('genericPath'), code: '{\n  "mcpServers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
 };
 let config = 'codex';
