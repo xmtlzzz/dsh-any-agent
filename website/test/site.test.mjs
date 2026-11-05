@@ -87,3 +87,36 @@ test('CSP allows the runtime version endpoints and canonical uses the public dom
   assert.match(html, /<link rel="canonical" href="https:\/\/dsh-any-agent\.xmtlz\.dev\/">/);
   assert.match(html, /property="og:image" content="https:\/\/dsh-any-agent\.xmtlz\.dev\/assets\/hero\.[a-f0-9]{10}\.jpg"/);
 });
+
+test('Install card notes use block wrappers and manual config note resides inside details', () => {
+  for (const page of [html, enHtml]) {
+    for (const match of page.matchAll(/<div class="install-card-note[^"]*">([\s\S]*?)<\/div>/g)) {
+      assert.match(match[1], /^<span>↳<\/span><(?:div|p)>/, 'install-card-note must wrap text in a container element');
+    }
+    const manualConfig = /<details class="manual-config">([\s\S]*?)<\/details>/.exec(page);
+    assert.ok(manualConfig, 'manual-config details must exist');
+    assert.match(manualConfig[1], /class="install-card-note manual-note"/, 'manual note must be inside manual-config details');
+    assert.doesNotMatch(page, /<\/details>\s*<p class="install-card-note"/);
+  }
+});
+
+test('GitHub Star badge is rendered in the header and queries repository stars', async () => {
+  for (const page of [html, enHtml]) {
+    assert.match(page, /<span class="github-star-badge"[^>]*>[\s\S]*?<span data-github-stars="true">\d+<\/span>/);
+    assert.match(page, /class="github-nav" href="https:\/\/github\.com\/xmtlzzz\/dsh-any-agent"/);
+  }
+  const releaseName = assets.find((name) => /^release\.[a-f0-9]{10}\.mjs$/.test(name));
+  const release = await readFile(resolve(dist, 'assets', releaseName), 'utf8');
+  assert.match(release, /api\.github\.com\/repos\/xmtlzzz\/dsh-any-agent/);
+});
+
+test('FAQ section uses expanded 2-column card rows without requiring clicks', () => {
+  for (const page of [html, enHtml]) {
+    const faqSection = /<section class="faq-section wrap" id="faq">([\s\S]*?)<\/section>/.exec(page);
+    assert.ok(faqSection, 'faq-section must exist');
+    assert.match(faqSection[1], /class="faq-card"/, 'faq-card must exist');
+    const rows = [...faqSection[1].matchAll(/<article class="faq-row">/g)];
+    assert.equal(rows.length, 9, 'must contain all 9 FAQ entries');
+    assert.doesNotMatch(faqSection[1], /<details>/, 'FAQ must be expanded by default without details/summary');
+  }
+});
