@@ -57,14 +57,20 @@ try {
   const second = await timed({});
   const third = await timed({});
   console.log(`    第 2 次 ${second.ms}ms，第 3 次 ${third.ms}ms（第一次 ${first.ms}ms）`);
-  check('★ 第 2 次调用是毫秒级（缓存生效）', second.ms < 500, `${second.ms}ms`);
-  check('★ 第 3 次调用同样是毫秒级', third.ms < 500, `${third.ms}ms`);
+  // ★ 判定“缓存生效”看结构化字段，不看墙钟：Windows 上实测第 2 或第 3 次偶尔会多出
+  //   ~700ms（服务端还在收尾上一次的探测子进程），500ms 阈值因此稳定误报。
+  //   耗时只做宽松的健全性检查：远低于一次真实探测（拉 DSH 进程要数秒）。
+  check('第一次确实做了磁盘探测（未命中缓存）', first.s.probe_cached === false && first.s.probe_ok === true, JSON.stringify({ c: first.s.probe_cached, ok: first.s.probe_ok }));
+  check('★ 第 2 次命中缓存（probe_cached=true，没有再拉进程）', second.s.probe_cached === true, JSON.stringify(second.s.probe_cached));
+  check('★ 第 3 次同样命中缓存', third.s.probe_cached === true, JSON.stringify(third.s.probe_cached));
+  check('命中缓存的调用远快于真实探测（< 1500ms）', second.ms < 1500 && third.ms < 1500, `${second.ms}ms / ${third.ms}ms`);
   check('缓存没有改变结果（会话数一致）', second.s.count === first.s.count && third.s.count === first.s.count, `${first.s.count}/${second.s.count}/${third.s.count}`);
 
   console.log('\n[3] ★ only_running=true：跳过探测，且语义等价');
   const only = await timed({ only_running: true });
   console.log(`    only_running ${only.ms}ms，会话数 ${only.s.count}（全为 running）`);
-  check('★ only_running 是毫秒级（跳过磁盘探测）', only.ms < 500, `${only.ms}ms`);
+  check('★ only_running 跳过磁盘探测（probe_ok=null）', only.s.probe_ok === null, JSON.stringify(only.s.probe_ok));
+  check('only_running 很快（< 1500ms）', only.ms < 1500, `${only.ms}ms`);
   check(
     '★ 且只返回正在跑的会话（不含磁盘上未打开的）',
     (only.s.conversations ?? []).every((c) => c.state === 'running'),
@@ -79,7 +85,8 @@ try {
   console.log('\n[4] include_closed=false：也不探测，但能看到本服务已打开的');
   const closed = await timed({ include_closed: false });
   console.log(`    include_closed=false ${closed.ms}ms，会话数 ${closed.s.count}`);
-  check('是毫秒级', closed.ms < 500, `${closed.ms}ms`);
+  check('不做磁盘探测（probe_ok=null）', closed.s.probe_ok === null, JSON.stringify(closed.s.probe_ok));
+  check('很快（< 1500ms）', closed.ms < 1500, `${closed.ms}ms`);
   check('仍包含本服务已打开的会话', (closed.s.conversations ?? []).some((c) => c.conversation_id === conv));
   check(
     '比默认调用少（列表里没有磁盘上的 detached 会话）',

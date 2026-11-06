@@ -166,7 +166,9 @@ try {
   await sleep(5000);
   const inj2 = await client.callTool(
     'dsh_interject',
-    { conversation_id: convId, message: '刚才那件事做完之后，只回复三个字：接着说', mode: 'queue' },
+    // 用一个不会被“意译”的暗号：以前要求“只回复三个字：接着说”，模型回了“接着”，
+    // 机制完全正常（排队等了上一轮、回合正常结束）却被判失败 —— 那是在测模型的措辞。
+    { conversation_id: convId, message: '刚才那件事做完之后，原样回复这个暗号，不要加别的字：QUEUED-7K2', mode: 'queue' },
     400_000,
   );
   const si2 = inj2?.structuredContent ?? {};
@@ -174,8 +176,8 @@ try {
   check('queue 确实等了上一轮', typeof si2.waited_ms === 'number' && si2.waited_ms > 1000, String(si2.waited_ms));
   check('queue 后的新回合正常结束', si2.stop_reason && si2.stop_reason !== 'error', `stop=${si2.stop_reason} err=${si2.error}`);
   check(
-    'DSH 按新指令回应',
-    typeof si2.answer === 'string' && si2.answer.includes('接着说'),
+    'DSH 按新指令回应（排队的话确实送达了）',
+    typeof si2.answer === 'string' && si2.answer.includes('QUEUED-7K2'),
     JSON.stringify(si2.answer?.slice(0, 160)),
   );
   console.log(`    答复: ${JSON.stringify(si2.answer?.slice(0, 160))}  waited=${si2.waited_ms}ms`);

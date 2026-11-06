@@ -126,7 +126,16 @@ try {
     console.log(`  stop=${s.stop_reason} 耗时=${((s.elapsed_ms ?? 0) / 1000).toFixed(1)}s`);
     console.log(`  用到工具: ${tools.join(', ') || '(无)'}`);
     console.log(`  答复: ${JSON.stringify((s.answer ?? '').slice(0, 300))}`);
-    check(`${j.key}: 回合正常结束`, s.stop_reason === 'end_turn', `stop=${s.stop_reason} err=${s.error ?? err ?? ''}`);
+    // ★ 工具层报错（isError）时 structuredContent 是空的，原因只在 content 文本里。
+    //   以前只打印 s.error，结果失败行是一句空的 `err=`，这次失败根本无从定位。
+    const toolErr = r?.isError ? McpClient.text(r).slice(0, 400) : '';
+    if (toolErr) console.log(`  工具报错: ${toolErr}`);
+    if (!r && err) console.log(`  调用异常: ${err}`);
+    check(
+      `${j.key}: 回合正常结束`,
+      s.stop_reason === 'end_turn',
+      `stop=${s.stop_reason} err=${s.error ?? toolErr ?? ''}${err ? ` call=${err}` : ''}${!toolErr && !s.error && !err ? ` raw=${JSON.stringify(r ?? null).slice(0, 300)}` : ''}`,
+    );
   }
 
   // ── 写代码 + 跑脚本的产物验证 ─────────────────────────────
