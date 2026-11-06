@@ -24,7 +24,7 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 
 **1.4 Never register dsh-any-agent into DSH's own MCP list.** DSH is an MCP client, this server is an MCP server; pointing one at the other recurses forever.
 
-**1.5 `DSH CLI entry not found`.** Set `DSH_BIN` explicitly (auto-detection scans the npx cache, npm global, and common paths).
+**1.5 `DSH CLI entry not found`.** Auto-detection finds the DeepSeek Harness desktop app (Windows uninstall registry plus default install paths on every platform; the CLI inside `app.asar` runs on the app's bundled runtime), npm global installs and the npx cache. Check `dsh_candidates` in `dsh_doctor`; for portable or custom locations set `DSH_BIN` explicitly (it may point inside `app.asar`).
 
 ## 2. Cost and budget
 

@@ -28,10 +28,16 @@ import {
   TEAM_MODE,
   DSH_PROFILE,
   toPosixPath,
-  resolveDshBin,
   dshVersionStatus,
-  isNpxCachePath,
 } from './config.mjs';
+import {
+  SOURCE_LABEL,
+  discoverDsh,
+  isNpxCachePath,
+  probeRuntimeNode,
+  resolveDsh,
+  satisfiesNodeRange,
+} from './dsh-locate.mjs';
 import { inspectProfile } from './bootstrap.mjs';
 import { audit } from './audit.mjs';
 import { listOrphans, LOCKS_DIR } from './locks.mjs';
@@ -1357,21 +1363,60 @@ export function createHandlers(hub, opts = {}) {
       const add = (id, status, detail, fix = null) => checks.push({ id, status, detail, fix });
 
       try {
-        const bin = resolveDshBin();
-        let version = null;
-        try {
-          version =
-            JSON.parse(readFileSync(join(dirname(bin), '..', 'package.json'), 'utf8')).version ?? null;
-        } catch {}
+        // 体检总是重新探测（不吃 60 秒缓存）：用户刚装/升级完桌面版就来查，必须看到新结果。
+        const all = discoverDsh({ fresh: true });
+        const dsh = resolveDsh();
+        const { bin, version } = dsh;
         const fromNpx = isNpxCachePath(bin);
         add(
           'dsh_bin',
           fromNpx ? 'warn' : 'ok',
-          `${bin}${version ? ` (DSH ${version})` : ''}${fromNpx ? ' —— 位于 npx 缓存，清缓存后会失效' : ''}`,
+          `${bin}${version ? ` (DSH ${version})` : ''}；来源=${SOURCE_LABEL[dsh.source] ?? dsh.source}` +
+            `；运行时=${dsh.runtime === 'node' ? `node ${process.versions.node}` : dsh.command}` +
+            (fromNpx ? ' —— 位于 npx 缓存，清缓存后会失效' : ''),
           fromNpx
-            ? '全局安装 DSH（npm i -g @deepseek-ai/dsh）或把 DSH_BIN 指向一个固定位置的 lib/bin.js'
+            ? '安装 DeepSeek Harness 桌面版（会被自动识别），或 npm i -g @deepseek-ai/dsh'
             : null,
         );
+
+        // DSH 的 engines.node 与实际拉起它的运行时是否匹配（0.2.2 起要求 Node >= 24.9）。
+        const runtimeNode = probeRuntimeNode(dsh);
+        const engOk = satisfiesNodeRange(dsh.enginesNode, runtimeNode);
+        add(
+          'dsh_runtime',
+          engOk === false ? 'warn' : 'ok',
+          `运行时 Node ${runtimeNode ?? '未知'}，DSH 要求 ${dsh.enginesNode ?? '未声明'}` +
+            (engOk === false ? ' —— 不满足，部分能力可能异常' : ''),
+          engOk === false
+            ? dsh.runtime === 'node'
+              ? '安装桌面版（自带满足要求的运行时，会被优先选用），或升级本机 Node，或用 DSH_RUNTIME 指定一个满足要求的 node'
+              : '更新桌面版，或用 DSH_RUNTIME 指定一个满足要求的 node'
+            : null,
+        );
+
+        // GUI（桌面版）与本服务是不是同一份 DSH：两边共用 ~/.dsh 会话存储。
+        const desktops = all.filter((c) => c.source === 'desktop');
+        if (desktops.length === 0) {
+          add('dsh_desktop', 'ok', '未发现 DeepSeek Harness 桌面版（不影响使用）');
+        } else {
+          const gui = desktops[0];
+          const same = gui.version === version;
+          add(
+            'dsh_desktop',
+            same ? 'ok' : 'warn',
+            `桌面版 ${gui.version ?? '?'}（${gui.installDir}）` +
+              (same ? '，与本服务所用 DSH 一致' : `；本服务用的是 ${version ?? '?'}（${SOURCE_LABEL[dsh.source]}）—— 两者共用 ~/.dsh 会话，版本不一致时新版本写的会话可能被旧版本 resume`),
+            same ? null : dsh.source === 'env' ? '去掉 DSH_BIN 让服务自动选用桌面版，或把 DSH_BIN 指向同版本' : '升级/统一两边的 DSH 版本',
+          );
+        }
+        if (all.length > 1) {
+          add(
+            'dsh_candidates',
+            'ok',
+            all.map((c) => `${SOURCE_LABEL[c.source]} ${c.version ?? '?'}${c === all[0] ? '（自动选用）' : ''}`).join('；'),
+          );
+        }
+
         const vs = dshVersionStatus(version);
         add(
           'dsh_version',
@@ -1384,7 +1429,7 @@ export function createHandlers(hub, opts = {}) {
               : '升级到 DSH 0.1.7-rc.1 及以上',
         );
       } catch (e) {
-        add('dsh_bin', 'fail', e.message, '设置 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js');
+        add('dsh_bin', 'fail', e.message, '安装 DeepSeek Harness 桌面版（自动识别），或设置 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js');
       }
 
       try {

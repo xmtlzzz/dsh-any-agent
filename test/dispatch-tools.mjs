@@ -213,11 +213,18 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
     assert.equal(dshVersionStatus('0.1.7-rc.1').status, 'ok');
   });
   check('0.1.9 → verified', () => assert.equal(lvl('0.1.9'), 'verified'));
-  check('★ 0.2.0-rc.1 → unverified/warn（rc 也算进 0.2）', () => {
-    assert.equal(lvl('0.2.0-rc.1'), 'unverified');
-    assert.equal(dshVersionStatus('0.2.0-rc.1').status, 'warn');
+  check('★ 0.2.1-rc.5 / 0.2.2-rc.1（全量实测过）→ verified/ok', () => {
+    assert.equal(lvl('0.2.1-rc.5'), 'verified');
+    assert.equal(lvl('0.2.2-rc.1'), 'verified');
+    assert.equal(dshVersionStatus('0.2.2-rc.1').status, 'ok');
   });
-  check('★ 0.2.1-rc.5（本机实测版本）→ unverified', () => assert.equal(lvl('0.2.1-rc.5'), 'unverified'));
+  check('★ 0.2.3-rc.1 → unverified/warn（rc 也算进 0.2.3）', () => {
+    assert.equal(lvl('0.2.3-rc.1'), 'unverified');
+    assert.equal(dshVersionStatus('0.2.3-rc.1').status, 'warn');
+  });
+  check('0.3.0 → unverified', () => assert.equal(lvl('0.3.0'), 'unverified'));
+  check('unverified 的说明里写明已验证区间（不再写死“只覆盖到 0.1.x”）', () =>
+    assert.match(dshVersionStatus('0.3.0').note, /0\.1\.7 ~ 0\.2\.2/));
   check('Windows npx 缓存路径被识别', () =>
     assert.ok(isNpxCachePath('C:\\Users\\a\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js')));
   check('POSIX npx 缓存路径被识别', () =>

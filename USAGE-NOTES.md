@@ -37,8 +37,10 @@
 
 ### 1.5 `DSH_BIN` 探测失败
 - **现象**：启动即报 `DSH CLI 入口未找到`。
-- **原因**：DSH 装在非常规位置（本服务按 npx 缓存 → npm 全局 → 常见路径的顺序通配搜索）。
-- **对策**：显式设置 `DSH_BIN=/path/to/node_modules/@deepseek-ai/dsh/lib/bin.js`。
+- **原因**：DSH 装在非常规位置。本服务自动识别 DeepSeek Harness 桌面版（Windows 卸载注册表 +
+  各平台默认安装位置，用桌面版自带运行时跑 asar 里的 CLI）、npm 全局安装和 npx 缓存。
+- **对策**：先跑 `dsh_doctor` 看 `dsh_candidates`；便携版/自定义位置再显式设置
+  `DSH_BIN=/path/to/node_modules/@deepseek-ai/dsh/lib/bin.js`（可指进 `app.asar` 内部）。
 
 ---
 

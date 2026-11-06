@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cmpVersion, resolveDsh } from './dsh-locate.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const PKG_ROOT = join(HERE, '..');
@@ -22,121 +23,31 @@ export const PKG_VERSION = (() => {
   }
 })();
 
-/** 相对 DSH 包入口的固定尾巴。 */
-const DSH_ENTRY = join('@deepseek-ai', 'dsh', 'lib', 'bin.js');
-
 /**
- * 在 npx 缓存目录里按通配找 DSH 入口。
- * npx 的缓存目录名带一个随机 hash（`_npx/<hash>/`），写死会随环境失效，所以这里筛一遍。
+ * DSH 的发现与拉起方式见 dsh-locate.mjs：自动识别桌面版（asar + 自带 Electron 运行时）、
+ * npm 全局与 npx 缓存，DSH_BIN 只作显式覆盖。这里转出给其余模块用。
  */
-function findInNpxCache() {
-  const roots = [
-    join(homedir(), 'AppData', 'Local', 'npm-cache', '_npx'),
-    join(homedir(), '.npm', '_npx'),
-  ];
-  for (const root of roots) {
-    if (!existsSync(root)) continue;
-    let entries;
-    try {
-      entries = readdirSync(root, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    const found = [];
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      const p = join(root, e.name, 'node_modules', DSH_ENTRY);
-      if (!existsSync(p)) continue;
-      let version = '0.0.0';
-      try {
-        version =
-          JSON.parse(readFileSync(join(dirname(p), '..', 'package.json'), 'utf8')).version ?? version;
-      } catch {
-        // 版本读不到就当 0.0.0，仍可作为候选
-      }
-      found.push({ p, version });
-    }
-    if (found.length) {
-      // ★ 取**最高版本**，不是目录枚举顺序。本机可以同时缓存 0.1.5 和 0.1.7，
-      //   按目录顺序会随机选中旧版，导致实验性能力（如 Agent Teams）根本加载不到。
-      found.sort((a, b) => cmpVersion(b.version, a.version));
-      return found[0].p;
-    }
-  }
-  return undefined;
-}
-
-/** 极简 semver 比较（够用于 npx 缓存里挑最新）；返回 a-b 的符号。 */
-export function cmpVersion(a, b) {
-  const [ac, ap] = String(a).split('-', 2);
-  const [bc, bp] = String(b).split('-', 2);
-  const an = ac.split('.').map(Number);
-  const bn = bc.split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    const d = (an[i] || 0) - (bn[i] || 0);
-    if (d) return d;
-  }
-  if (!ap && bp) return 1; // release > prerelease
-  if (ap && !bp) return -1;
-  if (ap && bp) {
-    const ar = ap.split('.');
-    const br = bp.split('.');
-    for (let i = 0; i < Math.max(ar.length, br.length); i++) {
-      const x = ar[i] ?? '';
-      const y = br[i] ?? '';
-      const xn = x !== '' && Number.isFinite(Number(x));
-      const yn = y !== '' && Number.isFinite(Number(y));
-      if (xn && yn) {
-        if (Number(x) !== Number(y)) return Number(x) - Number(y);
-      } else if (xn) return -1;
-      else if (yn) return 1;
-      else if (x !== y) return x < y ? -1 : 1;
-    }
-  }
-  return 0;
-}
+export { cmpVersion, discoverDsh, isNpxCachePath, resolveDsh } from './dsh-locate.mjs';
 
 /**
- * 解析 DSH CLI 入口。按顺序尝试：
- *   1) DSH_BIN 环境变量（最可靠，推荐显式设置）
- *   2) npx 缓存里的通配搜索（`_npx/<hash>/node_modules/@deepseek-ai/dsh/lib/bin.js`）
- *   3) npm 全局安装目录
- *
- * 用 `node <bin.js>` 而不是 `dsh`/`dsh.cmd`/`dsh.ps1`：Windows 的 PowerShell 执行策略
- * 会拦住 `.ps1` shim，而直接跑入口文件在所有平台上都稳。
+ * 只要 DSH 入口路径（兼容旧调用方；桌面版时是 asar 内部路径，普通 fs 读不到）。
+ * 要拉起 DSH 请用 resolveDsh()：它同时给出运行时与环境变量。
  */
 export function resolveDshBin() {
-  const explicit = process.env.DSH_BIN;
-  if (explicit) {
-    if (!existsSync(explicit)) {
-      throw new Error(`DSH_BIN 指向的文件不存在: ${explicit}`);
-    }
-    return explicit;
-  }
-  const candidates = [
-    findInNpxCache(),
-    join(homedir(), 'AppData', 'Roaming', 'npm', 'node_modules', DSH_ENTRY),
-    join('/usr', 'local', 'lib', 'node_modules', DSH_ENTRY),
-    join('/usr', 'lib', 'node_modules', DSH_ENTRY),
-  ].filter(Boolean);
-  for (const c of candidates) {
-    if (existsSync(c)) return c;
-  }
-  throw new Error(
-    'DSH CLI 入口未找到。请设置环境变量 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js\n' +
-      '  例如: DSH_BIN=/path/to/node_modules/@deepseek-ai/dsh/lib/bin.js',
-  );
+  return resolveDsh().bin;
 }
 
 /**
  * 兼容性矩阵（docs/zh/compatibility.md）的机器可读版本，供 dsh_doctor 使用。
  * 改矩阵时同步改这里：`[verifiedMin, verifiedBelow)` 是“已验证”区间。
  * 用 `-0` 后缀是为了把同号的 rc 版本也算进去（semver 里 `0.1.7-rc.1 < 0.1.7`）。
+ * 0.2.x：2026-11-06 用 0.2.1-rc.5（npm）与 0.2.2-rc.1（桌面版自带运行时）跑过全量套件。
  */
 export const DSH_COMPAT = Object.freeze({
   partialMin: '0.1.5-0',
   verifiedMin: '0.1.7-0',
-  verifiedBelow: '0.2.0-0',
+  verifiedBelow: '0.2.3-0',
+  verifiedLabel: '0.1.7 ~ 0.2.2',
 });
 
 /**
@@ -154,18 +65,13 @@ export function dshVersionStatus(version) {
     return { status: 'warn', level: 'partial', note: `DSH ${version} 部分可用：ACP 基本路径可用，缺 team 包` };
   }
   if (cmpVersion(version, DSH_COMPAT.verifiedBelow) < 0) {
-    return { status: 'ok', level: 'verified', note: `DSH ${version} 在已验证区间（0.1.7 ~ 0.2.0 之前）` };
+    return { status: 'ok', level: 'verified', note: `DSH ${version} 在已验证区间（${DSH_COMPAT.verifiedLabel}）` };
   }
   return {
     status: 'warn',
     level: 'unverified',
-    note: `DSH ${version} 未经本版本验证（兼容性矩阵只覆盖到 0.1.x），ACP session/* 面可能有变化`,
+    note: `DSH ${version} 未经本版本验证（兼容性矩阵覆盖 ${DSH_COMPAT.verifiedLabel}），ACP session/* 面可能有变化`,
   };
-}
-
-/** DSH 入口是不是落在 npx 缓存里（`_npx/<hash>/…`）：那里随 `npm cache clean` 或 npx 自身淘汰随时消失。 */
-export function isNpxCachePath(p) {
-  return /[\\/]_npx[\\/]/.test(String(p ?? ''));
 }
 
 /**
@@ -213,10 +119,7 @@ export const TEAM_MODE = (() => {
 /** 运行中的 DSH 版本（读不到为 null）。 */
 export const DSH_VERSION = (() => {
   try {
-    const bin = resolveDshBin();
-    return (
-      JSON.parse(readFileSync(join(dirname(bin), '..', 'package.json'), 'utf8')).version ?? null
-    );
+    return resolveDsh().version ?? null;
   } catch {
     return null;
   }
