@@ -53,6 +53,47 @@ conv.pushOut('tool', 'pwsh [in_progress]');
 const e = conv.readOut({ cursor: d.cursor });
 check('工具条目单独出现', e.entries.length === 1 && e.entries[0].kind === 'tool' && e.entries[0].seq > firstSeq, JSON.stringify(e.entries));
 
+console.log('\n[4b] ★ 不同工具调用各占一条；同一调用的状态更新原地替换');
+conv.currentTurn = 2;
+conv.pushOut('tool', 'read [in_progress]', { tool_call_id: 't-read' });
+conv.pushOut('tool', 'read [completed]', { tool_call_id: 't-read' });
+conv.pushOut('tool', 'pwsh [in_progress]', { tool_call_id: 't-pwsh' });
+conv.pushOut('tool', 'pwsh [completed]', { tool_call_id: 't-pwsh' });
+conv.pushOut('tool', 'write [completed]', { tool_call_id: 't-write' });
+const tools2 = conv.out.filter((x) => x.turn === 2 && x.kind === 'tool');
+check('★ 三个工具三条条目', tools2.length === 3, JSON.stringify(tools2.map((x) => x.text)));
+check(
+  '★ 每条只带自己的 id 与最新状态（不拼接）',
+  tools2.map((x) => `${x.tool_call_id}=${x.text}`).join('|') ===
+    't-read=read [completed]|t-pwsh=pwsh [completed]|t-write=write [completed]',
+  JSON.stringify(tools2),
+);
+const beforeUpd = conv.readOut({ cursor: 0, limit: 999 }).cursor;
+conv.pushOut('tool', 'pwsh [failed]', { tool_call_id: 't-pwsh' });
+const upd = conv.readOut({ cursor: beforeUpd });
+check(
+  '★ 状态更新推进修订号、增量里能看到替换后的全文',
+  upd.entries.length === 1 && upd.entries[0].tool_call_id === 't-pwsh' && upd.entries[0].text === 'pwsh [failed]',
+  JSON.stringify(upd.entries),
+);
+
+console.log('\n[4c] ★ 空回合的“开始/结束”是两条，不会拼成一条');
+conv.currentTurn = 3;
+conv.pushOut('turn', '第 3 轮开始', { phase: 'start' });
+conv.pushOut('turn', '第 3 轮结束（error）', { phase: 'end' });
+const turns3 = conv.out.filter((x) => x.turn === 3 && x.kind === 'turn');
+check(
+  '★ 开始与结束各自独立、phase 正确',
+  turns3.length === 2 && turns3[0].phase === 'start' && turns3[1].phase === 'end',
+  JSON.stringify(turns3),
+);
+
+console.log('\n[4d] 跨轮同一 tool_call_id 不复用旧条目');
+conv.currentTurn = 4;
+conv.pushOut('tool', 'read [in_progress]', { tool_call_id: 't-read' });
+const read4 = conv.out.filter((x) => x.tool_call_id === 't-read');
+check('新一轮的同 id 工具另起一条', read4.length === 2 && read4[1].turn === 4, JSON.stringify(read4));
+
 console.log('\n[5] limit 清洗');
 const l0 = conv.readOut({ cursor: 0, limit: 0 });
 check('limit=0 不再返回空（钳到 1）', l0.entries.length === 1, `entries=${l0.entries.length}`);

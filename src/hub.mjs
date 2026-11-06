@@ -1294,7 +1294,21 @@ export class Conversation {
   pushOut(kind, text, extra = {}) {
     const last = this.out[this.out.length - 1];
     const cap = (s) => (s.length > MAX_OUT_TEXT ? `…[已截断，保留尾部 ${MAX_OUT_TEXT} 字]…\n${s.slice(-MAX_OUT_TEXT)}` : s);
-    if (last && last.kind === kind && last.turn === this.currentTurn && text) {
+    // 工具更新是**快照**（`read [completed]`），不是增量：同一个 tool_call_id 原地替换，
+    // 不同的工具调用各占一条。旧实现按 kind 拼接，三个工具会挤成
+    // `read [in_progress]read [completed]pwsh …` 一条，且只剩第一个工具的 id。
+    if (kind === 'tool' && extra.tool_call_id) {
+      const same = this.#findToolEntry(extra.tool_call_id);
+      if (same) {
+        same.text = cap(text ?? '');
+        same.at = now();
+        same.rev = ++this.outRev;
+        return;
+      }
+    }
+    // 只有正文是流式增量，才需要合并；user/turn/tool 都是独立事件，合并会把
+    // “第 N 轮开始”与“第 N 轮结束”拼成一条（空回合时）。
+    if (kind === 'text' && last && last.kind === kind && last.turn === this.currentTurn && text) {
       last.text = cap(last.text + text);
       last.at = now();
       // ★ 合并进已有条目也必须推进修订号。否则游标已经读过这条的调用方
@@ -1305,6 +1319,16 @@ export class Conversation {
       if (this.out.length > MAX_OUT_ENTRIES) this.out.shift();
     }
     if (kind === 'text') this.turnOutChars += text?.length ?? 0;
+  }
+
+  /** 本轮里同一 tool_call_id 的工具条目（从尾部往回找，跨轮不复用）。 */
+  #findToolEntry(toolCallId) {
+    for (let i = this.out.length - 1; i >= 0; i--) {
+      const e = this.out[i];
+      if (e.turn !== this.currentTurn) return null;
+      if (e.kind === 'tool' && e.tool_call_id === toolCallId) return e;
+    }
+    return null;
   }
 
   /** 读输出：**按修订号**的游标式增量。条目被追加时会再次返回（按 seq 替换全文）。 */
