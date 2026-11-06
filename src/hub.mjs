@@ -24,15 +24,11 @@ import {
   existsSync,
   renameSync,
   statSync,
-  lstatSync,
   rmSync,
   readdirSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { promisify } from 'node:util';
 import {
   ALLOW_FULL_ACCESS,
   APPROVAL_POLICIES,
@@ -74,6 +70,7 @@ import { AcpProcess } from './acp.mjs';
 import { SessionHost } from './host.mjs';
 import { rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
+import { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
 import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
 import {
   LOCKS_DIR,
@@ -86,6 +83,9 @@ import {
   removeMarker,
   writeMarker,
 } from './locks.mjs';
+
+// 外部（测试、bin）一直从 hub.mjs 取这两个函数；拆出去之后导入路径保持不变。
+export { gitStatus, sameWorkspaceSnapshot };
 
 const now = () => Date.now();
 const NOOP_LOG = { info: () => {}, debug: () => {}, dshStderr: () => {} };
@@ -1797,189 +1797,6 @@ export class Conversation {
       this.#hub.remove(this.id);
     } else this.#hub.save();
     return { closed: stopped, forgotten: forget, ...(stopped ? {} : { error: '进程未能确认退出，登记已保留' }) };
-  }
-}
-
-/**
- * 两次 workspace 快照是否表示同一组工作区变更。
- *
- * 优先比较 `fingerprint`（覆盖**全量**条目：状态行 + 每个路径的 size/mtime，
- * 未跟踪目录递归展开）。只比较前 40 条 entries 会把"同一状态行但内容变了"
- * 和第 41 条之后的改动都漏掉（workspace_changed 假阴性）。
- */
-export function sameWorkspaceSnapshot(a, b) {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
-  if (typeof a.fingerprint === 'string' && typeof b.fingerprint === 'string') {
-    return a.fingerprint === b.fingerprint;
-  }
-  // 兼容旧快照/测试里手写的 { changed_files, entries }。
-  return JSON.stringify(a.entries ?? []) === JSON.stringify(b.entries ?? []);
-}
-
-/** 干净工作区的固定指纹（任何非空状态的指纹都至少包含一条状态行，不会与它相同）。 */
-const CLEAN_FINGERPRINT = createHash('sha256').update('clean\0').digest('hex');
-
-const GIT_TIMEOUT_MS = 8000;
-const GIT_MAX_BUFFER = 64 * 1024 * 1024;
-const MAX_UNTRACKED_DIR_ENTRIES = 2000;
-const execFileAsync = promisify(execFile);
-
-/**
- * 安全 git 参数（放 subcommand 之前）。
- *
- * `--no-optional-locks` 是 **git 全局选项**，放在 `status` 之后会被 git 当成
- * 未知参数直接退出 129 —— 那样快照永远是 null，workspace_changed 恒为 false。
- */
-const GIT_SAFE = ['--no-optional-locks', '-c', 'core.fsmonitor=false'];
-
-function gitEnv() {
-  return { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
-}
-
-/** 异步跑一次 git 并取 stdout；非 git 目录/超时/输出过大都抛给调用方。 */
-async function gitOutput(cwd, args) {
-  const { stdout } = await execFileAsync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    timeout: GIT_TIMEOUT_MS,
-    maxBuffer: GIT_MAX_BUFFER,
-    windowsHide: true,
-    env: gitEnv(),
-  });
-  return stdout;
-}
-
-/** 解析 porcelain v1 -z 状态行；rename/copy 的“原路径”是下一个 NUL 段。 */
-function parsePorcelainZ(stdout) {
-  const tokens = String(stdout ?? '').split('\0');
-  const rows = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (!token) continue;
-    // 形如 "XY path"；posix 允许路径里有空格，所以只切前三个字符。
-    if (token.length < 4 || token[2] !== ' ') continue;
-    const status = token.slice(0, 2);
-    const path = token.slice(3);
-    let orig = null;
-    if (/[RC]/.test(status)) orig = tokens[++i] || null;
-    rows.push({ status, path, orig });
-  }
-  return rows;
-}
-
-/**
- * 把一个路径的当前状态（类型 + size + mtimeMs）混进指纹。
- *
- * - 普通文件：size + mtimeMs 足以识别"状态行没变、内容变了"；
- * - 未跟踪目录（`?? dir/`）：目录 mtime 只在直接子项增删时变，光看它不够，
- *   所以递归展开（只用 lstat，不跟随符号链接/不钻 .git，且有预算上限）；
- * - 已跟踪的目录条目（子模块）：只看它自己的 lstat，避免把子模块整个走一遍。
- */
-function hashPathStat(hash, full, label, budget) {
-  let st;
-  try {
-    st = lstatSync(full);
-  } catch {
-    hash.update(`${label}\0missing\0`);
-    return;
-  }
-  if (st.isDirectory() && budget) {
-    hash.update(`${label}\0dir\0${st.mtimeMs}\0`);
-    let entries;
-    try {
-      entries = readdirSync(full, { withFileTypes: true });
-    } catch {
-      hash.update('unreadable\0');
-      return;
-    }
-    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    for (const ent of entries) {
-      if (ent.name === '.git') continue;
-      if (budget.left <= 0) {
-        hash.update(`${label}\0truncated\0`);
-        return;
-      }
-      budget.left -= 1;
-      hashPathStat(hash, join(full, ent.name), `${label}/${ent.name}`, budget);
-    }
-    return;
-  }
-  const kind = st.isSymbolicLink() ? 'link' : st.isFile() ? 'file' : st.isDirectory() ? 'dir' : 'other';
-  hash.update(`${label}\0${kind}\0${st.size}\0${st.mtimeMs}\0`);
-}
-
-/**
- * 收集当前工作区的 git 变更摘要（非 git 目录返回 null）。
- *
- * 异步实现：`execFile` 不占用事件循环 —— 一个 MCP 服务进程承载多个会话，
- * 同步 `spawnSync` 最长 8s 会把所有会话的 ACP 消息/审批一起卡住。
- *
- * 返回对象向后兼容：`changed_files` = 全量状态条目数，`entries` = 前 40 条
- * 展示用状态行；新增 `fingerprint` 覆盖**全量**条目（含逐路径 size/mtime），
- * 供 `sameWorkspaceSnapshot` 判断"内容是否真的变了"。
- */
-export async function gitStatus(cwd) {
-  if (process.env.DSH_MCP_GIT_STATUS === '0') return null;
-  try {
-    // ★ 在不可信仓库里 `git status` 可能触发仓库配置的 fsmonitor/filter；这些
-    //   命令发生在 DSH 沙箱与审批层之外。禁用可选锁与 fsmonitor，并允许用
-    //   DSH_MCP_GIT_STATUS=0 完全关掉。
-    // porcelain 的路径相对 **仓库根**（cwd 是子目录时也是），所以同时取 top-level。
-    const [statusOut, rootOut] = await Promise.all([
-      gitOutput(cwd, [...GIT_SAFE, 'status', '--porcelain', '-z']),
-      gitOutput(cwd, [...GIT_SAFE, 'rev-parse', '--show-toplevel']),
-    ]);
-    const rows = parsePorcelainZ(statusOut);
-    // ★ 干净的仓库返回“0 个改动”的快照，而不是 null：null 专指“拿不到快照”（非 git 目录、
-    //   git 不可用、总开关关闭）。以前两者混用，一轮把唯一的改动删干净时就会出现
-    //   workspace_changed=true 却 diff_stat=null —— 看不出是“现在干净了”还是“没查成”。
-    if (!rows.length) return { changed_files: 0, entries: [], fingerprint: CLEAN_FINGERPRINT };
-    // git 输出的是 `C:/...` 风格，统一成原生分隔符，后面 startsWith 才不会误判越界。
-    const root = resolve(String(rootOut ?? '').trim() || cwd);
-
-    // 状态行按路径排序后参与指纹，避免依赖 git 的输出顺序。
-    const sorted = rows
-      .slice()
-      .sort((a, b) =>
-        a.path === b.path
-          ? a.status < b.status
-            ? -1
-            : a.status > b.status
-              ? 1
-              : 0
-          : a.path < b.path
-            ? -1
-            : 1,
-      );
-
-    const hash = createHash('sha256');
-    const budget = { left: MAX_UNTRACKED_DIR_ENTRIES };
-    const entries = [];
-    const rootPrefix = root.endsWith(sep) ? root : root + sep;
-    for (const row of sorted) {
-      const display = row.orig ? `${row.status} ${row.orig} -> ${row.path}` : `${row.status} ${row.path}`;
-      if (entries.length < 40) entries.push(display);
-      hash.update(display);
-      hash.update('\0');
-
-      const cleanPath = row.path.endsWith('/') ? row.path.slice(0, -1) : row.path;
-      const full = resolve(root, cleanPath);
-      if (full !== root && !full.startsWith(rootPrefix)) {
-        hash.update('outside-worktree\0');
-        continue;
-      }
-      // 只有未跟踪目录需要递归；已跟踪条目（含子模块）看 lstat 即可。
-      hashPathStat(hash, full, cleanPath, row.status === '??' ? budget : null);
-    }
-
-    return {
-      changed_files: rows.length,
-      entries,
-      fingerprint: hash.digest('hex'),
-    };
-  } catch {
-    return null;
   }
 }
 
