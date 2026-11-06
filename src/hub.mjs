@@ -758,10 +758,19 @@ export class Conversation {
     const u = params?.update;
     if (!u) return;
     switch (u.sessionUpdate) {
-      case 'agent_message_chunk':
-        c.answer += u.content?.text ?? '';
-        this.pushOut('text', u.content?.text ?? '');
+      case 'agent_message_chunk': {
+        const chunk = u.content?.text ?? '';
+        // ★ 被工具调用隔开的两段正文是两条消息，不能首尾相接：以前会拼成
+        //   “…where possible.1) package.json…”。在新一段开头补一个空行
+        //   （上一段已以换行结尾就不重复补）。dsh_read 里它们本来就是两条，不受影响。
+        if (chunk && c.answerBreak) {
+          if (c.answer && !/\n\s*$/.test(c.answer) && !/^\s*\n/.test(chunk)) c.answer += '\n\n';
+          c.answerBreak = false;
+        }
+        c.answer += chunk;
+        this.pushOut('text', chunk);
         break;
+      }
       case 'agent_thought_chunk':
         // 思考内容只进这条回合的临时收集器（用于统计/可选返回），**不进环形缓冲**
         c.reasoning += u.content?.text ?? '';
@@ -782,6 +791,7 @@ export class Conversation {
           input: u.rawInput !== undefined ? u.rawInput : prev.input,
         };
         c.tools.set(id, merged);
+        if (c.answer) c.answerBreak = true;
         const label = merged.name ?? merged.title ?? id;
         this.currentTool = merged.status === 'completed' || merged.status === 'failed' ? null : label;
         const tag = merged.status ? ` [${merged.status}]` : '';
@@ -1054,6 +1064,8 @@ export class Conversation {
     this.pushOut('turn', `第 ${this.currentTurn} 轮开始`, { phase: 'start' });
     const c = {
       answer: '',
+      /** 上一段正文之后出现过工具调用：下一段正文前要补段落分隔（见 onUpdate）。 */
+      answerBreak: false,
       reasoning: '',
       reasoningChunks: 0,
       reasoningStartedAt: 0,

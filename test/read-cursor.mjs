@@ -102,5 +102,47 @@ check('limit=-1 不再静默丢尾（钳到 1）', ln.entries.length === 1, `ent
 const lh = conv.readOut({ cursor: 0, limit: 999999 });
 check('limit 过大被钳到缓冲上限', lh.entries.length === conv.out.length, `${lh.entries.length} vs ${conv.out.length}`);
 
+console.log('\n[6] ★ answer：被工具调用隔开的正文分段，不首尾相接');
+{
+  const newCollector = () => ({ answer: '', answerBreak: false, tools: new Map(), reasoning: '', reasoningChunks: 0, reasoningStartedAt: 0, otherUpdates: [] });
+  const say = (text) => conv.onUpdate({ update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } });
+  const tool = (id, status) => conv.onUpdate({ update: { sessionUpdate: status ? 'tool_call_update' : 'tool_call', toolCallId: id, title: 'pwsh', status } });
+
+  conv.currentTurn = 10;
+  conv.collector = newCollector();
+  say('I will run the ');
+  say('checks.');
+  tool('t1');
+  tool('t1', 'completed');
+  say('1) name is ');
+  say('dsh-any-agent');
+  check(
+    '★ 同一段的流式块照常拼接；工具调用之后的新一段前补空行',
+    conv.collector.answer === 'I will run the checks.\n\n1) name is dsh-any-agent',
+    JSON.stringify(conv.collector.answer),
+  );
+
+  const texts10 = conv.out.filter((x) => x.turn === 10 && x.kind === 'text').map((x) => x.text);
+  check(
+    'dsh_read 里两段正文仍是两条原样条目（不被插入空行）',
+    texts10.length === 2 && texts10[0] === 'I will run the checks.' && texts10[1] === '1) name is dsh-any-agent',
+    JSON.stringify(texts10),
+  );
+
+  conv.currentTurn = 11;
+  conv.collector = newCollector();
+  tool('t2');
+  say('先用工具，再说话');
+  check('正文之前的工具调用不产生开头空行', conv.collector.answer === '先用工具，再说话', JSON.stringify(conv.collector.answer));
+
+  conv.currentTurn = 12;
+  conv.collector = newCollector();
+  say('第一段\n');
+  tool('t3', 'completed');
+  say('第二段');
+  check('上一段已以换行结尾时不重复补空行', conv.collector.answer === '第一段\n第二段', JSON.stringify(conv.collector.answer));
+  conv.collector = null;
+}
+
 console.log(`\n===== 读游标回归：通过 ${pass}，失败 ${fail} =====`);
 process.exit(fail ? 1 : 0);
