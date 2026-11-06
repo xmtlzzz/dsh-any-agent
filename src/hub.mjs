@@ -73,6 +73,16 @@ import { readConversationMeta } from './titles.mjs';
 import { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
 import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
 import {
+  META_DIR,
+  NOOP_LOG,
+  forgottenPath,
+  isForgotten,
+  pruneStaleTombstones,
+  readConversationMetaFile,
+  writeConversationMeta,
+  writeTombstone,
+} from './hub-store.mjs';
+import {
   LOCKS_DIR,
   classifyHolder,
   describeLeaseConflict,
@@ -88,100 +98,6 @@ import {
 export { gitStatus, sameWorkspaceSnapshot };
 
 const now = () => Date.now();
-const NOOP_LOG = { info: () => {}, debug: () => {}, dshStderr: () => {} };
-
-/**
- * 会话元数据侧车（`.state/meta/<id>.json`）。
- *
- * 为什么需要：`forget=true` 只从注册表移除；之后按 id 查询时，`Hub.get()` 会从
- * DSH 会话存储重建会话（这是多实例恢复的刻意设计）。但 DSH 的会话记录里**没有**
- * 本服务选择的 `onApproval` / `reasoning_effort` / `title_hint` / 轮数，
- * 重建就会悄悄回落到默认值（实测 auto-allow→ask、low→max）。这个侧车保存
- * **仅元数据**（不含任何对话/思考正文），让重建后仍与原会话一致。
- */
-const META_DIR = join(dirname(STATE_FILE), 'meta');
-const metaFilePath = (id) => join(META_DIR, `${id}.json`);
-
-function writeConversationMeta(conv) {
-  try {
-    mkdirSync(META_DIR, { recursive: true });
-    const file = metaFilePath(conv.id);
-    const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-    writeFileSync(tmp, JSON.stringify(conv.toMeta(), null, 2), 'utf8');
-    renameSync(tmp, file);
-  } catch {
-    /* 元数据侧车只是辅助信息，写失败不影响主流程 */
-  }
-}
-
-function readConversationMetaFile(id) {
-  try {
-    return JSON.parse(readFileSync(metaFilePath(id), 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * forget 墓碑：`release(forget=true)` 之后，按 id 查询必须**明确失败**，
- * 而不是从 DSH 会话存储里悄悄复活。墓碑只含 id 与时间，不含任何内容；
- * 删除 `.state/forgotten/<id>.json` 即可恢复按 id 找回（手动、可审计）。
- */
-// 墓碑放在 DSH home 下而不是注册表旁边：不同实例即使注册表路径不同，
-// 也应该对同一个会话的 forget 达成一致（forget 是会话级终态，不是注册表级）。
-const FORGOTTEN_DIR = process.env.DSH_MCP_FORGOTTEN_DIR ?? join(DSH_HOME, '.dsh-any-agent-forgotten');
-const forgottenPath = (id) => join(FORGOTTEN_DIR, `${id}.json`);
-
-function writeTombstone(id) {
-  try {
-    mkdirSync(FORGOTTEN_DIR, { recursive: true });
-    const file = forgottenPath(id);
-    const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-    writeFileSync(tmp, JSON.stringify({ id, forgottenAt: Date.now() }, null, 2), 'utf8');
-    renameSync(tmp, file);
-  } catch {
-    /* 墓碑写失败时 forget 仍从注册表移除；下次 get 可能仍会复活，但不影响主流程 */
-  }
-}
-
-function isForgotten(id) {
-  try {
-    return existsSync(forgottenPath(id));
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 启动时清掉“会话文件已经不存在”的墓碑：它们不再阻止任何 resurrection，
- * 留着只会让测试/临时会话在 `$DSH_HOME/.dsh-any-agent-forgotten` 里堆积。
- * 会话文件还在的墓碑必须保留 —— 那正是 forget 的效力所在。
- */
-async function pruneStaleTombstones(log = NOOP_LOG) {
-  let removed = 0;
-  try {
-    if (!existsSync(FORGOTTEN_DIR)) return 0;
-    for (const f of readdirSync(FORGOTTEN_DIR)) {
-      if (!f.endsWith('.json')) continue;
-      const id = f.slice(0, -5);
-      // 异步读会话头：启动路径不能被大日志的同步解压卡住。
-      // ★ 只有确认会话文件不存在时才删墓碑；读超时/损坏时保留，
-      //   否则一次慢盘/挂载异常就会让 forget 失效。
-      const found = await findSessionHeaderStatus(id);
-      if (found.status === 'found' || found.status === 'error') {
-        if (found.status === 'error') log.info(`[hub] 墓碑 ${id} 暂不清理：${found.reason}`);
-        continue;
-      }
-      try {
-        rmSync(join(FORGOTTEN_DIR, f), { force: true });
-        removed++;
-      } catch {}
-    }
-  } catch {
-    /* 清理失败不影响启动 */
-  }
-  return removed;
-}
 
 /** 运行期输出环形缓冲的条目上限（仅内存，超出丢最旧的）。 */
 const MAX_OUT_ENTRIES = 500;
