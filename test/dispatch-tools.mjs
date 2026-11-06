@@ -237,7 +237,7 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
 
 console.log('\n[6c] PowerShell 哨兵等待命令');
 {
-  const { psWaitCommand } = await import('../src/tools.mjs');
+  const { psWaitCommand, psReadCommand } = await import('../src/tools.mjs');
   const cmd = psWaitCommand("C:\\Users\\o'neil\\runs\\a $b `c.json", 30);
   check('单引号转义成两个单引号', () => assert.match(cmd, /o''neil/));
   check('路径放在单引号字面量里（$ 与反引号不展开）', () =>
@@ -266,12 +266,25 @@ console.log('\n[6c] PowerShell 哨兵等待命令');
         assert.equal(missing.status, 1, missing.stderr);
         assert.match(missing.stdout, /TIMEOUT/);
       });
+      // ★ 读取命令：哨兵是无 BOM 的 UTF-8，PS 5.1 不带 -Encoding UTF8 会把中文读坏、JSON 解析失败。
+      const zh = join(dir, 'a $b [c]', 'run-zh.json');
+      writeFileSync(zh, JSON.stringify({ status: 'done', result: { answer: '三项冒烟测试全部通过' } }));
+      const rd = ps(`[Console]::OutputEncoding=[Text.Encoding]::UTF8; (${psReadCommand(zh)}).result.answer`);
+      check('★ 读取命令能正确解析含中文的哨兵（路径含单引号/$/方括号）', () => {
+        assert.equal(rd.status, 0, rd.stderr);
+        assert.equal(rd.stdout.trim(), '三项冒烟测试全部通过');
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   } else {
     console.log('  skipped: 非 Windows，不执行 PowerShell');
   }
+  check('读取命令带 -Encoding UTF8 且用 -LiteralPath', () => {
+    const c = psReadCommand("C:\\x\\o'neil.json");
+    assert.match(c, /-Encoding UTF8/);
+    assert.match(c, /-LiteralPath 'C:\\x\\o''neil\.json'/);
+  });
 }
 
 console.log('\n[7] 团队提示注入');

@@ -526,6 +526,16 @@ export function psWaitCommand(sentinelPath, timeoutSec = 2100) {
   );
 }
 
+/**
+ * PowerShell 版的哨兵**读取**命令。哨兵是无 BOM 的 UTF-8：Windows PowerShell 5.1 的
+ * `Get-Content` 默认按 ANSI 代码页读，中文正文会乱码、`ConvertFrom-Json` 直接解析失败，
+ * 所以必须显式 `-Encoding UTF8`（PowerShell 7 默认就是 UTF-8，加上也无害）。
+ */
+export function psReadCommand(sentinelPath) {
+  const lit = `'${String(sentinelPath).replace(/'/g, "''")}'`;
+  return `Get-Content -LiteralPath ${lit} -Raw -Encoding UTF8 | ConvertFrom-Json`;
+}
+
 /** 把结构化结果渲染成给模型看的文本。 */
 function renderSendResult(r) {
   const lines = [];
@@ -595,7 +605,9 @@ function backgroundReceipt(hub, conv, res) {
       /** Bash/MSYS 形式（D:\a\b → /d/a/b）；非 Windows 等于 sentinel_file。 */
       sentinel_file_posix: sentinelPosix,
       /** Windows 宿主：现成的 PowerShell 等待命令（路径已按单引号字面量转义）。 */
-      ...(process.platform === 'win32' ? { sentinel_wait_powershell: psWaitCommand(sentinel) } : {}),
+      ...(process.platform === 'win32'
+        ? { sentinel_wait_powershell: psWaitCommand(sentinel), sentinel_read_powershell: psReadCommand(sentinel) }
+        : {}),
       ...(review ? { review } : {}),
     },
     text:
@@ -609,7 +621,9 @@ function backgroundReceipt(hub, conv, res) {
       `    dl=$(( $(date +%s)+2100 )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE\n` +
       (process.platform === 'win32'
         ? `Windows 上 Bash 不可用（或会挂住）时，用 PowerShell 版本（原生路径，已转义好）：\n` +
-          `  PowerShell(run_in_background): ${psWaitCommand(sentinel)}\n`
+          `  PowerShell(run_in_background): ${psWaitCommand(sentinel)}\n` +
+          `读取时必须带 -Encoding UTF8（Windows PowerShell 5.1 默认按 ANSI 读，会乱码/解析失败）：\n` +
+          `  ${psReadCommand(sentinel)}\n`
         : '') +
       `文件出现后：直接读它拿结果（推荐——不受内存窗口限制、还扛服务重启），或 dsh_get(conversation_id, run_id) 验收。\n` +
       `消费完可以 rm 掉它。其它随时可用：dsh_status（是否在跑）、dsh_read（增量看输出）。` +
