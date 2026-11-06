@@ -25,7 +25,6 @@ import {
   renameSync,
   statSync,
   rmSync,
-  readdirSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -46,7 +45,6 @@ import {
   REVIEWS_DIR,
   REVIEW_MODES,
   RUNS_DIR,
-  SENTINEL_INCLUDE_REASONING,
   SENTINEL_TTL_MS,
   SHARED_PROCESS,
   STATE_FILE,
@@ -71,6 +69,7 @@ import { SessionHost } from './host.mjs';
 import { rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
+import { pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
 import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
 import {
   META_DIR,
@@ -94,8 +93,8 @@ import {
   writeMarker,
 } from './locks.mjs';
 
-// 外部（测试、bin）一直从 hub.mjs 取这两个函数；拆出去之后导入路径保持不变。
-export { gitStatus, sameWorkspaceSnapshot };
+// 外部（测试、bin）一直从 hub.mjs 取这些函数；拆出去之后导入路径保持不变。
+export { gitStatus, sameWorkspaceSnapshot, sanitizeResultForSentinel };
 
 const now = () => Date.now();
 
@@ -113,46 +112,6 @@ const MAX_RUN_PREVIEW = 200;
 const MAX_AUTO_APPROVALS_KEPT = 20;
 /** 自动放行审批里命令预览的长度。 */
 const MAX_AUTO_APPROVAL_PREVIEW = 200;
-
-/**
- * 清掉 `dir` 下超过 TTL 的文件与空会话目录；`.tmp` 残留不论年龄都按同一 cutoff 清。
- * 只遍历一层会话目录，绝不递归进别处 —— 调用方（哨兵/审核目录）都是本服务自己的。
- */
-function pruneDirTree(dir, ttlMs) {
-  if (!ttlMs || !existsSync(dir)) return { pruned: 0, dirs_removed: 0 };
-  let pruned = 0;
-  let dirsRemoved = 0;
-  const cutoff = Date.now() - ttlMs;
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const sub = join(dir, entry.name);
-      for (const f of readdirSync(sub, { withFileTypes: true })) {
-        if (!f.isFile()) continue;
-        const fp = join(sub, f.name);
-        try {
-          if (statSync(fp).mtimeMs < cutoff) {
-            rmSync(fp, { force: true });
-            pruned++;
-          }
-        } catch {
-          /* 单个文件失败就跳过 */
-        }
-      }
-      try {
-        if (readdirSync(sub).length === 0) {
-          rmSync(sub, { recursive: true, force: true });
-          dirsRemoved++;
-        }
-      } catch {
-        /* 目录清理失败无所谓 */
-      }
-    }
-  } catch {
-    /* 目录读不了就跳过 */
-  }
-  return { pruned, dirs_removed: dirsRemoved };
-}
 
 /** 按 ACP 权限应答的规范形状挑选项。 */
 function pickOption(options, want) {
@@ -207,51 +166,6 @@ async function applySessionConfig(proc, sessionId, cfg) {
   }
   await set('reasoning_effort', effort, `思考深度=${effort}`);
   return { applied, failed };
-}
-
-/**
- * 哨兵文件里的 result 是否要剥离思考内容。
- * 默认剥离以维持"思考不落盘"的保证，并留下 thinking_omitted 标记，
- * 免得调用方以为字段是意外丢失的。
- */
-export function sanitizeResultForSentinel(result) {
-  if (!result || typeof result !== 'object') return result ?? null;
-  const { thinking, ...rest } = result;
-  // ★ 即使 DSH_MCP_SENTINEL_INCLUDE_REASONING=1，也只额外保留 thinking；
-  //   answer/error/title/tools_used 仍然必须脱敏（以前这个开关会跳过整段清洗）。
-  // 正文/错误/标题同样可能夹带密钥；哨兵是落盘副本，统一套脱敏。
-  for (const key of ['answer', 'error', 'title']) {
-    if (typeof rest[key] === 'string') rest[key] = sanitizeApprovalContext(rest[key], key);
-  }
-  // 工具输入里会有完整命令、路径，甚至写入的文件内容。哨兵会保留 7 天，
-  // 所以按审批上下文同一套规则脱敏（密钥/令牌/密码类字段与常见内联字面量）。
-  if (Array.isArray(rest.tools_used)) {
-    rest.tools_used = rest.tools_used.map((t) => {
-      if (!t || typeof t !== 'object') return t;
-      const { input, ...meta } = t;
-      const safeMeta = sanitizeApprovalContext(meta);
-      return input === undefined ? safeMeta : { ...safeMeta, input: sanitizeApprovalContext(input) };
-    });
-  }
-  // 自动放行审批摘要记录时已脱敏；落盘前再过一遍，防止将来有人加字段漏掉。
-  if (Array.isArray(rest.auto_approvals)) {
-    rest.auto_approvals = rest.auto_approvals.map((a) => (a && typeof a === 'object' ? sanitizeApprovalContext(a) : a));
-  }
-  // 审核单里可能有原任务预览、审核理由与证据摘要；哨兵会保留 7 天，同样要脱敏。
-  if (rest.review && typeof rest.review === 'object') {
-    const rv = { ...rest.review };
-    for (const key of ['prompt_preview', 'notes']) {
-      if (typeof rv[key] === 'string') rv[key] = sanitizeApprovalContext(rv[key], key);
-    }
-    if (Array.isArray(rv.checklist)) rv.checklist = rv.checklist.map((x) => sanitizeApprovalContext(x));
-    if (Array.isArray(rv.findings)) rv.findings = rv.findings.map((x) => sanitizeApprovalContext(x));
-    if (rv.evidence) rv.evidence = sanitizeApprovalContext(rv.evidence);
-    rest.review = rv;
-  }
-  // 始终给出布尔值：调用方才能区分“思考被剥离”与“本来没有思考”。
-  const out = { ...rest, thinking_omitted: Boolean(thinking) && !SENTINEL_INCLUDE_REASONING };
-  if (SENTINEL_INCLUDE_REASONING && thinking !== undefined) out.thinking = thinking;
-  return out;
 }
 
 export class Conversation {
