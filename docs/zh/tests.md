@@ -15,7 +15,8 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 
 | 套件 | 检查数 | 覆盖 |
 |---|---|---|
-| `smoke` | 31 | 握手、工具表（15 个工具）、建会话、配置、注册表纯净性、原型链工具名拒绝 |
+| `smoke` | 33 | 握手、**instructions 长度上限**（客户端会截断过长说明）且铁律在最前、工具表（15 个工具）、建会话、配置、注册表纯净性、原型链工具名拒绝 |
+| `dsh-locate` | 19 | **DSH 自动发现**：纯 Node 读合成的 `app.asar`（版本、`engines.node`、入口存在性）、桌面版目录映射到自带 Electron 运行时 + `ELECTRON_RUN_AS_NODE=1`、候选排序（能跑的优先 → 版本高 → 桌面版 > 全局 > npx）、`DSH_BIN` 指进 asar 自动配桌面版运行时、`DSH_RUNTIME` 覆盖、`engines.node` 区间判定、`reg export` 输出解析（不花 token、不读注册表） |
 | `boundary` | 46 | 协议边界（重复 initialize、脏行、未知方法）、参数校验（含 read-only + 宽松审批必须拒绝、未知 provider/model、失败创建不留下写锁登记）、未知 id、游标边界、生命周期幂等、unicode |
 | `integration` | 30 | 跨进程 resume 与记忆、中断、两种插话 |
 | `async` | 21 | fire-and-forget + 事后验收，含收据/结果/哨兵里的审核单，以及一次真实 `dsh_review` 往返 |
@@ -27,8 +28,8 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `failure-terminal` | 11 | **失败路径的终态**：`ensureAlive` 失败时唤醒 `dsh_interject` 等待者、落 `status=error` 哨兵、错误对象挂 `runId`；审批没有对应 option 时 `effective=cancelled` 而不是假报 allow；`dsh_get` 能从哨兵文件回读（不花 token） |
 | `shared-host` | 25 | **共享进程宿主**：通知/审批按 `sessionId` 路由、未知会话审批一律取消、进程退出扇出所有挂载会话、最后一个会话 detach 才停进程；**默认开启且 `=0` 可关闭**（空串按未设置处理）；`takeover` 杀共享进程前的连坐检查；以及 RSS 读取（不花 token） |
 | `shared-process` | 8（无 DSH 时 skip） | **共享进程真机验证**：同 `(cwd, permission)` 的两个会话落在同一个 PID、关一个不影响另一个、全部关闭后宿主清空且 PID 退出（需要本机 DSH，`--all` 时运行） |
-| `dispatch-tools` | 55（非 Windows 53） | **派发面**：`dsh_inbox` 跨会话汇总待决审批、`client_run_id` 幂等命中与淘汰、队列 list/update/promote/remove（remove 写 cancelled 哨兵）、`dsh_get(max_chars)` 同时压缩 text 与 structured（正文截断、工具输入只留 `input_chars`，`max_chars=0` 仍返回全文）、`dsh_doctor` 的 DSH 版本档位与 npx 缓存识别、PowerShell 哨兵等待命令的转义与真机执行（仅 Windows）、审计只记元数据不记正文、`dsh_doctor` 关键检查项（不花 token） |
-| `read-cursor` | 10 | **`dsh_read` 游标语义**：追加到已读条目里的文本必须再次返回（修订号游标，按 `seq` 替换全文）；`limit` 钳到 1..500，`0`/负数不会空转或丢尾（不花 token） |
+| `dispatch-tools` | 59（非 Windows 56） | **派发面**：`dsh_inbox` 跨会话汇总待决审批、`client_run_id` 幂等命中与淘汰、队列 list/update/promote/remove（remove 写 cancelled 哨兵）、`dsh_get(max_chars)` 同时压缩 text 与 structured（正文截断、工具输入只留 `input_chars`，`max_chars=0` 仍返回全文）、`dsh_doctor` 的 DSH 版本档位（0.2.1-rc.5 / 0.2.2-rc.1 已验证，0.2.3+ 未验证）与 npx 缓存识别、PowerShell 哨兵等待命令的转义与真机执行、哨兵**读取**命令（`-Encoding UTF8`，在 Windows PowerShell 5.1 下正确解析中文；真机执行仅 Windows）、审计只记元数据不记正文、`dsh_doctor` 关键检查项（不花 token） |
+| `read-cursor` | 19 | **`dsh_read` 游标语义**：追加到已读条目里的文本必须再次返回（修订号游标，按 `seq` 替换全文）；**每个工具调用各占一条**、状态更新原地替换（以前会拼成一条、只剩第一个工具的 id）；空回合的开始/结束仍是两条；**`answer` 里被工具调用隔开的正文之间补空行**（以前首尾相接）；`limit` 钳到 1..500，`0`/负数不会空转或丢尾（不花 token） |
 | `line-decoder` | 4 | **UTF-8 行分帧**：MCP/ACP 的 chunk 边界不能把中文/emoji 截成 U+FFFD；覆盖逐字节、任意 chunk、CRLF 与 EOF 残留（不花 token） |
 | `sentinel-redaction` | 19 | **哨兵落盘卫生**：`result.thinking` 被剥掉、`thinking_omitted` 始终是布尔值、`answer`/`error`/`title`/`tools_used[].input` 都走与审批相同的凭据脱敏（不花 token） |
 | `review` | 70 | **调用方审核**：默认 `advisory` 审核单带清单 + 证据 + `dsh_review` 入口；`dsh_review` 把裁决落盘并回写内存 run 与哨兵；`fail`/`partial` 必须给理由；未完成/未知 run 被拒绝；重启后仍可凭哨兵审核；队列与 `client_run_id` 重放收据也带审核单；审核记录与哨兵共享 TTL；理由、预览、证据**与清单项**都凭据脱敏；**路径穿越 id 在触盘前就被拒绝**（不花 token） |
@@ -45,7 +46,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `roots` | 12 | 不传 `cwd` 时通过 MCP roots 取客户端当前项目；不支持 roots 的客户端得到可操作的报错（不花 token） |
 | `workspace-titles` | 18 | 家目录**与文件系统根目录**当工作区都会在 DSH 启动前被拦住；`title_hint` 与 DSH 自动标题分开返回（不花 token） |
 | `package-check` | 14 | `files` 白名单、零运行时依赖、Node 下限、bin shebang（不花 token） |
-| `timeout` | 38 | **超时语义**：`wait=false` 不受 `timeout_ms` 影响、`wait=true` 到期只转后台（不取消/不丢结果、`busy` 不说谎）、`timeout_ms<=0` 一直等、resume 失败会作废进程而不永久卡死、空 prompt 给清晰错误 |
+| `timeout` | 40 | **超时语义**：`wait=false` 不受 `timeout_ms` 影响、`wait=true` 到期只转后台（不取消/不丢结果、`busy` 不说谎）、`timeout_ms=0` 一直等、**负 `timeout_ms` 明确报错**（不派出回合、会话照常可用）、resume 失败会作废进程而不永久卡死、空 prompt 给清晰错误 |
 | `lock` | 79 | **写锁与抢占**：四类持有者判定、`writeMarker` 不覆盖活着的持有者、登记文件损坏/目录缺失等边界；**端到端**两实例抢锁 → 清晰报错 → 拒绝 → `force` 夺锁；**崩溃自动释放锁**、**卡死持有者无 force 自动抢占**；以及"一个回合 = 一个哨兵"的不变量（含内联回合与空闲插话） |
 | `cycle` | 36 | **异步派活的生命周期**：异步派活 → 收哨兵 → 空闲回收 → 再派活，连做 3 轮必须全程无锁错误；贴着回收窗口立刻重派（放大竞态）；`dsh_release` 后立刻重派；并断言回收后**不留下无法归因的锁**（这条实测抓到过"刚拉起的进程被 reaper 当空闲收掉"的竞态） |
 | `concurrency` | 31 | 三会话并发 + 实时增量读 |
@@ -54,8 +55,10 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `acceptance` | 36 | 两个文件夹 × 两个会话做只读 IDA Pro 分析 |
 | `multi` | 19 | **多实例共存 + 非 ASCII 路径**：复现"两实例共写注册表 → 后写的把先建的会话抹掉"，并验证**仅凭 id 就能从会话存储找回并真的派活**（指注册表丢失，不是显式 `forget` —— forget 是终态墓碑）；**兜底取回不会悄悄提权**（read-only 会话取回后仍是 read-only）；不留 `.tmp` 残渣；**中文 / emoji 工作区路径**能建会话、能干活、文件落在正确目录 |
 | `permission` | 11 | ★ **权限档是否真的生效**（安全属性）：不看我们的返回值（那正是会说谎的地方），而是读**会话自己记录的事实**（投影缓存里的 `permissions.preset` / `sandboxMode`），三档逐一核对且三档记录值互不相同。**这条测试抓到过无声提权**：profile 里 `defaultPreset` 会在会话创建时盖掉 `DSH_PERMISSION_MODE` |
-| `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
+| `list` | 17 | **`dsh_list` 的开销**：含磁盘探测的默认调用要 spawn 一个 DSH 进程（会话多时数秒），**连续调用命中缓存**（用 `probe_cached` 判定而不是墙钟：Windows 上偶尔有一次缓存调用多出约 700ms）；`only_running=true` 与 `include_closed=false` **跳过探测**（`probe_ok=null`）且语义等价（不把磁盘上的未打开会话算进来） |
 | `reasoning-check` | 8 | **思考可见性**：`reasoning=hide` 不返回思考正文但统计非零；`reasoning=full` 返回正文且渲染出思考段 |
+
+> **2026-11-06**：`node test/run.mjs` 现在**跑完全部套件**再在末尾列出所有失败项（`--bail` 恢复遇错即停）—— 以前 `timeout.mjs` 一条过时断言就让后面 11 个真机套件全部没跑。新增 `dsh-locate`（19）；`smoke` 33、`dispatch-tools` 59、`read-cursor` 19、`workspace-snapshot` 21、`timeout` 40、`list` 17。本机离线实测（Windows / Node 22.19.0，5/9 客户端配置）：**28 个套件 1082 项全绿**。需要模型的套件已对桌面版自带运行时上的 DSH 0.2.2-rc.1 全量重跑。
 
 **`node test/run.mjs` 在本机 7/9 客户端配置时跑 1012 项（九种齐全时 1030 项）** —— smoke 31 + 离线套件 981 项（九种齐全时 999 项）。**0.5.0 加调用方审核后全部退出码 0**（2026-11-04，Windows / Node 22.19.0；本机 5/9 配置时实测 994 项）；都不需要 provider（没有 DSH 时 smoke 自动跳过建会话段）。
 

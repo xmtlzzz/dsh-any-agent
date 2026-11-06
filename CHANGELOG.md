@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Zero-config DSH discovery, including the desktop app.** The server now finds
+  the DeepSeek Harness desktop app on its own (Windows uninstall registry via
+  `reg export`, plus default install paths on every platform), reads the CLI's
+  version and `engines` straight out of `resources/app.asar` with plain Node,
+  and launches it on the app's bundled Electron runtime in Node mode
+  (`ELECTRON_RUN_AS_NODE=1`). Previously only npx caches and npm global installs
+  were searched, so with the desktop app on 0.2.2-rc.1 the server silently ran a
+  stale 0.2.1-rc.5 from an npx cache. Candidates are ranked runnable-first →
+  newest → desktop > npm global > npx. `DSH_BIN` stays as an explicit override
+  (it may point inside an `.asar`); new `DSH_RUNTIME` overrides the launcher.
+- `dsh_doctor`: `dsh_bin` shows the source and runtime; new `dsh_runtime`
+  (launcher's Node vs DSH's `engines.node` — 0.2.2 needs Node ≥ 24.9),
+  `dsh_desktop` (warns when the GUI and this server run different DSH versions
+  over the shared `~/.dsh`), and `dsh_candidates`.
+- Background receipts on Windows carry `sentinel_read_powershell`, a reader that
+  passes `-Encoding UTF8` (Windows PowerShell 5.1 otherwise misreads the BOM-less
+  sentinel and `ConvertFrom-Json` fails on CJK text).
+
+### Changed
+
+- Compatibility matrix: DSH 0.2.1-rc.5 and 0.2.2-rc.1 are **verified** (full
+  suites, 2026-11-06); 0.2.3+ is unverified.
+- Server `instructions` cut from ~4.4k to ~1.5k characters with the hard rules
+  first. Clients truncate long instructions (Claude Code dropped the old tail,
+  including the "don't" rules); `smoke` now enforces a 2400-character cap.
+- `node test/run.mjs` runs **every** suite and lists all failures at the end;
+  `--bail` restores stop-at-first-failure. One stale assertion used to hide the
+  eleven model-backed suites after it.
+
+### Fixed
+
+- **`dsh_read` merged different tool calls into one entry.** Consecutive tool
+  updates in a turn were concatenated (`read [in_progress]read [completed]pwsh …`)
+  under the first call's `tool_call_id`. Each tool call now has its own entry and
+  a status update replaces it in place; only streamed text is still merged, so an
+  empty turn's start/end markers also stay separate.
+- **`answer` ran message segments together.** Text DSH sends before and after a
+  tool call is two messages, but the collected answer joined them with no
+  separator (`…where possible.1) package.json…`). A blank line now separates a
+  segment that follows a tool call (none is added when the previous segment
+  already ends with a newline, or before the first text); `dsh_read` entries are
+  unchanged.
+- **A clean repository is a 0-change snapshot, not `null`.** `null` now only means
+  "no snapshot" (not a git repo, git unavailable, disabled). A turn that removed
+  the last change used to report `workspace_changed=true` with `diff_stat=null`.
+- Tests: `timeout` asserts that a negative `timeout_ms` is rejected (the 0.4.0
+  behaviour) instead of the old "wait forever" semantics, and no longer passes on
+  an error result; `list` asserts caching via `probe_cached` instead of a 500 ms
+  wall-clock threshold; `integration`'s queue check uses a code token instead of
+  requiring the model to echo a phrase verbatim; `capability` prints the tool
+  error text when a call fails instead of an empty `err=`.
+
 ## [0.5.2] — 2026-11-05
 
 ### Fixed

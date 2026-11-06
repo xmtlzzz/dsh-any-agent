@@ -5,15 +5,16 @@ name: tests
 # This project's suite has two halves, and only one of them can run here.
 #
 #   OFFLINE (runs in CI)
-#     smoke             protocol (31 checks without DSH)
+#     smoke             protocol + instructions length cap (session sections skip without DSH)
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     guards            env-var edge cases            40 checks
+#     dsh-locate        DSH auto-discovery (asar)     19 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          37 checks
 #     failure-terminal  terminal state on failure     11 checks
 #     shared-host       shared process host           25 checks
-#     dispatch-tools    dispatch surface              55 checks (53 off Windows)
-#     read-cursor       dsh_read revision cursor      10 checks
+#     dispatch-tools    dispatch surface              59 checks (56 off Windows)
+#     read-cursor       dsh_read cursor + answer      19 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            10 checks
@@ -21,7 +22,7 @@ name: tests
 #     workspace-safety  data-loss boundaries          23 checks
 #     permission-adopt  no silent privilege escalation 17 checks
 #     state-safety      state/sentinel/lock storage   26 checks
-#     workspace-snapshot workspace_changed full fingerprint  18 checks
+#     workspace-snapshot workspace_changed full fingerprint  21 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     roots             cwd from MCP roots            12 checks
@@ -108,6 +109,10 @@ jobs:
       - name: guards (environment-variable edge cases)
         env: { DSH_MCP_LOG: silent }
         run: node test/guards.mjs
+
+      - name: dsh-locate (DSH auto-discovery, synthetic asar)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/dsh-locate.mjs
 
       - name: prune (sentinel retention)
         env: { DSH_MCP_LOG: silent }
