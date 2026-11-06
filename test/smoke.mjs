@@ -35,6 +35,16 @@ try {
   const init = await client.initialize();
   check('initialize 返回 serverInfo', init?.serverInfo?.name === 'dsh-any-agent', JSON.stringify(init?.serverInfo));
   check('声明 tools 能力', !!init?.capabilities?.tools);
+  // ★ 客户端会截断过长的 instructions（Claude Code 约 4000 字），旧版 4.4k 字的
+  //   末尾规则根本到不了模型。守住上限，并确认最要紧的规则在最前面。
+  const { INSTRUCTIONS_MAX_CHARS } = await import('../src/mcp.mjs');
+  const instr = String(init?.instructions ?? '');
+  check(
+    `★ instructions 不超过 ${INSTRUCTIONS_MAX_CHARS} 字（不会被客户端截断）`,
+    instr.length > 0 && instr.length <= INSTRUCTIONS_MAX_CHARS,
+    `${instr.length} 字`,
+  );
+  check('铁律在前 600 字内（截断时也能保住）', /铁律/.test(instr.slice(0, 600)) && /dsh_review/.test(instr.slice(0, 600)), instr.slice(0, 120));
 
   console.log('\n[2] tools/list');
   const tools = await client.listTools();
