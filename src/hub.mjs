@@ -1817,6 +1817,9 @@ export function sameWorkspaceSnapshot(a, b) {
   return JSON.stringify(a.entries ?? []) === JSON.stringify(b.entries ?? []);
 }
 
+/** 干净工作区的固定指纹（任何非空状态的指纹都至少包含一条状态行，不会与它相同）。 */
+const CLEAN_FINGERPRINT = createHash('sha256').update('clean\0').digest('hex');
+
 const GIT_TIMEOUT_MS = 8000;
 const GIT_MAX_BUFFER = 64 * 1024 * 1024;
 const MAX_UNTRACKED_DIR_ENTRIES = 2000;
@@ -1928,7 +1931,10 @@ export async function gitStatus(cwd) {
       gitOutput(cwd, [...GIT_SAFE, 'rev-parse', '--show-toplevel']),
     ]);
     const rows = parsePorcelainZ(statusOut);
-    if (!rows.length) return null;
+    // ★ 干净的仓库返回“0 个改动”的快照，而不是 null：null 专指“拿不到快照”（非 git 目录、
+    //   git 不可用、总开关关闭）。以前两者混用，一轮把唯一的改动删干净时就会出现
+    //   workspace_changed=true 却 diff_stat=null —— 看不出是“现在干净了”还是“没查成”。
+    if (!rows.length) return { changed_files: 0, entries: [], fingerprint: CLEAN_FINGERPRINT };
     // git 输出的是 `C:/...` 风格，统一成原生分隔符，后面 startsWith 才不会误判越界。
     const root = resolve(String(rootOut ?? '').trim() || cwd);
 

@@ -123,6 +123,22 @@ try {
     check('★ 目录 mtime 未变也能识别内部文件变化', sameWorkspaceSnapshot(before, after) === false);
   }
 
+  console.log('\n[3b] ★ 干净的仓库是“0 个改动”的快照，不是 null');
+  {
+    const repo = makeRepo('clean-after-delete');
+    writeFileSync(join(repo, 'base.txt'), 'base\n');
+    commitAll(repo);
+    const clean0 = await gitStatus(repo);
+    check('★ 干净仓库 → changed_files=0（不再是 null）', clean0 !== null && clean0.changed_files === 0 && clean0.entries.length === 0, JSON.stringify(clean0));
+    mkdirSync(join(repo, '.smoke'));
+    writeFileSync(join(repo, '.smoke', 'x.txt'), 'x\n');
+    const dirty = await gitStatus(repo);
+    rmSync(join(repo, '.smoke'), { recursive: true, force: true });
+    const clean1 = await gitStatus(repo);
+    check('★ 删掉唯一的改动：有变化，且 after 是 0 个改动（不是 null）', sameWorkspaceSnapshot(dirty, clean1) === false && clean1?.changed_files === 0, JSON.stringify(clean1));
+    check('干净 → 干净：没有变化', sameWorkspaceSnapshot(clean0, clean1) === true);
+  }
+
   console.log('\n[4] 非 git 目录与总开关');
   {
     const plain = join(root, 'not-a-repo');
