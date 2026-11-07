@@ -254,6 +254,10 @@ try {
   console.log(client.stderr.slice(-20).join('\n'));
 } finally {
   await client.close();
+  // 会话与全部产物：按本套件的临时根圈定（keep/cap 两个实例建的会话 cwd 也在里面）。
+  // ★ 动态 import：本文件要先设 DSH_MCP_LOCKS_DIR 再加载 locks.mjs，静态 import 会提前加载。
+  const { cleanupSuite } = await import('./residue.mjs');
+  cleanupSuite({ clients: [client], roots: [ROOT] });
   for (let i = 0; i < 3; i++) {
     try {
       rmSync(ROOT, { recursive: true, force: true });

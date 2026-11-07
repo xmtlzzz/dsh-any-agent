@@ -377,6 +377,12 @@ try {
   failCount++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);
 } finally {
+  // 先清会话与全部产物：按本套件的临时根圈定（A/B/A2/B2/C 几个实例建的会话 cwd 都在里面）。
+  // ★ 用动态 import：lock.mjs 在 import locks.mjs 之前要先设好 DSH_MCP_LOCKS_DIR 等环境变量，
+  //   静态 import 会把 locks.mjs 提前以默认环境加载进缓存。
+  const { cleanupSuite } = await import('./residue.mjs');
+  // （state2.json 与 state.json 同目录，per-run 数据目录相同，传 STATE 即可覆盖）
+  cleanupSuite({ roots: [ROOT], stateFiles: [STATE] });
   // 清理要够皮实：临时目录可能是某个还没退干净的 DSH 子进程的 cwd，rmSync 会 EPERM。
   // 清不掉不影响测试结论（系统临时目录会被系统回收）。
   for (let i = 0; i < 3; i++) {

@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
 import { purgeTestSessions } from '../src/workspace.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 let pass = 0;
 let failCount = 0;
@@ -224,8 +225,9 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
-  // idsOnly：只清理本套件创建的会话，不再按 %TEMP% 一刀切。
-  purgeTestSessions({ ids: convs.filter(Boolean), idsOnly: true });
+  // 只清理本套件创建的会话（点名 id + 自己的临时根），连同投影缓存/状态/哨兵等全部产物；
+  // 不再按 %TEMP% 一刀切。
+  cleanupSuite({ clients: [client], ids: convs.filter(Boolean), roots: [ROOT] });
   try {
     rmSync(ROOT, { recursive: true, force: true });
   } catch {}

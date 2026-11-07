@@ -3,13 +3,17 @@
  * 用一个明确要求逐步推理的题目来逼出 reasoning，并对比 hide / full 两种档位。
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
+import { cleanupSuite } from './residue.mjs';
 
-const STATE = join(tmpdir(), `dsh-any-agent-reason-state-${Date.now()}.json`);
-const ws = mkdtempSync(join(tmpdir(), 'dsh-any-agent-reason-ws-'));
+const ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-reason-'));
+// ★ 状态目录收在自己的临时根里（见 smoke.mjs 同处注释）
+const STATE = join(ROOT, 'state.json');
+const ws = join(ROOT, 'ws');
+mkdirSync(ws, { recursive: true });
 const client = new McpClient({ env: { DSH_MCP_STATE: STATE } }).start();
 
 let pass = 0;
@@ -69,8 +73,8 @@ try {
   console.log(client.stderr.slice(-20).join('\n'));
 } finally {
   await client.close();
-  try { rmSync(STATE, { force: true }); } catch {}
-  try { rmSync(ws, { recursive: true, force: true }); } catch {}
+  cleanupSuite({ clients: [client], roots: [ROOT] });
+  try { rmSync(ROOT, { recursive: true, force: true }); } catch {}
 }
 
 console.log(`\n===== reasoning 检查：通过 ${pass}，失败 ${fail} =====`);

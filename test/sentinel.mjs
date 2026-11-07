@@ -17,6 +17,7 @@ import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 let pass = 0;
 let failCount = 0;
@@ -205,6 +206,7 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
+  cleanupSuite({ clients: [client], roots: [ROOT] });
   try {
     rmSync(ROOT, { recursive: true, force: true });
   } catch {}

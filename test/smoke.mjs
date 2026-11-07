@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
+import { cleanupSuite } from './residue.mjs';
 import { resolveDshBin } from '../src/config.mjs';
 
 let hasDsh = true;
@@ -27,7 +28,10 @@ function check(name, cond, detail = '') {
   }
 }
 
-const STATE = join(tmpdir(), `dsh-any-agent-smoke-state-${Date.now()}.json`);
+// ★ 状态目录必须收在自己的临时根里：DSH_MCP_STATE 直接放 %TEMP% 根下的话，runs/reviews/locks/meta
+//   会散落在 %TEMP% 根下，没有 dsh-any-agent-* 目录兜着，永远清不掉。
+const ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-smoke-'));
+const STATE = join(ROOT, 'state.json');
 const client = new McpClient({ env: { DSH_MCP_STATE: STATE } }).start();
 
 try {
@@ -59,7 +63,7 @@ try {
     console.log('\n[3-5] 跳过 DSH 会话部分（未找到 DSH CLI；其余离线套件仍会执行）');
   } else {
   console.log('\n[3] dsh_start（只读档，临时工作区）');
-  ws = mkdtempSync(join(tmpdir(), 'dsh-any-agent-smoke-ws-'));
+  ws = mkdtempSync(join(ROOT, 'ws-'));
   const startRes = await client.callTool('dsh_start', { cwd: ws, permission: 'read-only' }, 90_000);
   const startText = McpClient.text(startRes);
   const convId = startRes?.structuredContent?.conversation_id;
@@ -140,8 +144,10 @@ try {
   console.log(client.stderr.slice(-25).join('\n'));
 } finally {
   await client.close();
+  // 收尾：删掉本套件造的会话及其全部产物，再删临时根（含状态目录）
+  cleanupSuite({ clients: [client], roots: [ROOT] });
   try {
-    rmSync(STATE, { force: true });
+    rmSync(ROOT, { recursive: true, force: true });
   } catch {}
 }
 

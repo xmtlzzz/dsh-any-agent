@@ -17,6 +17,7 @@ import { join } from 'node:path';
 
 const ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-list-'));
 const { McpClient } = await import('./mcp-client.mjs');
+const { cleanupSuite } = await import('./residue.mjs');
 const client = new McpClient({ env: { DSH_MCP_STATE: join(ROOT, 'state.json') } }).start();
 
 let pass = 0;
@@ -102,10 +103,9 @@ try {
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);
 } finally {
   await client.close();
-  const { purgeTestSessions } = await import('../src/workspace.mjs');
-  // 只删本套件自己创建的会话（idsOnly），绝不再用 tempOnly —— 那会删掉
-  // 其他进程/测试正在使用的临时工作区会话（实测导致 ENOENT 与跨套件误杀）。
-  purgeTestSessions({ ids: trackedId ? [trackedId] : [], idsOnly: true });
+  // 只删本套件自己创建的会话（点名 id + 自己的临时根），绝不扫荡整个 %TEMP% ——
+  // 那会删掉其他进程/测试正在使用的临时工作区会话（实测导致 ENOENT 与跨套件误杀）。
+  cleanupSuite({ clients: [client], ids: trackedId ? [trackedId] : [], roots: [ROOT] });
   for (let i = 0; i < 3; i++) {
     try {
       rmSync(ROOT, { recursive: true, force: true });

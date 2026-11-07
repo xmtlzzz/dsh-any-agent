@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 let pass = 0;
 let failCount = 0;
@@ -28,9 +29,11 @@ const check = (name, cond, detail = '') => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const STATE = join(tmpdir(), `dsh-any-agent-int-state-${Date.now()}.json`);
-const ws = process.env.DSH_MCP_TEST_CWD ?? mkdtempSync(join(tmpdir(), 'dsh-any-agent-int-ws-'));
-const ownWs = !process.env.DSH_MCP_TEST_CWD;
+// ★ 状态目录收在自己的临时根里（见 smoke.mjs 同处注释）。
+//   DSH_MCP_TEST_CWD 指向用户自己的目录时，会话的 cwd 不是测试目录：清理护栏会拒绝删它，会话保留。
+const ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-int-'));
+const STATE = join(ROOT, 'state.json');
+const ws = process.env.DSH_MCP_TEST_CWD ?? mkdtempSync(join(ROOT, 'ws-'));
 
 console.log(`工作区: ${ws}`);
 const client = new McpClient({ env: { DSH_MCP_STATE: STATE, DSH_MCP_LOG: 'info' } }).start();
@@ -197,14 +200,10 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
+  cleanupSuite({ clients: [client], roots: [ROOT] });
   try {
-    rmSync(STATE, { force: true });
+    rmSync(ROOT, { recursive: true, force: true });
   } catch {}
-  if (ownWs) {
-    try {
-      rmSync(ws, { recursive: true, force: true });
-    } catch {}
-  }
 }
 
 console.log(`\n===== 集成测试：通过 ${pass}，失败 ${failCount} =====`);

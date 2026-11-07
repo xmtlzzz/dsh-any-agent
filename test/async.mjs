@@ -17,6 +17,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 let pass = 0;
 let failCount = 0;
@@ -31,8 +32,9 @@ const check = (name, cond, detail = '') => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const STATE = join(tmpdir(), `dsh-any-agent-async-state-${Date.now()}.json`);
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-async-'));
+// ★ 状态目录收在自己的临时根里（见 smoke.mjs 同处注释）
+const STATE = join(root, 'state.json');
 const wsA = join(root, 'worker');
 const wsB = join(root, 'sidekick');
 mkdirSync(wsA, { recursive: true });
@@ -170,7 +172,7 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
-  try { rmSync(STATE, { force: true }); } catch {}
+  cleanupSuite({ clients: [client], roots: [root] });
   try { rmSync(root, { recursive: true, force: true }); } catch {}
 }
 

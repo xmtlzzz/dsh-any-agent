@@ -16,16 +16,19 @@
  *   DSH_E2E_MODE=preflight node ...     # 预检（1 个会话，先确认只读档下 IDA 通路可用）
  */
 
-import { mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 const MODE = process.env.DSH_E2E_MODE ?? 'full';
 const DESKTOP = join(homedir(), 'Desktop');
 const FOLDER_A = join(DESKTOP, 'dsh-any-agent-test-A');
 const FOLDER_B = join(DESKTOP, 'dsh-any-agent-test-B');
-const STATE = join(tmpdir(), `dsh-any-agent-e2e-state-${Date.now()}.json`);
+// ★ 状态目录收在自己的临时目录里（不要把 DSH_MCP_STATE 直接放 %TEMP% 根下，见 smoke.mjs 同处注释）
+const STATE_ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-e2e-'));
+const STATE = join(STATE_ROOT, 'state.json');
 
 /**
  * 这个套件依赖 DSH profile 里挂载的 IDA Pro MCP（mcp__ida__*）。
@@ -48,6 +51,7 @@ if (!hasIda && process.env.DSH_E2E_FORCE !== '1') {
   console.log('\nacceptance: skipped — no IDA MCP configured in the DSH profile.');
   console.log('  Add mcp__ida__* to the profile (or set DSH_E2E_FORCE=1 to run anyway).');
   console.log('\n===== acceptance: skipped (0 checks) =====');
+  rmSync(STATE_ROOT, { recursive: true, force: true }); // 还没起任何服务，别留空目录
   process.exit(0);
 }
 
@@ -218,12 +222,14 @@ try {
   //   想保留证据（人工翻看文件）就设 DSH_MCP_KEEP_EVIDENCE=1。
   if (process.env.DSH_MCP_KEEP_EVIDENCE === '1') {
     console.log('\n证据已保留（DSH_MCP_KEEP_EVIDENCE=1）：');
-    console.log(`  ${FOLDER_A}\n  ${FOLDER_B}`);
+    console.log(`  ${FOLDER_A}\n  ${FOLDER_B}\n  ${STATE_ROOT}（状态目录）`);
   } else {
-    const { rmSync } = await import('node:fs');
-    const { purgeTestSessions, pruneTestWorkspaces } = await import('../src/workspace.mjs');
-    const ids = results.map((r) => r.conversation_id).filter(Boolean);
-    if (ids.length) purgeTestSessions({ ids, idsOnly: true });
+    const { pruneTestWorkspaces } = await import('../src/workspace.mjs');
+    // 点名清理本次造的会话（桌面目录是固定名字、可能被别的进程同时用，所以只给 id 不给 roots）
+    cleanupSuite({ clients: [client], ids: results.map((r) => r.conversation_id).filter(Boolean) });
+    try {
+      rmSync(STATE_ROOT, { recursive: true, force: true });
+    } catch {}
     for (const d of [FOLDER_A, FOLDER_B]) {
       try {
         rmSync(d, { recursive: true, force: true });
