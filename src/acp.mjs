@@ -245,7 +245,14 @@ export class AcpProcess {
       const timer =
         timeoutMs > 0
           ? setTimeout(() => {
-              if (this.#pending.delete(id)) reject(new Error(`ACP 请求超时: ${method}`));
+              if (!this.#pending.delete(id)) return;
+              // 带上机器可读的 code/method：上层要区分"DSH 没回话（超时）"与"DSH 明确拒绝"，
+              // 前者可能是瞬时卡顿（可重试），后者重试只会重复同一个错误，不能靠匹配中文报错文本来分。
+              const err = new Error(`ACP 请求超时: ${method}`);
+              err.code = 'ACP_TIMEOUT';
+              err.method = method;
+              err.timeoutMs = timeoutMs;
+              reject(err);
             }, timeoutMs)
           : null;
       this.#pending.set(id, { resolve, reject, timer });

@@ -54,6 +54,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A clean repository is a 0-change snapshot, not `null`.** `null` now only means
   "no snapshot" (not a git repo, git unavailable, disabled). A turn that removed
   the last change used to report `workspace_changed=true` with `diff_stat=null`.
+- **A cold `session/resume` that DSH never answers is retried once.** A live
+  `test/multi.mjs` run once hit `ACP request timed out: session/resume` (60 s of
+  silence from a freshly spawned DSH); a rerun passed and it did not reproduce in
+  ~70 controlled resume cycles, 40 of them under concurrent load. The write lock is
+  ruled out (DSH takes it with a zero-timeout wait and refuses instantly), so it
+  looks like a rare stall inside the DSH process. `resume` is idempotent and the
+  failure path already kills the process and waits for it to exit, so `ensureAlive`
+  now rebuilds the process and retries exactly once — only for a timeout, never for
+  a write-lock refusal or invalid params, and not on a shared host that still carries
+  other conversations. `AcpProcess` timeout errors now carry `code=ACP_TIMEOUT` and
+  `method`, and the DSH stderr tail at the moment of a timeout goes to the opt-in
+  `DSH_MCP_LOG_STDERR` log. New offline suite `resume-retry` (fake ACP server).
 - Tests: `timeout` asserts that a negative `timeout_ms` is rejected (the 0.4.0
   behaviour) instead of the old "wait forever" semantics, and no longer passes on
   an error result; `list` asserts caching via `probe_cached` instead of a 500 ms

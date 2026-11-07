@@ -510,8 +510,34 @@ export class Conversation {
 
   // ── 进程生命周期 ────────────────────────────────────────────────
 
-  /** 确保有一个可用的 DSH 进程；必要时新建并 resume 回该会话。 */
-  async ensureAlive() {
+  /**
+   * 确保有一个可用的 DSH 进程；必要时新建并 resume 回该会话。
+   *
+   * ★ 冷启动 resume 的"请求超时"最多**自动重试一次**（`retried` 仅供内部递归使用）。
+   *
+   * 排查记录（test/multi.mjs [3] 偶发 `ACP 请求超时: session/resume`，已知一次、复现不出来）：
+   *   - 排除写锁：DSH 的写锁是 Windows 命名内核信号量，`WaitForSingleObject(handle, 0)` **零超时**，
+   *     被占用时**立刻**回 SessionAlreadyOwnedError，绝不会挂着等；而且 `dsh_release` 要等持有者
+   *     进程真的退出才返回，内核在进程死亡时同步释放它。所以"A 还没放锁 → B 的 resume 挂住"不成立
+   *     （撞锁走的是下面 isLeaseError 那条快速失败分支，报错文本也完全不同）。
+   *   - 冷 resume 的固定成本：DSH 0.2.2 在 session/new 与 session/resume 的**响应里**同步等待模型目录
+   *     刷新（deepseek-account / deepseek-api-key 两个 provider 各请求一次 api.deepseek.com/models，
+   *     截止 5 秒，并行）。本机该端点常年不可达，于是每个新进程的第一次 new/resume 稳定要 ~5.2 秒
+   *     再加 ~1.3s 的 Electron 冷启动。它是**有界**的（5s deadline），不会单独吃满 60s。
+   *   - 排除注册表 / 共享宿主：走读 SessionHost、AcpProcess、LineDecoder 与 B 的 adopt 路径没有"回包丢失"
+   *     或"请求被吞"的分支；resume 的每一步在 DSH 侧都是有界 I/O（目录扫描、读日志、零超时拿锁）。
+   *   - 复现不出来：同一场景（A 建会话 → A 释放 → 新进程 resume）顺序 30 次、5 路并发 40 次
+   *     （同时还有整套 multi.mjs 在跑），resume 一直 4.3–5.4s，没有一次离群；另外整套 multi.mjs 连跑 6 次全过。
+   *   - 所以 60s 的"无响应"最可能是 DSH 进程自身的**偶发停滞**（杀软/磁盘/系统调度、同机并发的其它
+   *     DSH 进程……），**具体触发点没有找到**，这里不假装知道。超时当下的 DSH stderr 尾部现在会经
+   *     dshStderr 记下（DSH_MCP_LOG_STDERR=1 时可见），下次撞上就有证据。
+   * 对策不是单纯把超时调大（真卡死了等再久也没用），而是利用 resume 的两个性质：
+   *   ① 幂等 —— 会话本体在磁盘上，resume 失败不改变它；
+   *   ② 失败路径已经杀掉并等到这个进程退出（写锁随之释放），重建进程是干净的重来。
+   * 所以只对 `ACP_TIMEOUT`（DSH 没回话）且确认旧进程已退出时重试一次；撞写锁、参数错误、DSH 明确拒绝
+   * 都不重试（重试只会重复同一个错误）。第二次仍超时就照旧报错，不无限循环。
+   */
+  async ensureAlive({ retried = false } = {}) {
     // ★ 上一代进程正在回收时必须先等它停完：否则会为同一会话再拉起一个进程，
     //   去抢一个**尚未释放**的写锁（reaper/release 里 await stop() 的那个窗口）。
     if (this.recycling) await this.recycling;
@@ -562,6 +588,13 @@ export class Conversation {
       this.#hub.log.info(`[conv ${this.id}] 已 resume`);
       return proc;
     } catch (e) {
+      // 超时当下 DSH 在 stderr 说了什么，是下次再撞上这个偶发停滞时唯一的证据；
+      // stop() 之后共享宿主就拿不到它了，所以先取。只走 dshStderr（默认静默，
+      // DSH_MCP_LOG_STDERR=1 才打印 —— DSH 的 stderr 可能夹带模型输出，不能默认外泄）。
+      if (e?.code === 'ACP_TIMEOUT') {
+        const tail = proc.stderrTail;
+        if (tail) this.#hub.log.dshStderr?.(`[conv ${this.id}] ${e.method} 超时时 DSH stderr 尾部:\n${tail}`);
+      }
       // ★ 半死的进程必须作废：它 alive 但**没有加载这个会话**，一旦留在 this.proc 上，
       //   下次调用会走上面 `this.proc?.alive` 的快路径，把 session/prompt 发给一个
       //   不认识该会话的进程 —— 会话就永久卡死了（重派也不会自愈）。
@@ -602,6 +635,15 @@ export class Conversation {
         err.code = 'session-writer-held';
         err.holder = holder;
         throw err;
+      }
+      // ★ 瞬时停滞：DSH 没回话，且那个进程已经确认退出（写锁随之释放）→ 重建进程重来一次。
+      //   共享宿主上还挂着别的会话时 `proc.alive` 仍为真（detach 只摘掉本会话），那个进程里
+      //   可能还有这条 resume 在跑，重试会撞上它自己 —— 此时不重试，照旧报错。
+      if (e?.code === 'ACP_TIMEOUT' && !retried && stopped && !proc.alive) {
+        this.#hub.log.info(
+          `[conv ${this.id}] ${e.method ?? 'ACP'} 超时（${e.timeoutMs ?? '?'}ms），已回收该进程；重建进程重试一次`,
+        );
+        return this.ensureAlive({ retried: true });
       }
       throw new Error(`恢复会话失败（已作废该进程，下次调用会重建）：${e.message}`);
     }
