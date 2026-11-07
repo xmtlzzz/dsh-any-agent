@@ -2,7 +2,7 @@
 
 # 设计稿：让用户看见 DSH 在做什么（live 事件流 + 查看器）
 
-> 状态：**P1 + P2 已实现**（基线 0.6.0 之后，见 CHANGELOG Unreleased）。实现与本文最初草案的差异已在对应小节标注"实现"。
+> 状态：**P1 + P2 已实现**，随 0.6.1 发布（见 CHANGELOG）。实现与本文最初草案的差异已在对应小节标注"实现"。
 >
 > 代码：`src/live.mjs`（写入）、`src/live-view.mjs`（读取 / 归并 / 终端渲染）、`src/live-cli.mjs`（`watch` / `dashboard` 子命令）、`src/live-dashboard.mjs` + `src/live-dashboard.html`（页面）。测试：`test/live-events.mjs`、`test/live-view.mjs`。
 >
