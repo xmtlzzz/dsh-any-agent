@@ -35,6 +35,17 @@ log(`${flag}测试收尾清理（只针对本仓库测试造出来的目录；�
 log('  规则：只删 cwd 在 tmpdir()/dsh-any-agent-*、桌面 dsh-any-agent-test-A|B、本仓库 .state/ws-probe-* 的会话；');
 log('        用户在 %TEMP% 里自己的真实项目、别的 agent 的临时根（TMP 指到别处）都不会被碰。\n');
 
+// ★ 保留证据模式必须在**任何**清扫之前生效：acceptance / workspace-effect 在
+//   DSH_MCP_KEEP_EVIDENCE=1 时故意留下桌面测试工作区里的会话和 `%TEMP%\dsh-any-agent-*`
+//   状态目录供人工查看，而 run.mjs 每次都会在最后调用本脚本。以前这个开关只挡住了第 5b 步
+//   （桌面文件夹），第 1 步的会话清扫和第 5 步的临时目录清扫照样把证据删掉了（PR #11 评审）。
+//   看完证据后不带这个开关再跑一次 `node test/cleanup.mjs` 即可收尾。
+if (process.env.DSH_MCP_KEEP_EVIDENCE === '1') {
+  log('  ★ DSH_MCP_KEEP_EVIDENCE=1：整轮清理已跳过，测试会话、状态目录与桌面测试文件夹全部原样保留。');
+  log('    看完证据后，不带这个开关再运行一次 node test/cleanup.mjs 收尾。');
+  process.exit(0);
+}
+
 const r = sweepTestResidue({ dryRun });
 
 // 1) 测试会话（DSH 侧产物随会话一起走：日志、投影缓存、登记、墓碑）
@@ -97,11 +108,9 @@ log(`  遗留临时工作区目录：删除 ${dirsRemoved} 个；遗留状态文
 // 5b) 桌面上遗留的测试文件夹（`dsh-any-agent-test-A/B`、`dsh-conc-*`）——
 //     验收测试与旧版并发测试会在这两个位置造真实工作区。验收测试自己会删；
 //     这里默认**不动**，避免误删恰好同名的用户目录；确实要清时设
-//     DSH_MCP_PURGE_DESKTOP=1。DSH_MCP_KEEP_EVIDENCE=1 仍优先跳过。
+//     DSH_MCP_PURGE_DESKTOP=1。（DSH_MCP_KEEP_EVIDENCE=1 时整个脚本在开头就已退出。）
 let foldersRemoved = 0;
-if (process.env.DSH_MCP_KEEP_EVIDENCE === '1') {
-  log('  桌面测试文件夹：已跳过（DSH_MCP_KEEP_EVIDENCE=1）');
-} else if (process.env.DSH_MCP_PURGE_DESKTOP !== '1') {
+if (process.env.DSH_MCP_PURGE_DESKTOP !== '1') {
   // ★ 默认不自动删桌面上的固定名字目录：用户的真实项目可能恰好叫这个名字。
   //   验收测试自己会删它创建的那两个目录；这里只保留手动入口。
   log('  桌面遗留测试文件夹：已跳过（需要时设 DSH_MCP_PURGE_DESKTOP=1）');

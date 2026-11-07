@@ -10,6 +10,7 @@
  * 路径穿越、旧版扁平目录的"必须有证据"、以及各真机套件确实接上了收尾清理。
  */
 
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -462,6 +463,37 @@ try {
   }
   const offenders = suiteFiles.filter((f) => /const STATE\w*\s*=\s*join\(tmpdir\(\)/.test(readText(join(HERE, f))) && f !== 'residue-purge.mjs');
   check('★ 没有套件把 DSH_MCP_STATE 直接放在 %TEMP% 根下（否则 runs/reviews/locks/meta 会散落且永不被清）', offenders.length === 0, offenders.join(','));
+
+  // ───────────────────────────────────────────────────────────
+  console.log('\n[11] ★ DSH_MCP_KEEP_EVIDENCE=1 时 cleanup.mjs 一样东西都不删（PR #11 评审）');
+  {
+    // 子进程的 tmpdir() 与 DSH_HOME 都指进沙箱：不碰真实 %TEMP% 与 ~/.dsh。
+    const evTmp = join(sandbox, 'evidence-tmp');
+    const evState = join(evTmp, 'dsh-any-agent-wseff-evidence');
+    mkdirSync(evState, { recursive: true });
+    writeFileSync(join(evState, 'conversations.json'), '{"version":1,"conversations":[]}');
+    const runCleanup = (extra) =>
+      spawnSync(process.execPath, [join(HERE, 'cleanup.mjs')], {
+        encoding: 'utf8',
+        timeout: 60_000,
+        env: {
+          ...process.env,
+          TEMP: evTmp,
+          TMP: evTmp,
+          TMPDIR: evTmp,
+          DSH_HOME: dshHome,
+          DSH_MCP_STATE: join(stateDir, 'conversations.json'),
+          DSH_MCP_PURGE_DESKTOP: '',
+          ...extra,
+        },
+      });
+    const kept = runCleanup({ DSH_MCP_KEEP_EVIDENCE: '1' });
+    check('保留证据模式下 cleanup 正常退出', kept.status === 0, kept.stderr);
+    check('★ 状态目录（证据）原样保留', existsSync(join(evState, 'conversations.json')));
+    check('输出里说明了整轮已跳过、以及怎么收尾', /KEEP_EVIDENCE=1：整轮清理已跳过/.test(kept.stdout) && /不带这个开关再运行一次/.test(kept.stdout), kept.stdout.slice(0, 300));
+    const swept = runCleanup({ DSH_MCP_KEEP_EVIDENCE: '' });
+    check('对照：不带开关时同一个临时状态目录会被清掉', swept.status === 0 && !existsSync(evState), swept.stdout.slice(-300));
+  }
 } catch (e) {
   failed++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);
