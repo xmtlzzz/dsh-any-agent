@@ -298,6 +298,8 @@ try {
   check('模型套件的数字原样保留（报告里没有模型套件）',
     zh().includes('| `boundary` | 46 | 边界 |') && zh().includes('| `shared-process` | 8（无 DSH 时 skip） | 共享进程 |'));
   check('说明了模型套件没动', /no model-backed suites/.test(r.out), r.out);
+  check('打印的差异只含真正改了的行（总数段落行数变化也不会让后面的行错位成一大片）',
+    r.out.includes('- | `alpha` | 5 | 甲 |') && r.out.includes('+ | `alpha` | 7 | 甲 |') && !r.out.includes('| `boundary` |') && !r.out.includes('| `beta` |'), preview(r.out));
   check('总数段落：本机实测（套件数、检查数、环境）',
     zh().includes('在本机（Windows，没有 DSH，5/9 个客户端配置 fixture）跑了 7 个离线套件、553 项检查') &&
     en().includes('ran 553 checks in 7 offline suites on this machine (Windows, no DSH, 5/9 client config fixtures)'), zh().split('\n').slice(-8).join(' | '));
@@ -328,7 +330,7 @@ try {
   r = run(['--check', '--report', devPath]);
   check('--check：文档与报告不一致 exit 1，并指出文件、行、旧值与新值',
     r.code === 1 && r.err.includes('docs/zh/tests.md') && r.err.includes('- | `alpha` | 99 | 甲 |') && r.err.includes('+ | `alpha` | 7 | 甲 |'), preview(r.err));
-  check('--check 不写文件', zh().includes('| `alpha` | 99 | 甲 |'));
+  check('--check 不写文件，差异里也没有无关的行', zh().includes('| `alpha` | 99 | 甲 |') && !r.err.includes('| `beta` |') && !r.err.includes('STALE'));
   r = run(['--report', devPath]);
   check('写回把手改的数字纠正回来，其余字节不变', r.code === 0 && zh() === zhBefore);
 

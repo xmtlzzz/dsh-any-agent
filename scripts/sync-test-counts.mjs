@@ -504,33 +504,54 @@ function ymlCount(name, spec, model) {
 
 // ── 差异显示 ──────────────────────────────────────────────────────
 
-export function diffLines(before, after) {
-  const a = before.split('\n');
-  const b = after.split('\n');
-  let start = 0;
-  while (start < a.length && start < b.length && a[start] === b[start]) start += 1;
-  let endA = a.length;
-  let endB = b.length;
-  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
-    endA -= 1;
-    endB -= 1;
-  }
-  return {
-    line: start + 1,
-    removed: a.slice(start, endA),
-    added: b.slice(start, endB),
-  };
-}
-
+/**
+ * 行级差异：先去掉共同的首尾，再对中间做 LCS。文档才几百行，O(n*m) 足够。
+ * 不能只做"逐行配对"：总数段落的行数会变，行数一变，后面所有行都会错位成一大片假差异。
+ * 返回 [{ line（旧文件里的行号）, removed:[], added:[] }]。
+ */
 function diffHunks(before, after) {
-  // 差异可能散在好几处：逐行配对，行数相同的文件（表格与注释）就能精确定位每一处。
   const a = before.split('\n');
   const b = after.split('\n');
-  if (a.length !== b.length) return [diffLines(before, after)];
-  const hunks = [];
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] !== b[i]) hunks.push({ line: i + 1, removed: [a[i]], added: [b[i]] });
+  let s = 0;
+  while (s < a.length && s < b.length && a[s] === b[s]) s += 1;
+  let ea = a.length;
+  let eb = b.length;
+  while (ea > s && eb > s && a[ea - 1] === b[eb - 1]) {
+    ea -= 1;
+    eb -= 1;
   }
+  const x = a.slice(s, ea);
+  const y = b.slice(s, eb);
+  const lcs = Array.from({ length: x.length + 1 }, () => new Uint32Array(y.length + 1));
+  for (let i = x.length - 1; i >= 0; i -= 1) {
+    for (let j = y.length - 1; j >= 0; j -= 1) {
+      lcs[i][j] = x[i] === y[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+  const hunks = [];
+  let cur = null;
+  const flush = () => {
+    if (cur) hunks.push(cur);
+    cur = null;
+  };
+  let i = 0;
+  let j = 0;
+  while (i < x.length || j < y.length) {
+    if (i < x.length && j < y.length && x[i] === y[j]) {
+      flush();
+      i += 1;
+      j += 1;
+    } else if (j < y.length && (i === x.length || lcs[i][j + 1] >= lcs[i + 1][j])) {
+      cur ??= { line: s + i + 1, removed: [], added: [] };
+      cur.added.push(y[j]);
+      j += 1;
+    } else {
+      cur ??= { line: s + i + 1, removed: [], added: [] };
+      cur.removed.push(x[i]);
+      i += 1;
+    }
+  }
+  flush();
   return hunks;
 }
 
