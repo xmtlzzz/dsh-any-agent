@@ -14,7 +14,7 @@ name: tests
 #     failure-terminal  terminal state on failure     10 checks
 #     shared-host       shared process host           25 checks
 #     resume-retry      cold-resume timeout retry     59 checks (fake ACP server)
-#     dispatch-tools    dispatch surface              58 checks (55 off Windows)
+#     dispatch-tools    dispatch surface              59 checks (55 off Windows)
 #     read-cursor       dsh_read cursor + answer      19 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
 #     review            caller review tickets        70 checks
