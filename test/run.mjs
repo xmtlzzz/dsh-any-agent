@@ -52,6 +52,10 @@ const OFFLINE = [
   // 工作区注册表与测试清理的安全边界：坏文件不覆盖、临时目录前缀不误伤、
   // 自动清理只删本仓库测试造的会话。纯文件系统，不花 token。
   'workspace-safety.mjs',
+  // 测试残留清理：DSH 侧（会话日志/投影缓存/工作区登记/墓碑）与本项目侧（注册表/元数据/
+  // 哨兵/审核/锁登记）每一种产物都被清掉、非测试会话逐字节不变、cwd 护栏、子会话级联、
+  // 干跑零写入、各真机套件都接上了收尾清理。沙箱 DSH_HOME，纯文件系统，不花 token。
+  'residue-purge.mjs',
   // 接管外部会话 / 运行期权限核对：未知档 fail-closed 到 read-only，
   // 记录 read-only 不能被侧车提升。纯内存 + 文件系统，不花 token。
   'permission-adopt.mjs',

@@ -20,6 +20,7 @@ name: tests
 #     forget-tombstone  forget is terminal            10 checks
 #     bootstrap-profile zero-dependency bootstrap     24 checks
 #     workspace-safety  data-loss boundaries          23 checks
+#     residue-purge     test residue cleanup, sandboxed 145 checks
 #     permission-adopt  no silent privilege escalation 17 checks
 #     state-safety      state/sentinel/lock storage   26 checks
 #     workspace-snapshot workspace_changed full fingerprint  21 checks
@@ -157,6 +158,14 @@ jobs:
       - name: workspace-safety (no data-loss on bad registry/temp prefixes)
         env: { DSH_MCP_LOG: silent }
         run: node test/workspace-safety.mjs
+
+      # Test-session cleanup: every artifact kind a test session leaves behind
+      # (DSH session log, projection cache, workspace registration, tombstone,
+      # registry entry, meta, sentinels, reviews, lock markers) is removed, and
+      # non-test sessions stay byte-identical. Sandboxed DSH_HOME; no DSH needed.
+      - name: residue-purge (test residue cleanup is complete and scoped)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/residue-purge.mjs
 
       - name: permission-adopt (no silent privilege escalation)
         env: { DSH_MCP_LOG: silent }
