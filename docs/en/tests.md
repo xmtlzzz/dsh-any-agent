@@ -6,7 +6,10 @@
 npm test                   # offline suites; smoke skips DSH sections if no DSH
 npm run test:all           # offline + model-backed suites (needs DSH/provider)
 node test/cleanup.mjs      # suite teardown on its own (test-created dirs only; --dry-run to preview)
+npm run lint               # zero-dependency static checks: syntax, imports, named exports, unused imports
 ```
+
+`npm run lint` (`scripts/lint.mjs`) runs `node --check` on every `.mjs` under `src/ bin/ scripts/ test/ demo/`, and verifies that every relative `import` / `export … from` points at an existing file with **exactly matching case**, that every named import is a real export of the target module, and that no named import is unused. It adds no npm dependency (`package-check` still enforces zero dependencies) and is a token-level scan rather than a full parser: it prefers a missed report to a false one. Run it after splitting modules or moving functions — a forgotten export tends to blow up only on some cold path, which CI without a real DSH never reaches. The offline CI job runs it first in every matrix cell.
 
 Model-backed suites are not part of the hosted CI matrix (they need a real DSH
 install and provider credentials). Run them locally, or dispatch the
@@ -47,6 +50,7 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `roots` | 12 | `dsh_start` without `cwd` asks the client for MCP roots; a client without roots gets an actionable error (no tokens) |
 | `workspace-titles` | 18 | home-as-workspace **and filesystem-root cwd** are rejected before DSH starts; `title_hint` is returned separately from DSH's automatic title (no tokens) |
 | `package-check` | 14 | `files` whitelist, zero runtime dependencies, Node floor, and bin shebangs (no tokens) |
+| `lint` | 22 | **Regression for the `npm run lint` static check itself**: throwaway trees prove that a syntax error, a missing or wrongly-cased import path, a missing named export (including `export { x } from`, `await import()` destructuring and `node:` builtins) and an unused import are each reported; a tree of tricky-but-valid syntax (uses inside template literals, quotes inside regex literals, `export *`) produces zero false positives; and this repo itself is lint-clean (no tokens) |
 | `timeout` | 40 | **timeout semantics**: `wait=false` is unaffected by `timeout_ms`; a `wait=true` expiry merely downgrades to background (turn not cancelled, result not lost, `busy` never lies); `timeout_ms=0` waits forever and a **negative `timeout_ms` is rejected with a clear error** (no run dispatched, conversation still usable); a failed resume invalidates the process instead of wedging the conversation; an empty prompt yields a clear error |
 | `lock` | 79 | **write lock and preemption**: four holder classifications, `writeMarker` never overwriting a live holder, malformed/missing registration edge cases; **end-to-end** with two real MCP instances fighting over one conversation → clear error → refusal → `force` takeover; **a crash releases the lock automatically**, **a wedged holder is preempted without `force`**; plus the "one turn, one sentinel" invariant (inline turns and idle interjects included) |
 | `cycle` | 36 | **the async dispatch lifecycle**: dispatch → collect the sentinel → idle reap → dispatch again, three rounds with no lock error; re-dispatch right on the reap boundary (widening the race); an immediate re-dispatch after `dsh_release`; and an assertion that reaping leaves no unattributable lock (this suite caught the reaper collecting a freshly spawned process as if it were idle) |

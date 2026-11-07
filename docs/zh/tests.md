@@ -6,7 +6,10 @@
 npm test                   # 全部离线套件；没有 DSH 时 smoke 自动跳过会话段
 npm run test:all           # 离线 + 需要模型的套件（需要 DSH/provider）
 node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目录；--dry-run 可预演）
+npm run lint               # 零依赖静态检查：语法、导入路径、具名导出、未使用导入
 ```
+
+`npm run lint`（`scripts/lint.mjs`）对 `src/ bin/ scripts/ test/ demo/` 下每个 `.mjs` 跑 `node --check`，并核对每条相对路径的 `import` / `export … from` 都指向存在且**大小写一致**的文件、每个具名导入都是目标模块的真实导出、没有未使用的具名导入。它不引入任何 npm 依赖（`package-check` 仍然强制零依赖），是 token 级扫描而不是完整解析器：宁可漏报也不误报。拆模块、挪函数之后先跑它 —— 一个漏掉的导出在没有真实 DSH 的 CI 上往往要到某条冷路径才会炸。CI 的离线 job 在每个矩阵格里都会先跑一遍。
 
 模型套件不在 GitHub 托管 CI 里（需要真实 DSH、provider 与凭据）。在本机跑，
 或用 `model-suites` workflow 指定一台装好 DSH 的 self-hosted runner。
@@ -46,6 +49,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `roots` | 12 | 不传 `cwd` 时通过 MCP roots 取客户端当前项目；不支持 roots 的客户端得到可操作的报错（不花 token） |
 | `workspace-titles` | 18 | 家目录**与文件系统根目录**当工作区都会在 DSH 启动前被拦住；`title_hint` 与 DSH 自动标题分开返回（不花 token） |
 | `package-check` | 14 | `files` 白名单、零运行时依赖、Node 下限、bin shebang（不花 token） |
+| `lint` | 22 | **静态检查 `npm run lint` 自身的回归**：在临时目录造一棵有问题的树，逐条断言语法错、导入路径不存在 / 大小写不一致、具名导出不存在（含 `export { x } from`、`await import()` 解构、`node:` 内置模块）、未使用导入都会报；写法刁钻但合法的树（模板字符串里的用法、正则里的引号、`export *`）零误报；并断言本仓库自己是 lint 干净的（不花 token） |
 | `timeout` | 40 | **超时语义**：`wait=false` 不受 `timeout_ms` 影响、`wait=true` 到期只转后台（不取消/不丢结果、`busy` 不说谎）、`timeout_ms=0` 一直等、**负 `timeout_ms` 明确报错**（不派出回合、会话照常可用）、resume 失败会作废进程而不永久卡死、空 prompt 给清晰错误 |
 | `lock` | 79 | **写锁与抢占**：四类持有者判定、`writeMarker` 不覆盖活着的持有者、登记文件损坏/目录缺失等边界；**端到端**两实例抢锁 → 清晰报错 → 拒绝 → `force` 夺锁；**崩溃自动释放锁**、**卡死持有者无 force 自动抢占**；以及"一个回合 = 一个哨兵"的不变量（含内联回合与空闲插话） |
 | `cycle` | 36 | **异步派活的生命周期**：异步派活 → 收哨兵 → 空闲回收 → 再派活，连做 3 轮必须全程无锁错误；贴着回收窗口立刻重派（放大竞态）；`dsh_release` 后立刻重派；并断言回收后**不留下无法归因的锁**（这条实测抓到过"刚拉起的进程被 reaper 当空闲收掉"的竞态） |
