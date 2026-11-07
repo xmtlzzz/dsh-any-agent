@@ -13,6 +13,7 @@ name: tests
 #     approval-details  credential redaction          37 checks
 #     failure-terminal  terminal state on failure     11 checks
 #     shared-host       shared process host           25 checks
+#     resume-retry      cold-resume timeout retry     59 checks (fake ACP server)
 #     dispatch-tools    dispatch surface              59 checks (56 off Windows)
 #     read-cursor       dsh_read cursor + answer      19 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
@@ -129,6 +130,11 @@ jobs:
       - name: shared-host (shared process host)
         env: { DSH_MCP_LOG: silent }
         run: node test/shared-host.mjs
+
+      # 假 ACP 服务端当 DSH：resume 停滞时重试一次，撞写锁/参数错误不重试。
+      - name: resume-retry (cold-resume timeout retry boundaries)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/resume-retry.mjs
 
       - name: dispatch-tools (dsh_inbox, idempotency, queue)
         env: { DSH_MCP_LOG: silent }

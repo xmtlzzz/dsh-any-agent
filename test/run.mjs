@@ -32,6 +32,9 @@ const OFFLINE = [
   'failure-terminal.mjs',
   // 共享 ACP 进程宿主：通知/审批路由、进程退出扇出、refcount 停进程。
   'shared-host.mjs',
+  // 冷启动 resume 超时的自动重试：用假 ACP 服务端验证"该重试/不该重试"的边界
+  // （DSH 没回话才重试一次；撞写锁、参数错误、共享宿主有别的会话时都不重试）。
+  'resume-retry.mjs',
   // 派发面：dsh_inbox、client_run_id 幂等、会话队列、dsh_get 正文预算。
   'dispatch-tools.mjs',
   // dsh_read 游标语义：纯内存，不花 token；守住“合并追加后增量必须能看到全文”、
