@@ -18,10 +18,12 @@ import { Hub } from '../src/hub.mjs';
 import { SHARED_PROCESS } from '../src/config.mjs';
 import { rssMb, readRssMap } from '../src/procstat.mjs';
 
+let passed = 0;
 let failed = 0;
 function check(name, fn) {
   try {
     fn();
+    passed += 1;
     console.log(`  ✓ ${name}`);
   } catch (e) {
     failed += 1;
@@ -181,5 +183,7 @@ check('换一个会话视角同样列得出', () =>
 check('查不到该 PID 时返回空', () => assert.deepEqual(bus.hostVictimsOf(9999, 'session-a'), []));
 check('PID 为空时返回空', () => assert.deepEqual(bus.hostVictimsOf(null, 'session-a'), []));
 
+// 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
+console.log(`\n===== shared host: passed ${passed}, failed ${failed} =====`);
 console.log(`\n总结果: ${failed === 0 ? '通过 ✅' : `${failed} 项失败 ❌`}`);
 process.exit(failed === 0 ? 0 : 1);

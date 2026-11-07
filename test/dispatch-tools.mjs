@@ -18,10 +18,12 @@ const { Conversation, Hub } = await import('../src/hub.mjs');
 const { createHandlers } = await import('../src/tools.mjs');
 const { TEAM_ACTIVE } = await import('../src/config.mjs');
 
+let passed = 0;
 let failed = 0;
 function check(name, fn) {
   try {
     fn();
+    passed += 1;
     console.log(`  ✓ ${name}`);
   } catch (e) {
     failed += 1;
@@ -334,5 +336,7 @@ if (!process.env.DSH_MCP_ALLOW_FULL_ACCESS) {
 
 rmSync(auditDir, { recursive: true, force: true });
 
+// 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
+console.log(`\n===== dispatch tools: passed ${passed}, failed ${failed} =====`);
 console.log(`\n总结果: ${failed === 0 ? '通过 ✅' : `${failed} 项失败 ❌`}`);
 process.exit(failed === 0 ? 0 : 1);

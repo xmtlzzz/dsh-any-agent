@@ -28,16 +28,20 @@ try {
 }
 if (!hasDsh) {
   console.log('  skipped: 本机没有可用的 DSH');
+  // 标准 skip 汇总行：报告里记为"整套跳过"，而不是 0 项通过。
+  console.log('\n===== shared process: skipped (0 checks) =====');
   process.exit(0);
 }
 
 const { Hub } = await import('../src/hub.mjs');
 const { readRssMap } = await import('../src/procstat.mjs');
 
+let passed = 0;
 let failed = 0;
 function check(name, fn) {
   try {
     fn();
+    passed += 1;
     console.log(`  ✓ ${name}`);
   } catch (e) {
     failed += 1;
@@ -83,5 +87,7 @@ check('全部关闭后宿主被清掉', () => assert.equal(hub.hosts.size, 0));
 await new Promise((r) => setTimeout(r, 500));
 check('PID 已退出（RSS 读不到）', () => assert.equal(readRssMap({ force: true }).has(pid), false));
 
+// 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
+console.log(`\n===== shared process: passed ${passed}, failed ${failed} =====`);
 console.log(`\n总结果: ${failed === 0 ? '通过 ✅' : `${failed} 项失败 ❌`}`);
 process.exit(failed === 0 ? 0 : 1);

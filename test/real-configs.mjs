@@ -95,6 +95,8 @@ for (const [id, candidates] of Object.entries(SOURCES)) {
 
 console.log('\n[0] 真实配置样本');
 console.log('  沙箱: ' + home);
+// 检查数随本机装了几个客户端变化（实测每多一个配置多 9 项），报告里要记下是几个。
+console.log('[report] fixtures=' + seeded.length + '/' + Object.keys(SOURCES).length + ' ids=' + (seeded.map((s) => s.id).join(',') || '-'));
 if (!seeded.length) {
   console.log('  (本机没有任何已安装客户端的配置 —— 这一组整体跳过，不代表通过)');
   console.log('\n===== real configs: skipped (0 checks) =====');

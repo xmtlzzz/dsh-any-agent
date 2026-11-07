@@ -16,7 +16,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 
 let failures = 0;
-const ok = (s) => console.log('  \u2713 ' + s);
+let passes = 0;
+const ok = (s) => { console.log('  \u2713 ' + s); passes++; };
 const bad = (s) => { console.log('  \u2717 ' + s); failures++; };
 
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
@@ -87,5 +88,7 @@ if (!m) {
   }
 }
 
+// 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
+console.log('\n===== package check: passed ' + passes + ', failed ' + failures + ' =====');
 console.log('\n' + (failures ? failures + ' problem(s) -- do not publish' : 'all checks passed'));
 process.exit(failures ? 1 : 0);
