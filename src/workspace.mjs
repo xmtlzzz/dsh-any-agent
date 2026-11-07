@@ -15,16 +15,22 @@
  * 或手动执行回填时做一次读-改-写，窗口很小；但仍与 GUI 存在理论上的覆盖可能。
  */
 
-import { copyFileSync, createReadStream, readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, realpathSync } from 'node:fs';
+import { copyFileSync, createReadStream, readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, realpathSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { StringDecoder } from 'node:string_decoder';
 import { createZstdDecompress, zstdDecompressSync } from 'node:zlib';
-import { DSH_HOME, REGISTER_WORKSPACE } from './config.mjs';
+import { DSH_HOME, PKG_ROOT, REGISTER_WORKSPACE } from './config.mjs';
 
 const WORKSPACE_FILE = join(DSH_HOME, 'storages', 'workspace.json');
 const SESSIONS_ROOT = join(DSH_HOME, 'sessions');
+/**
+ * DSH 的会话投影缓存：每个会话一个 `<id>.json`（标题/用量/cwd 等折叠结果）。
+ * ★ 删会话目录**不会**连带删它 —— 实测测试跑多了这里会攒出几百个孤儿文件
+ *   （磁盘上的会话早没了，缓存还在），所以清理会话必须一并删它。
+ */
+const PROJCACHE_DIR = join(DSH_HOME, 'storages', 'session_projcache', 'sessions');
 /** forget 墓碑目录（存 id+时间，不含内容）；清掉测试会话时一并清掉其墓碑。 */
 const FORGOTTEN_DIR = process.env.DSH_MCP_FORGOTTEN_DIR ?? join(DSH_HOME, '.dsh-any-agent-forgotten');
 
@@ -97,6 +103,42 @@ export function isTestTempPath(p) {
  */
 export function isTestDesktopPath(p) {
   return /[\\/]Desktop[\\/](dsh-any-agent-test-[AB]|dsh-conc-[ABC])([\\/]|$)/i.test(String(p ?? ''));
+}
+
+/**
+ * 边界测试（boundary.mjs）为了验证"非临时目录会被登记"，在**本仓库自己的** `.state/` 下
+ * 造一个 `ws-probe-<毫秒时间戳>` 目录。它不在系统临时目录里，所以单独认这一种。
+ *
+ * ★ 绑定 PKG_ROOT（当前进程跑的这份代码所在的仓库/worktree）而不是任意 `.state`：
+ *   并行跑测试的别的 worktree 有它们自己的 `.state/ws-probe-*`，那是人家还活着的会话，
+ *   这里的清理绝不能动。
+ */
+export function isTestScratchPath(p) {
+  try {
+    if (!p || !isAbsolute(String(p))) return false;
+    const rel = relative(join(PKG_ROOT, '.state'), String(p));
+    if (!rel || rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) return false;
+    return /^ws-probe-\d+$/.test(rel.split(/[\\/]/).filter(Boolean)[0] ?? '');
+  } catch {
+    return false;
+  }
+}
+
+/** 会话清理只认这个：桌面 `dsh-any-agent-test-A|B`（注意不含 `dsh-conc-*`，那只用于清工作区登记）。 */
+const DESKTOP_TEST_SESSION_RE = /[\\/]Desktop[\\/]dsh-any-agent-test-[AB]([\\/]|$)/i;
+
+/**
+ * ★ 清理会话的**唯一护栏**：只有 cwd 满足下面三种之一的会话才允许被删，
+ *   不论是被"扫描命中"、被 `ids` 点名还是被 `roots` 圈中 —— 点名也绕不过。
+ *     1) 当前进程 `os.tmpdir()/dsh-any-agent-*`（各测试套件自己的临时根）
+ *     2) 桌面 `dsh-any-agent-test-A|B`（验收/工作区效果测试）
+ *     3) 本仓库 `.state/ws-probe-*`（边界测试的登记探针）
+ *   别的 agent / 别的 worktree 把 TMP 指到 `C:\dsh-agent-tmp\...` 时，它们的会话对本进程
+ *   就**不是**测试目录 —— 这正是想要的：谁造的谁清。
+ */
+export function isTestSessionCwd(p) {
+  const s = String(p ?? '');
+  return isTestTempPath(s) || DESKTOP_TEST_SESSION_RE.test(s) || isTestScratchPath(s);
 }
 
 /**
@@ -425,65 +467,199 @@ export function backfillWorkspaces({ includeTemp = false, dryRun = false, pruneM
   return stats;
 }
 
+const SAFE_SESSION_ID = /^[A-Za-z0-9._-]{4,80}$/;
+
+/**
+ * 列出磁盘上所有会话（带会话头里的 id/cwd/父会话）。
+ * 头读不出来的目录直接略过：认不出 cwd 的会话**绝不当成测试会话**。
+ */
+function listSessionEntries() {
+  const entries = [];
+  if (!existsSync(SESSIONS_ROOT)) return entries;
+  for (const bucket of readdirSync(SESSIONS_ROOT)) {
+    const bucketPath = join(SESSIONS_ROOT, bucket);
+    let dirs;
+    try {
+      dirs = readdirSync(bucketPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const d of dirs) {
+      // 符号链接一律不碰：rmSync 对链接的行为依赖平台，且链接目标可能不在会话目录内。
+      if (!d.isDirectory() || d.isSymbolicLink()) continue;
+      const dir = join(bucketPath, d.name);
+      // 兜底：只允许删 SESSIONS_ROOT 下面的目录（结构上已经如此，防未来改动）。
+      if (!isInside(SESSIONS_ROOT, dir)) continue;
+      const header = readHeader(join(dir, 'session.v4.jsonl.zstd'));
+      if (!header?.id) continue;
+      entries.push({
+        id: header.id,
+        dirName: d.name,
+        dir,
+        bucketPath,
+        cwd: typeof header.cwd === 'string' ? header.cwd : '',
+        origin: header.origin ?? null,
+        parent: header.parentSession ?? null,
+      });
+    }
+  }
+  return entries;
+}
+
+/**
+ * 把会话 id 从 DSH 的工作区注册表里摘掉（**定点**：只动这些 id，不重新扫描磁盘）。
+ *
+ * 为什么不再用 `backfillWorkspaces({ includeTemp: true })` 来"对账"：回填会把磁盘上
+ * **所有**会话重新登记一遍（连别的进程/别的 agent 还活着的临时会话都会被登记成工作区，
+ * 出现在 GUI 侧栏里）——实测并行跑测试时真实 workspace.json 里就多出了别人的测试工作区。
+ *
+ * 规则：
+ *   - 从各工作区的 sessionIds、archivedSessionIds、pinnedSessionIds 摘掉这些 id；
+ *   - 摘完变空、且路径是测试目录的工作区条目一并删掉（真实项目的工作区条目绝不删）；
+ *   - 没有任何变化就**不写盘**（临时目录的测试会话根本没登记过，这是常态）；
+ *   - 注册表坏了 fail-closed：返回 error，不写。
+ */
+export function unregisterSessions(ids, { dryRun = false } = {}) {
+  const set = new Set((ids ?? []).filter((x) => typeof x === 'string' && x));
+  const res = { changed: false, sessions_removed: 0, workspaces_dropped: [], error: null };
+  if (!set.size) return res;
+  let doc;
+  try {
+    doc = readDoc();
+  } catch (e) {
+    return { ...res, error: e.message };
+  }
+  for (const wsId of Object.keys(doc.tables.workspaces)) {
+    const ws = doc.tables.workspaces[wsId];
+    if (!Array.isArray(ws?.sessionIds)) continue;
+    const kept = ws.sessionIds.filter((sid) => !set.has(sid));
+    const removed = ws.sessionIds.length - kept.length;
+    if (!removed) continue;
+    res.sessions_removed += removed;
+    ws.sessionIds = kept;
+    const isTestWs = isTestTempPath(ws.path) || isTestDesktopPath(ws.path) || isTestScratchPath(ws.path);
+    if (kept.length === 0 && isTestWs) {
+      res.workspaces_dropped.push({ id: wsId, path: ws.path });
+      delete doc.tables.workspaces[wsId];
+      doc.global.workspaceIds = (doc.global.workspaceIds ?? []).filter((x) => x !== wsId);
+      if (doc.global.defaultWorkspaceId === wsId) doc.global.defaultWorkspaceId = null;
+    }
+  }
+  for (const key of ['archivedSessionIds', 'pinnedSessionIds']) {
+    const before = doc.global[key] ?? [];
+    const after = before.filter((sid) => !set.has(sid));
+    if (after.length !== before.length) {
+      res.sessions_removed += before.length - after.length;
+      doc.global[key] = after;
+    }
+  }
+  res.changed = res.sessions_removed > 0;
+  if (res.changed && !dryRun) {
+    try {
+      writeDoc(doc);
+    } catch (e) {
+      res.error = e.message;
+    }
+  }
+  return res;
+}
+
 /**
  * 删除测试会话（**这是唯一会动磁盘会话文件的函数**，所以规则写得很死）。
  *
- * 只会删这几类，其余一律不碰：
- *   1) testOnly：cwd 在 `tmpdir()/dsh-any-agent-*` 下（本仓库测试自己造的）
- *   2) cwd 匹配 Desktop\dsh-any-agent-test-*
- *   3) tempOnly：cwd 在系统临时目录下（显式人工命令才用，范围最大）
- *   4) ids 里显式指定的
+ * ★ 硬护栏：无论怎么选中，一个会话只有在它**记录的 cwd** 是测试目录时才会被删
+ *   （见 `isTestSessionCwd`）。`ids` 点名、`roots` 圈定都绕不过这条；cwd 不是测试目录的
+ *   会被列进 `skipped` 并拒绝。以前 `ids` 可以删任意 cwd 的会话，写错一个 id 就是事故。
+ *
+ * 选中方式：
+ *   - 默认（扫荡）：磁盘上所有 cwd 是测试目录的会话，外加 `ids` 点名的。
+ *   - `idsOnly` 或给了 `roots`（点名模式）：只删 `ids` 点名的、以及 cwd 落在 `roots` 里的。
+ *     测试套件收尾用这个——只清自己造的，不会把并行进程的会话一起带走。
+ *   - 无论哪种，被选中会话的**子会话**（`parentSession` 指向它，DSH 派子代理时产生）
+ *     会级联带走（同样要过 cwd 护栏）：测试不知道子会话的 id，不级联就会一直留着。
+ *
+ * 每个被删会话清掉的 DSH 侧产物：会话目录、投影缓存 `<id>.json`、forget 墓碑、
+ * 工作区注册里的登记（定点摘除）、因此变空的分桶目录。
+ * 本项目自己的 per-run 数据（注册表/哨兵/审核/锁/元数据）见 `src/residue.mjs`。
  *
  * @param {object} opts
- * @param {boolean} [opts.testOnly] 只删**本仓库测试造的**临时目录（`tmpdir()/dsh-any-agent-*`）
- *   与桌面 `dsh-any-agent-test-*`。自动清理（测试套件收尾）必须用这条。
- * @param {boolean} [opts.tempOnly] 删除**所有** cwd 在系统临时目录下的会话。
- *   只给显式人工命令用；不要放进自动清理 —— 用户完全可能把真实项目放在临时目录。
- * @param {boolean} [opts.idsOnly] **只删 ids 里点名的**，忽略上面三条规则。
- *   要精确删某几个会话时用这条（否则一条临时目录规则会把别的也一起带走 —— 真实踩过）。
+ * @param {boolean} [opts.dryRun] 只列清单，不删任何东西
+ * @param {string[]} [opts.ids] 点名的会话 id
+ * @param {string[]} [opts.roots] 点名模式：cwd 在这些目录里的会话
+ * @param {boolean} [opts.idsOnly] 点名模式（只认 ids/roots，不扫荡）
+ * @param {boolean} [opts.testOnly] 兼容旧调用，忽略：护栏现在永远开着
  */
-export function purgeTestSessions({ dryRun = false, ids = [], testOnly = false, tempOnly = false, idsOnly = false } = {}) {
-  const explicit = new Set(ids);
-  const victims = [];
-  if (existsSync(SESSIONS_ROOT)) {
-    for (const bucket of readdirSync(SESSIONS_ROOT)) {
-      const bucketPath = join(SESSIONS_ROOT, bucket);
-      let dirs;
-      try {
-        dirs = readdirSync(bucketPath, { withFileTypes: true });
-      } catch {
+export function purgeTestSessions({ dryRun = false, ids = [], roots = [], idsOnly = false } = {}) {
+  const explicit = new Set((ids ?? []).filter((x) => typeof x === 'string' && x));
+  const rootList = (roots ?? []).filter((r) => typeof r === 'string' && r && isAbsolute(r));
+  const scoped = idsOnly || rootList.length > 0;
+  const all = listSessionEntries();
+  const victims = new Map();
+  const skipped = [];
+  const skippedIds = new Set();
+
+  const refuse = (e, reason) => {
+    if (skippedIds.has(e.id)) return;
+    skippedIds.add(e.id);
+    skipped.push({ id: e.id, cwd: e.cwd, reason });
+  };
+  const eligibleShape = (e) => SAFE_SESSION_ID.test(e.id) && e.id === e.dirName;
+  const take = (e, reason) =>
+    victims.set(e.id, { id: e.id, dir: e.dir, bucketPath: e.bucketPath, cwd: e.cwd, reason, origin: e.origin, parent: e.parent });
+
+  for (const e of all) {
+    const named = explicit.has(e.id);
+    const inRoot = Boolean(e.cwd) && isAbsolute(e.cwd) && rootList.some((r) => isInside(r, e.cwd));
+    const swept = !scoped && isTestSessionCwd(e.cwd);
+    if (!named && !inRoot && !swept) continue;
+    if (!isTestSessionCwd(e.cwd)) {
+      refuse(e, 'cwd 不是测试目录，拒绝删除');
+      continue;
+    }
+    if (!eligibleShape(e)) {
+      refuse(e, '会话 id 与目录名不一致或形状非法');
+      continue;
+    }
+    take(e, named ? '显式指定' : inRoot ? '测试根目录' : DESKTOP_TEST_SESSION_RE.test(e.cwd) ? '验收测试目录' : '测试临时目录');
+  }
+
+  // 子会话级联（可传递）：父会话被选中，它派出的子代理会话一并算。
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const e of all) {
+      if (victims.has(e.id) || !e.parent || !victims.has(e.parent)) continue;
+      if (!isTestSessionCwd(e.cwd)) {
+        refuse(e, '子会话的 cwd 不是测试目录，拒绝删除');
         continue;
       }
-      for (const d of dirs) {
-        // 符号链接一律不碰：rmSync 对链接的行为依赖平台，且链接目标可能不在会话目录内。
-        if (!d.isDirectory() || d.isSymbolicLink()) continue;
-        const dir = join(bucketPath, d.name);
-        // 兜底：只允许删 SESSIONS_ROOT 下面的目录（结构上已经如此，防未来改动）。
-        if (!isInside(SESSIONS_ROOT, dir)) continue;
-        const header = readHeader(join(dir, 'session.v4.jsonl.zstd'));
-        if (!header?.id) continue;
-        const cwd = header.cwd ?? '';
-        const isTemp = testOnly ? isTestTempPath(cwd) : isTempPath(cwd);
-        const isTestDesktop = !tempOnly && /[\\/]Desktop[\\/]dsh-any-agent-test-[AB]([\\/]|$)/i.test(cwd);
-        const isExplicit = explicit.has(header.id);
-        // idsOnly：只认点名，别的规则全部作废
-        if (idsOnly ? !isExplicit : !isTemp && !isTestDesktop && !isExplicit) continue;
-        victims.push({
-          id: header.id,
-          dir,
-          cwd,
-          reason: isExplicit ? '显式指定' : isTestDesktop ? '验收测试目录' : testOnly ? '测试临时目录' : '临时目录',
-          origin: header.origin ?? null,
-        });
+      if (!eligibleShape(e)) {
+        refuse(e, '会话 id 与目录名不一致或形状非法');
+        continue;
       }
+      take(e, '子会话（随父会话）');
+      grew = true;
     }
   }
+
+  const list = [...victims.values()];
   if (!dryRun) {
-    for (const v of victims) {
+    const removedIds = [];
+    const touchedBuckets = new Set();
+    for (const v of list) {
       try {
-        rmSync(v.dir, { recursive: true, force: true });
+        // Windows 上刚退出的 DSH 子进程可能还没松手：给几次重试。
+        rmSync(v.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
       } catch (e) {
         v.error = e.message;
+        continue; // 会话目录没删掉就别动它的其它产物，保持一致
+      }
+      removedIds.push(v.id);
+      touchedBuckets.add(v.bucketPath);
+      // 投影缓存：删目录不会带走它（见 PROJCACHE_DIR 注释）。
+      try {
+        rmSync(join(PROJCACHE_DIR, `${v.id}.json`), { force: true });
+      } catch (e) {
+        v.projcache_error = e.message;
       }
       // 会话文件都没了，墓碑也就没有意义：一起清掉，避免测试残留。
       try {
@@ -492,21 +668,81 @@ export function purgeTestSessions({ dryRun = false, ids = [], testOnly = false, 
         /* 墓碑不存在或删不掉都不影响会话清理 */
       }
     }
-    // 清掉因删空而残留的空分桶目录（每个工作区一个桶，空桶会一直堆着）
-    if (existsSync(SESSIONS_ROOT)) {
-      for (const bucket of readdirSync(SESSIONS_ROOT)) {
-        const p = join(SESSIONS_ROOT, bucket);
-        try {
-          if (readdirSync(p).length === 0) rmSync(p, { recursive: true, force: true });
-        } catch {
-          /* 桶被占用或权限问题就跳过 */
-        }
+    // 只清**我们刚删空**的分桶（每个工作区一个桶）；别的空桶不是我们造的，不碰。
+    for (const bp of touchedBuckets) {
+      try {
+        if (readdirSync(bp).length === 0) rmSync(bp, { recursive: true, force: true });
+      } catch {
+        /* 桶被占用或权限问题就跳过 */
       }
     }
-    // 删完之后把注册表里对应的 id 也摘掉
-    backfillWorkspaces({ includeTemp: true });
+    // 工作区注册：定点摘除（不再整盘回填，见 unregisterSessions 注释）。
+    const reg = unregisterSessions(removedIds);
+    return { count: list.length, victims: list, skipped, registry: reg };
   }
-  return { count: victims.length, victims };
+  return { count: list.length, victims: list, skipped, registry: null };
+}
+
+/**
+ * 清理投影缓存里的**孤儿**：`<id>.json` 还在，但磁盘上已经没有这个会话了。
+ *
+ * 只删 cwd（缓存里 `record.identity.cwd`）是测试目录的孤儿；认不出 cwd 或不是测试目录的
+ * 一律保留，只计数。`minAgeMs` 内刚写过的也不动（避免和正在创建会话的进程抢跑）。
+ * 会话目录不可读时 fail-closed（什么都不删）。
+ */
+export function purgeOrphanProjcache({ dryRun = false, minAgeMs = 60_000 } = {}) {
+  const res = { count: 0, bytes: 0, victims: [], kept_non_test: 0, error: null };
+  if (!existsSync(PROJCACHE_DIR)) return res;
+  const onDisk = new Set();
+  try {
+    for (const bucket of readdirSync(SESSIONS_ROOT)) {
+      try {
+        for (const d of readdirSync(join(SESSIONS_ROOT, bucket), { withFileTypes: true })) {
+          if (d.isDirectory()) onDisk.add(d.name);
+        }
+      } catch {
+        // 单个分桶读不了：保守起见当作"可能含有任何会话"——本次不清孤儿
+        return { ...res, error: `分桶不可读: ${bucket}` };
+      }
+    }
+  } catch (e) {
+    return { ...res, error: `会话目录不可读: ${e.message}` };
+  }
+  const now = Date.now();
+  for (const f of readdirSync(PROJCACHE_DIR)) {
+    if (!f.endsWith('.json')) continue;
+    const id = f.slice(0, -5);
+    if (!SAFE_SESSION_ID.test(id) || onDisk.has(id)) continue;
+    const file = join(PROJCACHE_DIR, f);
+    let st;
+    try {
+      st = statSync(file);
+    } catch {
+      continue;
+    }
+    if (!st.isFile() || now - st.mtimeMs < minAgeMs) continue;
+    let cwd = '';
+    try {
+      cwd = JSON.parse(readFileSync(file, 'utf8'))?.record?.identity?.cwd ?? '';
+    } catch {
+      /* 解析不了：认不出 cwd，保留 */
+    }
+    if (!isTestSessionCwd(cwd)) {
+      res.kept_non_test++;
+      continue;
+    }
+    res.victims.push({ id, file, cwd, bytes: st.size });
+    res.count++;
+    res.bytes += st.size;
+    if (!dryRun) {
+      try {
+        rmSync(file, { force: true });
+      } catch {
+        /* 删不掉就留着，下次再来 */
+      }
+    }
+  }
+  return res;
 }
 
 /** 清掉"没有会话且路径已不存在"的空工作区条目。 */
@@ -553,7 +789,7 @@ export function pruneTestWorkspaces({ dryRun = false } = {}) {
     if (!p) continue;
     // ★ 只删测试自己造的临时目录（dsh-any-agent-*）与桌面测试目录。
     //   以前用 isTempPath(p) 会把用户在 %TEMP% 里的真实项目登记也删掉。
-    if (!isTestTempPath(p) && !isTestDesktopPath(p)) continue;
+    if (!isTestTempPath(p) && !isTestDesktopPath(p) && !isTestScratchPath(p)) continue;
     removed.push({ id, path: p, sessions: ws?.sessionIds?.length ?? 0 });
     delete doc.tables.workspaces[id];
     doc.global.workspaceIds = (doc.global.workspaceIds ?? []).filter((x) => x !== id);
@@ -596,4 +832,4 @@ export function listWorkspaces() {
   }));
 }
 
-export { WORKSPACE_FILE, SESSIONS_ROOT };
+export { WORKSPACE_FILE, SESSIONS_ROOT, PROJCACHE_DIR };
