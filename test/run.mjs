@@ -90,6 +90,10 @@ const OFFLINE = [
   // 提交脚本：信息必须走 stdin，不许落盘。曾经的病根是「先写文件再 -F 那个
   // 文件」，于是 git add -A 会把临时文件卷进发布提交。
   'commit-script.mjs',
+  // 检查数同步：套件输出解析、报告拼装、把报告写回文档与 tests.yml。
+  // 文档里的数字由 scripts/sync-test-counts.mjs 从报告写回，这里守住它不写错。
+  // 纯文件系统（临时目录里的一份最小仓库），不花 token。
+  'test-counts.mjs',
   // MCP roots：不传 cwd 时用客户端当前打开的项目目录。走真实 stdio 握手，
   // 不需要 DSH，可以进 CI。
   'roots.mjs',
