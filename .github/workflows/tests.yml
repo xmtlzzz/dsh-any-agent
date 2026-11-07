@@ -11,9 +11,9 @@ name: tests
 #     dsh-locate        DSH auto-discovery (asar)     19 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          37 checks
-#     failure-terminal  terminal state on failure     11 checks
+#     failure-terminal  terminal state on failure     10 checks
 #     shared-host       shared process host           25 checks
-#     dispatch-tools    dispatch surface              59 checks (56 off Windows)
+#     dispatch-tools    dispatch surface              58 checks (55 off Windows)
 #     read-cursor       dsh_read cursor + answer      19 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
 #     review            caller review tickets        70 checks
@@ -25,12 +25,12 @@ name: tests
 #     workspace-snapshot workspace_changed full fingerprint  21 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
-#     test-counts       report parser + docs sync     0 checks
+#     test-counts       report parser + docs sync     92 checks
 #     roots             cwd from MCP roots            12 checks
-#     workspace-titles  home/root cwd guard, title_hint 18 checks
+#     workspace-titles  home/root cwd guard, title_hint 18 checks (16 off Windows)
 #     setup             client config writer          45 checks
 #     removal-scope     --remove only touches its own   24 checks
-#     config-safety     in-place edits, format        407 checks
+#     config-safety     in-place edits, format        406 checks
 #     real-configs      real config round-trip        skips without client fixtures
 #     package-check     publishability                14 checks
 #     package job       pack -> install -> --version
