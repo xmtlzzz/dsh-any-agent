@@ -7,15 +7,29 @@
  * ★ 默认不再“遇错即停”：以前 timeout.mjs 一条过时断言失败，后面 11 个真机套件
  *   （lock / multi / permission / concurrency …）全都没跑，结果看起来只坏了一处，
  *   实际上大半覆盖面根本没验证。现在每个套件都跑，最后列出全部失败项。
+ *
+ * ★ 每次运行都会写一份 JSON 报告（每个套件的通过/失败/跳过数、耗时、平台、Node 与 DSH 版本），
+ *   默认写到 .state/test-report.json（已被 .gitignore），--report <路径> 换位置，--no-report 不写。
+ *   中英文 tests.md 与 CI 注释里的检查数由 `npm run docs:counts` 从这份报告写回，不再手抄。
  */
 
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildReport, collectEnvironment, parseReportArgs, writeReport } from './report.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const all = process.argv.includes('--all');
 const bail = process.argv.includes('--bail');
+let reportOpt;
+try {
+  reportOpt = parseReportArgs(process.argv.slice(2));
+} catch (e) {
+  console.error(`参数错误：${e.message}`);
+  process.exit(2);
+}
+const startedAt = Date.now();
 
 /** 离线套件：不拉 DSH（smoke 除外，它在无 DSH 时自动跳过会话段）、不花 token，每次必跑。 */
 const OFFLINE = [
@@ -113,11 +127,68 @@ const MODEL = [
   'reasoning-check.mjs',
 ];
 
+/** 每个套件的运行记录（含完整输出），最后交给 report.mjs 解析成 JSON 报告。 */
+const results = [];
+
+/**
+ * 跑一个套件：输出照旧实时转给控制台，同时留一份给报告解析。
+ * ★ 用 StringDecoder 解码：chunk 边界可能落在中文/emoji 的多字节序列中间，
+ *   逐块 toString() 会产生 U+FFFD，把汇总行里的中文弄坏。
+ * ★ 等 'exit' 之后再给流一小段收尾时间，而不是死等 'close'：
+ *   套件若留下继承了 stdout 的孙进程，'close' 会一直不来，整个 run 就挂住了。
+ */
 function run(script) {
   return new Promise((resolve) => {
     console.log(`\n${'█'.repeat(70)}\n█ ${script}\n${'█'.repeat(70)}`);
-    const child = spawn(process.execPath, [join(HERE, script)], { stdio: 'inherit' });
-    child.on('exit', (code) => resolve(code ?? 1));
+    const started = Date.now();
+    const chunks = [];
+    const child = spawn(process.execPath, [join(HERE, script)], { stdio: ['inherit', 'pipe', 'pipe'] });
+    const tee = (stream, sink) => {
+      const decoder = new StringDecoder('utf8');
+      stream.on('data', (buf) => {
+        const text = decoder.write(buf);
+        if (text) {
+          chunks.push(text);
+          sink.write(text);
+        }
+      });
+      stream.on('end', () => {
+        const rest = decoder.end();
+        if (rest) {
+          chunks.push(rest);
+          sink.write(rest);
+        }
+      });
+    };
+    tee(child.stdout, process.stdout);
+    tee(child.stderr, process.stderr);
+
+    let settled = false;
+    let graceTimer = null;
+    const finish = (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(graceTimer);
+      const kind = OFFLINE.includes(script) ? 'offline' : MODEL.includes(script) ? 'model' : 'cleanup';
+      results.push({ script, kind, code, durationMs: Date.now() - started, output: chunks.join('') });
+      resolve(code);
+    };
+    let exitCode = null;
+    let streamsOpen = 2;
+    const maybeDone = () => {
+      if (exitCode !== null && streamsOpen === 0) finish(exitCode);
+    };
+    child.stdout.on('close', () => { streamsOpen -= 1; maybeDone(); });
+    child.stderr.on('close', () => { streamsOpen -= 1; maybeDone(); });
+    child.on('error', (e) => {
+      console.error(`无法启动 ${script}：${e.message}`);
+      finish(1);
+    });
+    child.on('exit', (code) => {
+      exitCode = code ?? 1;
+      graceTimer = setTimeout(() => finish(exitCode), 1500);
+      maybeDone();
+    });
   });
 }
 
@@ -138,10 +209,38 @@ for (const script of [...OFFLINE, ...(all ? MODEL : [])]) {
 const cleanupCode = await run('cleanup.mjs');
 if (cleanupCode !== 0) failed.push({ script: 'cleanup.mjs', code: cleanupCode });
 
+// JSON 报告：写失败时，用户点名的 --report 算失败（CI 后面的同步步骤要靠它），
+// 默认位置只警告 —— 不能因为 .state/ 不可写就让一次本来全绿的测试变红。
+let reportNote = '';
+if (reportOpt.path) {
+  try {
+    const report = buildReport({
+      argv: process.argv.slice(2),
+      all,
+      results,
+      env: await collectEnvironment(),
+      startedAt,
+      endedAt: Date.now(),
+    });
+    writeReport(reportOpt.path, report);
+    reportNote = `\n报告：${reportOpt.path}`;
+    // 汇总行与 ✓/✗ 行数对不上说明某个套件的计数出了问题：宁可在这里喊出来，也别写进文档。
+    for (const s of report.suites) {
+      if (s.counted === 'summary' && !s.skipped && s.marks.passed && s.marks.passed !== s.passed) {
+        console.log(`⚠ ${s.suite}：汇总行报 ${s.passed} 项通过，但输出里有 ${s.marks.passed} 行 ✓`);
+      }
+    }
+  } catch (e) {
+    console.log(`\n${reportOpt.explicit ? '✗' : '⚠'} 写测试报告失败（${reportOpt.path}）：${e.message}`);
+    if (reportOpt.explicit) failed.push({ script: '--report', code: 1 });
+  }
+}
+
 const total = OFFLINE.length + (all ? MODEL.length : 0) + 1;
 console.log(`\n${'='.repeat(70)}`);
 console.log(`套件：${total} 个，失败 ${failed.length} 个${skipped.length ? `，因 --bail 跳过 ${skipped.length} 个` : ''}`);
 for (const f of failed) console.log(`  ✗ ${f.script}（退出码 ${f.code}）`);
 if (skipped.length) console.log(`  跳过：${skipped.join(', ')}`);
+if (reportNote) console.log(reportNote);
 console.log(`\n总结果: ${failed.length === 0 ? '通过 ✅' : '失败 ❌'}`);
 process.exit(failed.length ? 1 : 0);
