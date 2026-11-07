@@ -13,6 +13,10 @@ npm version patch --no-git-tag-version
 node test/run.mjs
 node test/package-check.mjs
 npm run check:release   # version / CHANGELOG / doc links / package contents agree
+npm run docs:counts:check   # check counts in tests.md and the CI comment = the report node test/run.mjs just wrote
+#    A mismatch means tests changed without the numbers being refreshed:
+#    node test/run.mjs --all --report .state/test-report.json && npm run docs:counts
+#    (model-suite numbers only move with a report made using --all; see "After changing tests" in docs/en/tests.md)
 
 # 3. Verify the tarball itself: builds, installs, starts.
 npm pack --dry-run

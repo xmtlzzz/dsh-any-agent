@@ -6,6 +6,9 @@
 npm test                   # offline suites; smoke skips DSH sections if no DSH
 npm run test:all           # offline + model-backed suites (needs DSH/provider)
 node test/cleanup.mjs      # suite teardown on its own (test-created dirs only; --dry-run to preview)
+node test/run.mjs --all --report .state/test-report.json   # same, writing the JSON report to a chosen path (every run writes .state/test-report.json by default)
+npm run docs:counts       # write the report's check counts back into this page and the CI comment (see "After changing tests")
+npm run docs:counts:check # check that the docs agree with the report; exit 1 and print the diff if not
 ```
 
 Model-backed suites are not part of the hosted CI matrix (they need a real DSH
@@ -39,11 +42,13 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `workspace-safety` | 23 | **data-loss boundaries**: `isTempPath` is segment-aware (`tmpdir()+'Suffix'` and `/tmpfoo` are *not* temp), a corrupt `workspace.json` is never overwritten, an unreadable session root never wipes `sessionIds`, and automatic cleanup deletes only test-created sessions (no tokens) |
 | `permission-adopt` | 17 | **no silent privilege escalation**: adopting an external session with no permission record fails closed to `read-only`; a recorded `read-only` cannot be promoted by the sidecar; the runtime read-back rejects a recorded/requested mismatch (no tokens) |
 | `state-safety` | 26 | **state/sentinel/lock storage**: defaults live under `$DSH_HOME/.dsh-any-agent`, an unwritable directory fails startup loudly, sentinel write failures return `null` + `sentinel_error`, and bad numeric env values land on the safe side (no tokens) |
+| `workspace-snapshot` | 21 | **workspace snapshot**: `workspace_changed` must see full file contents (same status line with different content, changes past the 41st entry, inside untracked directories) and `gitStatus` runs asynchronously so it never blocks the shared MCP event loop (filesystem + a temp git repo, no tokens) |
 | `setup` | 45 | **the registration CLI**: preview writes nothing, `--remove` takes out only its own entry, an absent client is skipped rather than failed, the Codex TOML block round-trips, and the command recorded in a config is actually spawned and must answer `initialize` (no tokens). It never invokes `claude mcp get` — that CLI rewrites `~/.claude.json` |
 | `removal-scope` | 24 | **unregistering touches only its own entry**: configs holding unrelated MCP servers, top-level Codex settings and sibling Zed settings are registered and then removed, asserting every other value is byte-identical; removing something never written is a no-op with no write (no tokens) |
 | `config-safety` | 407 | **the property the 0.3 line is about**, per client: preview leaves files byte-identical with no `.bak`; register-then-remove restores every other entry byte-for-byte, keeps key order and drops no top-level key; 4-space / 2-space indentation, single-line JSON, missing trailing newline, CRLF and a UTF-8 BOM all survive a write; malformed JSON and read-only files are refused without damage; the second `--yes` is a no-op with no new backup; every `.bak-dsh-<stamp>` appears once and equals the pre-write bytes; a `claude` on PATH is never invoked (no tokens) |
 | `real-configs` | 84 (66 with 7/9, 48 with 5/9 fixtures) | **round-trip on the real thing**: copies this machine's actual client configs (an 182693-byte `~/.claude.json` holding hundreds of `projects` entries and case-colliding keys, a 238-line Codex TOML, Zed's full `settings.json`) into a temp dir, registers, then removes, and requires every file back **byte for byte**; entry-presence is checked by key (not a bare substring), and missing fixtures are reported as skipped rather than green (no tokens) |
 | `commit-script` | 26 | commit messages go through stdin, never a temp file that `git add -A` could capture (no tokens) |
+| `test-counts` | 0 | **check-count sync**: parsing suite output (Chinese/English summary lines, whole-suite skip, `✓`/`✗` fallback, `[report]` environment tags), report assembly, round-trips of the "main number (other environments)" cell, rewriting the Chinese and English docs and `tests.yml`, `--check` diffs and `--portable`, model-suite numbers left alone, failing reports refused (no tokens) |
 | `roots` | 12 | `dsh_start` without `cwd` asks the client for MCP roots; a client without roots gets an actionable error (no tokens) |
 | `workspace-titles` | 18 | home-as-workspace **and filesystem-root cwd** are rejected before DSH starts; `title_hint` is returned separately from DSH's automatic title (no tokens) |
 | `package-check` | 14 | `files` whitelist, zero runtime dependencies, Node floor, and bin shebangs (no tokens) |
@@ -53,21 +58,36 @@ The suite **cleans up after itself**: `run.mjs` always ends with `cleanup.mjs`, 
 | `concurrency` | 31 | three simultaneous conversations + live incremental reads |
 | `capability` | 22 | writing code, running scripts, **spawning its own subagents** (verified on disk via child session headers) |
 | `workspace-effect` | 24 | workspace actually effective when no path is given |
-| `acceptance` | 36 | two folders × two conversations doing a read-only IDA Pro analysis |
+| `acceptance` | 36 (skips without IDA MCP) | two folders × two conversations doing a read-only IDA Pro analysis |
 | `multi` | 19 | **several instances and non-ASCII paths**: reproduces "two instances share the registry and the later save drops the earlier instance's conversation", then proves **that conversation is recoverable by id alone from the session store and actually usable** (registry loss, not an explicit `forget` — forget is a terminal tombstone); **recovery never silently escalates privileges** (a read-only conversation stays read-only); no `.tmp` residue; and **CJK / emoji workspace paths** create sessions, do real work, and place files in the right directory |
 | `permission` | 11 | ★ **whether the permission tiers actually take effect** (a safety property): it ignores our own return values (the very thing that used to lie) and reads **the session's own record** (`permissions.preset` / `sandboxMode` in the projection cache), checking all three tiers and that their recorded values differ. **This suite caught a silent privilege escalation**: a `defaultPreset` in the profile overrides `DSH_PERMISSION_MODE` at session creation |
 | `list` | 17 | **the cost of `dsh_list`**: a default call runs the on-disk probe (it spawns a DSH process — seconds with many sessions) while **repeated calls hit the cache** (asserted via `probe_cached`, not wall-clock: Windows occasionally adds ~700 ms to one cached call); `only_running=true` and `include_closed=false` **skip the probe** (`probe_ok=null`) with equivalent semantics (unopened on-disk sessions are simply excluded) |
 | `reasoning-check` | 8 | **reasoning visibility**: `reasoning=hide` returns no thinking body but non-zero stats; `reasoning=full` returns the text and the rendered section |
 
-> **2026-11-06**: `node test/run.mjs` now runs **every** suite and lists all failures at the end (`--bail` restores stop-at-first-failure) — a single stale assertion in `timeout.mjs` used to hide eleven model-backed suites. New `dsh-locate` (19), plus `smoke` 33, `dispatch-tools` 59, `read-cursor` 19, `workspace-snapshot` 21, `timeout` 40, `list` 17. Offline run on this machine (Windows / Node 22.19.0, 5/9 client fixtures): **1082 checks, 28 suites, all green**. Model-backed suites re-run in full against DSH 0.2.2-rc.1 on the desktop app's bundled runtime.
+> **2026-11-06**: `node test/run.mjs` now runs **every** suite and lists all failures at the end (`--bail` restores stop-at-first-failure) — a single stale assertion in `timeout.mjs` used to hide eleven model-backed suites. Model-backed suites re-run in full against DSH 0.2.2-rc.1 on the desktop app's bundled runtime.
 
-**`node test/run.mjs` runs 1012 checks on a machine with seven client fixtures (1030 with all nine)** — smoke 31 + 981 offline checks (999 with nine). Every suite exited 0 on the 0.5.0 tree plus caller review (2026-11-04, Windows / Node 22.19.0; the local five-fixture run reports 994); none needs a provider (smoke skips its session-creation sections when DSH is absent).
+<!-- counts:begin (generated by scripts/sync-test-counts.mjs; do not edit by hand) -->
+<!-- counts:end -->
 
-That is **542 assertions in the client-registration suites alone** (`setup` 45, `removal-scope` 24, `config-safety` 407, `real-configs` 66; 560 with all nine fixtures), which is where the 0.3 work actually is.
+### 🔢 After changing tests: counts are computed
 
-The model-backed suites (`smoke` 31, `boundary` 46, `integration` 30, `async` 21, `sentinel` 36, `timeout` 38, `lock` 79, `cycle` 36, `concurrency` 31, `capability` 22, `workspace-effect` 24, `acceptance` 36, `multi` 19, `permission` 11, `list` 13, `reasoning-check` 8, `shared-process` 8) total 489. Most were last measured in full on 0.3.9; the suites touched by caller review (`smoke`, `integration`, `async`, `sentinel`, `boundary`) were re-run on this tree. They need a working provider, so re-run them yourself before trusting a release: `node test/run.mjs --all`. `acceptance` now **skips explicitly** when the DSH profile has no IDA MCP (`mcp__ida__*`); `shared-process` also skips without DSH.
+The check counts in this page are not typed by hand. Every `node test/run.mjs` run collects each suite's output and parses it into a JSON report (default `.state/test-report.json`, which is gitignored; `--report <path>` picks another location, `--no-report` skips it): per suite `passed` / `failed` / `skipped` / `exitCode` / `durationMs`, plus the platform, Node and DSH versions and how many client-config fixtures the machine had. The numbers come from each suite's own summary line (`===== ...: passed N, failed M =====`); an older suite without one falls back to counting its `✓`/`✗` lines; a new suite should print the standard summary line.
 
-> Three different totals are intentional: `node test/run.mjs` (1012/1030), the CI offline job (nominal 981/999, no smoke; hosted runners without client fixtures skip `real-configs` entirely), and the model-backed set (489 nominal). Counts are the numbers each suite prints itself; don't use one number for a different runner.
+**After changing tests:**
+
+```bash
+node test/run.mjs --all --report .state/test-report.json   # needs DSH/provider; drop --all to refresh only the offline numbers
+npm run docs:counts                                        # rewrite this table, the totals above (both languages) and the scope comment in .github/workflows/tests.yml
+git diff docs .github                                      # review what changed, then commit
+```
+
+- **Without `--all`** the report has no model-backed suites, so their numbers are left untouched (the script says so).
+- **Environment-dependent suites** are written as "main number (other environments)": `smoke` (DSH present or not), `dispatch-tools` (Windows also runs the real PowerShell sentinel checks), `config-safety` and `real-configs` (how many client configs the machine has), `workspace-titles` (filesystem case sensitivity, whether `TEMP` is inside the home directory). **Only the cell this run measured is updated**; the others stay as they were. To refresh another cell, run in that environment and pass the reports in order with several `--report` flags.
+- **Suites that skip as a whole** (`shared-process` without DSH, `acceptance` without IDA MCP, `real-configs` without client configs) keep their numbers.
+- **A report with a failing suite is refused** (exit 2): a failing suite's count is not trustworthy.
+- **A new suite**: add it to `OFFLINE`/`MODEL` in `test/run.mjs`, then add a table row (the script does not write the "covers" text; a missing row exits 1 and names the suite).
+
+**Keeping it from drifting:** `npm run docs:counts:check` writes nothing; if the docs disagree with the report it prints the diff and exits 1. The CI offline job runs `node test/run.mjs --report` and then `docs:counts:check --portable`, which only checks environment-independent suites plus `smoke` / `config-safety` in the cell hosted runners land in (no DSH, no client configs); platform-dependent suites are left to the full local check (a step in the release checklist). The `test-counts` suite covers the parser and the rewriting itself.
 
 ### 🧯 Why `sandbox-guard` exists
 
