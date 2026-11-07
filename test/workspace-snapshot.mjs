@@ -41,9 +41,20 @@ const check = (name, cond, detail = '') => {
 };
 
 const GIT_ENV = { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
+// ★ 给足时间：CI 的 windows-latest 上 `git add -A` 1200 个文件曾被 30s 超时中途杀掉
+//   （PR #11，node 24 那一格的第二遍全量运行），而报错里只剩 stderr 的 CRLF 警告，看不出是超时。
+const GIT_TIMEOUT_MS = 180_000;
 function git(cwd, ...args) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV, timeout: 30_000 });
-  if (r.status !== 0) throw new Error(`git ${args.join(' ')} 失败: ${r.stderr || r.error?.message}`);
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV, timeout: GIT_TIMEOUT_MS });
+  if (r.status !== 0) {
+    // 超时被杀时 status 是 null、stderr 只是半截输出 —— 必须把“超时/信号”说出来，否则误导排查。
+    const why =
+      r.error?.code === 'ETIMEDOUT' || r.signal
+        ? `超时或被信号终止（timeout=${GIT_TIMEOUT_MS}ms, signal=${r.signal ?? 'none'}）`
+        : `退出码 ${r.status}`;
+    const stderr = String(r.stderr ?? '').trim().split(/\r?\n/).slice(-5).join('\n');
+    throw new Error(`git ${args.join(' ')} 失败（${why}）: ${stderr || r.error?.message || ''}`);
+  }
   return String(r.stdout ?? '');
 }
 
@@ -53,6 +64,10 @@ function makeRepo(name) {
   git(dir, 'init', '-q');
   git(dir, 'config', 'user.email', 'test@example.invalid');
   git(dir, 'config', 'user.name', 'workspace snapshot test');
+  // 本测试只关心状态行与指纹，不关心换行符。Windows runner 默认 core.autocrlf=true，
+  // 会对每个文件做 LF→CRLF 换算并逐个打印警告：1200 个文件时又慢又刷屏，正是上面超时的诱因。
+  git(dir, 'config', 'core.autocrlf', 'false');
+  git(dir, 'config', 'core.safecrlf', 'false');
   return dir;
 }
 
