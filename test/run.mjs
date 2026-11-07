@@ -31,6 +31,15 @@ try {
 }
 const startedAt = Date.now();
 
+// live 事件流：不少离线套件用假 hub 直接驱动 Conversation，不设 DSH_MCP_STATE。
+// 不隔离的话它们的事件会写进用户真实的 ~/.dsh/.dsh-any-agent/live。整轮共用一个临时目录，
+// 收尾的 cleanup.mjs 会按 `dsh-any-agent-` 前缀把它删掉。
+if (!process.env.DSH_MCP_LIVE_DIR) {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  process.env.DSH_MCP_LIVE_DIR = mkdtempSync(join(tmpdir(), 'dsh-any-agent-live-'));
+}
+
 /** 离线套件：不拉 DSH（smoke 除外，它在无 DSH 时自动跳过会话段）、不花 token，每次必跑。 */
 const OFFLINE = [
   'smoke.mjs',
@@ -58,6 +67,10 @@ const OFFLINE = [
   'line-decoder.mjs',
   // 哨兵落盘脱敏：纯内存，不花 token；守住“思考永不进哨兵、工具输入先脱敏”。
   'sentinel-redaction.mjs',
+  // live 事件流写入侧：假 hub + 假 ACP 进程，守住“思考不落盘、预览脱敏、写失败不影响派活”。
+  'live-events.mjs',
+  // live 查看端：归并 / 增量 tail / watch --once / dashboard 的 token 与 Host 校验。
+  'live-view.mjs',
   // 调用方审核：结果/哨兵带审核单，dsh_review 落盘并回写；重启后仍可审核。
   // 纯内存 + 文件系统，不花 token。
   'review.mjs',

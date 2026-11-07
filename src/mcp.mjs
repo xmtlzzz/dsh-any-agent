@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { createHandlers, TOOL_DEFS } from './tools.mjs';
 import { DEFAULT_PERMISSION } from './config.mjs';
 import { LineDecoder } from './line-decoder.mjs';
+import { setLiveClient } from './live.mjs';
 
 const SERVER_NAME = 'dsh-any-agent';
 /**
@@ -156,6 +157,8 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
         // 默认 cwd —— 用户在客户端里看到哪个项目，就在这里干活。
         const caps = params?.capabilities;
         clientCapabilities = caps && typeof caps === 'object' ? caps : {};
+        // live 事件流用客户端名把会话挂到"谁派的"下面（仅名字/版本，不含其它字段）。
+        setLiveClient(params?.clientInfo);
         ok(id, {
           protocolVersion: typeof requested === 'string' ? requested : FALLBACK_PROTOCOL,
           capabilities: { tools: { listChanged: false } },

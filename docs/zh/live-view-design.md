@@ -2,7 +2,9 @@
 
 # 设计稿：让用户看见 DSH 在做什么（live 事件流 + 查看器）
 
-> 状态：**提案，未实现**。基线版本 0.6.0。本文只定问题、约束、数据契约与分期，不含实现代码。
+> 状态：**P1 + P2 已实现**（基线 0.6.0 之后，见 CHANGELOG Unreleased）。实现与本文最初草案的差异已在对应小节标注"实现"。
+>
+> 代码：`src/live.mjs`（写入）、`src/live-view.mjs`（读取 / 归并 / 终端渲染）、`src/live-cli.mjs`（`watch` / `dashboard` 子命令）、`src/live-dashboard.mjs` + `src/live-dashboard.html`（页面）。测试：`test/live-events.mjs`、`test/live-view.mjs`。
 >
 > 范围：定位为**轻量功能**，只做 §12 的 P1（事件流 + `watch`）和 P2（只读 `dashboard` 页面）。状态栏、宿主内嵌、控制面都不在本次范围内。
 
@@ -71,13 +73,14 @@ DSH 的工具活动经 ACP 的 `session/update`（`tool_call` / `tool_call_updat
 ### 6.1 位置与开关
 
 - 目录：`DSH_MCP_LIVE_DIR`，默认 `<dirname(STATE_FILE)>/live/`，与 `runs/`、`reviews/` 并列。
-- 文件：`<live>/<conversation_id>.jsonl`，一行一个事件，UTF-8，`\n` 结尾。
+- 文件：`<live>/<conversation_id>/events.jsonl`，一行一个事件，UTF-8，`\n` 结尾。
+  - 实现：按会话分**子目录**而不是扁平文件，因为现有的 `pruneDirTree` 只清理会话子目录；滚动出的 `events.jsonl.1` 也放在同一目录。
 - 级别：`DSH_MCP_LIVE=off | meta | detail`。
   - `meta`（建议默认）：工具名、kind、状态、时间、计数、审批类型与是否提权。**不含**任何工具输入、命令、路径、正文。
   - `detail`：在 `meta` 之上加脱敏后的输入预览（命令、路径）、prompt 预览、正文增量摘要。与哨兵已有的暴露面同级。
   - `off`：不写。
 
-> 默认取 `meta` 的理由：哨兵默认已经落了完整正文和工具输入，`meta` 比它少得多；但 DSH 的工具 `title` 可能夹带命令原文，所以 `meta` 下 `title` 也必须过脱敏并截断，或干脆只写 `name`/`kind`（见 §11 开放问题）。
+> 实现：**默认改为 `detail`**。用途是看调用链，只有工具名看不出"读了哪个文件、跑了什么命令"；而哨兵默认已经落了完整正文和未截断的工具输入，`detail` 的脱敏短预览暴露面不超过它。`meta` 只写 `name` / `kind`，`title` 归 `detail`（§11 第 2 条已按此定）。
 
 ### 6.2 公共字段
 
@@ -102,6 +105,14 @@ DSH 的工具活动经 ACP 的 `session/update`（`tool_call` / `tool_call_updat
 | `run.end` | 回合终止（成功 / 失败 / 取消） | `status`、`stop_reason`、`duration_ms`、`tool_count`、`auto_approvals`、`auto_escalations`、`usage` | — |
 | `writer.hello` / `writer.bye` | 写者首次写某会话 / 释放或 takeover 交出 | `reason` | — |
 
+实现与上表的差异（轻量化）：
+
+- 新增 `conv.open`（`dsh_start` 建会话，带 cwd / 权限 / 模型）、`conv.close`（非 forget 的释放）、`run.queued`（`dsh_send(queue=true)` 入队，带位置）。`run.start` 带 `via`（send / queue / interject）与 `cwd`；`conv.open` / `run.queued` / `run.start` 带 `client`（MCP `initialize` 的 `clientInfo.name`），查看端据此把会话挂到"谁派的"下面。
+- **不写** `text` 事件：正文只在哨兵里。
+- **不写** `writer.hello` / `writer.bye`：每条事件已带 `w`，查看端看最后一个写者的 pid 是否存活即可判断"中断"（§6.5）。
+- 排队被取消、插话等待超时、起不来的回合都补一条 `run.end`，查看端不会留下永远"排队 / 运行中"的回合。
+- 真机验证（DSH ACP）发现：`tool_call` **不带 `name`**，工具名在 `title` 里（`read` / `glob` / `write` / `pwsh`），`kind` 恒为 `other`。所以 `title` 是纯标识符时当作 `name` 写进 meta 级字段；带空格的 `title` 仍只进 detail。查看端把路径显示成相对会话目录的形式，并隐藏 `other`。
+
 `tool` 只在状态变化时落盘，避免 DSH 的快照式重复更新刷屏；`tool_call_id` 让查看器原地替换同一工具的行，语义与 `dsh_read` 的"按 seq 替换"一致。
 
 ### 6.4 写入方式
@@ -113,11 +124,11 @@ DSH 的工具活动经 ACP 的 `session/update`（`tool_call` / `tool_call_updat
 
 ### 6.5 一致性与边界情况
 
-- **takeover**：新写者先写 `writer.hello`，旧写者交出时写 `writer.bye`。查看器以最后一个 `writer.hello` 的 `w` 为当前写者，忽略其后旧 `w` 的迟到事件。
+- **takeover**：（实现）不写交接事件；查看器以每个回合 / 会话最后一条事件的 `w` 为准。旧写者被抢占后不会再有事件，迟到事件的窗口可以忽略。
 - **崩溃**：没有 `run.end` 的 run 视为"可能仍在跑"。查看器用 `w` 里的 pid 判断写者是否存活，已死则显示为"中断（写者已退出）"，不靠心跳。
 - **半行**：查看器必须容忍文件末尾的不完整行（写到一半被读）。
 - **轮转**：单文件超过上限（如 5MB）滚动成 `.1`，只留一份。
-- **清理**：并入 `Hub.pruneSentinels`，按 `SENTINEL_TTL_MS` 清理 `live/`；会话被 forget（tombstone）时同步删除其 live 文件。
+- **清理**：启动时按 `SENTINEL_TTL_MS` 清理 `live/`（实现：在 `bin/` 里单独调用 `pruneLive`，不改 `Hub.pruneSentinels` 的返回形状）；会话被 forget（tombstone）时同步删除其 live 目录；测试残留清理（`src/residue.mjs`）也一并清 `live/<id>/`。
 
 ## 7. 查看端
 
@@ -165,9 +176,9 @@ tail 一个或全部会话，按会话分组、工具行原地刷新、审批高
 ## 11. 开放问题
 
 1. **DSH 子代理的工具调用会不会经 ACP 上报？** 未验证。若不上报，用户只能看到子代理这一层的"一个工具"，需要先拿真实会话测，再决定是否在视图里标注"子代理内部不可见"。
-2. **`meta` 级别要不要写 `title`？** DSH 的 `title` 常是"pwsh: npm test"这类含命令的字符串。保守做法是 `meta` 只写 `name` / `kind`，`title` 归 `detail`。
-3. **默认级别**：`meta` 默认开，还是整体默认关、由 `setup` 引导开启？
-4. **正文要不要进 live**：只写字数（`meta`）够不够，还是 `detail` 也只给尾部摘要。
+2. ~~`meta` 级别要不要写 `title`？~~ 已定：`meta` 只写 `name` / `kind`，`title` 归 `detail`。
+3. ~~默认级别~~ 已定：默认 `detail`（理由见 §6.1）。
+4. ~~正文要不要进 live~~ 已定：不进，正文只在哨兵里。
 5. **多机 / 远程**：live 目录在本机；远程或云端会话的可见性不在本文范围。
 6. 英文版文档待方案定稿后补。
 

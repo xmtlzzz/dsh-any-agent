@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>DSH Live</title>
+<style>
+:root {
+  --bg: #f7f7f8; --surface: #ffffff; --sunken: #f1f1f3; --line: #e6e6ea; --line-2: #d9d9df;
+  --text: #17171c; --text-2: #55555f; --text-3: #8a8a95;
+  --accent: #4f5bd5; --accent-soft: #eceefd;
+  --ok: #1a8f5a; --ok-soft: #e5f4ec; --bad: #c8414b; --bad-soft: #fbeaeb;
+  --warn: #a8660b; --warn-soft: #fbf1df; --run: #4f5bd5; --run-soft: #eceefd;
+  --bar: #c9cdf3; --bar-run: #4f5bd5; --bar-ok: #9fd4b8; --bar-bad: #eba3a8;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --r: 8px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e0e11; --surface: #16161a; --sunken: #1c1c21; --line: #26262d; --line-2: #33333c;
+    --text: #ececf1; --text-2: #a5a5b1; --text-3: #6f6f7c;
+    --accent: #8d96ff; --accent-soft: #1f2140;
+    --ok: #4fc58a; --ok-soft: #13271d; --bad: #f07a82; --bad-soft: #2d1619;
+    --warn: #e7ae4c; --warn-soft: #2a2112; --run: #8d96ff; --run-soft: #1f2140;
+    --bar: #2f3363; --bar-run: #8d96ff; --bar-ok: #24563d; --bar-bad: #6b2b31;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e0e11; --surface: #16161a; --sunken: #1c1c21; --line: #26262d; --line-2: #33333c;
+  --text: #ececf1; --text-2: #a5a5b1; --text-3: #6f6f7c;
+  --accent: #8d96ff; --accent-soft: #1f2140;
+  --ok: #4fc58a; --ok-soft: #13271d; --bad: #f07a82; --bad-soft: #2d1619;
+  --warn: #e7ae4c; --warn-soft: #2a2112; --run: #8d96ff; --run-soft: #1f2140;
+  --bar: #2f3363; --bar-run: #8d96ff; --bar-ok: #24563d; --bar-bad: #6b2b31;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 13.5px/1.5 var(--sans); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; }
+button { font: inherit; color: inherit; }
+.mono { font-family: var(--mono); font-size: 12px; }
+
+/* ── 顶栏 ───────────────────────────────── */
+.top { display: flex; align-items: center; gap: 20px; height: 52px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 3; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 14px; letter-spacing: .1px; white-space: nowrap; }
+.brand-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--text); color: var(--surface); display: grid; place-items: center; font: 700 11px/1 var(--mono); }
+.conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); font-weight: 400; }
+.conn i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+.conn.on i { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.stats { display: flex; align-items: stretch; height: 100%; margin-left: 4px; }
+.stat { display: flex; flex-direction: column; justify-content: center; padding: 0 16px; border-left: 1px solid var(--line); min-width: 74px; }
+.stat b { font-size: 15px; font-weight: 650; line-height: 1.1; }
+.stat span { font-size: 11px; color: var(--text-3); }
+.stat.hot b { color: var(--run); }
+.stat.warn b { color: var(--warn); }
+.stat.zero b { color: var(--text-3); font-weight: 500; }
+.grow { flex: 1; }
+.search { position: relative; }
+.search input { font: inherit; font-size: 12.5px; height: 30px; width: 240px; padding: 0 10px 0 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--sunken); color: var(--text); outline: none; }
+.search input:focus { border-color: var(--accent); background: var(--surface); }
+.search svg { position: absolute; left: 9px; top: 9px; color: var(--text-3); }
+
+/* ── 布局 ───────────────────────────────── */
+.layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: calc(100% - 52px); }
+.rail { border-right: 1px solid var(--line); overflow: auto; background: var(--surface); }
+.main { overflow: auto; }
+
+/* ── 左栏 ───────────────────────────────── */
+.grp { padding: 14px 0 6px; }
+.grp + .grp { border-top: 1px solid var(--line); }
+.grp-h { display: flex; align-items: baseline; gap: 8px; padding: 0 16px 6px; }
+.grp-h b { font-size: 12px; font-weight: 600; }
+.grp-h span { font-size: 11px; color: var(--text-3); }
+.grp-h .gone { color: var(--bad); }
+.cv { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; column-gap: 10px; padding: 8px 16px; cursor: pointer; position: relative; outline: none; }
+.cv:hover { background: var(--sunken); }
+.cv:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.cv.sel { background: var(--accent-soft); }
+.cv.sel::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--accent); }
+.cv .sd { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--line-2); }
+.cv .sd.running { background: var(--run); animation: pulse 1.6s ease-in-out infinite; }
+.cv .sd.queued { background: var(--warn); }
+.cv .ti { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv .ago { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.cv .sub { grid-column: 2 / 4; font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv .sub .mono { color: var(--text-3); }
+.cv .flag { color: var(--warn); }
+@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+
+/* ── 主区 ───────────────────────────────── */
+.wrap { max-width: 1080px; padding: 22px 28px 48px; }
+.hd h1 { font-size: 19px; font-weight: 650; margin: 0 0 10px; letter-spacing: -.1px; word-break: break-word; }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 24px; padding: 12px 16px; margin: 0 0 24px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+.fact { min-width: 0; }
+.fact.wide { grid-column: span 2; }
+.fact dt { font-size: 11px; color: var(--text-3); margin: 0 0 2px; }
+.fact dd { margin: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr; }
+.fact dd.path { direction: rtl; text-align: left; }
+.sec-h { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; }
+.sec-h h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text-3); margin: 0; }
+.sec-h span { font-size: 12px; color: var(--text-3); }
+
+/* ── 调用链：回合 ───────────────────────── */
+.turns { position: relative; }
+.turn { position: relative; padding-left: 26px; padding-bottom: 14px; }
+.turn::before { content: ""; position: absolute; left: 7px; top: 22px; bottom: 0; width: 1px; background: var(--line-2); }
+.turn:last-child::before { display: none; }
+.node { position: absolute; left: 1px; top: 13px; width: 13px; height: 13px; border-radius: 50%; background: var(--surface); border: 2px solid var(--line-2); }
+.turn.running .node { border-color: var(--run); background: var(--run); box-shadow: 0 0 0 4px var(--run-soft); }
+.turn.done .node { border-color: var(--ok); }
+.turn.error .node, .turn.interrupted .node { border-color: var(--bad); background: var(--bad); }
+.turn.queued .node { border-color: var(--warn); border-style: dashed; }
+.turn.cancelled .node { border-color: var(--text-3); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.turn.running .card { border-color: color-mix(in srgb, var(--run) 35%, var(--line)); }
+.card-h { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; user-select: none; flex-wrap: wrap; }
+.card-h:hover { background: var(--sunken); }
+.chev { color: var(--text-3); transition: transform .15s ease; flex: none; }
+.collapsed .chev { transform: rotate(-90deg); }
+.tag { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 5px; background: var(--sunken); color: var(--text-2); white-space: nowrap; }
+.tag.running { background: var(--run-soft); color: var(--run); }
+.tag.done { background: var(--ok-soft); color: var(--ok); }
+.tag.error, .tag.interrupted { background: var(--bad-soft); color: var(--bad); }
+.tag.queued, .tag.warn { background: var(--warn-soft); color: var(--warn); }
+.tag.ghost { background: transparent; border: 1px solid var(--line-2); color: var(--text-3); font-weight: 500; }
+.card-h .rid { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); }
+.card-h .right { margin-left: auto; display: flex; gap: 14px; align-items: center; font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.card-h .right b { color: var(--text-2); font-weight: 600; }
+.prompt { margin: 0 12px 10px 34px; padding: 6px 10px; border-left: 2px solid var(--line-2); color: var(--text-2); font-size: 13px; word-break: break-word; }
+.errline { margin: 0 12px 10px 34px; padding: 6px 10px; border-radius: 6px; background: var(--bad-soft); color: var(--bad); font: 12px/1.45 var(--mono); word-break: break-word; }
+.collapsed .body { display: none; }
+
+/* ── 调用链：工具 / 审批（带时间条） ─────── */
+.spans { border-top: 1px solid var(--line); }
+.span { display: grid; grid-template-columns: 22px 92px minmax(0, 1fr) minmax(120px, 26%) 62px; align-items: center; gap: 10px; padding: 0 12px; height: 32px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.span:last-child { border-bottom: 0; }
+.span:hover { background: var(--sunken); }
+.span .st { display: grid; place-items: center; }
+.span .st i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.span.ok .st i { background: var(--ok); }
+.span.fail .st i { background: var(--bad); }
+.span.live .st i { background: var(--run); animation: pulse 1.6s ease-in-out infinite; }
+.span .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.span .kd { font-weight: 400; color: var(--text-3); font-size: 11px; margin-left: 4px; }
+.span .in { font-family: var(--mono); font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.track { position: relative; height: 8px; border-radius: 4px; background: var(--sunken); overflow: hidden; }
+.track b { position: absolute; top: 0; bottom: 0; min-width: 3px; border-radius: 4px; background: var(--bar); }
+.span.ok .track b { background: var(--bar-ok); }
+.span.fail .track b { background: var(--bar-bad); }
+.span.live .track b { background: var(--bar-run); }
+.span .tm { text-align: right; font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.span.flagged { background: var(--warn-soft); }
+.span.flagged:hover { background: var(--warn-soft); }
+.span.flagged .st { color: var(--warn); font-size: 12px; }
+.span.flagged .nm { color: var(--warn); }
+.span.flagged .tm { color: var(--warn); font-weight: 600; }
+.span.note .st { color: var(--text-3); font-size: 12px; }
+.span.note .nm { color: var(--text-2); font-weight: 500; }
+.span.stop .st, .span.stop .nm { color: var(--bad); }
+.span .esc { font-family: var(--sans); font-size: 11px; font-weight: 600; color: var(--warn); margin-right: 6px; }
+.more { padding: 6px 12px 6px 44px; font-size: 12px; color: var(--text-3); border-bottom: 1px solid var(--line); }
+
+/* ── 空状态 ─────────────────────────────── */
+.empty { display: grid; place-items: center; text-align: center; color: var(--text-3); padding: 72px 24px; }
+.empty h3 { margin: 0 0 6px; font-size: 14px; color: var(--text-2); font-weight: 600; }
+.empty p { margin: 0; font-size: 12.5px; max-width: 360px; }
+.empty code { font-family: var(--mono); font-size: 12px; background: var(--sunken); padding: 1px 6px; border-radius: 4px; color: var(--text-2); }
+.rail .empty { padding: 40px 18px; }
+.foot { margin-top: 18px; font-size: 11.5px; color: var(--text-3); }
+
+/* ── 窄屏 ───────────────────────────────── */
+@media (max-width: 820px) {
+  .top { height: auto; flex-wrap: wrap; gap: 10px 16px; padding: 10px 16px; position: static; }
+  .stats { height: 40px; margin-left: 0; order: 3; width: 100%; }
+  .stat { flex: 1; min-width: 0; padding: 0 10px; }
+  .stat span { white-space: nowrap; }
+  .stat:first-child { border-left: 0; padding-left: 0; }
+  .search { margin-left: auto; }
+  .search input { width: 180px; }
+  .layout { grid-template-columns: 1fr; height: auto; }
+  .rail { border-right: 0; border-bottom: 1px solid var(--line); max-height: 300px; }
+  .wrap { padding: 18px 16px 40px; }
+  .span { grid-template-columns: 18px minmax(0, 1fr) 56px; height: auto; padding: 7px 12px; row-gap: 3px; }
+  .span .st { grid-row: 1; grid-column: 1; }
+  .span .nm { grid-row: 1; grid-column: 2; }
+  .span .tm { grid-row: 1; grid-column: 3; }
+  .span .in { grid-row: 2; grid-column: 2 / 4; }
+  .span .track { grid-row: 3; grid-column: 2 / 4; height: 4px; }
+  .prompt, .errline { margin-left: 12px; }
+  .card-h .right { margin-left: 0; width: 100%; }
+  .fact dd { max-width: 240px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="brand-mark">DS</span>DSH Live <span class="conn" id="conn"><i></i><span>连接中</span></span></div>
+  <div class="stats" id="stats"></div>
+  <div class="grow"></div>
+  <label class="search">
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l4 4"/></svg>
+    <input type="search" id="q" placeholder="筛选标题、id、目录" aria-label="筛选会话">
+  </label>
+</header>
+<div class="layout">
+  <nav class="rail" id="rail" aria-label="会话"></nav>
+  <main class="main" id="main" aria-live="polite"></main>
+</div>
+<script>
+(() => {
+  'use strict';
+  const token = new URLSearchParams(location.search).get('t') || '';
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+  let view = null;
+  let selected = store.get('dsh-live-sel');
+  const collapsed = new Set();
+  let q = '';
+
+  // 只用 textContent 建 DOM：事件内容来自磁盘文件，绝不当 HTML 解析。
+  function h(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null && text !== '') n.textContent = String(text);
+    return n;
+  }
+  const short = (id) => String(id || '').slice(0, 8);
+  const base = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || p || '';
+  function dur(v) {
+    if (v === null || v === undefined || !isFinite(v)) return '';
+    if (v < 1000) return Math.round(v) + 'ms';
+    if (v < 60000) return (v / 1000).toFixed(v < 10000 ? 1 : 0) + 's';
+    const m = Math.floor(v / 60000);
+    return m + 'm' + String(Math.round((v % 60000) / 1000)).padStart(2, '0') + 's';
+  }
+  function ago(ts) {
+    if (!ts) return '';
+    const s = Math.max(0, (Date.now() - Date.parse(ts)) / 1000);
+    if (s < 45) return '刚刚';
+    if (s < 3600) return Math.round(s / 60) + ' 分钟前';
+    if (s < 86400) return Math.round(s / 3600) + ' 小时前';
+    return Math.round(s / 86400) + ' 天前';
+  }
+  const t = (ts) => (ts ? Date.parse(ts) : NaN);
+  const STATE = { running: '运行中', queued: '排队中', idle: '空闲', closed: '已释放' };
+  const RUN = { running: '运行中', queued: '排队', done: '完成', error: '出错', cancelled: '已取消', interrupted: '中断' };
+  const VIA = { send: '派活', queue: '排队', interject: '插话' };
+  const TOOL = { pending: '等待', in_progress: '进行中', unfinished: '未完成', completed: '完成', failed: '失败' };
+  const MODE = { 'auto-allow': '自动放行', 'auto-deny': '自动拒绝', 'read-only-deny': '只读拒绝', ask: '待人工裁决' };
+
+  function convs() {
+    const out = [];
+    for (const g of (view && view.groups) || []) for (const c of g.conversations) out.push(c);
+    return out;
+  }
+  const match = (c) => !q || [c.title, c.id, c.cwd, c.client].some((v) => v && String(v).toLowerCase().includes(q));
+
+  function renderStats() {
+    const s = view.totals;
+    const box = $('stats');
+    box.replaceChildren();
+    const stat = (n, label, cls) => {
+      const d = h('div', 'stat ' + (n ? cls || '' : 'zero'));
+      d.append(h('b', null, String(n)), h('span', null, label));
+      box.append(d);
+    };
+    stat(s.conversations, '会话', '');
+    stat(s.running, '运行中', 'hot');
+    stat(s.queued, '排队', 'warn');
+    stat(s.pending_approvals, '待审批', 'warn');
+    stat(s.escalations, '提权', 'warn');
+  }
+
+  function renderRail() {
+    const rail = $('rail');
+    rail.replaceChildren();
+    let any = false;
+    for (const g of view.groups) {
+      const list = g.conversations.filter(match);
+      if (!list.length) continue;
+      any = true;
+      const grp = h('section', 'grp');
+      const gh = h('div', 'grp-h');
+      gh.append(h('b', null, g.client || '未知客户端'));
+      gh.append(h('span', 'mono', 'pid ' + (g.pid || '?')));
+      if (!g.alive) gh.append(h('span', 'gone', '已退出'));
+      grp.append(gh);
+      for (const c of list) {
+        const row = h('div', 'cv' + (c.id === selected ? ' sel' : ''));
+        row.tabIndex = 0;
+        row.setAttribute('role', 'button');
+        row.setAttribute('aria-pressed', String(c.id === selected));
+        row.append(h('i', 'sd ' + c.state));
+        row.append(h('div', 'ti', c.title || '无标题 · ' + short(c.id)));
+        row.append(h('div', 'ago', ago(c.last_ts)));
+        const sub = h('div', 'sub');
+        const active = c.runs.find((r) => r.status === 'running');
+        const pend = c.runs.reduce((n, r) => n + r.pending_approvals, 0);
+        sub.append(document.createTextNode(active && active.current_tool ? '▸ ' + active.current_tool : STATE[c.state] || c.state));
+        if (pend) sub.append(h('span', 'flag', ' · ' + pend + ' 待审批'));
+        sub.append(document.createTextNode(' · '));
+        const p = h('span', 'mono', base(c.cwd));
+        p.title = c.cwd || '';
+        sub.append(p);
+        row.append(sub);
+        const pick = () => { selected = c.id; store.set('dsh-live-sel', c.id); render(); };
+        row.addEventListener('click', pick);
+        row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+        grp.append(row);
+      }
+      rail.append(grp);
+    }
+    if (!any) {
+      const e = h('div', 'empty');
+      if (q) e.append(h('h3', null, '没有匹配的会话'));
+      else {
+        e.append(h('h3', null, '还没有事件'));
+        const p = h('p');
+        p.append('用 ', h('code', null, 'dsh_send'), ' 派一次活，调用链会出现在这里。');
+        e.append(p);
+      }
+      rail.append(e);
+    }
+  }
+
+  /** 把会话目录前缀去掉，路径显示成相对路径（悬停仍能看到原文）。 */
+  function rel(txt, cwd) {
+    if (!txt || !cwd) return txt || '';
+    const root = String(cwd).replace(/[\\/]+$/, '');
+    let out = String(txt);
+    for (const sep of ['\\', '/']) out = out.split(root + sep).join('');
+    out = out.split(root).join('.');
+    return out;
+  }
+
+  function spanRow(it, run, t0, total, cwd) {
+    if (it.kind === 'tool') {
+      const st = it.status;
+      const cls = st === 'completed' ? 'ok' : st === 'failed' ? 'fail' : st === 'unfinished' ? '' : 'live';
+      const row = h('div', 'span ' + cls);
+      const s = h('span', 'st'); s.append(h('i')); row.append(s);
+      const label = it.name || it.title || 'tool';
+      const nm = h('span', 'nm', label);
+      if (it.tool_kind && it.tool_kind !== 'other' && it.tool_kind !== label) nm.append(h('span', 'kd', it.tool_kind));
+      row.append(nm);
+      const raw = it.input_preview || (it.title !== label ? it.title : '') || '';
+      const inp = h('span', 'in', rel(raw, cwd)); inp.title = raw; row.append(inp);
+      row.append(track(it, run, t0, total));
+      row.append(h('span', 'tm', it.elapsed_ms != null ? dur(it.elapsed_ms) : TOOL[st] || st || ''));
+      return row;
+    }
+    if (it.kind === 'approval') {
+      const row = h('div', 'span flagged');
+      row.append(h('span', 'st', '◆'));
+      row.append(h('span', 'nm', '审批'));
+      const inp = h('span', 'in');
+      if (it.escalation) inp.append(h('span', 'esc', '⚠ ' + it.escalation));
+      const txt = it.command_preview || it.title || it.tool || '';
+      inp.append(document.createTextNode(rel(txt, cwd)));
+      inp.title = (it.escalation ? it.escalation + '  ' : '') + txt;
+      row.append(inp);
+      const d = it.decided;
+      row.append(h('span', 'in', d ? '→ ' + (d.decision || d.effective || '') + (d.by ? '（' + d.by + '）' : '') : MODE[it.mode] || it.mode || ''));
+      row.append(h('span', 'tm', it.mode === 'ask' && !d ? '等待' : (MODE[it.mode] ? '' : '')));
+      return row;
+    }
+    const row = h('div', 'span note' + (it.kind === 'interrupt' ? ' stop' : ''));
+    row.append(h('span', 'st', it.kind === 'interrupt' ? '■' : '↪'));
+    row.append(h('span', 'nm', it.kind === 'interrupt' ? '中断' : '插话' + (it.mode ? ' · ' + it.mode : '')));
+    row.append(h('span', 'in', it.text_preview || ''));
+    row.append(h('span'));
+    row.append(h('span', 'tm', ''));
+    return row;
+  }
+
+  /** 时间条：工具在本轮里的起点与时长（类似 trace 瀑布图）。 */
+  function track(it, run, t0, total) {
+    const tr = h('span', 'track');
+    const start = t(it.at);
+    if (!isFinite(t0) || !isFinite(start) || !(total > 0)) return tr;
+    const end = it.elapsed_ms != null ? start + it.elapsed_ms : run.status === 'running' ? Date.now() : t(it.last_at) || start;
+    const left = Math.max(0, Math.min(100, ((start - t0) / total) * 100));
+    const width = Math.max(0.8, Math.min(100 - left, ((end - start) / total) * 100));
+    const b = h('b');
+    b.style.left = left + '%';
+    b.style.width = width + '%';
+    tr.title = dur(start - t0) + ' 起 · ' + dur(end - start);
+    tr.append(b);
+    return tr;
+  }
+
+  function chev() {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('width', '12'); s.setAttribute('height', '12'); s.setAttribute('viewBox', '0 0 16 16'); s.setAttribute('class', 'chev');
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', 'M4 6l4 4 4-4'); p.setAttribute('fill', 'none'); p.setAttribute('stroke', 'currentColor'); p.setAttribute('stroke-width', '2');
+    s.append(p);
+    return s;
+  }
+
+  function renderMain() {
+    const main = $('main');
+    main.replaceChildren();
+    const all = convs();
+    let c = all.find((x) => x.id === selected);
+    if (!c) c = all.find((x) => x.state === 'running') || all[0];
+    if (!c) {
+      const e = h('div', 'empty');
+      e.append(h('h3', null, '等待第一条事件'));
+      const p = h('p');
+      p.append('这是只读视图。服务端写入 ', h('code', null, 'live/'), ' 事件流后，这里按 客户端 → 会话 → 回合 → 工具 展开调用链。');
+      e.append(p);
+      main.append(e);
+      return;
+    }
+    selected = c.id;
+    const wrap = h('div', 'wrap');
+    const hd = h('div', 'hd');
+    hd.append(h('h1', null, c.title || '无标题会话'));
+    const facts = h('dl', 'facts');
+    const fact = (k, v, cls, full) => {
+      if (!v) return;
+      const f = h('div', 'fact' + (cls && cls.includes('path') ? ' wide' : ''));
+      f.append(h('dt', null, k));
+      const dd = h('dd', cls || null);
+      // 路径过长时从左边截断（保留末尾的目录名）；用 bdi 包住，避免 rtl 把标点甩到另一头。
+      const bdi = document.createElement('bdi');
+      bdi.textContent = v;
+      dd.append(bdi);
+      dd.title = full || v;
+      f.append(dd);
+      facts.append(f);
+    };
+    fact('状态', STATE[c.state] || c.state);
+    fact('客户端', (c.client || '未知') + ' · pid ' + (c.writer ? String(c.writer).split(':')[0] : '?') + (c.writer_alive ? '' : '（已退出）'));
+    fact('权限', [c.permission, c.on_approval].filter(Boolean).join(' · '));
+    fact('模型', c.model);
+    fact('会话 id', short(c.id), 'mono', c.id);
+    fact('目录', c.cwd, 'mono path');
+    hd.append(facts);
+    wrap.append(hd);
+
+    const sh = h('div', 'sec-h');
+    sh.append(h('h2', null, '调用链'), h('span', null, c.runs.length + ' 个回合 · 最新在上'));
+    wrap.append(sh);
+
+    const turns = h('div', 'turns');
+    const runs = [...c.runs].reverse();
+    if (!runs.length) {
+      const e = h('div', 'empty');
+      e.append(h('h3', null, '这个会话还没有派过活'));
+      turns.append(e);
+    }
+    for (const r of runs) {
+      const key = c.id + '/' + r.run;
+      const turn = h('div', 'turn ' + r.status + (collapsed.has(key) ? ' collapsed' : ''));
+      turn.append(h('span', 'node'));
+      const card = h('div', 'card');
+      const head = h('div', 'card-h');
+      head.setAttribute('role', 'button');
+      head.tabIndex = 0;
+      head.append(chev());
+      head.append(h('span', 'tag ' + r.status, RUN[r.status] || r.status));
+      if (r.via && !(r.status === 'queued' && r.via === 'queue')) head.append(h('span', 'tag ghost', VIA[r.via] || r.via));
+      head.append(h('span', 'rid', (r.turn ? '第 ' + r.turn + ' 轮 · ' : '') + r.run));
+      if (r.escalations) head.append(h('span', 'tag warn', '⚠ ' + r.escalations + ' 次提权'));
+      if (r.pending_approvals) head.append(h('span', 'tag warn', r.pending_approvals + ' 待审批'));
+      const right = h('span', 'right');
+      const tools = r.items.filter((x) => x.kind === 'tool').length;
+      const n = r.tool_count != null ? r.tool_count : tools;
+      const rb = h('span'); rb.append(h('b', null, String(n)), ' 个工具'); right.append(rb);
+      const t0 = t(r.started_at);
+      const total = r.duration_ms != null ? r.duration_ms : r.status === 'running' && isFinite(t0) ? Date.now() - t0 : null;
+      if (total != null) { const d = h('span'); d.append(h('b', null, dur(total))); right.append(d); }
+      right.append(h('span', null, ago(r.ended_at || r.started_at || r.queued_at)));
+      head.append(right);
+      const toggle = () => { if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key); render(); };
+      head.addEventListener('click', toggle);
+      head.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+      card.append(head);
+      const body = h('div', 'body');
+      if (r.prompt_preview) body.append(h('div', 'prompt', r.prompt_preview));
+      if (r.error) body.append(h('div', 'errline', r.error));
+      if (r.items.length) {
+        const spans = h('div', 'spans');
+        for (const it of r.items) spans.append(spanRow(it, r, t0, total, c.cwd));
+        body.append(spans);
+      }
+      card.append(body);
+      turn.append(card);
+      turns.append(turn);
+    }
+    wrap.append(turns);
+    wrap.append(h('div', 'foot', '只读视图 · 数据来自本机 live 事件流 · 思考内容从不写入 · 点击回合标题折叠'));
+    main.append(wrap);
+  }
+
+  function render() {
+    if (!view) return;
+    const rt = $('rail').scrollTop, mt = $('main').scrollTop, wt = window.scrollY;
+    // 先定下选中的会话（没选过 / 已消失时挑正在跑的），左栏高亮和右侧详情才一致。
+    const all = convs();
+    if (!all.some((x) => x.id === selected)) {
+      const pick = all.find((x) => x.state === 'running') || all[0];
+      selected = pick ? pick.id : null;
+    }
+    renderStats();
+    renderRail();
+    renderMain();
+    $('rail').scrollTop = rt; $('main').scrollTop = mt; window.scrollTo(0, wt);
+  }
+
+  $('q').addEventListener('input', (e) => { q = e.target.value.trim().toLowerCase(); render(); });
+
+  function setConn(on, text) {
+    const c = $('conn');
+    c.className = 'conn' + (on ? ' on' : '');
+    c.lastElementChild.textContent = text;
+  }
+  const es = new EventSource('/events?t=' + encodeURIComponent(token));
+  es.onopen = () => setConn(true, '实时');
+  es.onmessage = (e) => { try { view = JSON.parse(e.data); } catch { return; } render(); };
+  es.onerror = () => setConn(false, '重连中');
+  setInterval(render, 15000);
+})();
+</script>
+</body>
+</html>

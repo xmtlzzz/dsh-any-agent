@@ -76,6 +76,28 @@ Design notes (especially under **concurrent multi-session** use):
 4. dsh_read(id,  cursor=<prev>) # switch back; entries that grew since <prev> reappear (match by seq)
 ```
 
+## 👀 Side view: what the dispatched work is doing
+
+The calling agent can `dsh_read`, but you, sitting in front of the client, usually only see one `dsh_send`. The server writes each conversation's activity to a live event stream (`<state dir>/live/<conversation_id>/events.jsonl`), so you can watch the call chain **without going through the agent**:
+
+```text
+client (who dispatched) → conversation → run (send / queue / interject) → tool calls · approvals
+```
+
+```bash
+dsh-any-agent watch
+```
+
+```bash
+dsh-any-agent dashboard
+```
+
+- `watch [conversation id prefix]`: live call chain in the terminal (`--once` prints once and exits, `--runs N` shows the last N runs per conversation).
+- `dashboard`: a **read-only** local page; prints a URL with a one-time token (binds `127.0.0.1` only, checks the Host header, has no control that changes state).
+- Both are separate processes: they don't start the server, never touch the write lock and never talk to DSH, and they show conversations dispatched from every client (Claude Code, Codex, Cursor, …) together.
+- A run whose writer process has exited without finishing is shown as interrupted.
+- Tune with `DSH_MCP_LIVE`: `detail` (default; redacted command/path/prompt previews), `meta` (tool names, status, timing, approval kinds only), `off`. **Reasoning is never written at any level.** Event files share the sentinels' 7-day TTL; `dsh_release(forget=true)` deletes them too.
+
 ## 🤫 Reasoning: hidden by default
 
 DSH separates reasoning from answer text at the model layer, and ACP exposes them as **two independent streams**. This server hides reasoning by default and returns only **statistics** (characters, duration, chunk count) — so the caller knows thinking happened without paying for it in context.

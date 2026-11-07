@@ -40,6 +40,7 @@ import { rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
 import { writeTombstone } from './hub-store.mjs';
+import { emitLive, livePreview, removeLive, summarizeToolInput } from './live.mjs';
 import {
   classifyHolder,
   describeLeaseConflict,
@@ -140,6 +141,27 @@ export class Conversation {
   }
 
   #hub;
+
+  /**
+   * live 事件流用的工具跟踪：tool_call_id → {at, status, hasInput}。
+   * 单独放在这里而不是回合收集器里：收集器的 tools 会原样进 tools_used，不能混入新字段。
+   */
+  #liveTools = new Map();
+
+  /** 当前 run_id（live 事件用；回合外为 null）。 */
+  #liveRunId() {
+    return this.currentRun?.run_id ?? null;
+  }
+
+  /** 写一条 live 事件（永不抛错，见 live.mjs）。 */
+  #live(type, fields = {}, detail = null) {
+    emitLive(this.id, type, { run: this.#liveRunId(), turn: this.currentTurn, ...fields }, detail);
+  }
+
+  /** 审批裁决事件（decide / 超时 / 回合结束 / 关闭 统一走这里）。 */
+  #liveApprovalDecided(approvalId, by, decision = null, effective = null) {
+    this.#live('approval.decided', { approval_id: approvalId, by, decision, effective });
+  }
 
   /** 序列化进注册表的最小状态——**只有元数据，没有对话内容**。 */
   toState() {
@@ -571,6 +593,7 @@ export class Conversation {
         if (u.title !== undefined || u.status !== undefined || u.name !== undefined) {
           this.pushOut('tool', `${label}${tag}`, { tool_call_id: id });
         }
+        this.#liveTool(id, merged);
         break;
       }
       case 'usage_update':
@@ -583,6 +606,35 @@ export class Conversation {
       default:
         c.otherUpdates.push(u.sessionUpdate);
     }
+  }
+
+  /**
+   * 工具状态 → live 事件。DSH 的工具更新是快照、会重复推同一状态，所以只在
+   * "第一次出现 / 状态变化 / 第一次拿到输入"时写，避免刷屏。
+   */
+  #liveTool(id, merged) {
+    const seen = this.#liveTools.get(id);
+    const hasInput = merged.input !== undefined && merged.input !== null;
+    const status = merged.status ?? null;
+    if (seen && seen.status === status && (seen.hasInput || !hasInput)) return;
+    const at = seen?.at ?? now();
+    this.#liveTools.set(id, { at, status, hasInput });
+    const terminal = status === 'completed' || status === 'failed';
+    // 真实 DSH 的 tool_call 不带 name，工具名在 title 里（"read" / "pwsh"）。title 是纯标识符时
+    // 当作名字写进 meta 级字段；带空格等可能含命令原文的 title 只进 detail。
+    const titleAsName =
+      typeof merged.title === 'string' && /^[\w.:-]{1,40}$/.test(merged.title) ? merged.title : null;
+    this.#live(
+      'tool',
+      {
+        tool_call_id: id,
+        name: merged.name ?? titleAsName,
+        kind: merged.kind ?? null,
+        status,
+        elapsed_ms: terminal ? now() - at : undefined,
+      },
+      { title: livePreview(merged.title, 200), input_preview: summarizeToolInput(merged.input) },
+    );
   }
 
   async onPermissionRequest(params) {
@@ -605,11 +657,24 @@ export class Conversation {
     const desc = sanitizeApprovalContext(String(toolCall.title ?? toolCall.name ?? toolCall.toolCallId ?? '未知操作'));
     const allowId = pickOption(options, 'allow');
     const rejectId = pickOption(options, 'reject');
+    const liveApproval = (mode, extra = {}) => {
+      const input = toolCall.rawInput ?? toolCall.input ?? null;
+      const escalation =
+        input && typeof input === 'object' && typeof input.sandbox_permissions === 'string'
+          ? input.sandbox_permissions
+          : null;
+      this.#live(
+        'approval',
+        { tool_call_id: toolCall.toolCallId ?? null, tool: toolCall.name ?? null, mode, escalation, ...extra },
+        { title: livePreview(desc, 200), command_preview: summarizeToolInput(input) },
+      );
+    };
 
     // ★ read-only 是硬边界：即使会话被旧版本/显式参数配成 auto-allow，
     //   这里也绝不放行任何审批 —— DSH 会借审批把 sandbox 提权到可写。
     if (this.permission === 'read-only') {
       this.#hub.log.info(`[conv ${this.id}] read-only 强制拒绝审批: ${desc}`);
+      liveApproval('read-only-deny');
       return rejectId
         ? { outcome: { outcome: 'selected', optionId: rejectId } }
         : { outcome: { outcome: 'cancelled' } };
@@ -619,22 +684,26 @@ export class Conversation {
       // ★ 自动放行必须对调用方可见：DSH 会借审批把沙箱提升到 danger-full-access，
       //   不记下来的话 workspace-write 会话事后看起来像从未越界（实测一轮 6 次提权无人知晓）。
       if (allowId) this.#recordAutoApproval(params, toolCall, desc, options);
+      liveApproval('auto-allow');
       return allowId
         ? { outcome: { outcome: 'selected', optionId: allowId } }
         : { outcome: { outcome: 'cancelled' } };
     }
     if (this.onApproval === 'auto-deny') {
       this.#hub.log.info(`[conv ${this.id}] 审批拒绝: ${desc}`);
+      liveApproval('auto-deny');
       return rejectId
         ? { outcome: { outcome: 'selected', optionId: rejectId } }
         : { outcome: { outcome: 'cancelled' } };
     }
     const approvalId = `ap-${Math.random().toString(36).slice(2, 10)}`;
     this.#hub.log.info(`[conv ${this.id}] 审批待裁决: ${approvalId}`);
+    liveApproval('ask', { approval_id: approvalId });
     return await new Promise((resolve) => {
       const timer = setTimeout(() => {
         if (this.pendingApprovals.delete(approvalId)) {
           this.#hub.log.info(`[conv ${this.id}] 审批 ${approvalId} 超时，按拒绝处理`);
+          this.#liveApprovalDecided(approvalId, 'timeout', 'reject', 'cancelled');
           resolve({ outcome: { outcome: 'cancelled' } });
         }
       }, this.#hub.approvalTimeoutMs);
@@ -690,6 +759,7 @@ export class Conversation {
     //   否则 dsh_approval_decide 会渲染成"已裁决为 allow"，而 DSH 收到的是取消（假成功）。
     const effective = chosen ? 'selected' : 'cancelled';
     p.resolve(chosen ? { outcome: { outcome: 'selected', optionId: chosen } } : { outcome: { outcome: 'cancelled' } });
+    this.#liveApprovalDecided(approvalId, 'caller', decision, effective);
     return {
       approval_id: approvalId,
       decision,
@@ -719,6 +789,12 @@ export class Conversation {
     runRecord.status = 'error';
     runRecord.error = error?.message ?? String(error);
     runRecord.elapsed_ms = 0;
+    emitLive(
+      this.id,
+      'run.end',
+      { run: runRecord.run_id, turn: this.currentTurn, status: 'error', stop_reason: 'error' },
+      { error: livePreview(runRecord.error, 300) },
+    );
     runRecord.result = {
       conversation_id: this.id,
       run_id: runRecord.run_id,
@@ -789,7 +865,7 @@ export class Conversation {
    *
    * @returns 等到回合结束 → 完整 result；没等到（wait=false 或等超时）→ 收据对象
    */
-  async prompt(text, { reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, run, wait = true, review } = {}) {
+  async prompt(text, { reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, run, wait = true, review, via = 'send' } = {}) {
     if (this.busy) {
       throw new Error(
         `会话 ${this.id} 正在跑另一个回合。可以：dsh_interject 插话（打断并改口 / 排队），或 dsh_interrupt 打断。`,
@@ -835,6 +911,12 @@ export class Conversation {
     this.currentTool = null;
     this.pushOut('user', text.length > MAX_PROMPT_ECHO ? `${text.slice(0, MAX_PROMPT_ECHO)}…（已截断）` : text);
     this.pushOut('turn', `第 ${this.currentTurn} 轮开始`, { phase: 'start' });
+    this.#liveTools.clear();
+    this.#live(
+      'run.start',
+      { via, permission: this.permission, on_approval: this.onApproval, cwd: this.cwd },
+      { prompt_preview: livePreview(text, 200) },
+    );
     const c = {
       answer: '',
       /** 上一段正文之后出现过工具调用：下一段正文前要补段落分隔（见 onUpdate）。 */
@@ -900,10 +982,11 @@ export class Conversation {
           this.currentTool = null;
           // 回合结束后，任何仍挂着的审批都已失效：统一取消并清空，避免状态里
           // 留下一个 dsh_approval_decide 只会回"没有待决审批"的幽灵。
-          for (const [, p] of this.pendingApprovals) {
+          for (const [apId, p] of this.pendingApprovals) {
             try {
               p.resolve({ outcome: { outcome: 'cancelled' } });
             } catch {}
+            this.#liveApprovalDecided(apId, 'turn_end', null, 'cancelled');
           }
           this.pendingApprovals.clear();
           this.pushOut('turn', `第 ${this.currentTurn} 轮结束（${stopReason ?? 'unknown'}）`, {
@@ -911,6 +994,21 @@ export class Conversation {
             stop_reason: stopReason,
             error: failure ?? undefined,
           });
+          emitLive(
+            this.id,
+            'run.end',
+            {
+              run: runRecord.run_id,
+              turn: this.currentTurn,
+              status: failure ? 'error' : stopReason === 'cancelled' ? 'cancelled' : 'done',
+              stop_reason: stopReason ?? null,
+              duration_ms: now() - t0,
+              tool_count: c.tools.size,
+              auto_approvals: c.autoApprovalTotal,
+              auto_escalations: c.autoEscalationTotal,
+            },
+            { error: livePreview(failure, 300) },
+          );
           this.turnCount += 1;
           this.lastUsedAt = now();
           this.#hub.save();
@@ -1063,6 +1161,7 @@ export class Conversation {
   async interrupt() {
     if (!this.proc?.alive) return { interrupted: false, reason: 'DSH 进程未运行' };
     this.proc.notify('session/cancel', { sessionId: this.id });
+    this.#live('interrupt', { busy: this.busy });
     if (!this.busy) {
       return { interrupted: false, reason: '当前没有进行中的回合（已发送 cancel，用于清空排队输入）' };
     }
@@ -1206,6 +1305,12 @@ export class Conversation {
     const run = this.createRun(preview ?? text, { clientRunId, review });
     run.status = 'queued';
     this.queue.push({ run, text, reasoning, clientRunId, enqueued_at: now() });
+    emitLive(
+      this.id,
+      'run.queued',
+      { run: run.run_id, turn: this.currentTurn, position: this.queue.length, cwd: this.cwd },
+      { prompt_preview: livePreview(run.prompt_preview, 200) },
+    );
     return { run, position: this.queue.length, deduped: false };
   }
 
@@ -1250,6 +1355,7 @@ export class Conversation {
           permission: this.permission,
         });
       }
+      emitLive(this.id, 'run.end', { run: run.run_id, turn: this.currentTurn, status: 'cancelled', stop_reason: 'cancelled' });
       // 取消也是终态 → 写哨兵，避免等待方永远空等。
       const file = this.#hub.writeRunSentinel(this.id, run);
       run.result.sentinel_file = file ?? this.#hub.runSentinelPath(this.id, run.run_id);
@@ -1284,7 +1390,7 @@ export class Conversation {
       const item = this.queue.shift();
       const run = item.run;
       run.status = 'running';
-      this.prompt(item.text, { reasoning: item.reasoning, run, wait: false })
+      this.prompt(item.text, { reasoning: item.reasoning, run, wait: false, via: 'queue' })
         .catch(() => {})
         .finally(() => this.#scheduleDrain());
     }, 0);
@@ -1481,13 +1587,14 @@ export class Conversation {
     // 先建 run：幂等键要在"等待上一轮"之前就登记，否则重试会造出第二个 run。
     const run = this.createRun(message, { clientRunId, review });
     if (!this.busy) {
-      const r = await this.prompt(message, { reasoning, timeoutMs, run });
+      const r = await this.prompt(message, { reasoning, timeoutMs, run, via: 'interject' });
       return { ...r, interjected: 'idle', waited_ms: 0 };
     }
     const t0 = now();
     if (mode === 'interject') {
       this.proc?.notify('session/cancel', { sessionId: this.id });
     }
+    this.#live('interject', { mode, pending_run: run.run_id }, { text_preview: livePreview(message, 200) });
     // 排队等待的时长跟随调用方的 timeoutMs（0 = 一直等），不再固定 30 分钟。
     const idle = await this.waitIdle(timeoutMs);
     const waited = now() - t0;
@@ -1519,11 +1626,12 @@ export class Conversation {
           permission: this.permission,
         });
       }
+      emitLive(this.id, 'run.end', { run: run.run_id, turn: this.currentTurn, status: 'cancelled', stop_reason: 'cancelled' }, { error: livePreview(err.message, 300) });
       const file = this.#hub.writeRunSentinel?.(this.id, run);
       run.result.sentinel_file = file ?? this.#hub.runSentinelPath?.(this.id, run.run_id) ?? null;
       throw err;
     }
-    const r = await this.prompt(message, { reasoning, timeoutMs, run });
+    const r = await this.prompt(message, { reasoning, timeoutMs, run, via: mode === 'queue' ? 'queue' : 'interject' });
     return { ...r, interjected: mode, waited_ms: waited };
   }
 
@@ -1559,10 +1667,11 @@ export class Conversation {
       this.proc = null;
     }
     // 回合已经结束/进程正在关闭，任何仍挂着的审批都不再可裁决。
-    for (const [, p] of this.pendingApprovals) {
+    for (const [apId, p] of this.pendingApprovals) {
       try {
         p.resolve({ outcome: { outcome: 'cancelled' } });
       } catch {}
+      this.#liveApprovalDecided(apId, 'close', null, 'cancelled');
     }
     this.pendingApprovals.clear();
     // 只有确认进程退出后才删登记；否则把登记留着，让 takeover/classifyHolder
@@ -1579,7 +1688,12 @@ export class Conversation {
       // 而不是从 DSH 会话存储把它重建回来（否则 forget 形同虚设）。
       writeTombstone(this.id);
       this.#hub.remove(this.id);
-    } else this.#hub.save();
+      // forget 是"永久移除"：事件流也一并删掉，查看器里不再出现这个会话。
+      removeLive(this.id);
+    } else {
+      this.#hub.save();
+      this.#live('conv.close', { stopped });
+    }
     return { closed: stopped, forgotten: forget, ...(stopped ? {} : { error: '进程未能确认退出，登记已保留' }) };
   }
 }

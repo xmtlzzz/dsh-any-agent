@@ -60,7 +60,7 @@ const removed = { ...r.project.removed };
 for (const k of Object.keys(removed)) removed[k] += r.legacy.removed[k];
 log(
   `  本项目 per-run 数据：注册表条目 ${removed.registry}、元数据 ${removed.meta}、哨兵目录 ${removed.runs}、` +
-    `审核目录 ${removed.reviews}、锁登记 ${removed.locks}`,
+    `审核目录 ${removed.reviews}、锁登记 ${removed.locks}、事件流 ${removed.live ?? 0}`,
 );
 if (r.legacy.dirsRemoved.length) log(`    收掉空的旧版扁平目录 ${r.legacy.dirsRemoved.length} 个（%TEMP% 根下 runs/reviews/locks/meta）`);
 for (const e of [...r.project.errors, ...r.legacy.errors]) log(`    ⚠️ ${e}`);
