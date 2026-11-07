@@ -30,6 +30,8 @@
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**); answer/error/title/tool inputs are still credential-redacted |
 | `DSH_MCP_REVIEW` | `advisory` | Caller-review policy. `advisory` (default) attaches a review ticket (checklist + evidence + `dsh_review` entry) to every result and sentinel **without blocking later sends**; `off` disables automatic tickets. Per-conversation/per-send overrides use the `review` argument |
 | `DSH_MCP_REVIEWS_DIR` | `<state file dir>/reviews` | Where review verdicts are written (`<this>/<conversation_id>/<run_id>.review.json`). Must be writable, or startup fails loudly |
+| `DSH_MCP_LIVE` | `detail` | Live event stream level (the data behind `watch` / `dashboard`). `detail` adds redacted prompt / command / path previews; `meta` keeps tool names, status, timing and approval kinds only; `off` writes nothing. Reasoning is never written at any level |
+| `DSH_MCP_LIVE_DIR` | `<state file dir>/live` | Live event stream directory (`<this>/<conversation_id>/events.jsonl`, rolled to `.1` at 5 MB). Write failures are skipped silently and never affect a run; pruned by `DSH_MCP_SENTINEL_TTL_MS` |
 | `DSH_MCP_PERMISSION` | `workspace-write` | Default tier for `dsh_start`. `danger-full-access` additionally requires `DSH_MCP_ALLOW_FULL_ACCESS=1` |
 | `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | Whether `permission=danger-full-access` is allowed. Denied by default: it hands the caller whole-machine write access |
 | `DSH_MCP_REASONING_EFFORT` | `max` | Default reasoning effort |

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-11-08
+
+### Added
+
+- **Live call-chain view of dispatched work.** The server now appends each
+  conversation's activity — run start/end (with how it was dispatched: send,
+  queue or interject, and which MCP client sent it), tool calls on status change,
+  approvals and their decisions — to `<state dir>/live/<conversation_id>/events.jsonl`.
+  Two new read-only subcommands show it without going through the calling agent:
+  `dsh-any-agent watch` (terminal tree) and `dsh-any-agent dashboard` (local page on
+  `127.0.0.1` with a one-time token and Host check, no controls). Both run as
+  separate processes, never touch the write lock, and merge conversations from
+  every client. `DSH_MCP_LIVE=detail|meta|off` (default `detail`: redacted
+  previews, the same exposure as sentinels) and `DSH_MCP_LIVE_DIR`. Reasoning is
+  never written; write failures never affect a run; files follow the sentinel
+  TTL and are deleted on `forget`. Design: `docs/zh/live-view-design.md`.
+
 ## [0.6.0] — 2026-11-07
 
 ### Added

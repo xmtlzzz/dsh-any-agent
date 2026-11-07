@@ -76,6 +76,28 @@ while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit
 4. dsh_read(id,  cursor=<上次>) # 切回来；上次之后被追加过的条目会再次出现（按 seq 替换全文）
 ```
 
+## 👀 旁路查看：派出去的活在干什么
+
+调用方 agent 能 `dsh_read`，但坐在客户端前的你通常只看到一次 `dsh_send`。服务会把每个会话的活动写成 live 事件流（`<状态目录>/live/<会话id>/events.jsonl`），你可以**不经过 agent**直接看调用链：
+
+```text
+客户端（谁派的） → 会话 → 回合（派活 / 排队 / 插话） → 工具调用 · 审批
+```
+
+```bash
+dsh-any-agent watch
+```
+
+```bash
+dsh-any-agent dashboard
+```
+
+- `watch [会话id前缀]`：在终端里实时显示调用链（`--once` 打印一次就退出，`--runs N` 每个会话显示最近几轮）。
+- `dashboard`：起一个**只读**本地页面，打印出带一次性 token 的地址（只监听 `127.0.0.1`，校验 Host 头，没有任何能改变状态的按钮）。
+- 两者都是独立进程：不启动服务、不碰写锁、不连 DSH，所有客户端（Claude Code、Codex、Cursor…）派出去的会话都能一起看到。
+- 写者进程已退出而回合没有结束的，显示为"中断"。
+- 级别用 `DSH_MCP_LIVE` 调：`detail`（默认，带脱敏后的命令/路径/prompt 预览）、`meta`（只有工具名、状态、计时、审批类型）、`off`。**思考内容在任何级别都不写**。事件文件和哨兵同一个 7 天 TTL；`dsh_release(forget=true)` 会一并删掉。
+
 ## 🤫 思考内容：默认隐藏
 
 DSH 在模型层就把思考与正文分开，ACP 又把它们做成**两条独立流**。本服务默认隐藏思考内容，只返回**统计**（字数、耗时、段数）——调用方知道它想过，但不必为思考内容付上下文成本。

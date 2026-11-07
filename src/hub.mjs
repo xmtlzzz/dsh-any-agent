@@ -63,6 +63,7 @@ import { rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { Conversation } from './conversation.mjs';
 import { pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
+import { emitLive, livePreview } from './live.mjs';
 import { homeWorkspaceProblem } from './workspace-guard.mjs';
 import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
 import {
@@ -579,6 +580,12 @@ export class Hub {
       }
       this.conversations.set(conv.id, conv);
       this.save();
+      emitLive(
+        conv.id,
+        'conv.open',
+        { cwd, permission, on_approval: conv.onApproval, model: conv.cfg?.model ?? null },
+        { title_hint: livePreview(conv.titleHint, 120) },
+      );
       this.log.info(
         `[hub] 新建会话 ${conv.id}（cwd=${cwd}, 权限=${permission}, 思考深度=${effort}` +
           `${conv.workspace?.registered ? ', 工作区已登记' : `, 工作区登记失败: ${conv.workspace?.error}`}）`,

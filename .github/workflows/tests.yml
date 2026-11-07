@@ -17,6 +17,8 @@ name: tests
 #     dispatch-tools    dispatch surface              59 checks (55 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
+#     live-events       live event stream, write side  33 checks
+#     live-view         watch / dashboard viewers      39 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            10 checks
 #     bootstrap-profile zero-dependency bootstrap     24 checks
@@ -169,6 +171,16 @@ jobs:
       - name: sentinel-redaction (thinking/input hygiene)
         env: { DSH_MCP_LOG: silent }
         run: node test/sentinel-redaction.mjs
+
+      # live 事件流：假 hub + 假 ACP 进程，思考不落盘、预览脱敏、写失败不影响派活。
+      - name: live-events (live event stream, write side)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/live-events.mjs
+
+      # 查看端：增量 tail、watch --once 走 bin 入口、dashboard 的 token / Host / 只读校验。
+      - name: live-view (watch / dashboard, read-only viewers)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/live-view.mjs
 
       - name: review (caller review tickets, verdicts, sentinel rewrite)
         env: { DSH_MCP_LOG: silent }

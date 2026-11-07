@@ -232,6 +232,31 @@ export const RUNS_DIR = process.env.DSH_MCP_RUNS_DIR ?? join(dirname(STATE_FILE)
 export const REVIEWS_DIR = process.env.DSH_MCP_REVIEWS_DIR ?? join(dirname(STATE_FILE), 'reviews');
 
 /**
+ * live 事件流目录（默认与状态文件同目录下的 live/）。
+ *
+ * 每个会话一份 `<LIVE_DIR>/<conversation_id>/events.jsonl`：派活、工具调用、审批、回合结束，
+ * 给用户用 `dsh-any-agent watch` / `dashboard` 旁路查看（不经过调用方 agent）。
+ * 详见 docs/zh/live-view-design.md。**思考内容在事件格式里没有位置，任何级别都不落盘。**
+ */
+export const LIVE_DIR = process.env.DSH_MCP_LIVE_DIR ?? join(dirname(STATE_FILE), 'live');
+
+/**
+ * live 事件流级别：
+ *   detail（默认）—— 在 meta 之上带脱敏后的预览：prompt、工具 title / 输入、审批命令。
+ *                    暴露面与哨兵相同（哨兵默认就落完整正文与工具输入）。
+ *   meta         —— 只有工具名 / kind / 状态 / 计时 / 计数 / 审批类型，不含任何输入或正文。
+ *   off          —— 不写。
+ */
+export const LIVE_LEVELS = ['off', 'meta', 'detail'];
+export const LIVE_LEVEL = (() => {
+  const raw = String(process.env.DSH_MCP_LIVE ?? '').trim().toLowerCase();
+  if (raw === '') return 'detail';
+  if (raw === '0' || raw === 'false' || raw === 'no') return 'off';
+  if (raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes') return 'detail';
+  return LIVE_LEVELS.includes(raw) ? raw : 'detail';
+})();
+
+/**
  * 调用方审核策略：
  *   advisory（默认）—— 每个回合结果都附审核单（清单 + dsh_review 入口 + 证据），
  *                      但**不阻塞**后续 dsh_send；调用方仍可自己决定先做什么。

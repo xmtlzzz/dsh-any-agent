@@ -15,6 +15,7 @@
  *     - runs/<id>/                     完成哨兵
  *     - reviews/<id>/                  调用方审核记录
  *     - locks/<id>.json                写锁持有者登记
+ *     - live/<id>/                     live 事件流（watch / dashboard 的数据源）
  *
  * ★ 护栏（和 purgeTestSessions 同一条）：只清"能证明是测试会话"的。证据按可信度：
  *     会话头里的 cwd > 元数据侧车里的 cwd > 注册表条目里的 cwd。
@@ -28,7 +29,7 @@
 import { existsSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { REVIEWS_DIR, RUNS_DIR, STATE_FILE } from './config.mjs';
+import { LIVE_DIR, REVIEWS_DIR, RUNS_DIR, STATE_FILE } from './config.mjs';
 import { LOCKS_DIR } from './locks.mjs';
 import { isTestSessionCwd, pruneTestWorkspaces, purgeOrphanProjcache, purgeTestSessions } from './workspace.mjs';
 
@@ -49,12 +50,13 @@ function resolveState(spec) {
     runsDir: s.runsDir ?? join(dir, 'runs'),
     reviewsDir: s.reviewsDir ?? join(dir, 'reviews'),
     locksDir: s.locksDir ?? join(dir, 'locks'),
+    liveDir: s.liveDir ?? join(dir, 'live'),
   };
 }
 
 /** 当前进程配置的状态目录（= MCP 服务默认用的那份，通常是 `~/.dsh/.dsh-any-agent`）。 */
 export function defaultState() {
-  return { stateFile: STATE_FILE, runsDir: RUNS_DIR, reviewsDir: REVIEWS_DIR, locksDir: LOCKS_DIR };
+  return { stateFile: STATE_FILE, runsDir: RUNS_DIR, reviewsDir: REVIEWS_DIR, locksDir: LOCKS_DIR, liveDir: LIVE_DIR };
 }
 
 const readJson = (file) => {
@@ -105,7 +107,7 @@ export function purgeProjectState({ ids, states, headerCwds = new Map(), trusted
   const trustedSet = trusted === true ? null : new Set(Array.isArray(trusted) ? trusted : []);
   const isTrusted = (id) => trusted === true || (trustedSet?.has(id) ?? false);
   const specs = (states?.length ? states : [defaultState()]).map(resolveState);
-  const res = { removed: { registry: 0, meta: 0, runs: 0, reviews: 0, locks: 0 }, refused: [], errors: [] };
+  const res = { removed: { registry: 0, meta: 0, runs: 0, reviews: 0, locks: 0, live: 0 }, refused: [], errors: [] };
   const wanted = [...new Set((ids ?? []).filter((x) => typeof x === 'string' && SAFE_ID.test(x)))];
 
   for (const st of specs) {
@@ -133,6 +135,7 @@ export function purgeProjectState({ ids, states, headerCwds = new Map(), trusted
     for (const id of allowed) {
       if (removePath(join(st.runsDir, id), dryRun)) res.removed.runs++;
       if (removePath(join(st.reviewsDir, id), dryRun)) res.removed.reviews++;
+      if (removePath(join(st.liveDir, id), dryRun)) res.removed.live++;
       if (removePath(join(st.locksDir, `${id}.json`), dryRun)) res.removed.locks++;
       if (removePath(join(st.metaDir, `${id}.json`), dryRun)) res.removed.meta++;
       // 侧车写到一半崩溃会留 `<id>.json.tmp.<pid>.<rand>`
@@ -215,6 +218,7 @@ export function sweepStateDir({ state, dryRun = false, removeEmptyDirs = false }
   };
   collect(spec.runsDir, false);
   collect(spec.reviewsDir, false);
+  collect(spec.liveDir, false);
   collect(spec.locksDir, true);
   collect(spec.metaDir, true);
   try {

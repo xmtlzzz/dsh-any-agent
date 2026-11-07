@@ -39,6 +39,8 @@ if (argv.includes('--help') || argv.includes('-h')) {
     '  dsh-any-agent                 run the MCP server on stdio\n' +
     '  dsh-any-agent team on|off     enable/disable Agent Teams (writes settings.json)\n' +
     '  dsh-any-agent team status     show the effective team mode\n' +
+    '  dsh-any-agent watch [conv]    live call chain of dispatched runs in this terminal\n' +
+    '  dsh-any-agent dashboard       same, as a read-only local web page (127.0.0.1 + token)\n' +
     '  dsh-any-agent --version       print the version and exit\n' +
     '  dsh-any-agent --help          this text\n\n' +
     'Register it with your client:\n' +
@@ -52,10 +54,21 @@ if (argv.includes('--help') || argv.includes('-h')) {
     '  DSH_MCP_PERMISSION       danger-full-access | workspace-write | read-only\n' +
     '  DSH_MCP_APPROVAL         auto-allow | auto-deny | ask\n' +
     '  DSH_MCP_REVIEW           advisory (default) | off — caller review ticket on results\n' +
-    '  DSH_MCP_LOG              silent (default) | info | debug\n\n' +
+    '  DSH_MCP_LOG              silent (default) | info | debug\n' +
+    '  DSH_MCP_LIVE             detail (default) | meta | off — live event stream for watch/dashboard\n\n' +
     'Docs: https://github.com/xmtlzzz/dsh-any-agent\n',
   );
   process.exit(0);
+}
+
+/**
+ * `dsh-any-agent watch` / `dsh-any-agent dashboard`：只读查看 live 事件流（调用链）。
+ * 独立进程，不启动 Hub、不碰写锁、不连 DSH —— 必须在启动 Hub 之前分派。
+ */
+if (argv[0] === 'watch' || argv[0] === 'dashboard') {
+  const cli = await import('../src/live-cli.mjs');
+  const code = argv[0] === 'watch' ? await cli.runWatch(argv.slice(1)) : await cli.runDashboard(argv.slice(1));
+  process.exit(code);
 }
 
 /**
@@ -128,6 +141,15 @@ await hub.load();
 hub.startReaper();
 // 启动时清一次过期哨兵（哨兵内含正文，长期不清理会无声堆积）
 const prunedSentinels = hub.pruneSentinels();
+// live 事件流与哨兵同一 TTL（单独调用，不改 pruneSentinels 的返回形状）
+try {
+  const { pruneLive } = await import('../src/live.mjs');
+  const { SENTINEL_TTL_MS } = await import('../src/config.mjs');
+  const prunedLive = pruneLive(SENTINEL_TTL_MS);
+  if (prunedLive.pruned) log.info(`[dsh-any-agent] 启动清理：删除 ${prunedLive.pruned} 个过期 live 事件文件`);
+} catch {
+  /* 清理失败不影响启动 */
+}
 if (prunedSentinels.pruned || prunedSentinels.reviews_pruned) {
   log.info(
     `[dsh-any-agent] 启动清理：删除 ${prunedSentinels.pruned} 个过期哨兵、` +
