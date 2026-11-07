@@ -94,6 +94,8 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 
 **6.3 Temp directories are skipped by default** (`DSH_MCP_REGISTER_WORKSPACE=project`) so test runs don't flood your GUI. Use `all` to include them.
 
+**6.4 Running the tests must not leave anything in `~/.dsh`.** Symptom: the session count under `~/.dsh` keeps growing, and `storages/session_projcache/sessions/` holds many orphan files whose session directories are long gone. Cause: model-backed tests use your real `~/.dsh` (the credentials live there, so it cannot be isolated), and the old cleanup removed the session directory but neither the projection cache nor this project's own `runs/reviews/meta/locks`. Now: every model-backed suite removes the sessions it created, with every artifact, in its own `finally`, and `node test/cleanup.mjs` is the global backstop. **Only sessions whose cwd is a test directory are ever deleted** — naming an id does not bypass that. See `docs/en/tests.md`.
+
 ## 7. Privacy
 
 **7.1 Silent by default** — not one byte. MCP's stdout is the protocol channel, and stderr lands in Claude/Codex's logs.

@@ -40,6 +40,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Test runs left residue in the real `~/.dsh`.** Purging a test session removed
+  only its session directory; the DSH projection cache
+  (`storages/session_projcache/sessions/<id>.json`) was never removed, so about
+  400 orphan files piled up, and the project's own `runs/`, `reviews/`, `meta/`,
+  `locks/` and registry entries leaked too (eight suites kept their state loose
+  under `%TEMP%`, where nothing cleaned it). Every model-backed suite now purges
+  exactly the sessions it created (plus DSH-spawned subagent sessions) with every
+  artifact in its own `finally`; `test/cleanup.mjs` is only the backstop and also
+  sweeps old orphans. The purge refuses any session whose cwd is not a test
+  directory, even when named by id, and no longer re-registers every temp session
+  on disk into the GUI workspace list as a side effect. New offline suite
+  `residue-purge` proves both halves in a sandboxed `DSH_HOME`.
 - **`dsh_read` merged different tool calls into one entry.** Consecutive tool
   updates in a turn were concatenated (`read [in_progress]read [completed]pwsh …`)
   under the first call's `tool_call_id`. Each tool call now has its own entry and

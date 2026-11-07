@@ -228,6 +228,11 @@
 - **原因**：跑测试会在 `%TEMP%` 下建一堆工作区，全登记会把你 GUI 灌满。
 - **对策**：默认模式 `project` 会跳过临时目录。要连临时目录一起登记就设 `DSH_MCP_REGISTER_WORKSPACE=all`。
 
+### 6.4 跑测试不该在 `~/.dsh` 里留东西
+- **现象**：`~/.dsh` 里会话数越攒越多；`storages/session_projcache/sessions/` 里有大量会话目录早已不在的孤儿文件。
+- **原因**：真机测试用的是你真实的 `~/.dsh`（凭据在那里，没法隔离）；旧版清理只删会话目录，不删投影缓存，也不清本项目自己的 `runs/reviews/meta/locks`。
+- **现状**：每个真机套件在 `finally` 里清掉自己造的会话及全部产物，全局 `node test/cleanup.mjs` 兜底；**只有 cwd 是测试目录的会话才会被删**，点名 id 也绕不过。详见 `docs/zh/tests.md`。
+
 ---
 
 ## 七、隐私与日志

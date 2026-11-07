@@ -11,7 +11,13 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 模型套件不在 GitHub 托管 CI 里（需要真实 DSH、provider 与凭据）。在本机跑，
 或用 `model-suites` workflow 指定一台装好 DSH 的 self-hosted runner。
 
-测试套件**会自己收尾**：`run.mjs` 结束时必定执行 `cleanup.mjs`，它只清理 cwd 在**测试自己造的目录**（`tmpdir()/dsh-any-agent-*` 或桌面 `dsh-any-agent-test-*`）里的会话与工作区登记。**用户在 `%TEMP%` 里自己的真实项目、以及你的状态目录都不会被碰**。要连桌面测试目录一起清，可显式跑 `node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions`。
+测试套件**会自己收尾，跑完不留残留**。真机套件会在各自的 `finally` 里调用 `test/residue.mjs` 的 `cleanupSuite`，精确清掉**自己造的**会话（`McpClient` 自动记下每个 `dsh_start` 返回的 id；再按套件自己的临时根兜住没记到 id 的会话与 DSH 自己派出的子代理会话），连同它的**全部产物**：
+- DSH 侧：会话日志、投影缓存 `storages/session_projcache/sessions/<id>.json`（删会话目录**不会**带走它，旧版跑多了会攒出几百个孤儿）、`workspace.json` 里的登记、forget 墓碑；
+- 本项目侧：注册表条目、`meta/`、哨兵 `runs/`、审核 `reviews/`、写锁登记 `locks/`（状态目录收在套件自己的临时根里，不再散落在 `%TEMP%` 根下）。
+
+`run.mjs` 结束时再执行一遍全局 `cleanup.mjs` 作兜底（处理被杀掉的进程、旧版本的残留、投影缓存里的测试孤儿）。**护栏**：只有 cwd 是**测试自己造的目录**（当前进程的 `tmpdir()/dsh-any-agent-*`、桌面 `dsh-any-agent-test-A|B`、本仓库 `.state/ws-probe-*`）的会话才会被删，**点名 id 也绕不过**；用户在 `%TEMP%` 里自己的真实项目、并行 agent 的临时根（TMP 指到别处）、以及你的状态目录都不会被碰。要连桌面测试目录一起清，可显式跑 `node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions`。
+
+为什么真机套件不把 `DSH_HOME` 指到一次性沙箱：DSH 的凭据在 `$DSH_HOME/.credentials.yaml`，沙箱里没有它真机套件就拿不到模型，而把密钥/路由复制进临时目录等于多开一个泄漏面；所以真机套件继续用真实 `~/.dsh`，靠上面这套精确清理保证不留残留（纯离线套件早就用沙箱 `DSH_HOME`，见 `test/sandbox-home.mjs`）。
 
 | 套件 | 检查数 | 覆盖 |
 |---|---|---|
@@ -36,6 +42,7 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `forget-tombstone` | 10 | **`forget` 是终态**：`release(forget=true)` 写墓碑，按 id 查询明确失败并给出恢复路径，列表不再展示；删除墓碑后回到常规“未知会话”路径（不花 token） |
 | `bootstrap-profile` | 24 | **首启 profile 在零依赖发布形态下可用**：内置 YAML 子集解析器复制路由、剥掉 `apiKey`/`headers`/字面密钥、绝不写 `defaultPreset`、幂等；用户手写文件逐字节不动（不花 token） |
 | `workspace-safety` | 23 | **数据丢失边界**：`isTempPath` 按路径分段（`tmpdir()+'Suffix'`、`/tmpfoo` 都不算临时目录）、坏 `workspace.json` 绝不覆盖、会话根不可读时绝不清空 `sessionIds`、自动清理只删测试造的会话（不花 token） |
+| `residue-purge` | 145 | **测试残留清理**（沙箱 `DSH_HOME`，不花 token）：一个测试会话的每种产物（会话日志、投影缓存、工作区登记/archived/pinned、墓碑、注册表条目、元数据、哨兵、审核、锁登记）都被清掉；**非测试会话逐字节不变**（点名也删不掉）；子会话级联、`roots` 限定、干跑零写入、坏文件 fail-closed、路径穿越、旧版扁平目录必须有证据才清、各真机套件都接上了收尾 |
 | `permission-adopt` | 17 | **不无声提权**：接管没有权限记录的外部会话时 fail-closed 到 `read-only`；记录为 `read-only` 的会话不能被侧车提升；运行期回读记录与请求不一致会失败（不花 token） |
 | `state-safety` | 26 | **状态/哨兵/锁目录**：默认在 `$DSH_HOME/.dsh-any-agent`、不可写时启动明确失败、哨兵写失败返回 `null` + `sentinel_error`、非法数值落安全侧（不花 token） |
 | `setup` | 45 | **注册 CLI**：预览不写盘、`--remove` 只摘自己那条、没装客户端算跳过不算失败、Codex TOML 段往返、以及把写进配置里的命令真的拉起一次并要求应答 `initialize`（不花 token）。**不会调用 `claude mcp get`** —— 那个 CLI 会整体回写 `~/.claude.json` |
