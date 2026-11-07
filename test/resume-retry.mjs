@@ -35,8 +35,10 @@ process.env.DSH_MCP_STATE = join(ROOT, 'state', 'conversations.json');
 process.env.DSH_MCP_BOOTSTRAP = '0';
 process.env.DSH_MCP_LOG = 'silent';
 process.env.DSH_BIN = join(HERE, 'fake-acp.mjs');
-// 够长，慢 CI 上 node 冷启动也不会误触发；够短，整套不拖。
-process.env.DSH_MCP_REQUEST_TIMEOUT_MS = '2000';
+// 请求超时同时管 initialize 和 session/resume。2s 在繁忙的 windows-latest 上不够：PR #11 的 CI
+// （node 22，第二遍全量运行）里第一个假进程冷启动没赶上 initialize，被当成"DSH 没回话"重建了一次。
+// 4s 留出冷启动余量；两个故意停滞的场景因此各多等几秒，可以接受。
+process.env.DSH_MCP_REQUEST_TIMEOUT_MS = '4000';
 
 const { Conversation } = await import('../src/hub.mjs');
 const { SessionHost } = await import('../src/host.mjs');
@@ -110,6 +112,13 @@ function newConv(id) {
 
 const settle = async (ms = 400) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * 本场景里那次"重建进程重试"是不是**冷启动 initialize 超时**引起的（而不是 resume 被拒后误重试）。
+ * ensureAlive 对任何 ACP_TIMEOUT 都重建一次，initialize 也不例外；慢 runner 上这是环境噪声，
+ * 不是本场景要测的"拒绝不重试"。日志里写着是哪个方法超时，据此区分。
+ */
+const initTimeoutRebuilt = () => logs.some((l) => l.includes('initialize 超时') && l.includes('重试一次'));
+
 try {
   console.log(`\n共享进程: ${SHARED_PROCESS ? '开（默认）' : '关（DSH_MCP_SHARED_PROCESS=0）'}`);
 
@@ -168,6 +177,7 @@ try {
   console.log('\n[3] 撞写锁（DSH 明确拒绝）→ 不重试，走"写锁被占用"说明');
   {
     const read = scenario('lease');
+    logs.length = 0;
     const conv = newConv('retry-lease');
     let err = null;
     try {
@@ -177,7 +187,12 @@ try {
     }
     const { starts, resumes } = read();
     check('报的是写锁冲突', err?.code === 'session-writer-held', `${err?.code} ${err?.message}`);
-    check('只 resume 了一次、只拉起一个进程', resumes.length === 1 && starts.length === 1, `starts=${starts.length} resumes=${resumes.length}`);
+    check('★ 拒绝不重试：session/resume 只发了一次', resumes.length === 1, `resumes=${resumes.length} logs=${JSON.stringify(logs)}`);
+    check(
+      '没有因为拒绝而重建进程（冷启动 initialize 超时引起的那次重建另计）',
+      starts.length === 1 || (starts.length === 2 && initTimeoutRebuilt()),
+      `starts=${starts.length} logs=${JSON.stringify(logs)}`,
+    );
     check('进程已退出', starts.every((p) => !isPidAlive(p)));
   }
 
@@ -185,6 +200,7 @@ try {
   console.log('\n[4] invalid params（DSH 明确拒绝）→ 不重试');
   {
     const read = scenario('invalid');
+    logs.length = 0;
     const conv = newConv('retry-invalid');
     let err = null;
     try {
@@ -194,7 +210,12 @@ try {
     }
     const { starts, resumes } = read();
     check('报错并带上 DSH 的原因', /恢复会话失败/.test(err?.message ?? '') && /not resumable/.test(err?.message ?? ''), err?.message);
-    check('只 resume 了一次、只拉起一个进程', resumes.length === 1 && starts.length === 1, `starts=${starts.length} resumes=${resumes.length}`);
+    check('★ 拒绝不重试：session/resume 只发了一次', resumes.length === 1, `resumes=${resumes.length} logs=${JSON.stringify(logs)}`);
+    check(
+      '没有因为拒绝而重建进程（冷启动 initialize 超时引起的那次重建另计）',
+      starts.length === 1 || (starts.length === 2 && initTimeoutRebuilt()),
+      `starts=${starts.length} logs=${JSON.stringify(logs)}`,
+    );
   }
 
   // ── [5] 超时错误的机器可读字段 ──────────────────────────────
