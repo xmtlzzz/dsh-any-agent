@@ -12,7 +12,7 @@
  * 收尾：Ctrl+C / kill 本进程 → 自动 release + 删除桌面演示文件夹。
  */
 
-import { mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
