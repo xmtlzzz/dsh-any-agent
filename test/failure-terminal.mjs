@@ -15,10 +15,12 @@ import assert from 'node:assert';
 import { Conversation } from '../src/hub.mjs';
 import { createHandlers } from '../src/tools.mjs';
 
+let passed = 0;
 let failed = 0;
 function check(name, fn) {
   try {
     fn();
+    passed += 1;
     console.log(`  ✓ ${name}`);
   } catch (e) {
     failed += 1;
@@ -139,5 +141,7 @@ check('返回 sentinel_file', () => assert.equal(got.structured.sentinel_file, f
 
 rmSync(dir, { recursive: true, force: true });
 
+// 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
+console.log(`\n===== failure terminal: passed ${passed}, failed ${failed} =====`);
 console.log(`\n总结果: ${failed === 0 ? '通过 ✅' : `${failed} 项失败 ❌`}`);
 process.exit(failed === 0 ? 0 : 1);

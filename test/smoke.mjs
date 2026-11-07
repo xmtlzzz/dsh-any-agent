@@ -151,5 +151,7 @@ try {
   } catch {}
 }
 
+// 检查数随有没有 DSH 变化（有 = 会话段也跑，没有 = 跳过），报告里要记下是哪一种。
+console.log(`[report] dsh=${hasDsh ? 1 : 0}`);
 console.log(`\n===== 冒烟测试：通过 ${pass}，失败 ${failCount} =====`);
 process.exit(failCount ? 1 : 0);
