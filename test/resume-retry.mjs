@@ -270,15 +270,36 @@ try {
   }
 }
 
-console.log(`\n===== resume 重试（${SHARED_PROCESS ? '共享进程' : '一会话一进程'}）：通过 ${pass}，失败 ${failed} =====`);
+// 每种模式一行**非标准**小计（`-----`）：test/report.mjs 只认最后一条 `=====` 汇总行，
+// 两种模式各打一条标准行时报告只会记到后跑的那一半（实测记成 27 而不是 59）。
+const MODE_TAG = '[resume-retry-mode]';
+console.log(`\n----- resume 重试（${SHARED_PROCESS ? '共享进程' : '一会话一进程'}）：通过 ${pass}，失败 ${failed} -----`);
+if (CHILD) console.log(`${MODE_TAG} pass=${pass} fail=${failed}`);
 
 let childFailed = false;
+let totalPass = pass;
+let totalFail = failed;
 if (!CHILD && SHARED_PROCESS) {
   console.log('\n──── 再跑一遍：DSH_MCP_SHARED_PROCESS=0（一会话一进程） ────');
+  // stdout 走管道再原样转发，才能读到子进程那一半的计数并合成一条标准汇总行。
   const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--child'], {
-    stdio: 'inherit',
+    stdio: ['inherit', 'pipe', 'inherit'],
+    encoding: 'utf8',
     env: { ...process.env, DSH_MCP_SHARED_PROCESS: '0' },
   });
+  process.stdout.write(r.stdout ?? '');
   childFailed = r.status !== 0;
+  const m = new RegExp(`${MODE_TAG.replace(/[[\]]/g, '\\$&')} pass=(\\d+) fail=(\\d+)`).exec(r.stdout ?? '');
+  if (m) {
+    totalPass += Number(m[1]);
+    totalFail += Number(m[2]);
+  } else {
+    // 子进程没报出计数（崩了）也必须算失败，不能让合计看起来是全绿。
+    totalFail += 1;
+    childFailed = true;
+  }
+}
+if (!CHILD) {
+  console.log(`\n===== resume 重试（两种模式合计）：通过 ${totalPass}，失败 ${totalFail} =====`);
 }
 process.exit(failed || childFailed ? 1 : 0);
