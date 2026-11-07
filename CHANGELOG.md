@@ -20,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were searched, so with the desktop app on 0.2.2-rc.1 the server silently ran a
   stale 0.2.1-rc.5 from an npx cache. Candidates are ranked runnable-first →
   newest → desktop > npm global > npx. `DSH_BIN` stays as an explicit override
-  (it may point inside an `.asar`); new `DSH_RUNTIME` overrides the launcher.
+  (it may point inside an `.asar`); new `DSH_RUNTIME` overrides the launcher,
+  both with `DSH_BIN` and on its own for auto-discovered npm/npx installs (whose
+  `engines.node` is then re-checked against it); the desktop app always keeps its
+  bundled runtime.
 - `dsh_doctor`: `dsh_bin` shows the source and runtime; new `dsh_runtime`
   (launcher's Node vs DSH's `engines.node` — 0.2.2 needs Node ≥ 24.9),
   `dsh_desktop` (warns when the GUI and this server run different DSH versions
@@ -83,12 +86,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sweeps old orphans. The purge refuses any session whose cwd is not a test
   directory, even when named by id, and no longer re-registers every temp session
   on disk into the GUI workspace list as a side effect. New offline suite
-  `residue-purge` proves both halves in a sandboxed `DSH_HOME`.
+  `residue-purge` proves both halves in a sandboxed `DSH_HOME`. With
+  `DSH_MCP_KEEP_EVIDENCE=1`, `cleanup.mjs` now skips the whole sweep, so the
+  sessions and state directories that `acceptance` / `workspace-effect` keep for
+  inspection survive the end-of-run cleanup.
 - **`dsh_read` merged different tool calls into one entry.** Consecutive tool
   updates in a turn were concatenated (`read [in_progress]read [completed]pwsh …`)
   under the first call's `tool_call_id`. Each tool call now has its own entry and
   a status update replaces it in place; only streamed text is still merged, so an
-  empty turn's start/end markers also stay separate.
+  empty turn's start/end markers also stay separate. Because an in-place update
+  can give an earlier entry a higher revision, `dsh_read` now pages in revision
+  order (entries in a page are still returned in time order) so a small `limit`
+  can never skip an unread entry, and `gap` is computed from entries actually
+  evicted from the ring buffer instead of assuming revisions grow along it.
 - **`answer` ran message segments together.** Text DSH sends before and after a
   tool call is two messages, but the collected answer joined them with no
   separator (`…where possible.1) package.json…`). A blank line now separates a

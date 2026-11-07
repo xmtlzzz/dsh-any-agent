@@ -8,20 +8,20 @@ name: tests
 #     smoke             protocol + instructions length cap, no DSH   20 checks
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     guards            env-var edge cases            40 checks
-#     dsh-locate        DSH auto-discovery (asar)     19 checks
+#     dsh-locate        DSH auto-discovery (asar)     21 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          37 checks
 #     failure-terminal  terminal state on failure     10 checks
 #     shared-host       shared process host           25 checks
 #     resume-retry      cold-resume timeout retry     59 checks (fake ACP server)
 #     dispatch-tools    dispatch surface              59 checks (55 off Windows)
-#     read-cursor       dsh_read cursor + answer      19 checks
+#     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            10 checks
 #     bootstrap-profile zero-dependency bootstrap     24 checks
 #     workspace-safety  data-loss boundaries          23 checks
-#     residue-purge     test residue cleanup, sandboxed 145 checks
+#     residue-purge     test residue cleanup, sandboxed 149 checks
 #     permission-adopt  no silent privilege escalation 17 checks
 #     state-safety      state/sentinel/lock storage   26 checks
 #     workspace-snapshot workspace_changed full fingerprint  21 checks
