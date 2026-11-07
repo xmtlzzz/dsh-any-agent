@@ -53,6 +53,7 @@
     "test:smoke": "node ./test/smoke.mjs",
     "test:guards": "node ./test/guards.mjs",
     "test:prune": "node ./test/prune.mjs",
+    "lint": "node ./scripts/lint.mjs",
     "check:release": "node ./scripts/check-release.mjs",
     "commit": "node ./scripts/commit.mjs"
   },

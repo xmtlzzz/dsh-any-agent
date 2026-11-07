@@ -26,8 +26,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background receipts on Windows carry `sentinel_read_powershell`, a reader that
   passes `-Encoding UTF8` (Windows PowerShell 5.1 otherwise misreads the BOM-less
   sentinel and `ConvertFrom-Json` fails on CJK text).
+- `npm run lint` (`scripts/lint.mjs`, no npm dependencies): `node --check` on every
+  `.mjs`, relative import paths that resolve with exact case, named imports that
+  are real exports (including `await import()` destructuring and `node:`
+  builtins), and unused named imports. Runs first in every CI offline cell and at
+  the Node 22.15 floor; `test/lint.mjs` is its regression suite. Its first run
+  removed nine unused imports.
 
 ### Changed
+
+- **Internal: `src/hub.mjs` and `src/tools.mjs` are split into cohesive modules**
+  with no behaviour change. From `hub.mjs`: `conversation.mjs` (the `Conversation`
+  class), `git-snapshot.mjs`, `hub-store.mjs` (meta sidecar and forget
+  tombstones), `sentinel.mjs`, `workspace-guard.mjs`, `acp-session.mjs`. From
+  `tools.mjs`: `tool-defs.mjs`, `tool-render.mjs`, `doctor.mjs`. Both files
+  re-export every name they exported before, so existing import paths still work.
+- `model-suites` workflow finds DSH through the project's own `resolveDsh()`
+  (`scripts/detect-dsh.mjs`) instead of `command -v dsh`, so a self-hosted runner
+  with only the desktop app installed works without secrets; `DSH_BIN` stays an
+  optional override.
 
 - Compatibility matrix: DSH 0.2.1-rc.5 and 0.2.2-rc.1 are **verified** (full
   suites, 2026-11-06); 0.2.3+ is unverified.

@@ -9,9 +9,9 @@
  * 会消耗一定 token（三个 agent 各自多步作业）。
  */
 
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, basename } from 'node:path';
+import { join } from 'node:path';
 import { zstdDecompressSync } from 'node:zlib';
 import { McpClient } from './mcp-client.mjs';
 import { cleanupSuite } from './residue.mjs';

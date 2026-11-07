@@ -33,6 +33,8 @@ name: tests
 #     config-safety     in-place edits, format        407 checks
 #     real-configs      real config round-trip        skips without client fixtures
 #     package-check     publishability                14 checks
+#     lint              static checks (npm run lint)  syntax, imports, exports, unused
+#     lint (selftest)   scripts/lint.mjs regression   22 checks
 #     package job       pack -> install -> --version
 #     website job       build + 29 site/a11y tests + bilingual pages
 #
@@ -98,6 +100,17 @@ jobs:
         run: |
           if command -v dsh > /dev/null 2>&1; then echo 'dsh unexpectedly present'; exit 1; fi
           echo 'no dsh on PATH, as expected'
+
+      # 零依赖静态检查：语法、相对导入路径（含大小写）、具名导出是否存在、未使用导入。
+      # 放在最前面：拆模块 / 改导入留下的一个漏导出，比任何一个套件都更早、更便宜地暴露。
+      # 在 Linux 上跑的价值最大 —— Windows/macOS 不区分大小写，只有这里会抓到
+      # `./Foo.mjs` 与 `foo.mjs` 的写法不一致。
+      - name: lint (syntax, imports resolve, named exports exist, no unused imports)
+        run: npm run lint
+
+      - name: lint selftest (every rule fires, valid syntax is not flagged)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/lint.mjs
 
       - name: smoke (protocol; skips DSH session sections on this runner)
         env: { DSH_MCP_LOG: silent, DSH_BIN: '/fake/never/used.js' }
@@ -315,5 +328,7 @@ jobs:
         run: |
           node --version
           node test/package-check.mjs
+          # 具名导入（含 node:zlib 的 zstdDecompressSync）要对照这个版本的真实导出检查。
+          node scripts/lint.mjs
           node test/workspace-safety.mjs
           node test/bootstrap-profile.mjs

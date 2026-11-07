@@ -19,7 +19,7 @@
 import { chmodSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
-import { atomicWrite, backupFile, clientList, resolveDirs, ENTRY_NAME } from '../src/clients.mjs';
+import { atomicWrite, backupFile, clientList, resolveDirs } from '../src/clients.mjs';
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
