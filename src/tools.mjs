@@ -36,9 +36,18 @@ import { audit } from './audit.mjs';
 import { listOrphans, LOCKS_DIR } from './locks.mjs';
 import { rssMb } from './procstat.mjs';
 import { normalizeReviewMode } from './review.mjs';
+import {
+  backgroundReceipt,
+  compactResultForBudget,
+  queuedReceipt,
+  renderReviewSection,
+  renderSendResult,
+  replayRun,
+} from './tool-render.mjs';
 
 // 外部（mcp.mjs、测试）一直从 tools.mjs 取这些名字；拆出去之后导入路径保持不变。
 export { TOOL_DEFS } from './tool-defs.mjs';
+export { compactResultForBudget, psReadCommand, psWaitCommand } from './tool-render.mjs';
 
 /**
  * timeout_ms 校验：只接受 >= 0 的有限数字（0 = 一直等）。
@@ -61,259 +70,8 @@ const TEAM_PREFIX =
   '不需要就单 agent 完成。不要为简单任务组队。\n\n';
 
 /**
- * 把审核单渲染成调用方一眼能看到的文本块。
+ * 工具处理器表。
  *
- * 为什么放在正文后面而不是单独一次工具调用：MCP 调用方拿到结果后往往直接转述，
- * 审核要求必须和结果出现在同一条消息里，才有机会改变它的下一步动作。
- */
-function renderReviewSection(review) {
-  if (!review || typeof review !== 'object') return '';
-  const lines = [];
-  const pending = review.status === 'pending';
-  lines.push(`【调用方审核${pending ? ' · 待提交' : ` · ${review.status}`}】`);
-  if (review.prompt_preview) lines.push(`原任务: ${review.prompt_preview}`);
-  const ev = review.evidence ?? {};
-  const bits = [];
-  if (ev.stop_reason) bits.push(`stop=${ev.stop_reason}`);
-  if (ev.workspace_changed != null) bits.push(`工作区变化=${ev.workspace_changed ? '是' : '否'}`);
-  if (ev.changed_files != null) bits.push(`改动文件=${ev.changed_files}`);
-  if (Array.isArray(ev.tools) && ev.tools.length) bits.push(`工具=[${ev.tools.join(', ')}]`);
-  if (ev.auto_approvals) {
-    bits.push(`⚠ 自动放行审批=${ev.auto_approvals}${ev.auto_escalations ? `（含提权 ${ev.auto_escalations}）` : ''}`);
-  }
-  if (bits.length) lines.push(`证据: ${bits.join(' · ')}`);
-  if (pending) {
-    lines.push('在把这次结果当作完成之前，请独立核验：');
-    (review.checklist ?? []).forEach((item, i) => lines.push(`${i + 1}. ${item}`));
-    if (review.instructions) lines.push(review.instructions);
-    lines.push(
-      `提交裁决: dsh_review(conversation_id="${review.conversation_id}", run_id="${review.run_id}", ` +
-        'verdict="pass|partial|fail", notes="审核理由")',
-    );
-  } else {
-    if (review.notes) lines.push(`审核理由: ${review.notes}`);
-    if (Array.isArray(review.findings) && review.findings.length) {
-      lines.push(`审核问题: ${review.findings.join('；')}`);
-    }
-    if (review.review_file) lines.push(`审核记录: ${review.review_file}`);
-  }
-  return lines.join('\n');
-}
-
-/**
- * 按 `max_chars` 预算压缩一份回合结果（只用于返回给调用方，不改原对象）。
- *
- * 体积大头是 tools_used[].input：edit/write 会带完整的新旧文本，几十次工具调用
- * 轻松几万字。压缩后每个工具只留 id/title/name/status/kind 与 input_chars；
- * 正文与思考截到预算长度。完整版本仍在哨兵文件里。
- */
-export function compactResultForBudget(result, cap) {
-  if (!result || typeof result !== 'object' || !(cap > 0)) return result ?? null;
-  const out = { ...result };
-  if (typeof out.answer === 'string' && out.answer.length > cap) out.answer = out.answer.slice(0, cap);
-  if (typeof out.thinking === 'string' && out.thinking.length > cap) out.thinking = out.thinking.slice(0, cap);
-  if (Array.isArray(out.tools_used)) {
-    out.tools_used = out.tools_used.map((t) => {
-      if (!t || typeof t !== 'object') return t;
-      const { input, ...meta } = t;
-      if (input === undefined) return meta;
-      let chars = 0;
-      try {
-        chars = typeof input === 'string' ? input.length : JSON.stringify(input)?.length ?? 0;
-      } catch {
-        chars = 0;
-      }
-      return { ...meta, input_chars: chars };
-    });
-  }
-  return out;
-}
-
-/**
- * PowerShell 版的哨兵等待命令（Windows 宿主上 Git Bash 可能不可用或挂住）。
- * 路径放进单引号字面量：PowerShell 单引号里只有 `'` 需要转义（写成 `''`），
- * `$`、反引号都不展开，所以不会被路径内容注入。
- */
-export function psWaitCommand(sentinelPath, timeoutSec = 2100) {
-  const lit = `'${String(sentinelPath).replace(/'/g, "''")}'`;
-  return (
-    `$f=${lit}; $dl=(Get-Date).AddSeconds(${Math.max(1, Math.floor(timeoutSec))}); ` +
-    `while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit 1 }; Start-Sleep -Seconds 2 }; 'DONE'`
-  );
-}
-
-/**
- * PowerShell 版的哨兵**读取**命令。哨兵是无 BOM 的 UTF-8：Windows PowerShell 5.1 的
- * `Get-Content` 默认按 ANSI 代码页读，中文正文会乱码、`ConvertFrom-Json` 直接解析失败，
- * 所以必须显式 `-Encoding UTF8`（PowerShell 7 默认就是 UTF-8，加上也无害）。
- */
-export function psReadCommand(sentinelPath) {
-  const lit = `'${String(sentinelPath).replace(/'/g, "''")}'`;
-  return `Get-Content -LiteralPath ${lit} -Raw -Encoding UTF8 | ConvertFrom-Json`;
-}
-
-/** 把结构化结果渲染成给模型看的文本。 */
-function renderSendResult(r) {
-  const lines = [];
-  if (r.answer?.trim()) lines.push(r.answer.trim());
-  else lines.push('(DSH 本次没有产生正文输出)');
-
-  if (r.thinking && r.thinking.trim()) {
-    lines.push('');
-    lines.push('--- 思考内容 ---');
-    lines.push(r.thinking.trim());
-  }
-
-  const meta = [];
-  meta.push(`stop=${r.stop_reason}`);
-  if (typeof r.elapsed_ms === 'number') meta.push(`耗时=${(r.elapsed_ms / 1000).toFixed(1)}s`);
-  if (r.thinking_stats?.chars) {
-    meta.push(
-      r.thinking_stats.hidden
-        ? `思考已隐藏(${r.thinking_stats.chars}字/${(r.thinking_stats.ms / 1000).toFixed(1)}s)`
-        : `思考=${r.thinking_stats.chars}字`,
-    );
-  }
-  const tools = (r.tools_used ?? []).map((t) => t.name ?? t.title).filter(Boolean);
-  if (tools.length) meta.push(`工具=[${[...new Set(tools)].join(', ')}]`);
-  if (r.workspace_changed) meta.push(`本轮工作区状态发生变化(当前共 ${r.diff_stat?.changed_files ?? '?'} 个文件有改动)`);
-  if (r.auto_approvals_total) {
-    meta.push(
-      `自动放行审批 ${r.auto_approvals_total} 次` +
-        (r.auto_escalations_total ? `(含沙箱提权 ${r.auto_escalations_total} 次)` : ''),
-    );
-  }
-  lines.push('');
-  lines.push(`[${meta.join(' · ')}]`);
-
-  if (r.review) {
-    lines.push('');
-    lines.push(renderReviewSection(r.review));
-  }
-
-  if (r.error) {
-    lines.push('');
-    lines.push(`⚠️ 回合失败: ${r.error}`);
-  }
-  return lines.join('\n');
-}
-
-/** 工具处理器表。 */
-/**
- * 后台收据的渲染：wait=false 直接走这里；wait=true 等超时会自动降级到这里。
- * 关键语义：**回合没有被取消**，只是我们不再原地等 —— 结果稍后由哨兵文件通知。
- */
-function backgroundReceipt(hub, conv, res) {
-  const sentinel = res.sentinel_file ?? hub.runSentinelPath(conv.id, res.run_id);
-  const sentinelPosix = toPosixPath(sentinel);
-  const review = conv.pendingReviewTicket?.(res.run_id) ?? null;
-  const waited = res.waited_ms
-    ? `已等待 ${(res.waited_ms / 1000).toFixed(0)}s 仍未结束，改为后台继续（**回合没有被取消**）。`
-    : '已在后台执行（**回合没有被取消**）。';
-  return {
-    structured: {
-      conversation_id: conv.id,
-      run_id: res.run_id,
-      accepted: true,
-      background: true,
-      still_running: true,
-      sentinel_file: sentinel,
-      /** Bash/MSYS 形式（D:\a\b → /d/a/b）；非 Windows 等于 sentinel_file。 */
-      sentinel_file_posix: sentinelPosix,
-      /** Windows 宿主：现成的 PowerShell 等待命令（路径已按单引号字面量转义）。 */
-      ...(process.platform === 'win32'
-        ? { sentinel_wait_powershell: psWaitCommand(sentinel), sentinel_read_powershell: psReadCommand(sentinel) }
-        : {}),
-      ...(review ? { review } : {}),
-    },
-    text:
-      `${waited}（run_id=${res.run_id}）\n\n` +
-      `【跑完自动通知，无需轮询】完成时（成功/失败/被取消）会原子写出这个文件（含最终结果，但**不含思考内容**）：\n` +
-      `  ${sentinel}\n` +
-      `直接用下面这个 Bash 形式路径，**不要手工转换**（写错会一直等到超时）：\n` +
-      `  ${sentinelPosix}\n` +
-      `推荐用后台任务等它出现，文件一到就会唤醒你：\n` +
-      `  Bash(run_in_background): sent="${sentinelPosix}"; \\\n` +
-      `    dl=$(( $(date +%s)+2100 )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE\n` +
-      (process.platform === 'win32'
-        ? `Windows 上 Bash 不可用（或会挂住）时，用 PowerShell 版本（原生路径，已转义好）：\n` +
-          `  PowerShell(run_in_background): ${psWaitCommand(sentinel)}\n` +
-          `读取时必须带 -Encoding UTF8（Windows PowerShell 5.1 默认按 ANSI 读，会乱码/解析失败）：\n` +
-          `  ${psReadCommand(sentinel)}\n`
-        : '') +
-      `文件出现后：直接读它拿结果（推荐——不受内存窗口限制、还扛服务重启），或 dsh_get(conversation_id, run_id) 验收。\n` +
-      `消费完可以 rm 掉它。其它随时可用：dsh_status（是否在跑）、dsh_read（增量看输出）。` +
-      (review ? `\n\n${renderReviewSection(review)}` : '') +
-      (res.waited_ms
-        ? `\n\n下次想立刻返回就传 wait=false；想等更久就调大 timeout_ms（**0 = 一直等**）。`
-        : ''),
-  };
-}
-
-/**
- * 幂等命中：返回同一个 client_run_id 首次对应 run 的结果或收据。
- * 绝不创建第二个 run —— 这正是"响应在传输层丢了、想安全重发"需要的语义。
- */
-function replayRun(hub, conv, run, wantResult) {
-  const sentinel = hub.runSentinelPath(conv.id, run.run_id);
-  const sentinelPosix = toPosixPath(sentinel);
-  const terminal = run.status === 'done' || run.status === 'error' || run.status === 'cancelled';
-  if (terminal && run.result) {
-    return {
-      structured: { ...run.result, replayed: true, ...(wantResult ? {} : { background: true }) },
-      text:
-        `（幂等命中：client_run_id 已对应一个已结束的回合，未重复派活）\n` +
-        renderSendResult(run.result) +
-        `\n哨兵文件: ${sentinel}`,
-    };
-  }
-  const review = conv.pendingReviewTicket?.(run.run_id) ?? null;
-  return {
-    structured: {
-      conversation_id: conv.id,
-      run_id: run.run_id,
-      status: run.status,
-      accepted: true,
-      background: true,
-      still_running: true,
-      replayed: true,
-      sentinel_file: sentinel,
-      sentinel_file_posix: sentinelPosix,
-      ...(review ? { review } : {}),
-    },
-    text:
-      `（幂等命中：同一个 client_run_id 已在跑或排队，未重复派活）run_id=${run.run_id} status=${run.status}\n` +
-      `哨兵文件: ${sentinel}` +
-      (review ? `\n\n${renderReviewSection(review)}` : ''),
-  };
-}
-
-/** 入队回执：入队时不写哨兵，真正结束才写。 */
-function queuedReceipt(hub, conv, run, position) {
-  const sentinel = hub.runSentinelPath(conv.id, run.run_id);
-  const sentinelPosix = toPosixPath(sentinel);
-  const review = conv.pendingReviewTicket?.(run.run_id) ?? null;
-  return {
-    structured: {
-      conversation_id: conv.id,
-      run_id: run.run_id,
-      accepted: true,
-      queued: true,
-      queue_position: position,
-      status: 'queued',
-      sentinel_file: sentinel,
-      sentinel_file_posix: sentinelPosix,
-      ...(review ? { review } : {}),
-    },
-    text:
-      `已入队（第 ${position} 位）。当前回合结束后自动执行；**入队时不会写哨兵**，真正结束时才写：\n` +
-      `  ${sentinel}\n` +
-      `用 dsh_queue list 查看/修改/删除；取消：dsh_queue(conversation_id, action="remove", run_id="${run.run_id}")。` +
-      (review ? `\n\n${renderReviewSection(review)}` : ''),
-  };
-}
-
-/**
  * @param {object} hub
  * @param {{projectDir?: () => Promise<string|null>}} [opts]
  *   projectDir：客户端当前打开的项目目录（MCP roots）。不传 cwd 时用它兜底 ——
