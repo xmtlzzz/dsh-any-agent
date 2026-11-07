@@ -144,5 +144,44 @@ console.log('\n[6] ★ answer：被工具调用隔开的正文分段，不首尾
   conv.collector = null;
 }
 
+console.log('\n[7] ★ 工具原地更新后分页不跳条（PR #11 评审：追加 A → 追加正文 → 更新 A → limit=1）');
+{
+  const c7 = new Conversation({ id: '00000000-0000-0000-0000-000000000007', cwd: process.cwd() }, hub);
+  c7.currentTurn = 1;
+  c7.pushOut('tool', 'read [in_progress]', { tool_call_id: 'A' }); // rev 1
+  c7.pushOut('text', '正文');                                        // rev 2
+  c7.pushOut('tool', 'read [completed]', { tool_call_id: 'A' });    // A 原地更新到 rev 3
+  const seen = [];
+  let cur = 0;
+  for (let i = 0; i < 10; i++) {
+    const r = c7.readOut({ cursor: cur, limit: 1 });
+    seen.push(...r.entries.map((e) => e.text));
+    if (r.entries.length === 0 && !r.has_more) break;
+    cur = r.cursor;
+  }
+  check('★ limit=1 逐页读：正文没有被跳过', seen.includes('正文'), JSON.stringify(seen));
+  check('★ 工具的最新状态也读到了', seen.includes('read [completed]'), JSON.stringify(seen));
+  const first = c7.readOut({ cursor: 0, limit: 1 });
+  check('★ 第一页按修订号取最小的那条，且 has_more=true', first.entries[0]?.text === '正文' && first.has_more === true, JSON.stringify(first));
+  const all = c7.readOut({ cursor: 0 });
+  check('一次读全：条目按 seq 时间顺序返回、游标是最大修订号', all.entries.map((e) => e.seq).join(',') === '1,2' && all.cursor === 3 && all.has_more === false, JSON.stringify(all));
+  check('★ 没被环形缓冲挤掉任何条目时 gap=false（数组首条修订号大也不误报）', all.gap === false && first.gap === false, JSON.stringify({ all: all.gap, first: first.gap }));
+}
+
+console.log('\n[8] 环形缓冲挤掉未读条目时 gap=true，挤掉的都已读过时 gap=false');
+{
+  const c8 = new Conversation({ id: '00000000-0000-0000-0000-000000000008', cwd: process.cwd() }, hub);
+  c8.currentTurn = 1;
+  c8.pushOut('user', '第一条');
+  const early = c8.readOut({ cursor: 0 }).cursor; // 读过第一条
+  for (let t = 2; t <= 520; t++) {
+    c8.currentTurn = t;
+    c8.pushOut('user', `第 ${t} 条`); // 不同回合的 user 条目各占一条，超过 500 条开始挤
+  }
+  check('★ 游标停在早期：被挤掉的条目里有没读到的 → gap=true', c8.readOut({ cursor: early }).gap === true);
+  const latest = c8.readOut({ cursor: 0, limit: 999 }).cursor;
+  check('游标已经越过所有被挤掉的条目 → gap=false', c8.readOut({ cursor: latest }).gap === false);
+}
+
 console.log(`\n===== 读游标回归：通过 ${pass}，失败 ${fail} =====`);
 process.exit(fail ? 1 : 0);

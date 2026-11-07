@@ -117,6 +117,8 @@ export class Conversation {
     this.outSeq = 0;
     /** 输出缓冲的**修订号**：每次追加（含合并进已有条目）都 +1，供游标式增量读使用。 */
     this.outRev = 0;
+    /** 被环形缓冲挤掉的条目里最大的修订号：游标落在它之下就说明有内容没读到（gap）。 */
+    this.outDroppedRev = 0;
     this.turnOutChars = 0;
     this.currentTurn = 0;
     this.turnStartedAt = 0;
@@ -1099,7 +1101,11 @@ export class Conversation {
       last.rev = ++this.outRev;
     } else {
       this.out.push({ seq: ++this.outSeq, rev: ++this.outRev, kind, turn: this.currentTurn, text: cap(text ?? ''), at: now(), ...extra });
-      if (this.out.length > MAX_OUT_ENTRIES) this.out.shift();
+      if (this.out.length > MAX_OUT_ENTRIES) {
+        const dropped = this.out.shift();
+        const droppedRev = typeof dropped.rev === 'number' ? dropped.rev : dropped.seq;
+        if (droppedRev > this.outDroppedRev) this.outDroppedRev = droppedRev;
+      }
     }
     if (kind === 'text') this.turnOutChars += text?.length ?? 0;
   }
@@ -1120,8 +1126,15 @@ export class Conversation {
     // limit 必须清洗：负数会被 slice 解释成“从头到尾少一条”，0 会让调用方原地空转。
     const n = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), MAX_OUT_ENTRIES)) : 200;
     const revOf = (e) => (typeof e.rev === 'number' ? e.rev : e.seq);
-    const entries = this.out.filter((e) => revOf(e) > cur).slice(0, n);
-    const next = entries.length ? revOf(entries[entries.length - 1]) : cur;
+    // ★ 分页必须按**修订号**取，不能按数组顺序：工具条目的状态更新是原地替换并推进修订号，
+    //   数组里靠前的条目可能比靠后的修订号更大（追加工具 A → 追加正文 → 更新 A）。按数组顺序
+    //   切 limit 条、再拿最后一条的修订号当游标，就会越过没读到的正文，之后永远读不到它。
+    //   按修订号升序取前 n 条，游标 = 本页最大修订号，于是"修订号 ≤ 游标"的条目一定都已返回。
+    const eligible = this.out.filter((e) => revOf(e) > cur).sort((a, b) => revOf(a) - revOf(b));
+    const page = eligible.slice(0, n);
+    const next = page.length ? revOf(page[page.length - 1]) : cur;
+    // 本页内部再按 seq 排回时间顺序，方便调用方直接展示。
+    const entries = page.slice().sort((a, b) => a.seq - b.seq);
     const res = {
       conversation_id: this.id,
       state: this.state(),
@@ -1129,9 +1142,9 @@ export class Conversation {
       current_tool: this.currentTool,
       entries,
       cursor: next,
-      has_more: this.out.some((e) => revOf(e) > next),
-      /** 缓冲被环形覆盖时会为 true，表示你错过了中间一段。 */
-      gap: entries.length > 0 && this.out.length > 0 && revOf(this.out[0]) > cur + 1,
+      has_more: eligible.length > page.length,
+      /** 缓冲被环形覆盖、且被挤掉的条目里有游标之后的内容时为 true：你错过了中间一段。 */
+      gap: this.outDroppedRev > cur,
     };
     // 思考内容只在显式要求时、且只针对"当前正在跑的回合"返回；不保留、不进缓冲
     if (includeReasoning && this.collector?.reasoning) {
