@@ -5,7 +5,7 @@
 | Variable | Default | Purpose |
 |---|---|---|
 | `DSH_BIN` | auto-detected (desktop app → npm global → npx cache) | Explicit path to `@deepseek-ai/dsh/lib/bin.js` (may point inside the desktop app's `app.asar`) |
-| `DSH_RUNTIME` | auto | Explicit executable that launches DSH (e.g. a Node 24); by default the desktop app's bundled runtime, otherwise this server's node |
+| `DSH_RUNTIME` | auto | Explicit executable that launches DSH (e.g. a Node 24). Used with `DSH_BIN`, or on its own for auto-discovered npm global / npx installs (their `engines.node` is re-checked against it); the desktop app always keeps its bundled runtime (only it can read the asar). Unset: the desktop app's bundled runtime, otherwise this server's node |
 | `DSH_HOME` | `~/.dsh` | DSH home shared with the GUI (credentials, sessions, workspace registry). Point it elsewhere only for isolation/multi-account |
 | `DSH_MCP_PROFILE` | `dsh-mcp` (`dsh-team` when team is on) | DSH profile to drive; an explicit value wins |
 | `DSH_MCP_TEAM` | `0` (off) | Team mode, opt-in. `dsh-any-agent team on` writes the settings file; this env var overrides it. When on, uses the `dsh-team` profile and injects a "form a team when needed" line before `dsh_send`; per call use `dsh_send(team=false)` |

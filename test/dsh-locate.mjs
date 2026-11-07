@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  applyRuntimeOverride,
   cmpVersion,
   desktopCandidate,
   desktopExeForAsar,
@@ -195,6 +196,37 @@ try {
   check('DSH_BIN 指向不存在的文件 → 清晰报错', () => {
     process.env.DSH_BIN = join(root, 'missing', 'bin.js');
     assert.throws(() => resolveDsh(), /DSH_BIN 指向的文件不存在/);
+  });
+
+  console.log('\n[5b] ★ 只设 DSH_RUNTIME（不设 DSH_BIN）也作用于自动发现的候选（PR #11 评审）');
+  const nodeCand = (enginesNode) => ({
+    source: 'global',
+    bin: '/x/node_modules/@deepseek-ai/dsh/lib/bin.js',
+    version: '0.2.2-rc.1',
+    enginesNode,
+    command: process.execPath,
+    args: ['/x/node_modules/@deepseek-ai/dsh/lib/bin.js'],
+    env: {},
+    runtime: 'node',
+    runtimeOk: false,
+  });
+  const deskCand = { source: 'desktop', runtime: 'electron', command: 'C:/app/DeepSeek Harness.exe', env: { ELECTRON_RUN_AS_NODE: '1' }, runtimeOk: null, version: '0.2.2-rc.1' };
+  check('★ npm/npx 候选换成 DSH_RUNTIME，并按它实测的 Node 版本重新判定 engines', () => {
+    // 用本进程的 node 当“自定义运行时”：版本已知，判定结果可预期
+    const [ok, desk] = applyRuntimeOverride([nodeCand('>=1'), deskCand], process.execPath);
+    assert.equal(ok.command, process.execPath);
+    assert.equal(ok.runtime, 'custom');
+    assert.equal(ok.env.ELECTRON_RUN_AS_NODE, '1');
+    assert.equal(ok.runtimeOk, true, '>=1 必然满足');
+    assert.deepEqual(desk, deskCand, '桌面版候选保持自带运行时不变');
+    const [tooNew] = applyRuntimeOverride([nodeCand('>=999')], process.execPath);
+    assert.equal(tooNew.runtimeOk, false, '>=999 必然不满足');
+  });
+  check('★ 只设 DSH_RUNTIME 且文件不存在 → 自动发现时清晰报错（不再被静默忽略）', () => {
+    delete process.env.DSH_BIN;
+    process.env.DSH_RUNTIME = join(root, 'missing-runtime.exe');
+    assert.throws(() => resolveDsh({ fresh: true }), /DSH_RUNTIME 指向的文件不存在/);
+    delete process.env.DSH_RUNTIME;
   });
 
   console.log('\n[6] 注册表导出解析');

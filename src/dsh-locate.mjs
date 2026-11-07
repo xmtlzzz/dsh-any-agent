@@ -14,7 +14,8 @@
  *   ~/.dsh 会话存储，版本不一致时新版本写的会话可能被旧版本 resume）。
  *
  * 显式覆盖：DSH_BIN（指向 bin.js；可以指进 .asar 内部，运行时自动推导），
- *          DSH_RUNTIME（可选，指定拉起 DSH 的可执行文件，例如一个 Node 24）。
+ *          DSH_RUNTIME（可选，指定拉起 DSH 的可执行文件，例如一个 Node 24；配合 DSH_BIN，
+ *          或单独设置时作用于自动发现的 npm/npx 候选 —— 桌面版始终用它自带的运行时）。
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -450,10 +451,45 @@ export function rankCandidates(list) {
 
 /** 自动发现到的全部候选（已排序，第一个就是默认选择）。结果缓存 60 秒。 */
 export function discoverDsh({ fresh = false } = {}) {
-  if (!fresh && discoveryCache && Date.now() - discoveryCache.at < DISCOVERY_TTL_MS) return discoveryCache.list;
-  const list = rankCandidates([...desktopCandidates(), ...globalCandidates(), ...npxCandidates()]);
-  discoveryCache = { at: Date.now(), list };
+  const runtime = process.env.DSH_RUNTIME || null;
+  if (
+    !fresh &&
+    discoveryCache &&
+    discoveryCache.runtime === runtime &&
+    Date.now() - discoveryCache.at < DISCOVERY_TTL_MS
+  ) {
+    return discoveryCache.list;
+  }
+  if (runtime && !existsSync(runtime)) throw new Error(`DSH_RUNTIME 指向的文件不存在: ${runtime}`);
+  const raw = [...desktopCandidates(), ...globalCandidates(), ...npxCandidates()];
+  const list = rankCandidates(runtime ? applyRuntimeOverride(raw, runtime) : raw);
+  discoveryCache = { at: Date.now(), runtime, list };
   return list;
+}
+
+/**
+ * DSH_RUNTIME 对**自动发现**的候选同样生效（不只是配合 DSH_BIN）：dsh_doctor 在
+ * "engines.node 不满足"时建议的正是"用 DSH_RUNTIME 指定一个满足要求的 node" —— 以前只有
+ * 显式 DSH_BIN 分支读它，照做之后服务仍用自己的 Node 22 拉起要求 Node 24 的 npm 版 DSH。
+ *
+ * 只替换 npm 全局 / npx 这类 `node <bin.js>` 候选；桌面版的 CLI 在 app.asar 里，普通 node
+ * 读不了，必须用它自带的 Electron 运行时，所以桌面版候选保持不变。替换后用实测的运行时
+ * Node 版本重新判定 engines（拿不到版本就记 null = 未知，不当作不满足）。导出供测试。
+ */
+export function applyRuntimeOverride(list, runtime) {
+  const env = { ELECTRON_RUN_AS_NODE: '1' };
+  const runtimeNode = probeRuntimeNode({ command: runtime, env });
+  return list.map((c) =>
+    c.runtime === 'node'
+      ? {
+          ...c,
+          command: runtime,
+          env,
+          runtime: 'custom',
+          runtimeOk: satisfiesNodeRange(c.enginesNode, runtimeNode),
+        }
+      : c,
+  );
 }
 
 /** 显式 DSH_BIN（可选 DSH_RUNTIME）。 */
