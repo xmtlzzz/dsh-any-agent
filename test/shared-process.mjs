@@ -7,7 +7,7 @@
  * 环境变量必须在 import 之前设置 —— config.mjs 在模块加载期读它们。
  */
 
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert';
@@ -28,16 +28,20 @@ try {
 }
 if (!hasDsh) {
   console.log('  skipped: 本机没有可用的 DSH');
+  // 标准 skip 汇总行：报告里记为"整套跳过"，而不是 0 项通过。
+  console.log('\n===== shared process: skipped (0 checks) =====');
   process.exit(0);
 }
 
 const { Hub } = await import('../src/hub.mjs');
 const { readRssMap } = await import('../src/procstat.mjs');
 
+let passed = 0;
 let failed = 0;
 function check(name, fn) {
   try {
     fn();
+    passed += 1;
     console.log(`  ✓ ${name}`);
   } catch (e) {
     failed += 1;
@@ -49,6 +53,9 @@ const cwd = mkdtempSync(join(tmpdir(), 'dsh-any-agent-shared-ws-'));
 const log = { info() {}, debug() {}, dshStderr() {} };
 const hub = new Hub({ log });
 
+// ★ 无论中途是否抛错，收尾都要把本套件造的会话与状态清干净（以前这里根本没有收尾，
+//   4 个会话、两个临时目录全靠全局 cleanup.mjs 兜底）。body 不缩进，保持 diff 小。
+try {
 console.log('\n[1] 同 cwd + 同权限的 4 个会话共享一个 DSH 进程');
 const mk = () => hub.create({ cwd, permission: 'read-only', onApproval: 'auto-deny' });
 const a = await mk();
@@ -82,6 +89,17 @@ check('全部关闭后宿主被清掉', () => assert.equal(hub.hosts.size, 0));
 // 给进程一点退出时间，再确认 PID 从进程表里消失。
 await new Promise((r) => setTimeout(r, 500));
 check('PID 已退出（RSS 读不到）', () => assert.equal(readRssMap({ force: true }).has(pid), false));
+} finally {
+  try { await hub.shutdown(); } catch {}
+  // 动态 import：本文件在加载 config.mjs 之前要先设好 DSH_MCP_STATE 等环境变量
+  const { cleanupSuite } = await import('./residue.mjs');
+  cleanupSuite({ roots: [cwd, base], stateFiles: [process.env.DSH_MCP_STATE] });
+  for (const d of [cwd, base]) {
+    try { rmSync(d, { recursive: true, force: true }); } catch {}
+  }
+}
 
+// 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
+console.log(`\n===== shared process: passed ${passed}, failed ${failed} =====`);
 console.log(`\n总结果: ${failed === 0 ? '通过 ✅' : `${failed} 项失败 ❌`}`);
 process.exit(failed === 0 ? 0 : 1);

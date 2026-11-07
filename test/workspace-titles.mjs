@@ -52,6 +52,8 @@ check('普通项目目录放行',
 // 所以用一个临时文件探针判断，只在真正不区分时才断言。
 {
   const caseInsensitiveFs = fsCaseInsensitive();
+  // 下面那条断言只在不区分大小写的文件系统上才有，报告里要记下是哪一种。
+  console.log('[report] fs-case=' + (caseInsensitiveFs ? 'insensitive' : 'sensitive'));
   if (caseInsensitiveFs) {
     check('不区分大小写的平台上，改大小写也认得出',
       Boolean(homeWorkspaceProblem(home.toUpperCase(), 'workspace-write')));
@@ -79,7 +81,10 @@ check('带尾部分隔符也认得出', Boolean(homeWorkspaceProblem(home + sep,
   check('文案给出了两条出路',
     msg.includes('read-only') && msg.includes('danger-full-access'), msg);
   check('文案没有把家目录路径写错', msg.includes(home), msg);
-  if (temp.toLowerCase().startsWith(home.toLowerCase())) {
+  const tempInHome = temp.toLowerCase().startsWith(home.toLowerCase());
+  // 这条断言只在 temp 落在家目录内时才有（Windows 默认如此，Linux/macOS 默认不是），报告里要记下。
+  console.log('[report] temp-in-home=' + (tempInHome ? 1 : 0));
+  if (tempInHome) {
     check('文案指出 temp 就在工作区里（本机确实如此）', msg.includes(temp), msg);
   } else {
     console.log('  ---  本机 temp 不在家目录内，相关断言跳过');

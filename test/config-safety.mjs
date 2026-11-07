@@ -1456,6 +1456,8 @@ section('[15] 真实 HOME 只读回归：plan 模式覆盖全部已存在客户�
   const existing = [...before.keys()].filter((p) => existsSync(p));
 
   check('真实 HOME：plan 模式退出码 0', r.code === 0, 'exit ' + r.code + ' ' + firstLine(r.out));
+  // 下面的断言只在装了客户端时才有一条（0 个 => 少一项），报告里要记下这个条件。
+  console.log('[report] real-clients=' + existing.length);
   // CI runner 上通常一个 MCP 客户端都没装，这一组退化为空断言。
   // 与其假绿，不如明确说「这里没验」—— 它只在开发机上才真正覆盖东西。
   if (existing.length === 0) {

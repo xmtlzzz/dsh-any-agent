@@ -3,6 +3,10 @@ name: model-suites
 # Model-backed suites need a real DSH install, a configured provider and
 # credentials. GitHub-hosted runners do not have those, so this workflow is
 # manual and expects a self-hosted runner label that does.
+#
+# DSH is found the way the server itself finds it (src/dsh-locate.mjs
+# resolveDsh(): desktop app, npm global, npx cache), so a runner that only has the
+# desktop app installed needs no secrets. The DSH_BIN secret is an optional override.
 on:
   workflow_dispatch:
     inputs:
@@ -25,17 +29,17 @@ jobs:
         with:
           node-version: '22'
 
-      - name: detect DSH
+      # 用项目自己的 resolveDsh() 判定（src/dsh-locate.mjs，与服务启动时同一套逻辑）：
+      # 桌面版（注册表 / 默认安装路径）、npm 全局、npx 缓存都认，所以只装了桌面版、
+      # PATH 里没有 `dsh` 的自托管 runner 不需要任何 secret 就能跑。
+      # DSH_BIN secret 仍然可选：设了就当显式覆盖；没设时 secrets.DSH_BIN 是空串，被当作未设置。
+      # 不指定 shell：`node scripts/detect-dsh.mjs` 在 Linux 的 bash 与 Windows 的 pwsh 里写法一致，
+      # 也就不依赖 runner 上装了 Git Bash。
+      - name: detect DSH (same discovery the server uses)
         id: dsh
-        shell: bash
         env:
           DSH_BIN: ${{ secrets.DSH_BIN }}
-        run: |
-          if [ -n "${DSH_BIN:-}" ] || command -v dsh >/dev/null 2>&1; then
-            echo 'ok=1' >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning title=Model suites skipped::No DSH on this runner. Use a self-hosted runner with DSH, a provider and credentials."
-          fi
+        run: node scripts/detect-dsh.mjs
 
       - name: run offline + model suites
         if: steps.dsh.outputs.ok == '1'

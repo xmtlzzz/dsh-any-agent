@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 let pass = 0;
 let failCount = 0;
@@ -28,9 +29,11 @@ const check = (name, cond, detail = '') => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const STATE = join(tmpdir(), `dsh-any-agent-int-state-${Date.now()}.json`);
-const ws = process.env.DSH_MCP_TEST_CWD ?? mkdtempSync(join(tmpdir(), 'dsh-any-agent-int-ws-'));
-const ownWs = !process.env.DSH_MCP_TEST_CWD;
+// ★ 状态目录收在自己的临时根里（见 smoke.mjs 同处注释）。
+//   DSH_MCP_TEST_CWD 指向用户自己的目录时，会话的 cwd 不是测试目录：清理护栏会拒绝删它，会话保留。
+const ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-int-'));
+const STATE = join(ROOT, 'state.json');
+const ws = process.env.DSH_MCP_TEST_CWD ?? mkdtempSync(join(ROOT, 'ws-'));
 
 console.log(`工作区: ${ws}`);
 const client = new McpClient({ env: { DSH_MCP_STATE: STATE, DSH_MCP_LOG: 'info' } }).start();
@@ -166,7 +169,9 @@ try {
   await sleep(5000);
   const inj2 = await client.callTool(
     'dsh_interject',
-    { conversation_id: convId, message: '刚才那件事做完之后，只回复三个字：接着说', mode: 'queue' },
+    // 用一个不会被“意译”的暗号：以前要求“只回复三个字：接着说”，模型回了“接着”，
+    // 机制完全正常（排队等了上一轮、回合正常结束）却被判失败 —— 那是在测模型的措辞。
+    { conversation_id: convId, message: '刚才那件事做完之后，原样回复这个暗号，不要加别的字：QUEUED-7K2', mode: 'queue' },
     400_000,
   );
   const si2 = inj2?.structuredContent ?? {};
@@ -174,8 +179,8 @@ try {
   check('queue 确实等了上一轮', typeof si2.waited_ms === 'number' && si2.waited_ms > 1000, String(si2.waited_ms));
   check('queue 后的新回合正常结束', si2.stop_reason && si2.stop_reason !== 'error', `stop=${si2.stop_reason} err=${si2.error}`);
   check(
-    'DSH 按新指令回应',
-    typeof si2.answer === 'string' && si2.answer.includes('接着说'),
+    'DSH 按新指令回应（排队的话确实送达了）',
+    typeof si2.answer === 'string' && si2.answer.includes('QUEUED-7K2'),
     JSON.stringify(si2.answer?.slice(0, 160)),
   );
   console.log(`    答复: ${JSON.stringify(si2.answer?.slice(0, 160))}  waited=${si2.waited_ms}ms`);
@@ -195,14 +200,10 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
+  cleanupSuite({ clients: [client], roots: [ROOT] });
   try {
-    rmSync(STATE, { force: true });
+    rmSync(ROOT, { recursive: true, force: true });
   } catch {}
-  if (ownWs) {
-    try {
-      rmSync(ws, { recursive: true, force: true });
-    } catch {}
-  }
 }
 
 console.log(`\n===== 集成测试：通过 ${pass}，失败 ${failCount} =====`);

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpClient } from './mcp-client.mjs';
-import { pruneEmptyWorkspaces, purgeTestSessions } from '../src/workspace.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 let pass = 0;
 let failCount = 0;
@@ -23,8 +23,9 @@ const check = (name, cond, detail = '') => {
   }
 };
 
-const STATE = join(tmpdir(), `dsh-any-agent-bound-state-${Date.now()}.json`);
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-bound-'));
+// ★ 状态目录收在自己的临时根里（见 smoke.mjs 同处注释）
+const STATE = join(root, 'state.json');
 const goodWs = join(root, 'ok');
 mkdirSync(goodWs, { recursive: true });
 const client = new McpClient({ env: { DSH_MCP_STATE: STATE } }).start();
@@ -152,12 +153,12 @@ try {
       const id = realStart.structuredContent.conversation_id;
       await client.callTool('dsh_release', { conversation_id: id, forget: true });
       // 只 forget 不够：DSH 的会话目录还在磁盘上，工作区条目就不会变空。
-      // 用显式 id 精确删掉这条会话，再让注册表对账。
-      purgeTestSessions({ ids: [id] });
+      // 精确删掉这条会话（只点它的 id 与它自己的 ws-probe 目录；cwd 护栏认 .state/ws-probe-*），
+      // 连带摘掉工作区登记，并删掉因此变空的 ws-probe 工作区条目。
+      cleanupSuite({ ids: [id], roots: [realWs], stateFiles: [STATE] });
     }
     try {
       rmSync(realWs, { recursive: true, force: true });
-      pruneEmptyWorkspaces();
     } catch {
       /* 清理失败不影响测试结论 */
     }
@@ -255,7 +256,7 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
-  try { rmSync(STATE, { force: true }); } catch {}
+  cleanupSuite({ clients: [client], roots: [root] });
   try { rmSync(root, { recursive: true, force: true }); } catch {}
 }
 

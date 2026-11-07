@@ -15,8 +15,11 @@
  *   node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions [--dry-run] [--ids=a,b]
  *
  * 只有 --purge-test-sessions 会动磁盘上的会话文件，且规则很死：只删
- * "cwd 在 tmpdir()/dsh-any-agent-* 下" 或 "cwd 在 Desktop\dsh-any-agent-test-*" 的会话，
- * 外加 --ids 显式指定的。**不会**删除用户在 %TEMP% 里自己的真实项目会话。
+ * "cwd 在 tmpdir()/dsh-any-agent-* 下"、"cwd 在 Desktop\dsh-any-agent-test-A|B" 或本仓库
+ * ".state/ws-probe-*" 的会话。**不会**删除用户在 %TEMP% 里自己的真实项目会话。
+ * --ids=a,b 只清点名的那几个，但**点名也绕不过护栏**：cwd 不是测试目录的会被拒绝并列出。
+ * 每个被删会话的全部产物一并清掉（日志、投影缓存、工作区登记、墓碑，以及本项目的
+ * 注册表/元数据/哨兵/审核/锁登记）；另外清掉投影缓存里的测试孤儿。
  */
 
 import {
@@ -24,10 +27,10 @@ import {
   listWorkspaces,
   pruneEmptyWorkspaces,
   pruneTempWorkspaces,
-  purgeTestSessions,
   WORKSPACE_FILE,
   SESSIONS_ROOT,
 } from '../src/workspace.mjs';
+import { purgeTestResidue, sweepTestResidue } from '../src/residue.mjs';
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -46,14 +49,18 @@ const ids = (val('--ids') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 
 // ── 清理测试会话（唯一会删文件的动作） ──────────────────────
 if (has('--purge-test-sessions')) {
-  const res = purgeTestSessions({ dryRun, ids, testOnly: true });
+  // 点名（--ids）= 只清这几个；否则全盘扫荡。两条路都会连带清本项目侧的 per-run 数据。
+  const full = ids.length ? purgeTestResidue({ ids, dryRun }) : sweepTestResidue({ dryRun });
+  const res = full.sessions;
   console.log(`${flag}清理测试会话：${res.count} 个`);
   for (const v of res.victims) {
     console.log(`  - ${v.id}  [${v.reason}]${v.origin ? ` origin=${v.origin}` : ''}  cwd=${v.cwd}`);
     if (v.error) console.log(`      ⚠️ 删除失败: ${v.error}`);
   }
+  for (const s of res.skipped ?? []) console.log(`  ✗ 拒绝 ${s.id}：${s.reason}  cwd=${s.cwd}`);
   if (!res.count) console.log('  （没有命中任何会话）');
-  if (!dryRun) console.log('  已同步从工作区注册表摘除这些会话 id');
+  if (!dryRun) console.log('  已同步清掉这些会话的投影缓存、工作区登记、墓碑与本项目 per-run 数据');
+  if (full.orphans) console.log(`${flag}  投影缓存测试孤儿：${full.orphans.count} 个`);
   console.log('');
 }
 

@@ -15,6 +15,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 let pass = 0;
 let failCount = 0;
@@ -29,8 +30,9 @@ const check = (name, cond, detail = '') => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const STATE = join(tmpdir(), `dsh-any-agent-conc-state-${Date.now()}.json`);
 const wsRoot = mkdtempSync(join(tmpdir(), 'dsh-any-agent-conc-'));
+// ★ 状态目录收在自己的临时根里（见 smoke.mjs 同处注释）
+const STATE = join(wsRoot, 'state.json');
 const client = new McpClient({ env: { DSH_MCP_STATE: STATE } }).start();
 
 /** 三个会话各自的标记词，用于验证内容隔离。任务要足够长，才能覆盖后面几轮轮询。 */
@@ -171,7 +173,7 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
-  try { rmSync(STATE, { force: true }); } catch {}
+  cleanupSuite({ clients: [client], roots: [wsRoot] });
   try { rmSync(wsRoot, { recursive: true, force: true }); } catch {}
 }
 

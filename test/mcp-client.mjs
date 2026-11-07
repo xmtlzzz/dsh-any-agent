@@ -12,9 +12,19 @@ export class McpClient {
   #pending = new Map();
   #buf = '';
   stderr = [];
+  /**
+   * 本客户端通过 dsh_start 建出来的会话 id（自动记录）。套件收尾时交给
+   * `test/residue.mjs` 的 cleanupSuite 精确清理，不必每个套件各自记 id。
+   */
+  createdIds = new Set();
 
   constructor({ env = {} } = {}) {
     this.env = env;
+  }
+
+  /** 这个客户端拉起的服务用的注册表文件（DSH_MCP_STATE；per-run 数据按它的同级目录推导）。 */
+  get stateFile() {
+    return this.env.DSH_MCP_STATE ?? process.env.DSH_MCP_STATE ?? null;
   }
 
   start() {
@@ -98,7 +108,12 @@ export class McpClient {
   }
 
   async callTool(name, args, timeoutMs) {
-    return await this.request('tools/call', { name, arguments: args }, timeoutMs);
+    const result = await this.request('tools/call', { name, arguments: args }, timeoutMs);
+    if (name === 'dsh_start') {
+      const id = result?.structuredContent?.conversation_id;
+      if (typeof id === 'string' && id) this.createdIds.add(id);
+    }
+    return result;
   }
 
   /** 取工具结果里的纯文本。 */

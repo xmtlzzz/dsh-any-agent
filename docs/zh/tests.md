@@ -6,16 +6,29 @@
 npm test                   # 全部离线套件；没有 DSH 时 smoke 自动跳过会话段
 npm run test:all           # 离线 + 需要模型的套件（需要 DSH/provider）
 node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目录；--dry-run 可预演）
+npm run lint               # 零依赖静态检查：语法、导入路径、具名导出、未使用导入
+node test/run.mjs --all --report .state/test-report.json   # 同上，并指定 JSON 报告位置（每次运行默认都写 .state/test-report.json）
+npm run docs:counts       # 把报告里的检查数写回本文与 CI 注释（见下文「改了测试之后」）
+npm run docs:counts:check # 只检查文档与报告是否一致，不一致 exit 1 并打印差异
 ```
+
+`npm run lint`（`scripts/lint.mjs`）对 `src/ bin/ scripts/ test/ demo/` 下每个 `.mjs` 跑 `node --check`，并核对每条相对路径的 `import` / `export … from` 都指向存在且**大小写一致**的文件、每个具名导入都是目标模块的真实导出、没有未使用的具名导入。它不引入任何 npm 依赖（`package-check` 仍然强制零依赖），是 token 级扫描而不是完整解析器：宁可漏报也不误报。拆模块、挪函数之后先跑它 —— 一个漏掉的导出在没有真实 DSH 的 CI 上往往要到某条冷路径才会炸。CI 的离线 job 在每个矩阵格里都会先跑一遍。
 
 模型套件不在 GitHub 托管 CI 里（需要真实 DSH、provider 与凭据）。在本机跑，
 或用 `model-suites` workflow 指定一台装好 DSH 的 self-hosted runner。
 
-测试套件**会自己收尾**：`run.mjs` 结束时必定执行 `cleanup.mjs`，它只清理 cwd 在**测试自己造的目录**（`tmpdir()/dsh-any-agent-*` 或桌面 `dsh-any-agent-test-*`）里的会话与工作区登记。**用户在 `%TEMP%` 里自己的真实项目、以及你的状态目录都不会被碰**。要连桌面测试目录一起清，可显式跑 `node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions`。
+测试套件**会自己收尾，跑完不留残留**。真机套件会在各自的 `finally` 里调用 `test/residue.mjs` 的 `cleanupSuite`，精确清掉**自己造的**会话（`McpClient` 自动记下每个 `dsh_start` 返回的 id；再按套件自己的临时根兜住没记到 id 的会话与 DSH 自己派出的子代理会话），连同它的**全部产物**：
+- DSH 侧：会话日志、投影缓存 `storages/session_projcache/sessions/<id>.json`（删会话目录**不会**带走它，旧版跑多了会攒出几百个孤儿）、`workspace.json` 里的登记、forget 墓碑；
+- 本项目侧：注册表条目、`meta/`、哨兵 `runs/`、审核 `reviews/`、写锁登记 `locks/`（状态目录收在套件自己的临时根里，不再散落在 `%TEMP%` 根下）。
+
+`run.mjs` 结束时再执行一遍全局 `cleanup.mjs` 作兜底（处理被杀掉的进程、旧版本的残留、投影缓存里的测试孤儿）。**护栏**：只有 cwd 是**测试自己造的目录**（当前进程的 `tmpdir()/dsh-any-agent-*`、桌面 `dsh-any-agent-test-A|B`、本仓库 `.state/ws-probe-*`）的会话才会被删，**点名 id 也绕不过**；用户在 `%TEMP%` 里自己的真实项目、并行 agent 的临时根（TMP 指到别处）、以及你的状态目录都不会被碰。要连桌面测试目录一起清，可显式跑 `node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions`。
+
+为什么真机套件不把 `DSH_HOME` 指到一次性沙箱：DSH 的凭据在 `$DSH_HOME/.credentials.yaml`，沙箱里没有它真机套件就拿不到模型，而把密钥/路由复制进临时目录等于多开一个泄漏面；所以真机套件继续用真实 `~/.dsh`，靠上面这套精确清理保证不留残留（纯离线套件早就用沙箱 `DSH_HOME`，见 `test/sandbox-home.mjs`）。
 
 | 套件 | 检查数 | 覆盖 |
 |---|---|---|
-| `smoke` | 31 | 握手、工具表（15 个工具）、建会话、配置、注册表纯净性、原型链工具名拒绝 |
+| `smoke` | 33（无 DSH 时 20） | 握手、**instructions 长度上限**（客户端会截断过长说明）且铁律在最前、工具表（15 个工具）、建会话、配置、注册表纯净性、原型链工具名拒绝 |
+| `dsh-locate` | 21 | **DSH 自动发现**：纯 Node 读合成的 `app.asar`（版本、`engines.node`、入口存在性）、桌面版目录映射到自带 Electron 运行时 + `ELECTRON_RUN_AS_NODE=1`、候选排序（能跑的优先 → 版本高 → 桌面版 > 全局 > npx）、`DSH_BIN` 指进 asar 自动配桌面版运行时、`DSH_RUNTIME` 覆盖、`engines.node` 区间判定、`reg export` 输出解析（不花 token、不读注册表） |
 | `boundary` | 46 | 协议边界（重复 initialize、脏行、未知方法）、参数校验（含 read-only + 宽松审批必须拒绝、未知 provider/model、失败创建不留下写锁登记）、未知 id、游标边界、生命周期幂等、unicode |
 | `integration` | 30 | 跨进程 resume 与记忆、中断、两种插话 |
 | `async` | 21 | fire-and-forget + 事后验收，含收据/结果/哨兵里的审核单，以及一次真实 `dsh_review` 往返 |
@@ -24,46 +37,75 @@ node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目
 | `guards` | 40 | **环境变量守卫**：奇怪的数值一律压到安全侧 —— `IDLE_TTL_MS` 的 `-1` 当"永不回收"、非法值/空串回落默认 10 分钟、回收间隔过小压回默认（防空转紧循环）、**失联阈值下限 30 秒**（防别的实例"合法地"抢占并杀掉我们的回合）；以及团队模式的默认值与优先级（`DSH_MCP_TEAM` > `settings.json` > 默认关）（不花 token，每次必跑） |
 | `sandbox-guard` | 21 | **测试沙箱自身**：「临时 HOME」如果落到真实用户目录、它的子目录、盘符根目录，或 OS 临时目录之外，一律报错拒绝，绝不被写入和删除。其余套件都通过 `test/sandbox-home.mjs` 拿目录、只销毁自己建的那个（不花 token，每次必跑） |
 | `approval-details` | 37 | **审批审查上下文**：待决审批的快照带命令、理由、cwd 与原始审批 ID —— 不只是一个裸 ID，调用方才能真正裁决；缺失的 `rawInput` 会按 ID 从先前的 `tool_call` 更新关联回来；凭据形状的字段与常见内联字面量在结构化上下文和展示标题里都会脱敏；关闭会话会取消待决审批。经真实 stdio MCP 端到端验证 |
-| `failure-terminal` | 11 | **失败路径的终态**：`ensureAlive` 失败时唤醒 `dsh_interject` 等待者、落 `status=error` 哨兵、错误对象挂 `runId`；审批没有对应 option 时 `effective=cancelled` 而不是假报 allow；`dsh_get` 能从哨兵文件回读（不花 token） |
+| `failure-terminal` | 10 | **失败路径的终态**：`ensureAlive` 失败时唤醒 `dsh_interject` 等待者、落 `status=error` 哨兵、错误对象挂 `runId`；审批没有对应 option 时 `effective=cancelled` 而不是假报 allow；`dsh_get` 能从哨兵文件回读（不花 token） |
 | `shared-host` | 25 | **共享进程宿主**：通知/审批按 `sessionId` 路由、未知会话审批一律取消、进程退出扇出所有挂载会话、最后一个会话 detach 才停进程；**默认开启且 `=0` 可关闭**（空串按未设置处理）；`takeover` 杀共享进程前的连坐检查；以及 RSS 读取（不花 token） |
 | `shared-process` | 8（无 DSH 时 skip） | **共享进程真机验证**：同 `(cwd, permission)` 的两个会话落在同一个 PID、关一个不影响另一个、全部关闭后宿主清空且 PID 退出（需要本机 DSH，`--all` 时运行） |
-| `dispatch-tools` | 55（非 Windows 53） | **派发面**：`dsh_inbox` 跨会话汇总待决审批、`client_run_id` 幂等命中与淘汰、队列 list/update/promote/remove（remove 写 cancelled 哨兵）、`dsh_get(max_chars)` 同时压缩 text 与 structured（正文截断、工具输入只留 `input_chars`，`max_chars=0` 仍返回全文）、`dsh_doctor` 的 DSH 版本档位与 npx 缓存识别、PowerShell 哨兵等待命令的转义与真机执行（仅 Windows）、审计只记元数据不记正文、`dsh_doctor` 关键检查项（不花 token） |
-| `read-cursor` | 10 | **`dsh_read` 游标语义**：追加到已读条目里的文本必须再次返回（修订号游标，按 `seq` 替换全文）；`limit` 钳到 1..500，`0`/负数不会空转或丢尾（不花 token） |
+| `resume-retry` | 63 | **冷启动 resume 超时重试**（用 `test/fake-acp.mjs` 当 DSH，共享进程与 `DSH_MCP_SHARED_PROCESS=0` 各跑一遍）：第一次 `session/resume` 没回话 → 在新进程上重试一次（旧子进程已退出、写锁登记指向新进程）；一直没回话 → 恰好重试一次后如实报错，不留僵尸子进程与登记；撞写锁、invalid params 一律**不**重试；`AcpProcess` 超时错误带 `code=ACP_TIMEOUT` 与 `method`；共享宿主上还挂着别的会话时不重试（不花 token） |
+| `dispatch-tools` | 59（非 Windows 55） | **派发面**：`dsh_inbox` 跨会话汇总待决审批、`client_run_id` 幂等命中与淘汰、队列 list/update/promote/remove（remove 写 cancelled 哨兵）、`dsh_get(max_chars)` 同时压缩 text 与 structured（正文截断、工具输入只留 `input_chars`，`max_chars=0` 仍返回全文）、`dsh_doctor` 的 DSH 版本档位（0.2.1-rc.5 / 0.2.2-rc.1 已验证，0.2.3+ 未验证）与 npx 缓存识别、PowerShell 哨兵等待命令的转义与真机执行、哨兵**读取**命令（`-Encoding UTF8`，在 Windows PowerShell 5.1 下正确解析中文；真机执行仅 Windows）、审计只记元数据不记正文、`dsh_doctor` 关键检查项（不花 token） |
+| `read-cursor` | 26 | **`dsh_read` 游标语义**：追加到已读条目里的文本必须再次返回（修订号游标，按 `seq` 替换全文）；**每个工具调用各占一条**、状态更新原地替换（以前会拼成一条、只剩第一个工具的 id）；空回合的开始/结束仍是两条；**`answer` 里被工具调用隔开的正文之间补空行**（以前首尾相接）；`limit` 钳到 1..500，`0`/负数不会空转或丢尾（不花 token） |
 | `line-decoder` | 4 | **UTF-8 行分帧**：MCP/ACP 的 chunk 边界不能把中文/emoji 截成 U+FFFD；覆盖逐字节、任意 chunk、CRLF 与 EOF 残留（不花 token） |
 | `sentinel-redaction` | 19 | **哨兵落盘卫生**：`result.thinking` 被剥掉、`thinking_omitted` 始终是布尔值、`answer`/`error`/`title`/`tools_used[].input` 都走与审批相同的凭据脱敏（不花 token） |
 | `review` | 70 | **调用方审核**：默认 `advisory` 审核单带清单 + 证据 + `dsh_review` 入口；`dsh_review` 把裁决落盘并回写内存 run 与哨兵；`fail`/`partial` 必须给理由；未完成/未知 run 被拒绝；重启后仍可凭哨兵审核；队列与 `client_run_id` 重放收据也带审核单；审核记录与哨兵共享 TTL；理由、预览、证据**与清单项**都凭据脱敏；**路径穿越 id 在触盘前就被拒绝**（不花 token） |
 | `forget-tombstone` | 10 | **`forget` 是终态**：`release(forget=true)` 写墓碑，按 id 查询明确失败并给出恢复路径，列表不再展示；删除墓碑后回到常规“未知会话”路径（不花 token） |
 | `bootstrap-profile` | 24 | **首启 profile 在零依赖发布形态下可用**：内置 YAML 子集解析器复制路由、剥掉 `apiKey`/`headers`/字面密钥、绝不写 `defaultPreset`、幂等；用户手写文件逐字节不动（不花 token） |
 | `workspace-safety` | 23 | **数据丢失边界**：`isTempPath` 按路径分段（`tmpdir()+'Suffix'`、`/tmpfoo` 都不算临时目录）、坏 `workspace.json` 绝不覆盖、会话根不可读时绝不清空 `sessionIds`、自动清理只删测试造的会话（不花 token） |
+| `residue-purge` | 149 | **测试残留清理**（沙箱 `DSH_HOME`，不花 token）：一个测试会话的每种产物（会话日志、投影缓存、工作区登记/archived/pinned、墓碑、注册表条目、元数据、哨兵、审核、锁登记）都被清掉；**非测试会话逐字节不变**（点名也删不掉）；子会话级联、`roots` 限定、干跑零写入、坏文件 fail-closed、路径穿越、旧版扁平目录必须有证据才清、各真机套件都接上了收尾 |
 | `permission-adopt` | 17 | **不无声提权**：接管没有权限记录的外部会话时 fail-closed 到 `read-only`；记录为 `read-only` 的会话不能被侧车提升；运行期回读记录与请求不一致会失败（不花 token） |
 | `state-safety` | 26 | **状态/哨兵/锁目录**：默认在 `$DSH_HOME/.dsh-any-agent`、不可写时启动明确失败、哨兵写失败返回 `null` + `sentinel_error`、非法数值落安全侧（不花 token） |
+| `workspace-snapshot` | 21 | **工作区快照**：`workspace_changed` 必须看全量文件内容（同一状态行但内容变了、第 41 条之后的改动、未跟踪目录内部），且 `gitStatus` 异步执行、不阻塞共享 MCP 事件循环（纯文件系统 + 临时 git 仓库，不花 token） |
 | `setup` | 45 | **注册 CLI**：预览不写盘、`--remove` 只摘自己那条、没装客户端算跳过不算失败、Codex TOML 段往返、以及把写进配置里的命令真的拉起一次并要求应答 `initialize`（不花 token）。**不会调用 `claude mcp get`** —— 那个 CLI 会整体回写 `~/.claude.json` |
 | `removal-scope` | 24 | **注销只动自己那条**：给一份装着别的 MCP 服务器、顶层 Codex 设置和 Zed 兄弟设置的配置，注册再注销，断言其余每个值逐字节不变；删一个从没写过的东西 = 无写入、无报错（不花 token） |
-| `config-safety` | 407 | **0.3 这条线的核心性质**，逐客户端验证：预览后文件逐字节不变且不产生 `.bak`；注册再注销后其余条目逐字节还原、键顺序不变、顶层键不丢；4 空格 / 2 空格缩进、单行 JSON、无末尾换行、CRLF、UTF-8 BOM 都能在写入后保留；坏 JSON 与只读文件被拒绝且原文件无损；第二次 `--yes` 空跑不新增备份；每个 `.bak-dsh-<时间戳>` 只出现一次且内容等于写入前字节；PATH 上有 `claude` 也绝不调用（不花 token） |
-| `real-configs` | 84（7/9 配置时 66，本机 5/9 时 48） | **拿真家伙做往返**：把本机**真实**的客户端配置复制进临时目录（18 万字节、含几百个 `projects` 条目与大小写重复键的 `~/.claude.json`，238 行的 Codex TOML，Zed 的完整 `settings.json`），注册再撤销，要求每个文件**逐字节**还原；条目是否存在按**键**判断而不是裸子串；缺少 fixture 时明确打印 `skipped`，绝不假绿（不花 token） |
+| `config-safety` | 407（无客户端配置时 406） | **0.3 这条线的核心性质**，逐客户端验证：预览后文件逐字节不变且不产生 `.bak`；注册再注销后其余条目逐字节还原、键顺序不变、顶层键不丢；4 空格 / 2 空格缩进、单行 JSON、无末尾换行、CRLF、UTF-8 BOM 都能在写入后保留；坏 JSON 与只读文件被拒绝且原文件无损；第二次 `--yes` 空跑不新增备份；每个 `.bak-dsh-<时间戳>` 只出现一次且内容等于写入前字节；PATH 上有 `claude` 也绝不调用（不花 token） |
+| `real-configs` | 84（7/9 配置时 66，5/9 配置时 48） | **拿真家伙做往返**：把本机**真实**的客户端配置复制进临时目录（18 万字节、含几百个 `projects` 条目与大小写重复键的 `~/.claude.json`，238 行的 Codex TOML，Zed 的完整 `settings.json`），注册再撤销，要求每个文件**逐字节**还原；条目是否存在按**键**判断而不是裸子串；缺少 fixture 时明确打印 `skipped`，绝不假绿（不花 token） |
 | `commit-script` | 26 | 提交信息走 stdin，绝不落临时文件让 `git add -A` 卷进发布提交（不花 token） |
+| `test-counts` | 92 | **检查数同步**：套件输出解析（中英文汇总行、整套 skip、`✓`/`✗` 兜底、`[report]` 环境标注）、报告拼装、「主数字（其它环境的数字）」单元格往返、对中英文文档与 `tests.yml` 的重写、`--check` 差异与 `--portable`、模型套件数字不动、失败的报告被拒绝（不花 token） |
 | `roots` | 12 | 不传 `cwd` 时通过 MCP roots 取客户端当前项目；不支持 roots 的客户端得到可操作的报错（不花 token） |
-| `workspace-titles` | 18 | 家目录**与文件系统根目录**当工作区都会在 DSH 启动前被拦住；`title_hint` 与 DSH 自动标题分开返回（不花 token） |
+| `workspace-titles` | 18（TEMP 在家目录外时 17，区分大小写且 TEMP 在家目录外时 16） | 家目录**与文件系统根目录**当工作区都会在 DSH 启动前被拦住；`title_hint` 与 DSH 自动标题分开返回（不花 token） |
 | `package-check` | 14 | `files` 白名单、零运行时依赖、Node 下限、bin shebang（不花 token） |
-| `timeout` | 38 | **超时语义**：`wait=false` 不受 `timeout_ms` 影响、`wait=true` 到期只转后台（不取消/不丢结果、`busy` 不说谎）、`timeout_ms<=0` 一直等、resume 失败会作废进程而不永久卡死、空 prompt 给清晰错误 |
+| `lint` | 22 | **静态检查 `npm run lint` 自身的回归**：在临时目录造一棵有问题的树，逐条断言语法错、导入路径不存在 / 大小写不一致、具名导出不存在（含 `export { x } from`、`await import()` 解构、`node:` 内置模块）、未使用导入都会报；写法刁钻但合法的树（模板字符串里的用法、正则里的引号、`export *`）零误报；并断言本仓库自己是 lint 干净的（不花 token） |
+| `timeout` | 40 | **超时语义**：`wait=false` 不受 `timeout_ms` 影响、`wait=true` 到期只转后台（不取消/不丢结果、`busy` 不说谎）、`timeout_ms=0` 一直等、**负 `timeout_ms` 明确报错**（不派出回合、会话照常可用）、resume 失败会作废进程而不永久卡死、空 prompt 给清晰错误 |
 | `lock` | 79 | **写锁与抢占**：四类持有者判定、`writeMarker` 不覆盖活着的持有者、登记文件损坏/目录缺失等边界；**端到端**两实例抢锁 → 清晰报错 → 拒绝 → `force` 夺锁；**崩溃自动释放锁**、**卡死持有者无 force 自动抢占**；以及"一个回合 = 一个哨兵"的不变量（含内联回合与空闲插话） |
 | `cycle` | 36 | **异步派活的生命周期**：异步派活 → 收哨兵 → 空闲回收 → 再派活，连做 3 轮必须全程无锁错误；贴着回收窗口立刻重派（放大竞态）；`dsh_release` 后立刻重派；并断言回收后**不留下无法归因的锁**（这条实测抓到过"刚拉起的进程被 reaper 当空闲收掉"的竞态） |
 | `concurrency` | 31 | 三会话并发 + 实时增量读 |
 | `capability` | 22 | 写代码、跑脚本、**自行派子代理**（用磁盘上的子会话头验证） |
 | `workspace-effect` | 24 | 不给路径时工作区是否真的生效 |
-| `acceptance` | 36 | 两个文件夹 × 两个会话做只读 IDA Pro 分析 |
+| `acceptance` | 36（没有 IDA MCP 时 skip） | 两个文件夹 × 两个会话做只读 IDA Pro 分析 |
 | `multi` | 19 | **多实例共存 + 非 ASCII 路径**：复现"两实例共写注册表 → 后写的把先建的会话抹掉"，并验证**仅凭 id 就能从会话存储找回并真的派活**（指注册表丢失，不是显式 `forget` —— forget 是终态墓碑）；**兜底取回不会悄悄提权**（read-only 会话取回后仍是 read-only）；不留 `.tmp` 残渣；**中文 / emoji 工作区路径**能建会话、能干活、文件落在正确目录 |
 | `permission` | 11 | ★ **权限档是否真的生效**（安全属性）：不看我们的返回值（那正是会说谎的地方），而是读**会话自己记录的事实**（投影缓存里的 `permissions.preset` / `sandboxMode`），三档逐一核对且三档记录值互不相同。**这条测试抓到过无声提权**：profile 里 `defaultPreset` 会在会话创建时盖掉 `DSH_PERMISSION_MODE` |
-| `list` | 13 | **`dsh_list` 的开销**（实测驱动）：含磁盘探测的默认调用约 1 秒（要 spawn 一个 DSH 进程），**连续调用命中缓存降到个位数毫秒**；`only_running=true` 与 `include_closed=false` **跳过探测**且语义等价（不把磁盘上的未打开会话算进来） |
+| `list` | 17 | **`dsh_list` 的开销**：含磁盘探测的默认调用要 spawn 一个 DSH 进程（会话多时数秒），**连续调用命中缓存**（用 `probe_cached` 判定而不是墙钟：Windows 上偶尔有一次缓存调用多出约 700ms）；`only_running=true` 与 `include_closed=false` **跳过探测**（`probe_ok=null`）且语义等价（不把磁盘上的未打开会话算进来） |
 | `reasoning-check` | 8 | **思考可见性**：`reasoning=hide` 不返回思考正文但统计非零；`reasoning=full` 返回正文且渲染出思考段 |
 
-**`node test/run.mjs` 在本机 7/9 客户端配置时跑 1012 项（九种齐全时 1030 项）** —— smoke 31 + 离线套件 981 项（九种齐全时 999 项）。**0.5.0 加调用方审核后全部退出码 0**（2026-11-04，Windows / Node 22.19.0；本机 5/9 配置时实测 994 项）；都不需要 provider（没有 DSH 时 smoke 自动跳过建会话段）。
+> **2026-11-06**：`node test/run.mjs` 现在**跑完全部套件**再在末尾列出所有失败项（`--bail` 恢复遇错即停）—— 以前 `timeout.mjs` 一条过时断言就让后面 11 个真机套件全部没跑。需要模型的套件已对桌面版自带运行时上的 DSH 0.2.2-rc.1 全量重跑。
 
-其中 **542 项属于客户端注册器套件**（`setup` 45、`removal-scope` 24、`config-safety` 407、`real-configs` 66；九种齐全时 560 项）—— 0.3 的活其实都在这里。
+<!-- counts:begin (generated by scripts/sync-test-counts.mjs; do not edit by hand) -->
+**`node test/run.mjs` 在本机（Windows，装了 DSH，5/9 个客户端配置 fixture）跑了 31 个离线套件、1417 项检查，全部通过。**表中带括号的数字随环境变化（有没有 DSH、哪个平台、文件系统是否区分大小写、本机装了几个客户端配置），套件总数也随之变化；这一行记录的是上次同步所用报告的环境。
 
-需要模型的套件（`smoke` 31、`boundary` 46、`integration` 30、`async` 21、`sentinel` 36、`timeout` 38、`lock` 79、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`multi` 19、`permission` 11、`list` 13、`reasoning-check` 8、`shared-process` 8）合计 489 项。多数最近一次完整实测在 0.3.9；与调用方审核相关的 `smoke`/`integration`/`async`/`sentinel`/`boundary` 已在本树重跑。它们要可用 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**；`shared-process` 没有 DSH 时也会 skip。
+其中 **524 项属于客户端注册器套件**（`setup` 45、`removal-scope` 24、`config-safety` 407、`real-configs` 48）—— 0.3 的活其实都在这里。
 
-> 三个总数是刻意分开的：`node test/run.mjs`（1012/1030）、CI 离线 job（名义 981/999，不含 smoke；hosted runner 没有客户端 fixture 时 `real-configs` 会整体跳过）、需要模型的集合（名义 489）。数字取各套件自己打印的汇总，不在这里手抄；不要把一个数字套到另一个 runner 上。
+需要模型的套件（`boundary` 46、`integration` 30、`async` 21、`sentinel` 36、`timeout` 40、`lock` 79、`multi` 19、`list` 17、`permission` 11、`shared-process` 8、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`reasoning-check` 8）名义合计 **464 项**；有 DSH 时 `smoke` 还会多跑 13 项会话段。它们要可用的 DSH 与 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**；`shared-process` 没有 DSH 时也会 skip。
+
+> 三个总数是刻意分开的：本机 `node test/run.mjs`（1417）、CI 离线 job（名义 Linux/macOS 1349，Windows 1355；hosted runner 没有 DSH 也没有客户端 fixture，`smoke` 跳过会话段、`real-configs` 整体跳过）、需要模型的集合（名义 464）。数字取各套件自己打印的汇总，由 `npm run docs:counts` 从报告写回，不在这里手抄；不要把一个数字套到另一个 runner 上。
+<!-- counts:end -->
+
+### 🔢 改了测试之后：检查数是算出来的
+
+本文的检查数不手写。`node test/run.mjs` 每次运行都会把各套件的输出收下来，解析成一份 JSON 报告（默认 `.state/test-report.json`，已被 `.gitignore`；`--report <路径>` 换位置，`--no-report` 不写）：每个套件的 `passed` / `failed` / `skipped` / `exitCode` / `durationMs`，加上平台、Node 与 DSH 版本、本机有几个客户端配置 fixture。数字取各套件自己打印的汇总行（`===== …：通过 N，失败 M =====`）；没有汇总行的老套件退回去数 `✓`/`✗` 行；新写的套件请直接打印标准汇总行。
+
+**改完测试后：**
+
+```bash
+node test/run.mjs --all --report .state/test-report.json   # 要有 DSH/provider；只想更新离线数字就去掉 --all
+npm run docs:counts                                        # 写回本表、上面的总数段落（中英文）与 .github/workflows/tests.yml 的范围注释
+git diff docs .github                                      # 看一眼改了什么，然后提交
+```
+
+- **没带 `--all`**：报告里没有需要模型的套件，模型套件的数字原样保留（脚本会说明）。
+- **随环境变化的套件**写成「主数字（其它环境的数字）」：`smoke`（有无 DSH）、`dispatch-tools`（Windows 多跑 PowerShell 哨兵的真机执行）、`config-safety` 与 `real-configs`（本机装了几个客户端配置）、`workspace-titles`（文件系统是否区分大小写、`TEMP` 是否在家目录内）。**只更新这次量到的那一格**，其余格子原样保留 —— 想补哪一格，就在对应环境里再跑一次，把几份报告按顺序用多个 `--report` 传给 `docs:counts`。
+- **整套 skip 的套件**（没有 DSH 的 `shared-process`、没有 IDA MCP 的 `acceptance`、没有客户端配置的 `real-configs`）不动数字。
+- **报告里有失败的套件时脚本拒绝写入**（exit 2）：失败套件的检查数不可信。
+- **新增套件**：先加进 `test/run.mjs` 的 `OFFLINE`/`MODEL`，再在表里补一行（脚本不替你写"覆盖"说明；缺行会 exit 1 并点名）。
+
+**防漂移：** `npm run docs:counts:check` 不写文件，文档与报告不一致就打印差异并 exit 1。CI 的离线 job 跑完 `node test/run.mjs --report` 后执行 `docs:counts:check --portable`，只核对与环境无关的套件，以及只取决于「没有 DSH、没有客户端配置」的 `smoke` / `config-safety` 在 runner 上那一格；随平台变化的套件留给本机的完整检查（发版清单里有这一步）。`test-counts` 套件覆盖报告解析与文档重写本身。
 
 ### 🧯 为什么会有 `sandbox-guard`
 

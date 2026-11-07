@@ -7,7 +7,7 @@
  *   [4] 非法数值环境变量落到安全侧（负 TTL 不清空哨兵；空串权限/思考档回落默认）
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';

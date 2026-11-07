@@ -17,6 +17,7 @@ import { join } from 'node:path';
 
 const ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-perm-'));
 const { McpClient } = await import('./mcp-client.mjs');
+const { cleanupSuite } = await import('./residue.mjs');
 const { DSH_HOME } = await import('../src/config.mjs');
 const client = new McpClient({ env: { DSH_MCP_STATE: join(ROOT, 'state.json') } }).start();
 
@@ -104,9 +105,8 @@ try {
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);
 } finally {
   await client.close();
-  const { purgeTestSessions } = await import('../src/workspace.mjs');
-  // idsOnly：只清理本套件创建的会话，不再按 %TEMP% 一刀切。
-  purgeTestSessions({ ids: convs.filter(Boolean), idsOnly: true });
+  // 只清理本套件创建的会话（点名 id + 自己的临时根），不再按 %TEMP% 一刀切。
+  cleanupSuite({ clients: [client], ids: convs.filter(Boolean), roots: [ROOT] });
   for (let i = 0; i < 3; i++) {
     try {
       rmSync(ROOT, { recursive: true, force: true });

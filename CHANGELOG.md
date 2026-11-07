@@ -7,6 +7,126 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-07
+
+### Added
+
+- **Zero-config DSH discovery, including the desktop app.** The server now finds
+  the DeepSeek Harness desktop app on its own (Windows uninstall registry via
+  `reg export`, plus default install paths on every platform), reads the CLI's
+  version and `engines` straight out of `resources/app.asar` with plain Node,
+  and launches it on the app's bundled Electron runtime in Node mode
+  (`ELECTRON_RUN_AS_NODE=1`). Previously only npx caches and npm global installs
+  were searched, so with the desktop app on 0.2.2-rc.1 the server silently ran a
+  stale 0.2.1-rc.5 from an npx cache. Candidates are ranked runnable-first →
+  newest → desktop > npm global > npx. `DSH_BIN` stays as an explicit override
+  (it may point inside an `.asar`); new `DSH_RUNTIME` overrides the launcher,
+  both with `DSH_BIN` and on its own for auto-discovered npm/npx installs (whose
+  `engines.node` is then re-checked against it); the desktop app always keeps its
+  bundled runtime.
+- `dsh_doctor`: `dsh_bin` shows the source and runtime; new `dsh_runtime`
+  (launcher's Node vs DSH's `engines.node` — 0.2.2 needs Node ≥ 24.9),
+  `dsh_desktop` (warns when the GUI and this server run different DSH versions
+  over the shared `~/.dsh`), and `dsh_candidates`.
+- Background receipts on Windows carry `sentinel_read_powershell`, a reader that
+  passes `-Encoding UTF8` (Windows PowerShell 5.1 otherwise misreads the BOM-less
+  sentinel and `ConvertFrom-Json` fails on CJK text).
+- `npm run lint` (`scripts/lint.mjs`, no npm dependencies): `node --check` on every
+  `.mjs`, relative import paths that resolve with exact case, named imports that
+  are real exports (including `await import()` destructuring and `node:`
+  builtins), and unused named imports. Runs first in every CI offline cell and at
+  the Node 22.15 floor; `test/lint.mjs` is its regression suite. Its first run
+  removed nine unused imports.
+- **Test counts in the docs are generated, not hand-edited.** `test/run.mjs`
+  writes a machine-readable report (`.state/test-report.json` by default,
+  `--report <path>`; per suite: passed/failed/skipped/duration, plus platform,
+  Node, DSH and client-fixture context), every suite prints a standard summary
+  line, and `npm run docs:counts` rewrites the per-suite counts, totals and the
+  CI scope comment from it; `npm run docs:counts:check` fails on any mismatch.
+  The CI offline job runs the check on the platform-independent suites, and the
+  release checklist includes it. Several hand-maintained numbers were wrong and
+  are corrected (e.g. failure-terminal 10, not 11).
+
+### Changed
+
+- **Internal: `src/hub.mjs` and `src/tools.mjs` are split into cohesive modules**
+  with no behaviour change. From `hub.mjs`: `conversation.mjs` (the `Conversation`
+  class), `git-snapshot.mjs`, `hub-store.mjs` (meta sidecar and forget
+  tombstones), `sentinel.mjs`, `workspace-guard.mjs`, `acp-session.mjs`. From
+  `tools.mjs`: `tool-defs.mjs`, `tool-render.mjs`, `doctor.mjs`. Both files
+  re-export every name they exported before, so existing import paths still work.
+- `model-suites` workflow finds DSH through the project's own `resolveDsh()`
+  (`scripts/detect-dsh.mjs`) instead of `command -v dsh`, so a self-hosted runner
+  with only the desktop app installed works without secrets; `DSH_BIN` stays an
+  optional override.
+- **`dsh-any-agent-workspaces --purge-test-sessions --ids …` now refuses
+  sessions whose cwd is not a test directory**, even when named explicitly, and
+  reports them as skipped. The purge also removes every artifact of a test
+  session (projection cache, registry entry, sentinels, reviews, locks), not
+  just its session directory.
+- Compatibility matrix: DSH 0.2.1-rc.5 and 0.2.2-rc.1 are **verified** (full
+  suites, 2026-11-06); 0.2.3+ is unverified.
+- Server `instructions` cut from ~4.4k to ~1.5k characters with the hard rules
+  first. Clients truncate long instructions (Claude Code dropped the old tail,
+  including the "don't" rules); `smoke` now enforces a 2400-character cap.
+- `node test/run.mjs` runs **every** suite and lists all failures at the end;
+  `--bail` restores stop-at-first-failure. One stale assertion used to hide the
+  eleven model-backed suites after it.
+
+### Fixed
+
+- **Test runs left residue in the real `~/.dsh`.** Purging a test session removed
+  only its session directory; the DSH projection cache
+  (`storages/session_projcache/sessions/<id>.json`) was never removed, so about
+  400 orphan files piled up, and the project's own `runs/`, `reviews/`, `meta/`,
+  `locks/` and registry entries leaked too (eight suites kept their state loose
+  under `%TEMP%`, where nothing cleaned it). Every model-backed suite now purges
+  exactly the sessions it created (plus DSH-spawned subagent sessions) with every
+  artifact in its own `finally`; `test/cleanup.mjs` is only the backstop and also
+  sweeps old orphans. The purge refuses any session whose cwd is not a test
+  directory, even when named by id, and no longer re-registers every temp session
+  on disk into the GUI workspace list as a side effect. New offline suite
+  `residue-purge` proves both halves in a sandboxed `DSH_HOME`. With
+  `DSH_MCP_KEEP_EVIDENCE=1`, `cleanup.mjs` now skips the whole sweep, so the
+  sessions and state directories that `acceptance` / `workspace-effect` keep for
+  inspection survive the end-of-run cleanup.
+- **`dsh_read` merged different tool calls into one entry.** Consecutive tool
+  updates in a turn were concatenated (`read [in_progress]read [completed]pwsh …`)
+  under the first call's `tool_call_id`. Each tool call now has its own entry and
+  a status update replaces it in place; only streamed text is still merged, so an
+  empty turn's start/end markers also stay separate. Because an in-place update
+  can give an earlier entry a higher revision, `dsh_read` now pages in revision
+  order (entries in a page are still returned in time order) so a small `limit`
+  can never skip an unread entry, and `gap` is computed from entries actually
+  evicted from the ring buffer instead of assuming revisions grow along it.
+- **`answer` ran message segments together.** Text DSH sends before and after a
+  tool call is two messages, but the collected answer joined them with no
+  separator (`…where possible.1) package.json…`). A blank line now separates a
+  segment that follows a tool call (none is added when the previous segment
+  already ends with a newline, or before the first text); `dsh_read` entries are
+  unchanged.
+- **A clean repository is a 0-change snapshot, not `null`.** `null` now only means
+  "no snapshot" (not a git repo, git unavailable, disabled). A turn that removed
+  the last change used to report `workspace_changed=true` with `diff_stat=null`.
+- **A cold `session/resume` that DSH never answers is retried once.** A live
+  `test/multi.mjs` run once hit `ACP request timed out: session/resume` (60 s of
+  silence from a freshly spawned DSH); a rerun passed and it did not reproduce in
+  ~70 controlled resume cycles, 40 of them under concurrent load. The write lock is
+  ruled out (DSH takes it with a zero-timeout wait and refuses instantly), so it
+  looks like a rare stall inside the DSH process. `resume` is idempotent and the
+  failure path already kills the process and waits for it to exit, so `ensureAlive`
+  now rebuilds the process and retries exactly once — only for a timeout, never for
+  a write-lock refusal or invalid params, and not on a shared host that still carries
+  other conversations. `AcpProcess` timeout errors now carry `code=ACP_TIMEOUT` and
+  `method`, and the DSH stderr tail at the moment of a timeout goes to the opt-in
+  `DSH_MCP_LOG_STDERR` log. New offline suite `resume-retry` (fake ACP server).
+- Tests: `timeout` asserts that a negative `timeout_ms` is rejected (the 0.4.0
+  behaviour) instead of the old "wait forever" semantics, and no longer passes on
+  an error result; `list` asserts caching via `probe_cached` instead of a 500 ms
+  wall-clock threshold; `integration`'s queue check uses a code token instead of
+  requiring the model to echo a phrase verbatim; `capability` prints the tool
+  error text when a call fails instead of an empty `err=`.
+
 ## [0.5.2] — 2026-11-05
 
 ### Fixed
@@ -1016,7 +1136,12 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.9...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.5.2...v0.6.0
+[0.5.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.9...v0.4.0
 [0.3.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.6...v0.3.7

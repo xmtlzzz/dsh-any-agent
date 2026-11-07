@@ -11,11 +11,11 @@
  * 用唯一文件名，这样"搜索候选目录"这个检查才有意义。
  */
 
-import { mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
-import { pruneEmptyWorkspaces, purgeTestSessions } from '../src/workspace.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 let pass = 0;
 let failCount = 0;
@@ -35,7 +35,9 @@ const JOBS = [
   { key: 'A', dir: join(DESKTOP, 'dsh-any-agent-test-A'), file: `probe-a-${STAMP}.txt`, marker: `MARKER-A-${STAMP}` },
   { key: 'B', dir: join(DESKTOP, 'dsh-any-agent-test-B'), file: `probe-b-${STAMP}.txt`, marker: `MARKER-B-${STAMP}` },
 ];
-const STATE = join(tmpdir(), `dsh-any-agent-wseff-state-${STAMP}.json`);
+// ★ 状态目录收在自己的临时目录里（不要把 DSH_MCP_STATE 直接放 %TEMP% 根下，见 smoke.mjs 同处注释）
+const STATE_ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-wseff-'));
+const STATE = join(STATE_ROOT, 'state.json');
 
 const client = new McpClient({ env: { DSH_MCP_STATE: STATE } }).start();
 const convs = [];
@@ -145,19 +147,20 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
-  try { rmSync(STATE, { force: true }); } catch {}
   // 默认自清理：不把测试文件夹和会话留在别人的桌面与 GUI 里。
   // 需要保留证据（人工查看文件）时设 DSH_MCP_KEEP_EVIDENCE=1。
   if (process.env.DSH_MCP_KEEP_EVIDENCE === '1') {
     console.log('\n证据文件已保留（DSH_MCP_KEEP_EVIDENCE=1）:');
     for (const j of JOBS) console.log(`  ${join(j.dir, j.file)}`);
+    console.log(`  ${STATE_ROOT}（状态目录）`);
   } else {
     for (const j of JOBS) {
       try { rmSync(j.dir, { recursive: true, force: true }); } catch {}
     }
-    // 会话已在上面 release 过；这里精确删掉它们的会话记录并让注册表对账
-    purgeTestSessions({ ids: convs.map((c) => c.id).filter(Boolean) });
-    pruneEmptyWorkspaces();
+    // 会话已在上面 release 过；只点 id 精确删掉它们（桌面目录是固定名字，不给 roots），
+    // 连带摘掉工作区登记、删掉因此变空的桌面测试工作区条目
+    cleanupSuite({ clients: [client], ids: convs.map((c) => c.id).filter(Boolean) });
+    try { rmSync(STATE_ROOT, { recursive: true, force: true }); } catch {}
     console.log('\n已清理测试文件夹、会话与工作区登记（保留证据请设 DSH_MCP_KEEP_EVIDENCE=1）');
   }
 }

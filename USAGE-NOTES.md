@@ -37,8 +37,10 @@
 
 ### 1.5 `DSH_BIN` 探测失败
 - **现象**：启动即报 `DSH CLI 入口未找到`。
-- **原因**：DSH 装在非常规位置（本服务按 npx 缓存 → npm 全局 → 常见路径的顺序通配搜索）。
-- **对策**：显式设置 `DSH_BIN=/path/to/node_modules/@deepseek-ai/dsh/lib/bin.js`。
+- **原因**：DSH 装在非常规位置。本服务自动识别 DeepSeek Harness 桌面版（Windows 卸载注册表 +
+  各平台默认安装位置，用桌面版自带运行时跑 asar 里的 CLI）、npm 全局安装和 npx 缓存。
+- **对策**：先跑 `dsh_doctor` 看 `dsh_candidates`；便携版/自定义位置再显式设置
+  `DSH_BIN=/path/to/node_modules/@deepseek-ai/dsh/lib/bin.js`（可指进 `app.asar` 内部）。
 
 ---
 
@@ -225,6 +227,11 @@
 ### 6.3 临时目录默认不登记
 - **原因**：跑测试会在 `%TEMP%` 下建一堆工作区，全登记会把你 GUI 灌满。
 - **对策**：默认模式 `project` 会跳过临时目录。要连临时目录一起登记就设 `DSH_MCP_REGISTER_WORKSPACE=all`。
+
+### 6.4 跑测试不该在 `~/.dsh` 里留东西
+- **现象**：`~/.dsh` 里会话数越攒越多；`storages/session_projcache/sessions/` 里有大量会话目录早已不在的孤儿文件。
+- **原因**：真机测试用的是你真实的 `~/.dsh`（凭据在那里，没法隔离）；旧版清理只删会话目录，不删投影缓存，也不清本项目自己的 `runs/reviews/meta/locks`。
+- **现状**：每个真机套件在 `finally` 里清掉自己造的会话及全部产物，全局 `node test/cleanup.mjs` 兜底；**只有 cwd 是测试目录的会话才会被删**，点名 id 也绕不过。详见 `docs/zh/tests.md`。
 
 ---
 

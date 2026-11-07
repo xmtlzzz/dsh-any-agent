@@ -24,7 +24,7 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 
 **1.4 Never register dsh-any-agent into DSH's own MCP list.** DSH is an MCP client, this server is an MCP server; pointing one at the other recurses forever.
 
-**1.5 `DSH CLI entry not found`.** Set `DSH_BIN` explicitly (auto-detection scans the npx cache, npm global, and common paths).
+**1.5 `DSH CLI entry not found`.** Auto-detection finds the DeepSeek Harness desktop app (Windows uninstall registry plus default install paths on every platform; the CLI inside `app.asar` runs on the app's bundled runtime), npm global installs and the npx cache. Check `dsh_candidates` in `dsh_doctor`; for portable or custom locations set `DSH_BIN` explicitly (it may point inside `app.asar`).
 
 ## 2. Cost and budget
 
@@ -93,6 +93,8 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 **6.2 ★ The running DSH server caches the registry in memory.** MCP-created conversations pile up under "Ungrouped" in the GUI. This server writes the registration file, but a running DSH won't re-read it — **restart DSH**. ⚠️ Before restarting, don't touch workspaces in the GUI, or the server will write its in-memory state back over the file.
 
 **6.3 Temp directories are skipped by default** (`DSH_MCP_REGISTER_WORKSPACE=project`) so test runs don't flood your GUI. Use `all` to include them.
+
+**6.4 Running the tests must not leave anything in `~/.dsh`.** Symptom: the session count under `~/.dsh` keeps growing, and `storages/session_projcache/sessions/` holds many orphan files whose session directories are long gone. Cause: model-backed tests use your real `~/.dsh` (the credentials live there, so it cannot be isolated), and the old cleanup removed the session directory but neither the projection cache nor this project's own `runs/reviews/meta/locks`. Now: every model-backed suite removes the sessions it created, with every artifact, in its own `finally`, and `node test/cleanup.mjs` is the global backstop. **Only sessions whose cwd is a test directory are ever deleted** — naming an id does not bypass that. See `docs/en/tests.md`.
 
 ## 7. Privacy
 

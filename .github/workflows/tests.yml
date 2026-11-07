@@ -5,37 +5,50 @@ name: tests
 # This project's suite has two halves, and only one of them can run here.
 #
 #   OFFLINE (runs in CI)
-#     smoke             protocol (31 checks without DSH)
+#     smoke             protocol + instructions length cap, no DSH   20 checks
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     guards            env-var edge cases            40 checks
+#     dsh-locate        DSH auto-discovery (asar)     21 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          37 checks
-#     failure-terminal  terminal state on failure     11 checks
+#     failure-terminal  terminal state on failure     10 checks
 #     shared-host       shared process host           25 checks
-#     dispatch-tools    dispatch surface              55 checks (53 off Windows)
-#     read-cursor       dsh_read revision cursor      10 checks
+#     resume-retry      cold-resume timeout retry     63 checks (fake ACP server)
+#     dispatch-tools    dispatch surface              59 checks (55 off Windows)
+#     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            10 checks
 #     bootstrap-profile zero-dependency bootstrap     24 checks
 #     workspace-safety  data-loss boundaries          23 checks
+#     residue-purge     test residue cleanup, sandboxed 149 checks
 #     permission-adopt  no silent privilege escalation 17 checks
 #     state-safety      state/sentinel/lock storage   26 checks
-#     workspace-snapshot workspace_changed full fingerprint  18 checks
+#     workspace-snapshot workspace_changed full fingerprint  21 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
+#     test-counts       report parser + docs sync     92 checks
 #     roots             cwd from MCP roots            12 checks
-#     workspace-titles  home/root cwd guard, title_hint 18 checks
+#     workspace-titles  home/root cwd guard, title_hint 18 checks (16 off Windows)
 #     setup             client config writer          45 checks
 #     removal-scope     --remove only touches its own   24 checks
-#     config-safety     in-place edits, format        407 checks
+#     config-safety     in-place edits, format        406 checks
 #     real-configs      real config round-trip        skips without client fixtures
 #     package-check     publishability                14 checks
+#     lint              static checks (npm run lint)  syntax, imports, exports, unused
+#     lint (selftest)   scripts/lint.mjs regression   22 checks
 #     package job       pack -> install -> --version
 #     website job       build + 29 site/a11y tests + bilingual pages
 #
 #     These load modules and touch the filesystem: no DSH, no model, no
 #     credentials.
+#
+#     The check counts above are written by scripts/sync-test-counts.mjs
+#     (npm run docs:counts) from the JSON report test/run.mjs produces, not
+#     typed by hand. The numbers are what a hosted runner measures: no DSH and
+#     no client config fixtures (hence smoke's session sections and
+#     real-configs do not run). The last step of the offline job re-runs the
+#     suites with --report and fails if the docs disagree.
 #
 #   NEEDS DSH (does NOT run in CI)
 #     boundary, integration, async, sentinel, timeout, lock, cycle,
@@ -97,6 +110,17 @@ jobs:
           if command -v dsh > /dev/null 2>&1; then echo 'dsh unexpectedly present'; exit 1; fi
           echo 'no dsh on PATH, as expected'
 
+      # 零依赖静态检查：语法、相对导入路径（含大小写）、具名导出是否存在、未使用导入。
+      # 放在最前面：拆模块 / 改导入留下的一个漏导出，比任何一个套件都更早、更便宜地暴露。
+      # 在 Linux 上跑的价值最大 —— Windows/macOS 不区分大小写，只有这里会抓到
+      # `./Foo.mjs` 与 `foo.mjs` 的写法不一致。
+      - name: lint (syntax, imports resolve, named exports exist, no unused imports)
+        run: npm run lint
+
+      - name: lint selftest (every rule fires, valid syntax is not flagged)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/lint.mjs
+
       - name: smoke (protocol; skips DSH session sections on this runner)
         env: { DSH_MCP_LOG: silent, DSH_BIN: '/fake/never/used.js' }
         run: node test/smoke.mjs
@@ -108,6 +132,10 @@ jobs:
       - name: guards (environment-variable edge cases)
         env: { DSH_MCP_LOG: silent }
         run: node test/guards.mjs
+
+      - name: dsh-locate (DSH auto-discovery, synthetic asar)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/dsh-locate.mjs
 
       - name: prune (sentinel retention)
         env: { DSH_MCP_LOG: silent }
@@ -124,6 +152,11 @@ jobs:
       - name: shared-host (shared process host)
         env: { DSH_MCP_LOG: silent }
         run: node test/shared-host.mjs
+
+      # 假 ACP 服务端当 DSH：resume 停滞时重试一次，撞写锁/参数错误不重试。
+      - name: resume-retry (cold-resume timeout retry boundaries)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/resume-retry.mjs
 
       - name: dispatch-tools (dsh_inbox, idempotency, queue)
         env: { DSH_MCP_LOG: silent }
@@ -152,6 +185,14 @@ jobs:
       - name: workspace-safety (no data-loss on bad registry/temp prefixes)
         env: { DSH_MCP_LOG: silent }
         run: node test/workspace-safety.mjs
+
+      # Test-session cleanup: every artifact kind a test session leaves behind
+      # (DSH session log, projection cache, workspace registration, tombstone,
+      # registry entry, meta, sentinels, reviews, lock markers) is removed, and
+      # non-test sessions stay byte-identical. Sandboxed DSH_HOME; no DSH needed.
+      - name: residue-purge (test residue cleanup is complete and scoped)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/residue-purge.mjs
 
       - name: permission-adopt (no silent privilege escalation)
         env: { DSH_MCP_LOG: silent }
@@ -194,6 +235,11 @@ jobs:
         env: { DSH_MCP_LOG: silent }
         run: node test/commit-script.mjs
 
+      # 检查数同步的回归：解析各套件的汇总行、把报告写回文档。纯文件系统，不花 token。
+      - name: test-counts (report parser and docs sync)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/test-counts.mjs
+
       # MCP roots：不传 cwd 时用客户端当前打开的项目目录。真实 stdio 握手，
       # 不需要 DSH 也不需要模型。
       - name: roots (cwd defaults to the client project dir)
@@ -228,6 +274,18 @@ jobs:
           node bin/dsh-any-agent.mjs --help > /dev/null
           node bin/setup.mjs --version
           node bin/restore.mjs --help > /dev/null
+
+      # 文档里的检查数不手抄：把离线套件再跑一遍产出 JSON 报告，然后核对文档。
+      # --portable 只核对与环境无关的套件，以及 smoke / config-safety 在 runner 这一格
+      # （没有 DSH、没有客户端配置）；dispatch-tools / workspace-titles 随平台与文件系统变化，
+      # 留给本机的完整检查（发版清单里的 npm run docs:counts:check）。
+      # 代价：离线套件在每个矩阵格里多跑一遍（各格并行，约一分钟），换来文档数字不会无声地漂。
+      - name: docs test counts match this run (portable suites)
+        shell: bash
+        env: { DSH_MCP_LOG: silent, DSH_BIN: '/fake/never/used.js' }
+        run: |
+          node test/run.mjs --report .state/ci-report.json
+          node scripts/sync-test-counts.mjs --check --portable --report .state/ci-report.json
 
   package:
     name: tarball installs and starts
@@ -301,5 +359,7 @@ jobs:
         run: |
           node --version
           node test/package-check.mjs
+          # 具名导入（含 node:zlib 的 zstdDecompressSync）要对照这个版本的真实导出检查。
+          node scripts/lint.mjs
           node test/workspace-safety.mjs
           node test/bootstrap-profile.mjs

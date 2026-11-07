@@ -9,11 +9,12 @@
  * 会消耗一定 token（三个 agent 各自多步作业）。
  */
 
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, basename } from 'node:path';
+import { join } from 'node:path';
 import { zstdDecompressSync } from 'node:zlib';
 import { McpClient } from './mcp-client.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 let pass = 0;
 let failCount = 0;
@@ -27,8 +28,9 @@ const check = (name, cond, detail = '') => {
   }
 };
 
-const STATE = join(tmpdir(), `dsh-any-agent-cap-state-${Date.now()}.json`);
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-cap-'));
+// ★ 状态目录收在自己的临时根里（见 smoke.mjs 同处注释）
+const STATE = join(root, 'state.json');
 const DSH_HOME = process.env.DSH_HOME ?? join(process.env.USERPROFILE ?? '', '.dsh');
 const SESSIONS_ROOT = join(DSH_HOME, 'sessions');
 
@@ -126,7 +128,16 @@ try {
     console.log(`  stop=${s.stop_reason} 耗时=${((s.elapsed_ms ?? 0) / 1000).toFixed(1)}s`);
     console.log(`  用到工具: ${tools.join(', ') || '(无)'}`);
     console.log(`  答复: ${JSON.stringify((s.answer ?? '').slice(0, 300))}`);
-    check(`${j.key}: 回合正常结束`, s.stop_reason === 'end_turn', `stop=${s.stop_reason} err=${s.error ?? err ?? ''}`);
+    // ★ 工具层报错（isError）时 structuredContent 是空的，原因只在 content 文本里。
+    //   以前只打印 s.error，结果失败行是一句空的 `err=`，这次失败根本无从定位。
+    const toolErr = r?.isError ? McpClient.text(r).slice(0, 400) : '';
+    if (toolErr) console.log(`  工具报错: ${toolErr}`);
+    if (!r && err) console.log(`  调用异常: ${err}`);
+    check(
+      `${j.key}: 回合正常结束`,
+      s.stop_reason === 'end_turn',
+      `stop=${s.stop_reason} err=${s.error ?? toolErr ?? ''}${err ? ` call=${err}` : ''}${!toolErr && !s.error && !err ? ` raw=${JSON.stringify(r ?? null).slice(0, 300)}` : ''}`,
+    );
   }
 
   // ── 写代码 + 跑脚本的产物验证 ─────────────────────────────
@@ -187,11 +198,13 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
-  try { rmSync(STATE, { force: true }); } catch {}
   if (!process.env.DSH_MCP_KEEP_WS) {
+    // 会话（含 DSH 自己派出的子代理会话）与全部产物一并清掉，再删临时根
+    cleanupSuite({ clients: [client], roots: [root] });
     try { rmSync(root, { recursive: true, force: true }); } catch {}
   } else {
-    console.log(`工作区保留在: ${root}`);
+    // 要保留工作区做人工检查：会话与状态也一并留着（之后 node test/cleanup.mjs 会兜底清掉）
+    console.log(`工作区保留在: ${root}（会话与状态也保留；node test/cleanup.mjs 可清）`);
   }
 }
 

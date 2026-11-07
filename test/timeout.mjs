@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpClient } from './mcp-client.mjs';
 import { purgeTestSessions } from '../src/workspace.mjs';
+import { cleanupSuite } from './residue.mjs';
 
 let pass = 0;
 let failCount = 0;
@@ -171,15 +172,24 @@ try {
   check('重派后依然不留半死进程', stB2?.structuredContent?.alive === false, McpClient.text(stB2).slice(0, 200));
 
   console.log('\n[6] 参数边界：负 timeout / 空 prompt');
-  // timeout_ms 为负数应等同"不设超时"（代码里是 timeoutMs <= 0 → 一直等），
-  // 必须正常拿到结果，而不是立刻转后台或报错。
+  // 0.4.0 起 timeout_ms 只接受 >= 0 的有限数字（src/tools.mjs parseTimeoutMs）：负数、NaN
+  // 一律**明确报错**，不再“等同不设超时”—— 旧语义会让 'abc' → NaN 静默降级成后台收据，
+  // 调用方以为自己在原地等。这里同时守住：报错时不能派出回合、会话不受损。
   const neg = await client.callTool(
     'dsh_send',
     { conversation_id: convA, prompt: '只回复：负超时', wait: true, timeout_ms: -5 },
     300_000,
   );
-  check('★ 负 timeout_ms 等同不设超时，返回完整结果', neg?.structuredContent?.still_running !== true, JSON.stringify(neg?.structuredContent ?? {}).slice(0, 200));
-  check('负 timeout_ms 的回合正常结束', neg?.structuredContent?.stop_reason === 'end_turn', String(neg?.structuredContent?.stop_reason));
+  const negText = McpClient.text(neg);
+  check('★ 负 timeout_ms 被明确拒绝（isError）', neg?.isError === true, negText.slice(0, 200));
+  check('★ 报错说明了合法取值', /timeout_ms 必须是 >= 0 的有限数字/.test(negText), negText.slice(0, 200));
+  check('被拒绝时没有派出回合（没有 run_id）', !neg?.structuredContent?.run_id, JSON.stringify(neg?.structuredContent ?? {}).slice(0, 200));
+  const afterNeg = await client.callTool(
+    'dsh_send',
+    { conversation_id: convA, prompt: '只回复：好的', wait: true, timeout_ms: 0 },
+    300_000,
+  );
+  check('拒绝之后会话照常可用', afterNeg?.structuredContent?.stop_reason === 'end_turn', McpClient.text(afterNeg).slice(0, 200));
 
   // 空 prompt：不该挂住、不该崩；要么正常回合，要么给出清晰错误
   const empty = await client.callTool(
@@ -215,8 +225,9 @@ try {
   console.log(client.stderr.slice(-30).join('\n'));
 } finally {
   await client.close();
-  // idsOnly：只清理本套件创建的会话，不再按 %TEMP% 一刀切。
-  purgeTestSessions({ ids: convs.filter(Boolean), idsOnly: true });
+  // 只清理本套件创建的会话（点名 id + 自己的临时根），连同投影缓存/状态/哨兵等全部产物；
+  // 不再按 %TEMP% 一刀切。
+  cleanupSuite({ clients: [client], ids: convs.filter(Boolean), roots: [ROOT] });
   try {
     rmSync(ROOT, { recursive: true, force: true });
   } catch {}

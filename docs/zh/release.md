@@ -14,6 +14,9 @@ npm version patch --no-git-tag-version
 node test/run.mjs
 node test/package-check.mjs
 npm run check:release   # 版本号 / CHANGELOG / 文档链接 / 打包清单一致性
+npm run docs:counts:check   # tests.md 与 CI 注释里的检查数 = 刚才 node test/run.mjs 写出的报告
+#    不一致就是改过测试没更新数字：node test/run.mjs --all --report .state/test-report.json && npm run docs:counts
+#    （模型套件的数字只有带 --all 的报告才会更新，见 docs/zh/tests.md「改了测试之后」）
 
 # 3. 确认 tarball 本身：打得出来、装得上、起得来
 npm pack --dry-run

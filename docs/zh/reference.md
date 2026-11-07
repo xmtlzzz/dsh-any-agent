@@ -4,7 +4,8 @@
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `DSH_BIN` | 自动探测 | `@deepseek-ai/dsh/lib/bin.js` 路径 |
+| `DSH_BIN` | 自动探测（桌面版 → npm 全局 → npx 缓存） | 显式指定 `@deepseek-ai/dsh/lib/bin.js` 路径（可指进桌面版 `app.asar` 内部） |
+| `DSH_RUNTIME` | 自动 | 显式指定拉起 DSH 的可执行文件（如一个 Node 24）。配合 `DSH_BIN` 使用，或单独设置时作用于自动发现的 npm 全局 / npx 版 DSH（并按它的 Node 版本重新判定 `engines.node`）；桌面版始终用其自带运行时（asar 只有它读得了）。不设时：桌面版用自带运行时，其余用本服务的 node |
 | `DSH_MCP_PROFILE` | `dsh-mcp`（团队开启时 `dsh-team`） | 驱动用的 DSH profile；显式设置优先 |
 | `DSH_MCP_TEAM` | `0`（关闭） | 团队模式，按需开启。`dsh-any-agent team on` 写设置文件；这里设 `1`/`0` 可覆盖它。开启后使用 `dsh-team` profile，并在 `dsh_send` 前注入"需要时先建团队"的提示；单次关闭用 `dsh_send(team=false)` |
 | `DSH_MCP_SETTINGS` | `$DSH_HOME/.dsh-any-agent/settings.json` | 团队开关的设置文件（`dsh-any-agent team on/off` 写它） |

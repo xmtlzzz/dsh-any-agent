@@ -164,10 +164,10 @@ try {
       await cl.close();
     } catch {}
   }
-  // 只清本套件自己创建的会话（idsOnly），绝不再用 tempOnly —— 那会误删
-  // 其他进程/测试正在使用的临时工作区会话。
-  const { purgeTestSessions } = await import('../src/workspace.mjs');
-  purgeTestSessions({ ids: [...tracked], idsOnly: true });
+  // 只清本套件自己创建的会话（点名 id + 自己的临时根），绝不扫荡整个 %TEMP% ——
+  // 那会误删其他进程/测试正在使用的临时工作区会话。
+  const { cleanupSuite } = await import('./residue.mjs');
+  cleanupSuite({ clients: [A, B], ids: [...tracked], roots: [ROOT] });
   for (let i = 0; i < 3; i++) {
     try {
       rmSync(ROOT, { recursive: true, force: true });

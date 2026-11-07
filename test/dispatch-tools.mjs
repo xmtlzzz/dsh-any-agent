@@ -18,10 +18,12 @@ const { Conversation, Hub } = await import('../src/hub.mjs');
 const { createHandlers } = await import('../src/tools.mjs');
 const { TEAM_ACTIVE } = await import('../src/config.mjs');
 
+let passed = 0;
 let failed = 0;
 function check(name, fn) {
   try {
     fn();
+    passed += 1;
     console.log(`  ✓ ${name}`);
   } catch (e) {
     failed += 1;
@@ -213,11 +215,18 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
     assert.equal(dshVersionStatus('0.1.7-rc.1').status, 'ok');
   });
   check('0.1.9 → verified', () => assert.equal(lvl('0.1.9'), 'verified'));
-  check('★ 0.2.0-rc.1 → unverified/warn（rc 也算进 0.2）', () => {
-    assert.equal(lvl('0.2.0-rc.1'), 'unverified');
-    assert.equal(dshVersionStatus('0.2.0-rc.1').status, 'warn');
+  check('★ 0.2.1-rc.5 / 0.2.2-rc.1（全量实测过）→ verified/ok', () => {
+    assert.equal(lvl('0.2.1-rc.5'), 'verified');
+    assert.equal(lvl('0.2.2-rc.1'), 'verified');
+    assert.equal(dshVersionStatus('0.2.2-rc.1').status, 'ok');
   });
-  check('★ 0.2.1-rc.5（本机实测版本）→ unverified', () => assert.equal(lvl('0.2.1-rc.5'), 'unverified'));
+  check('★ 0.2.3-rc.1 → unverified/warn（rc 也算进 0.2.3）', () => {
+    assert.equal(lvl('0.2.3-rc.1'), 'unverified');
+    assert.equal(dshVersionStatus('0.2.3-rc.1').status, 'warn');
+  });
+  check('0.3.0 → unverified', () => assert.equal(lvl('0.3.0'), 'unverified'));
+  check('unverified 的说明里写明已验证区间（不再写死“只覆盖到 0.1.x”）', () =>
+    assert.match(dshVersionStatus('0.3.0').note, /0\.1\.7 ~ 0\.2\.2/));
   check('Windows npx 缓存路径被识别', () =>
     assert.ok(isNpxCachePath('C:\\Users\\a\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js')));
   check('POSIX npx 缓存路径被识别', () =>
@@ -230,7 +239,7 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
 
 console.log('\n[6c] PowerShell 哨兵等待命令');
 {
-  const { psWaitCommand } = await import('../src/tools.mjs');
+  const { psWaitCommand, psReadCommand } = await import('../src/tools.mjs');
   const cmd = psWaitCommand("C:\\Users\\o'neil\\runs\\a $b `c.json", 30);
   check('单引号转义成两个单引号', () => assert.match(cmd, /o''neil/));
   check('路径放在单引号字面量里（$ 与反引号不展开）', () =>
@@ -259,12 +268,25 @@ console.log('\n[6c] PowerShell 哨兵等待命令');
         assert.equal(missing.status, 1, missing.stderr);
         assert.match(missing.stdout, /TIMEOUT/);
       });
+      // ★ 读取命令：哨兵是无 BOM 的 UTF-8，PS 5.1 不带 -Encoding UTF8 会把中文读坏、JSON 解析失败。
+      const zh = join(dir, 'a $b [c]', 'run-zh.json');
+      writeFileSync(zh, JSON.stringify({ status: 'done', result: { answer: '三项冒烟测试全部通过' } }));
+      const rd = ps(`[Console]::OutputEncoding=[Text.Encoding]::UTF8; (${psReadCommand(zh)}).result.answer`);
+      check('★ 读取命令能正确解析含中文的哨兵（路径含单引号/$/方括号）', () => {
+        assert.equal(rd.status, 0, rd.stderr);
+        assert.equal(rd.stdout.trim(), '三项冒烟测试全部通过');
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   } else {
     console.log('  skipped: 非 Windows，不执行 PowerShell');
   }
+  check('读取命令带 -Encoding UTF8 且用 -LiteralPath', () => {
+    const c = psReadCommand("C:\\x\\o'neil.json");
+    assert.match(c, /-Encoding UTF8/);
+    assert.match(c, /-LiteralPath 'C:\\x\\o''neil\.json'/);
+  });
 }
 
 console.log('\n[7] 团队提示注入');
@@ -314,5 +336,7 @@ if (!process.env.DSH_MCP_ALLOW_FULL_ACCESS) {
 
 rmSync(auditDir, { recursive: true, force: true });
 
+// 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
+console.log(`\n===== dispatch tools: passed ${passed}, failed ${failed} =====`);
 console.log(`\n总结果: ${failed === 0 ? '通过 ✅' : `${failed} 项失败 ❌`}`);
 process.exit(failed === 0 ? 0 : 1);

@@ -3,7 +3,8 @@
  * dsh-any-agent 入口：以 MCP stdio 服务端方式运行，用 DSH (ACP) 作为后端。
  *
  * 环境变量：
- *   DSH_BIN                     DSH CLI 入口（默认探测 npx 缓存位置）
+ *   DSH_BIN                     DSH CLI 入口（默认自动识别：桌面版 → npm 全局 → npx 缓存）
+ *   DSH_RUNTIME                 拉起 DSH 的可执行文件（默认：桌面版用其自带运行时，其余用本进程 node）
  *   DSH_MCP_PROFILE             驱动用的 DSH profile（默认 dsh-mcp）
  *   DSH_MCP_STATE               会话注册表路径（默认 $DSH_HOME/.dsh-any-agent/conversations.json）
  *   DSH_MCP_PERMISSION          新建会话的默认权限档（默认 danger-full-access）
@@ -45,6 +46,8 @@ if (argv.includes('--help') || argv.includes('-h')) {
     '  dsh-any-agent-setup --yes     apply\n\n' +
     'Key environment variables (all optional):\n' +
     '  DSH_BIN                  path to @deepseek-ai/dsh/lib/bin.js; auto-detected\n' +
+    '                           (desktop app -> npm global -> npx cache)\n' +
+    '  DSH_RUNTIME              executable that launches DSH; auto (desktop app\'s own runtime)\n' +
     '  DSH_MCP_PROFILE          DSH profile to drive (default dsh-mcp)\n' +
     '  DSH_MCP_PERMISSION       danger-full-access | workspace-write | read-only\n' +
     '  DSH_MCP_APPROVAL         auto-allow | auto-deny | ask\n' +

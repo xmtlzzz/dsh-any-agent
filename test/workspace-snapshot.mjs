@@ -41,9 +41,20 @@ const check = (name, cond, detail = '') => {
 };
 
 const GIT_ENV = { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
+// ★ 给足时间：CI 的 windows-latest 上 `git add -A` 1200 个文件曾被 30s 超时中途杀掉
+//   （PR #11，node 24 那一格的第二遍全量运行），而报错里只剩 stderr 的 CRLF 警告，看不出是超时。
+const GIT_TIMEOUT_MS = 180_000;
 function git(cwd, ...args) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV, timeout: 30_000 });
-  if (r.status !== 0) throw new Error(`git ${args.join(' ')} 失败: ${r.stderr || r.error?.message}`);
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV, timeout: GIT_TIMEOUT_MS });
+  if (r.status !== 0) {
+    // 超时被杀时 status 是 null、stderr 只是半截输出 —— 必须把“超时/信号”说出来，否则误导排查。
+    const why =
+      r.error?.code === 'ETIMEDOUT' || r.signal
+        ? `超时或被信号终止（timeout=${GIT_TIMEOUT_MS}ms, signal=${r.signal ?? 'none'}）`
+        : `退出码 ${r.status}`;
+    const stderr = String(r.stderr ?? '').trim().split(/\r?\n/).slice(-5).join('\n');
+    throw new Error(`git ${args.join(' ')} 失败（${why}）: ${stderr || r.error?.message || ''}`);
+  }
   return String(r.stdout ?? '');
 }
 
@@ -53,6 +64,10 @@ function makeRepo(name) {
   git(dir, 'init', '-q');
   git(dir, 'config', 'user.email', 'test@example.invalid');
   git(dir, 'config', 'user.name', 'workspace snapshot test');
+  // 本测试只关心状态行与指纹，不关心换行符。Windows runner 默认 core.autocrlf=true，
+  // 会对每个文件做 LF→CRLF 换算并逐个打印警告：1200 个文件时又慢又刷屏，正是上面超时的诱因。
+  git(dir, 'config', 'core.autocrlf', 'false');
+  git(dir, 'config', 'core.safecrlf', 'false');
   return dir;
 }
 
@@ -121,6 +136,22 @@ try {
     writeFileSync(join(repo, 'scratch', 'a.txt'), 'two with a different size\n');
     const after = await gitStatus(repo);
     check('★ 目录 mtime 未变也能识别内部文件变化', sameWorkspaceSnapshot(before, after) === false);
+  }
+
+  console.log('\n[3b] ★ 干净的仓库是“0 个改动”的快照，不是 null');
+  {
+    const repo = makeRepo('clean-after-delete');
+    writeFileSync(join(repo, 'base.txt'), 'base\n');
+    commitAll(repo);
+    const clean0 = await gitStatus(repo);
+    check('★ 干净仓库 → changed_files=0（不再是 null）', clean0 !== null && clean0.changed_files === 0 && clean0.entries.length === 0, JSON.stringify(clean0));
+    mkdirSync(join(repo, '.smoke'));
+    writeFileSync(join(repo, '.smoke', 'x.txt'), 'x\n');
+    const dirty = await gitStatus(repo);
+    rmSync(join(repo, '.smoke'), { recursive: true, force: true });
+    const clean1 = await gitStatus(repo);
+    check('★ 删掉唯一的改动：有变化，且 after 是 0 个改动（不是 null）', sameWorkspaceSnapshot(dirty, clean1) === false && clean1?.changed_files === 0, JSON.stringify(clean1));
+    check('干净 → 干净：没有变化', sameWorkspaceSnapshot(clean0, clean1) === true);
   }
 
   console.log('\n[4] 非 git 目录与总开关');

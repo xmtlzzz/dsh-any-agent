@@ -16,7 +16,7 @@ import {
   DSH_PROFILE,
   PKG_VERSION,
   REQUEST_TIMEOUT_MS,
-  resolveDshBin,
+  resolveDsh,
 } from './config.mjs';
 import { LineDecoder } from './line-decoder.mjs';
 
@@ -97,17 +97,19 @@ export class AcpProcess {
     } else if (ready.skipped) {
       this.#log.debug(`[acp] profile 引导跳过: ${ready.skipped}`);
     }
-    const bin = resolveDshBin();
-    const env = { ...process.env, DSH_PERMISSION_MODE: this.permission };
+    // 桌面版：用它自带的 Electron 以 Node 模式跑 asar 里的 CLI；npm/npx：用本进程的 node。
+    const dsh = resolveDsh();
+    const env = { ...process.env, ...dsh.env, DSH_PERMISSION_MODE: this.permission };
     // 0.4.0：可选的子进程堆上限。只加参数、不覆盖用户已有的 NODE_OPTIONS。
     if (CHILD_MAX_OLD_SPACE_MB > 0) {
       const prev = String(env.NODE_OPTIONS ?? '').trim();
       env.NODE_OPTIONS = `${prev} --max-old-space-size=${CHILD_MAX_OLD_SPACE_MB}`.trim();
     }
-    this.#child = spawn(process.execPath, [bin, '--profile', DSH_PROFILE], {
+    this.#child = spawn(dsh.command, [...dsh.args, '--profile', DSH_PROFILE], {
       cwd: this.cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
 
     this.#child.stdout.on('data', (d) => this.#onData(d));
@@ -243,7 +245,14 @@ export class AcpProcess {
       const timer =
         timeoutMs > 0
           ? setTimeout(() => {
-              if (this.#pending.delete(id)) reject(new Error(`ACP 请求超时: ${method}`));
+              if (!this.#pending.delete(id)) return;
+              // 带上机器可读的 code/method：上层要区分"DSH 没回话（超时）"与"DSH 明确拒绝"，
+              // 前者可能是瞬时卡顿（可重试），后者重试只会重复同一个错误，不能靠匹配中文报错文本来分。
+              const err = new Error(`ACP 请求超时: ${method}`);
+              err.code = 'ACP_TIMEOUT';
+              err.method = method;
+              err.timeoutMs = timeoutMs;
+              reject(err);
             }, timeoutMs)
           : null;
       this.#pending.set(id, { resolve, reject, timer });
