@@ -1,0 +1,25 @@
+{
+  "name": "dsh-any-agent-video",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Promo video for dsh-any-agent, rendered with Remotion. Not part of the npm package.",
+  "scripts": {
+    "music": "node scripts/make-music.mjs",
+    "dev": "npm run music && remotion studio src/index.jsx",
+    "still": "remotion still src/index.jsx Promo",
+    "render": "npm run music && remotion render src/index.jsx Promo out/dsh-any-agent-promo.mp4 --codec=h264 --crf=18",
+    "stills": "node scripts/stills.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.541",
+    "@remotion/cli": "4.0.541",
+    "@remotion/renderer": "4.0.541",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.541"
+  }
+}
