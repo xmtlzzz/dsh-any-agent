@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-07
+
 ### Added
 
 - **Zero-config DSH discovery, including the desktop app.** The server now finds
@@ -32,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builtins), and unused named imports. Runs first in every CI offline cell and at
   the Node 22.15 floor; `test/lint.mjs` is its regression suite. Its first run
   removed nine unused imports.
+- **Test counts in the docs are generated, not hand-edited.** `test/run.mjs`
+  writes a machine-readable report (`.state/test-report.json` by default,
+  `--report <path>`; per suite: passed/failed/skipped/duration, plus platform,
+  Node, DSH and client-fixture context), every suite prints a standard summary
+  line, and `npm run docs:counts` rewrites the per-suite counts, totals and the
+  CI scope comment from it; `npm run docs:counts:check` fails on any mismatch.
+  The CI offline job runs the check on the platform-independent suites, and the
+  release checklist includes it. Several hand-maintained numbers were wrong and
+  are corrected (e.g. failure-terminal 10, not 11).
 
 ### Changed
 
@@ -45,7 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`scripts/detect-dsh.mjs`) instead of `command -v dsh`, so a self-hosted runner
   with only the desktop app installed works without secrets; `DSH_BIN` stays an
   optional override.
-
+- **`dsh-any-agent-workspaces --purge-test-sessions --ids …` now refuses
+  sessions whose cwd is not a test directory**, even when named explicitly, and
+  reports them as skipped. The purge also removes every artifact of a test
+  session (projection cache, registry entry, sentinels, reviews, locks), not
+  just its session directory.
 - Compatibility matrix: DSH 0.2.1-rc.5 and 0.2.2-rc.1 are **verified** (full
   suites, 2026-11-06); 0.2.3+ is unverified.
 - Server `instructions` cut from ~4.4k to ~1.5k characters with the hard rules
@@ -1111,7 +1126,12 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.9...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.5.2...v0.6.0
+[0.5.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.9...v0.4.0
 [0.3.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.3.6...v0.3.7
