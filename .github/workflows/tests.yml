@@ -5,7 +5,7 @@ name: tests
 # This project's suite has two halves, and only one of them can run here.
 #
 #   OFFLINE (runs in CI)
-#     smoke             protocol + instructions length cap (session sections skip without DSH)
+#     smoke             protocol + instructions length cap, no DSH   20 checks
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     guards            env-var edge cases            40 checks
 #     dsh-locate        DSH auto-discovery (asar)     19 checks
@@ -25,6 +25,7 @@ name: tests
 #     workspace-snapshot workspace_changed full fingerprint  21 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
+#     test-counts       report parser + docs sync     0 checks
 #     roots             cwd from MCP roots            12 checks
 #     workspace-titles  home/root cwd guard, title_hint 18 checks
 #     setup             client config writer          45 checks
@@ -37,6 +38,13 @@ name: tests
 #
 #     These load modules and touch the filesystem: no DSH, no model, no
 #     credentials.
+#
+#     The check counts above are written by scripts/sync-test-counts.mjs
+#     (npm run docs:counts) from the JSON report test/run.mjs produces, not
+#     typed by hand. The numbers are what a hosted runner measures: no DSH and
+#     no client config fixtures (hence smoke's session sections and
+#     real-configs do not run). The last step of the offline job re-runs the
+#     suites with --report and fails if the docs disagree.
 #
 #   NEEDS DSH (does NOT run in CI)
 #     boundary, integration, async, sentinel, timeout, lock, cycle,
@@ -199,6 +207,11 @@ jobs:
         env: { DSH_MCP_LOG: silent }
         run: node test/commit-script.mjs
 
+      # 检查数同步的回归：解析各套件的汇总行、把报告写回文档。纯文件系统，不花 token。
+      - name: test-counts (report parser and docs sync)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/test-counts.mjs
+
       # MCP roots：不传 cwd 时用客户端当前打开的项目目录。真实 stdio 握手，
       # 不需要 DSH 也不需要模型。
       - name: roots (cwd defaults to the client project dir)
@@ -233,6 +246,18 @@ jobs:
           node bin/dsh-any-agent.mjs --help > /dev/null
           node bin/setup.mjs --version
           node bin/restore.mjs --help > /dev/null
+
+      # 文档里的检查数不手抄：把离线套件再跑一遍产出 JSON 报告，然后核对文档。
+      # --portable 只核对与环境无关的套件，以及 smoke / config-safety 在 runner 这一格
+      # （没有 DSH、没有客户端配置）；dispatch-tools / workspace-titles 随平台与文件系统变化，
+      # 留给本机的完整检查（发版清单里的 npm run docs:counts:check）。
+      # 代价：离线套件在每个矩阵格里多跑一遍（各格并行，约一分钟），换来文档数字不会无声地漂。
+      - name: docs test counts match this run (portable suites)
+        shell: bash
+        env: { DSH_MCP_LOG: silent, DSH_BIN: '/fake/never/used.js' }
+        run: |
+          node test/run.mjs --report .state/ci-report.json
+          node scripts/sync-test-counts.mjs --check --portable --report .state/ci-report.json
 
   package:
     name: tarball installs and starts
