@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-11-08
+
+### Added
+
+- **Token usage in the live view.** A new `usage` event carries the run's token
+  delta (uncached input, output, cache read, cache write), the session total and
+  the context-window use, read from DSH's own projection cache. It updates during
+  a run (throttled to every 2 s, only when the numbers change; verified against
+  real DSH, which updates its totals after every model step) and once more with
+  the final numbers after the run ends. `watch` shows per-run and session totals;
+  the dashboard adds a token stat, per-run tokens on each turn, and a "Token 消耗"
+  panel (input / output / cache-hit rate, composition, context window, per-turn
+  chart). Counts are metadata only and are written at every level except `off`.
+
+### Changed
+
+- **`watch` redraws in place.** It now runs on the terminal's alternate screen
+  (like `top`) and rewrites only the lines that changed, instead of clearing the
+  screen every tick — which in Windows Terminal piled every frame into the
+  scrollback. Lines are clipped to the terminal width (CJK counted as two
+  columns) and the frame to its height; leaving restores the original screen.
+- **Dashboard: inspector column and scrollable turns.** Wide screens get a right
+  column for the selected conversation: totals, per-tool breakdown, files read /
+  written, approvals. A long turn scrolls inside its card (hidden scrollbar, edge
+  fades, a "↓ N 条" hint), follows the newest tool while you are at the bottom,
+  and keeps your position across live updates when you scroll up. The page no
+  longer caps its width, so ultra-wide screens are filled.
+- Viewers prefer the caller's `title_hint` over DSH's native title, which is only
+  a truncated prefix of the first prompt.
+
+### Fixed
+
+- Dashboard: on narrow screens the token stat's long label widened the header
+  and caused horizontal scrolling; stat labels now truncate and the full token
+  breakdown is in a tooltip.
+
 ## [0.6.1] — 2026-11-08
 
 ### Added

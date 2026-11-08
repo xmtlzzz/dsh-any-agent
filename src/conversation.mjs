@@ -40,7 +40,7 @@ import { rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
 import { writeTombstone } from './hub-store.mjs';
-import { emitLive, livePreview, removeLive, summarizeToolInput } from './live.mjs';
+import { emitLive, livePreview, liveSettings, removeLive, summarizeToolInput } from './live.mjs';
 import {
   classifyHolder,
   describeLeaseConflict,
@@ -156,6 +156,61 @@ export class Conversation {
   /** 写一条 live 事件（永不抛错，见 live.mjs）。 */
   #live(type, fields = {}, detail = null) {
     emitLive(this.id, type, { run: this.#liveRunId(), turn: this.currentTurn, ...fields }, detail);
+  }
+
+  /**
+   * live 事件流的 token 跟踪：`{runId, base, at, last}`。
+   * DSH 在投影缓存里维护**会话累计**的 tokenUsage.totals，并在回合中每个模型步之后更新
+   * （真机实测）；回合开始时记下基线，之后发的是"本回合增量"。
+   */
+  #liveUsage = null;
+
+  /** 读 DSH 投影缓存里的 token 累计与上下文压力；读不到返回 null。 */
+  #readTokenUsage() {
+    try {
+      const meta = readConversationMeta(this.id);
+      const t = meta?.usage?.totals;
+      const p = meta?.pressure;
+      if (!t && !p) return null;
+      const n = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
+      return {
+        totals: t
+          ? { input: n(t.uncachedInputTokens), output: n(t.outputTokens), cache_read: n(t.cacheReadTokens), cache_write: n(t.cacheWriteTokens) }
+          : null,
+        context: p && Number.isFinite(p.contextWindow) ? { used: n(p.pressureTokens ?? p.surfaceTokens), window: p.contextWindow } : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 发一条 `usage` 事件（本回合 token 增量 + 会话累计 + 上下文占用）。
+   * 回合中节流到 2 秒一次、且只在数字变化时发；回合结束后 force 再发一次最终值。
+   */
+  #liveUsageTick({ force = false } = {}) {
+    const u = this.#liveUsage;
+    if (!u) return;
+    const t = now();
+    if (!force && t - u.at < 2000) return;
+    u.at = t;
+    const cur = this.#readTokenUsage();
+    if (!cur?.totals && !cur?.context) return;
+    const base = u.base ?? { input: 0, output: 0, cache_read: 0, cache_write: 0 };
+    const tokens = cur.totals
+      ? Object.fromEntries(Object.keys(base).map((k) => [k, Math.max(0, cur.totals[k] - base[k])]))
+      : null;
+    const sig = JSON.stringify([tokens, cur.context]);
+    if (!force && sig === u.last) return;
+    u.last = sig;
+    emitLive(this.id, 'usage', {
+      run: u.runId,
+      turn: u.turn,
+      tokens,
+      session_tokens: cur.totals,
+      context: cur.context,
+      final: force || undefined,
+    });
   }
 
   /** 审批裁决事件（decide / 超时 / 回合结束 / 关闭 统一走这里）。 */
@@ -598,6 +653,7 @@ export class Conversation {
       }
       case 'usage_update':
         c.usage = u;
+        this.#liveUsageTick();
         break;
       case 'plan':
       case 'plan_update':
@@ -635,6 +691,7 @@ export class Conversation {
       },
       { title: livePreview(merged.title, 200), input_preview: summarizeToolInput(merged.input) },
     );
+    this.#liveUsageTick();
   }
 
   async onPermissionRequest(params) {
@@ -789,6 +846,7 @@ export class Conversation {
     runRecord.status = 'error';
     runRecord.error = error?.message ?? String(error);
     runRecord.elapsed_ms = 0;
+    if (this.#liveUsage?.runId === runRecord.run_id) this.#liveUsage = null;
     emitLive(
       this.id,
       'run.end',
@@ -912,6 +970,10 @@ export class Conversation {
     this.pushOut('user', text.length > MAX_PROMPT_ECHO ? `${text.slice(0, MAX_PROMPT_ECHO)}…（已截断）` : text);
     this.pushOut('turn', `第 ${this.currentTurn} 轮开始`, { phase: 'start' });
     this.#liveTools.clear();
+    // live 关闭时不读投影缓存（emitLive 会直接丢弃，读了也白读）。
+    this.#liveUsage = liveSettings().level === 'off'
+      ? null
+      : { runId: runRecord.run_id, turn: this.currentTurn, base: this.#readTokenUsage()?.totals ?? null, at: 0, last: '' };
     this.#live(
       'run.start',
       { via, permission: this.permission, on_approval: this.onApproval, cwd: this.cwd },
@@ -1019,6 +1081,12 @@ export class Conversation {
           this.#scheduleDrain();
           // 到这里才允许被 git 拖慢；结果/审核单/哨兵必须等快照完成后再落。
           const after = await afterPromise;
+          // 回合结束后 DSH 的 token 累计已经落盘（真机实测在哨兵之前）：发一次最终值。
+          // 只发给本回合自己的跟踪器——下一回合可能已经在 git 快照期间开始了。
+          if (this.#liveUsage?.runId === runRecord.run_id) {
+            this.#liveUsageTick({ force: true });
+            this.#liveUsage = null;
+          }
           const result = {
             conversation_id: this.id,
             run_id: runRecord.run_id,

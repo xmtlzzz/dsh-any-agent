@@ -96,6 +96,7 @@ dsh-any-agent dashboard
 - `dashboard`: a **read-only** local page; prints a URL with a one-time token (binds `127.0.0.1` only, checks the Host header, has no control that changes state).
 - Both are separate processes: they don't start the server, never touch the write lock and never talk to DSH, and they show conversations dispatched from every client (Claude Code, Codex, Cursor, …) together.
 - A run whose writer process has exited without finishing is shown as interrupted.
+- **Token usage**: each run's input / output / cache read-write delta, the session total and context-window use, updated while the run is going (numbers come from DSH's own session record). The dashboard's side column has a "Token 消耗" panel and a per-turn chart.
 - Tune with `DSH_MCP_LIVE`: `detail` (default; redacted command/path/prompt previews), `meta` (tool names, status, timing, approval kinds only), `off`. **Reasoning is never written at any level.** Event files share the sentinels' 7-day TTL; `dsh_release(forget=true)` deletes them too.
 
 ## 🤫 Reasoning: hidden by default
