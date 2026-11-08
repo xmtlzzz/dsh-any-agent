@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Release workflow: the MCP Registry job now waits (up to 10 minutes) until npm
+  serves the new version. On the first v0.6.3 run it registered seconds after
+  `npm publish`, and the registry's npm lookup still returned 404.
+
 ## [0.6.3] — 2026-11-08
 
 ### Added
