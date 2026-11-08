@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-11-08
+
 ### Added
 
 - **Token usage in the live view.** A new `usage` event carries the run's token
@@ -34,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer caps its width, so ultra-wide screens are filled.
 - Viewers prefer the caller's `title_hint` over DSH's native title, which is only
   a truncated prefix of the first prompt.
+
+### Fixed
+
+- Dashboard: on narrow screens the token stat's long label widened the header
+  and caused horizontal scrolling; stat labels now truncate and the full token
+  breakdown is in a tooltip.
 
 ## [0.6.1] — 2026-11-08
 
