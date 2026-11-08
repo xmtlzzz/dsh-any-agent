@@ -1,3 +1,9 @@
+> [!WARNING]
+> **历史文档 · Archived.** 这是项目早期（v0.2 前后）的设计草案，保留它是为了记录"为什么选 ACP、为什么这样设计"的推理过程。文中的工具数量、版本号、默认值与路线图**都已过时**，不要按它理解当前行为。
+> This is the early (v0.2-era) design draft, kept for the reasoning behind choosing ACP. Tool counts, versions, defaults and the roadmap below are **out of date**.
+>
+> 当前文档 · Current docs: [README](README.zh.md) · [架构 / Architecture](docs/zh/architecture.md) ([en](docs/en/architecture.md)) · [工具与用法 / Usage](docs/zh/usage.md) ([en](docs/en/usage.md)) · [实时查看设计 / Live view design](docs/zh/live-view-design.md) ([en](docs/en/live-view-design.md)) · [CHANGELOG](CHANGELOG.md)
+
 # dsh-any-agent 功能设计（v0.2 草案，历史文档）
 
 > 目标：做一个 MCP Server，让 **Codex / Claude Code** 能调用 **DeepSeek Harness (DSH)** 当"外包工程师"——写代码、搭脚手架、跑任务，并且 DSH 自己还能挂它自己的 MCP。

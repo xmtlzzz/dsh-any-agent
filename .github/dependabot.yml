@@ -1,0 +1,28 @@
+# The npm package itself has zero runtime dependencies (enforced by package-check),
+# and website/ has none either. What does have versions to track:
+#   - the GitHub Actions used by the workflows;
+#   - video/ (Remotion + React, pinned exactly; not part of the npm package).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: 'ci'
+
+  - package-ecosystem: npm
+    directory: /video
+    schedule:
+      interval: monthly
+    groups:
+      # Remotion's packages must move in lockstep (same exact version), and React with them.
+      remotion:
+        patterns: ['remotion', '@remotion/*']
+      react:
+        patterns: ['react', 'react-dom']
+    commit-message:
+      prefix: 'chore(video)'

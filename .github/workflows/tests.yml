@@ -18,7 +18,7 @@ name: tests
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
 #     live-events       live event stream, write side  43 checks
-#     live-view         watch / dashboard viewers      54 checks
+#     live-view         watch / dashboard viewers      66 checks
 #     release-notes     Release notes from CHANGELOG   12 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            10 checks
@@ -37,7 +37,7 @@ name: tests
 #     removal-scope     --remove only touches its own   24 checks
 #     config-safety     in-place edits, format        406 checks
 #     real-configs      real config round-trip        skips without client fixtures
-#     package-check     publishability                14 checks
+#     package-check     publishability                15 checks
 #     lint              static checks (npm run lint)  syntax, imports, exports, unused
 #     lint (selftest)   scripts/lint.mjs regression   22 checks
 #     package job       pack -> install -> --version

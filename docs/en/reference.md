@@ -32,6 +32,7 @@
 | `DSH_MCP_REVIEWS_DIR` | `<state file dir>/reviews` | Where review verdicts are written (`<this>/<conversation_id>/<run_id>.review.json`). Must be writable, or startup fails loudly |
 | `DSH_MCP_LIVE` | `detail` | Live event stream level (the data behind `watch` / `dashboard`). `detail` adds redacted prompt / command / path previews; `meta` keeps tool names, status, timing and approval kinds only; `off` writes nothing. Reasoning is never written at any level |
 | `DSH_MCP_LIVE_DIR` | `<state file dir>/live` | Live event stream directory (`<this>/<conversation_id>/events.jsonl`, rolled to `.1` at 5 MB). Write failures are skipped silently and never affect a run; pruned by `DSH_MCP_SENTINEL_TTL_MS` |
+| `DSH_MCP_LANG` | follows the system | Interface language of `watch` / `dashboard`: `zh` or `en`. When unset: `LC_ALL` / `LC_MESSAGES` / `LANG`, then the OS locale; the `--lang` flag wins over it |
 | `DSH_MCP_PERMISSION` | `workspace-write` | Default tier for `dsh_start`. `danger-full-access` additionally requires `DSH_MCP_ALLOW_FULL_ACCESS=1` |
 | `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | Whether `permission=danger-full-access` is allowed. Denied by default: it hands the caller whole-machine write access |
 | `DSH_MCP_REASONING_EFFORT` | `max` | Default reasoning effort |

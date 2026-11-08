@@ -16,8 +16,7 @@
    ② **read-only**: you cannot approve, interject or interrupt from the page — use the MCP tools (`dsh_approval_decide` / `dsh_interject` / `dsh_interrupt`);
    ③ **only tool calls reported over ACP are visible**: whether a DSH subagent's internal calls are reported is up to DSH, and this server does not infer them;
    ④ **token numbers come from DSH's session record**: before DSH writes them the panel shows no data, and session totals include runs from before the live view;
-   ⑤ **no backfill**: runs before 0.6.1 have no call chain, and runs before 0.6.2 have no token data;
-   ⑥ the interface text is currently Chinese.
+   ⑤ **no backfill**: runs before 0.6.1 have no call chain, and runs before 0.6.2 have no token data.
 
 ## ❓ Why is the profile still called `dsh-mcp`?
 

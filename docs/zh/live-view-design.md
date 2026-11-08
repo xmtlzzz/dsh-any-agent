@@ -1,8 +1,8 @@
-> 返回 [README](../../README.zh.md)
+> 返回 [README](../../README.zh.md) · English: [live view design](../en/live-view-design.md)
 
 # 设计稿：让用户看见 DSH 在做什么（live 事件流 + 查看器）
 
-> 状态：**P1 + P2 已实现**，随 0.6.1 发布；token 用量与查看端改进随 0.6.2 发布（见 CHANGELOG）。实现与本文最初草案的差异已在对应小节标注"实现"。
+> 状态：**P1 + P2 已实现**，随 0.6.1 发布；token 用量与查看端改进随 0.6.2 发布；之后又加了英文界面、`--open` 与 `dsh_doctor` 的 live 检查（见 CHANGELOG）。实现与本文最初草案的差异已在对应小节标注"实现"。
 >
 > 代码：`src/live.mjs`（写入）、`src/live-view.mjs`（读取 / 归并 / 终端渲染）、`src/live-cli.mjs`（`watch` / `dashboard` 子命令）、`src/live-dashboard.mjs` + `src/live-dashboard.html`（页面）。测试：`test/live-events.mjs`、`test/live-view.mjs`。
 >
@@ -144,8 +144,13 @@ tail 一个或全部会话，按会话分组、工具行原地刷新、审批高
 - **独立进程**，与 MCP 服务进程无关，所以 §5 方案 A 的端口、生命周期问题都不存在。
 - 只绑定 `127.0.0.1`、随机端口；启动时生成一次性 token，放在打印出来的 URL 里；校验 `Host` 头防 DNS rebinding；只提供 GET。
 - 单个内联静态 HTML，不依赖 CDN；数据走 SSE。
-- 文件变更检测用 `fs.watch` + 定时轮询兜底（Windows 上 `fs.watch` 不可靠）。
+- 文件变更检测：（实现）只用定时轮询，不用 `fs.watch`（Windows 上不可靠）。
 - 视图：左侧会话列表（状态、cwd、标题、最近活动），右侧当前会话的时间线（轮次 → 工具 → 审批 → 结束摘要）。
+  - 实现：中间是回合时间线，每次工具调用带一根时间条，长回合在卡片内部滚动；右栏是概览、Token 消耗、工具分布、涉及文件、审批。`--open` 直接用默认浏览器打开。
+
+### 7.3 界面语言
+
+（实现）两个查看端都有中英文：`--lang zh|en`，否则依次看 `DSH_MCP_LANG`、`LC_ALL` / `LC_MESSAGES` / `LANG`、系统区域设置。网页右上角也能切换，并记住选择。
 
 ## 8. 与现有机制的关系
 
@@ -160,7 +165,7 @@ tail 一个或全部会话，按会话分组、工具行原地刷新、审批高
 
 1. 思考内容在 schema 里没有位置（§6.4）。
 2. 所有字符串字段过 `sanitizeApprovalContext`，再按字段截断。
-3. 默认 `meta` 级别不含工具输入；`detail` 需显式开启，文档里说明其暴露面与哨兵同级。
+3. （实现）默认 `detail`：只多出脱敏后的短预览，暴露面不超过哨兵；`meta` 去掉这些预览，`off` 完全不写。
 4. **为什么不做控制面**：待决审批、插话、中断的状态都在某个服务进程的内存里（`pendingApprovals` 等）。独立的 dashboard 进程要操作它们，只能再开一条反向通道（例如服务进程监视一个命令目录），这等于给"能写本地文件的任何东西"开了一个批准提权的口子，需要单独的鉴权设计，和"轻量"的定位不符。
 5. dashboard 只监听回环地址，token 只在启动时打印，不落盘。
 
@@ -169,7 +174,7 @@ tail 一个或全部会话，按会话分组、工具行原地刷新、审批高
 - 离线（`test/fake-acp.mjs` 驱动）：发 `tool_call` / `tool_call_update` / `request_permission`，断言 live 文件的行、级别过滤、脱敏、状态去重、单行截断。
 - 思考内容回归：fake ACP 发 `agent_thought_chunk`，断言 live 文件里不出现其文本（任何级别）。
 - 写入失败：live 目录不可写时派活仍成功。
-- takeover / 崩溃：`writer.hello` / `writer.bye` 顺序；无 `run.end` 时查看器的判定。
+- 崩溃：无 `run.end` 且写者进程已退出时，查看器显示为中断（实现：不写交接事件，见 §6.5）。
 - 轮转与 TTL 清理、forget 时删除。
 - 查看器解析：半行、未知 `v`、未知 `type`。
 - 所有测试设置 `DSH_MCP_LIVE_DIR` 到各自临时目录；live 用例不并发跑真实 DSH（与现有 live 测试同一规则）。
@@ -181,7 +186,7 @@ tail 一个或全部会话，按会话分组、工具行原地刷新、审批高
 3. ~~默认级别~~ 已定：默认 `detail`（理由见 §6.1）。
 4. ~~正文要不要进 live~~ 已定：不进，正文只在哨兵里。
 5. **多机 / 远程**：live 目录在本机；远程或云端会话的可见性不在本文范围。
-6. 英文版文档待方案定稿后补。
+6. ~~英文版文档~~ 已补：[docs/en/live-view-design.md](../en/live-view-design.md)。
 
 ## 12. 分期
 

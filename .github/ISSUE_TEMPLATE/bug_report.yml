@@ -1,0 +1,72 @@
+name: Bug report · 问题反馈
+description: Something does not work as documented · 行为和文档不一致
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security problems: do not file them here** — use [Security → Report a vulnerability](https://github.com/xmtlzzz/dsh-any-agent/security/advisories/new) instead.
+        安全问题请不要在这里提，改用上面的私下报告链接。
+
+        Please check the [usage notes](https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.en.md) and [known limitations](https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/limits.md) first — many "bugs" (write lock taken by the GUI, model routing in ACP) are documented there.
+        提交前先看看[使用注意事项](https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.md)和[已知限制](https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/limits.md)。
+  - type: input
+    id: version
+    attributes:
+      label: dsh-any-agent version · 版本
+      description: '`dsh-any-agent --version`'
+      placeholder: 0.6.2
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: MCP client · 客户端
+      options:
+        - Claude Code
+        - Claude Desktop
+        - Codex
+        - Cursor
+        - Windsurf
+        - Zed
+        - Gemini CLI
+        - opencode
+        - VS Code
+        - Other / 其他
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and Node.js · 系统与 Node 版本
+      placeholder: Windows 11, Node 22.19.0
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: dsh_doctor output · 体检输出
+      description: |
+        Ask your agent to run `dsh_doctor` and paste the result. It shows the DSH version, profile, state directories, locks and live view.
+        让 agent 调一次 `dsh_doctor`，把结果贴在这里（包含 DSH 版本、profile、目录、锁与 live 状态）。
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did · 复现步骤
+      description: The tool calls or commands, in order. Remove secrets and private paths. · 按顺序列出工具调用或命令（去掉密钥与隐私路径）。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual · 预期与实际
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else · 其他
+      description: Sentinel JSON, `watch --once` output, logs with `DSH_MCP_LOG=info` (never with `DSH_MCP_LOG_STDERR=1` unless you checked it for reasoning text). · 哨兵、`watch --once` 输出或日志。

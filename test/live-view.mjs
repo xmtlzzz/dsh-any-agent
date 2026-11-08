@@ -13,7 +13,7 @@ const liveDir = join(root, 'live');
 process.env.DSH_MCP_STATE = join(root, 'state.json');
 process.env.DSH_MCP_LIVE_DIR = liveDir;
 
-const { LiveState, LiveTail, splitLines, parseEvent, renderText, writerPid, displayWidth, clipLine, layoutFrame, diffFrame, fmtTokens, cacheHitRate } = await import(
+const { LiveState, LiveTail, splitLines, parseEvent, renderText, writerPid, displayWidth, clipLine, layoutFrame, diffFrame, fmtTokens, cacheHitRate, detectLang, TEXT } = await import(
   '../src/live-view.mjs'
 );
 const { startDashboard } = await import('../src/live-dashboard.mjs');
@@ -199,6 +199,27 @@ try {
     check('没有 title_hint 时退回 DSH 原生标题', () => byId['c-u'] === '在当前目录做一个简易的、可');
   }
 
+  console.log('\n[4c] 界面语言');
+  {
+    check('--lang 优先，其次 DSH_MCP_LANG', () => detectLang('en', { DSH_MCP_LANG: 'zh' }) === 'en' && detectLang(null, { DSH_MCP_LANG: 'zh' }) === 'zh');
+    check('LANG=zh_CN.UTF-8 → zh；LANG=en_US.UTF-8 → en', () => detectLang(null, { LANG: 'zh_CN.UTF-8' }) === 'zh' && detectLang(null, { LANG: 'en_US.UTF-8' }) === 'en');
+    check('LC_ALL 优先于 LANG', () => detectLang(null, { LC_ALL: 'en_US', LANG: 'zh_CN' }) === 'en');
+    check('LANG=C / POSIX 不算数，退回系统区域设置', () => detectLang(null, { LANG: 'C' }, 'zh-CN') === 'zh' && detectLang(null, { LANG: 'POSIX' }, 'en-US') === 'en');
+    check('什么都没有时按系统区域设置', () => detectLang(null, {}, 'zh-Hans-CN') === 'zh' && detectLang(null, {}, 'fr-FR') === 'en');
+    const s = new LiveState();
+    s.apply(ev('c-en', 'run.start', { run: 'r1', client: 'codex' }));
+    s.apply(ev('c-en', 'approval', { run: 'r1', mode: 'ask', approval_id: 'ap', command_preview: 'pip install x' }));
+    const v = s.view({ alive: () => true });
+    const en = renderText(v, { lang: 'en' });
+    const zh = renderText(v, { lang: 'zh' });
+    check('英文渲染没有中文字符', () => !/[一-鿿]/.test(en) && en.includes('1 conversation · 1 running') && en.includes('approval ask → awaiting decision'));
+    check('中文渲染保持原样（默认 zh）', () => zh.includes('1 会话 · 1 运行中') && renderText(v) === zh);
+    check('英文空状态与截高提示', () =>
+      renderText({ totals: { conversations: 0, running: 0 }, groups: [] }, { lang: 'en' }).includes('No events yet') &&
+      layoutFrame(Array.from({ length: 30 }, () => 'x').join('\n'), { cols: 200, rows: 10, lang: 'en' })[9].includes('more lines hidden'));
+    check('两份文案的键完全一致', () => JSON.stringify(Object.keys(TEXT.zh).sort()) === JSON.stringify(Object.keys(TEXT.en).sort()));
+  }
+
   console.log('\n[5] watch --once（真正走 bin 入口，不启动 Hub）');
   {
     writeEvents('c-watch', [ev('c-watch', 'run.start', { run: 'r-watch', client: 'cursor', prompt_preview: 'hello-watch' })]);
@@ -206,6 +227,24 @@ try {
     const r = spawnSync(process.execPath, [bin, 'watch', '--once'], { env: { ...process.env, DSH_MCP_LIVE_DIR: liveDir }, encoding: 'utf8', timeout: 30_000 });
     check('watch --once 退出码 0', () => r.status === 0, r.stderr);
     check('watch --once 输出调用链', () => r.stdout.includes('cursor') && r.stdout.includes('r-watch') && r.stdout.includes('hello-watch'), r.stdout);
+  }
+
+  console.log('\n[5b] dashboard --open 的浏览器启动命令');
+  {
+    const { openInBrowser } = await import('../src/live-cli.mjs');
+    const calls = [];
+    const fake = (cmd, args) => {
+      calls.push([cmd, args]);
+      return { on() {}, unref() {} };
+    };
+    const url = 'http://127.0.0.1:1234/?t=abc_DEF-123';
+    await openInBrowser(url, { platform: 'win32', spawnFn: fake });
+    await openInBrowser(url, { platform: 'darwin', spawnFn: fake });
+    await openInBrowser(url, { platform: 'linux', spawnFn: fake });
+    check('Windows 用 cmd /c start "" <url>：空标题传空字符串（Node 转成 ""）', () => calls[0][0] === 'cmd' && JSON.stringify(calls[0][1]) === JSON.stringify(['/c', 'start', '', url]));
+    check('macOS 用 open，Linux 用 xdg-open', () => calls[1][0] === 'open' && calls[2][0] === 'xdg-open' && calls[2][1][0] === url);
+    const failing = await openInBrowser(url, { platform: 'linux', spawnFn: () => { throw new Error('ENOENT'); } });
+    check('启动失败不抛错（打印的地址仍可手动打开）', () => failing === false);
   }
 
   console.log('\n[6] dashboard：只读、token、Host 校验');

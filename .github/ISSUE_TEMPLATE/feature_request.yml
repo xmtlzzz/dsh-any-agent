@@ -1,0 +1,26 @@
+name: Feature request · 功能建议
+description: An idea for the dispatch layer · 对派发层的建议
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This server is a **dispatcher, not a capability aggregator**: file/shell/search/skills belong to DSH itself, and this project only adds what dispatch needs (sessions, async runs, interjecting, approvals, the live view…). See [Positioning](https://github.com/xmtlzzz/dsh-any-agent#-positioning-a-dispatcher-not-a-capability-aggregator).
+        本服务只负责"派活"，能力复用 DSH；不会为 DSH 的每个能力加一个 MCP 工具。见 README 的[定位](https://github.com/xmtlzzz/dsh-any-agent/blob/main/README.zh.md#-定位本服务只负责派活能力复用-dsh)一节。
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem · 要解决的问题
+      description: What are you trying to do, and what gets in the way today? · 你想做什么，现在卡在哪里？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like · 期望的做法
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered · 考虑过的其他办法

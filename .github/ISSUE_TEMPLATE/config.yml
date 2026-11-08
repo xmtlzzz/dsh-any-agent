@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability · 安全漏洞
+    url: https://github.com/xmtlzzz/dsh-any-agent/security/advisories/new
+    about: Report privately — please do not open a public issue. · 请私下报告，不要开公开 issue。
+  - name: Usage notes · 使用注意事项
+    url: https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.en.md
+    about: Common pitfalls (write lock, model routing, budgets) and the troubleshooting table. · 常见坑与故障速查。
+  - name: DeepSeek Harness itself · DSH 本身的问题
+    url: https://www.npmjs.com/package/@deepseek-ai/dsh
+    about: Problems in DSH's sandbox, models or GUI belong to the DSH project. · DSH 沙箱、模型、GUI 的问题请反馈给 DSH。

@@ -40,7 +40,8 @@ if (argv.includes('--help') || argv.includes('-h')) {
     '  dsh-any-agent team on|off     enable/disable Agent Teams (writes settings.json)\n' +
     '  dsh-any-agent team status     show the effective team mode\n' +
     '  dsh-any-agent watch [conv]    live call chain of dispatched runs in this terminal\n' +
-    '  dsh-any-agent dashboard       same, as a read-only local web page (127.0.0.1 + token)\n' +
+    '  dsh-any-agent dashboard       same, as a read-only local web page (127.0.0.1 + token);\n' +
+    '                                --open launches it in your browser\n' +
     '  dsh-any-agent --version       print the version and exit\n' +
     '  dsh-any-agent --help          this text\n\n' +
     'Register it with your client:\n' +

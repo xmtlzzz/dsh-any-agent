@@ -612,16 +612,101 @@ export function clipLine(s, cols) {
   return out + '…\x1b[0m';
 }
 
+// ── 界面语言 ────────────────────────────────────────────────
+
+/** watch / dashboard 命令行界面的两份文案。函数式条目负责插值。 */
+export const TEXT = {
+  zh: {
+    header: (c, r) => `DSH live · ${c} 会话 · ${r} 运行中`,
+    queued: (n) => `${n} 排队`,
+    pending: (n) => `${n} 待审批`,
+    escalations: (n) => `⚠ ${n} 次提权`,
+    tokens: (i, o) => `token 入 ${i} / 出 ${o}`,
+    unknownClient: '未知客户端',
+    exited: ' (已退出)',
+    running: '运行中',
+    queuedState: '排队',
+    closed: '已释放',
+    idle: '空闲',
+    total: (i, o) => ` · 累计 ${i}/${o}`,
+    context: (p) => ` · 上下文 ${p}%`,
+    untitled: '(无标题)',
+    tools: (n) => `${n} 工具`,
+    runEscalations: (n) => `⚠${n} 提权`,
+    earlier: (n) => `…前面还有 ${n} 条`,
+    noMatch: (q) => `没有匹配 ${q} 的会话。`,
+    empty: '还没有任何事件。派一次活（dsh_send）之后这里就会出现。',
+    approval: '审批',
+    waiting: ' → 等待裁决',
+    interject: '插话',
+    interrupt: '■ 中断',
+    hiddenRows: (n) => `…还有 ${n} 行没显示（给会话 id 前缀、或用 --runs / --items 收窄）`,
+    footer: (time, dir) => `更新于 ${time} · live 目录: ${dir} · Ctrl+C 退出`,
+  },
+  en: {
+    header: (c, r) => `DSH live · ${c} conversation${c === 1 ? '' : 's'} · ${r} running`,
+    queued: (n) => `${n} queued`,
+    pending: (n) => `${n} awaiting approval`,
+    escalations: (n) => `⚠ ${n} escalation${n === 1 ? '' : 's'}`,
+    tokens: (i, o) => `tokens in ${i} / out ${o}`,
+    unknownClient: 'unknown client',
+    exited: ' (exited)',
+    running: 'running',
+    queuedState: 'queued',
+    closed: 'released',
+    idle: 'idle',
+    total: (i, o) => ` · total ${i}/${o}`,
+    context: (p) => ` · context ${p}%`,
+    untitled: '(untitled)',
+    tools: (n) => `${n} tool${n === 1 ? '' : 's'}`,
+    runEscalations: (n) => `⚠${n} escalation${n === 1 ? '' : 's'}`,
+    earlier: (n) => `…${n} earlier`,
+    noMatch: (q) => `No conversation matches ${q}.`,
+    empty: 'No events yet. Dispatch something (dsh_send) and it shows up here.',
+    approval: 'approval',
+    waiting: ' → awaiting decision',
+    interject: 'interject',
+    interrupt: '■ interrupted',
+    hiddenRows: (n) => `…${n} more line${n === 1 ? '' : 's'} hidden (pass a conversation id prefix, or narrow with --runs / --items)`,
+    footer: (time, dir) => `updated ${time} · live dir: ${dir} · Ctrl+C to quit`,
+  },
+};
+
+/**
+ * 界面语言：显式 `zh` / `en` 优先；否则看 DSH_MCP_LANG，再看 LC_ALL / LC_MESSAGES / LANG，
+ * 最后看系统区域设置（Windows 上通常没有 LANG）。以 zh 开头 → 中文，其余 → 英文。
+ */
+export function detectLang(explicit = null, env = process.env, locale = null) {
+  const pick = (v) => (typeof v === 'string' && v.trim() ? v.trim().toLowerCase() : null);
+  const norm = (v) => (v.startsWith('zh') ? 'zh' : 'en');
+  const direct = pick(explicit) ?? pick(env.DSH_MCP_LANG);
+  if (direct === 'zh' || direct === 'en') return direct;
+  if (direct) return norm(direct);
+  const fromEnv = pick(env.LC_ALL) ?? pick(env.LC_MESSAGES) ?? pick(env.LANG);
+  if (fromEnv && fromEnv !== 'c' && fromEnv !== 'posix') return norm(fromEnv);
+  let sys = locale;
+  if (!sys) {
+    try {
+      sys = Intl.DateTimeFormat().resolvedOptions().locale;
+    } catch {
+      sys = 'en';
+    }
+  }
+  return norm(String(sys).toLowerCase());
+}
+
+const T = (lang) => TEXT[lang] ?? TEXT.zh;
+
 /**
  * 把一帧文本排成"适合这个终端"的行：截宽、截高（超出的行数在最后一行说明）。
  * 纯函数，方便测试。
  */
-export function layoutFrame(text, { cols = 120, rows = 40 } = {}) {
+export function layoutFrame(text, { cols = 120, rows = 40, lang = 'zh' } = {}) {
   let lines = String(text).split('\n').map((l) => clipLine(l, cols));
   if (rows > 2 && lines.length > rows) {
     const hidden = lines.length - (rows - 1);
     lines = lines.slice(0, rows - 1);
-    lines.push(clipLine(`\x1b[2m…还有 ${hidden} 行没显示（给会话 id 前缀、或用 --runs / --items 收窄）\x1b[0m`, cols));
+    lines.push(clipLine(`\x1b[2m${T(lang).hiddenRows(hidden)}\x1b[0m`, cols));
   }
   return lines;
 }
@@ -677,8 +762,10 @@ function clip(s, n) {
  * @param {number} [opts.runs] 每个会话显示最近几轮（默认 3）
  * @param {number} [opts.items] 每轮显示最后几条工具/审批（默认 12）
  * @param {boolean} [opts.color] ANSI 颜色
+ * @param {'zh'|'en'} [opts.lang] 界面语言（默认中文）
  */
-export function renderText(view, { conv = null, runs = 3, items = 12, color = false } = {}) {
+export function renderText(view, { conv = null, runs = 3, items = 12, color = false, lang = 'zh' } = {}) {
+  const L = T(lang);
   const c = (code, s) => (color ? `\x1b[${code}m${s}\x1b[0m` : s);
   const dim = (s) => c('2', s);
   const warn = (s) => c('33', s);
@@ -687,27 +774,27 @@ export function renderText(view, { conv = null, runs = 3, items = 12, color = fa
   const out = [];
   const t = view.totals;
   out.push(
-    `DSH live · ${t.conversations} 会话 · ${t.running} 运行中` +
-      (t.queued ? ` · ${t.queued} 排队` : '') +
-      (t.pending_approvals ? ` · ${warn(`${t.pending_approvals} 待审批`)}` : '') +
-      (t.escalations ? ` · ${warn(`⚠ ${t.escalations} 次提权`)}` : '') +
-      (t.tokens ? ` · token 入 ${fmtTokens(tokenInputTotal(t.tokens))} / 出 ${fmtTokens(t.tokens.output)}` : ''),
+    L.header(t.conversations, t.running) +
+      (t.queued ? ` · ${L.queued(t.queued)}` : '') +
+      (t.pending_approvals ? ` · ${warn(L.pending(t.pending_approvals))}` : '') +
+      (t.escalations ? ` · ${warn(L.escalations(t.escalations))}` : '') +
+      (t.tokens ? ` · ${L.tokens(fmtTokens(tokenInputTotal(t.tokens)), fmtTokens(t.tokens.output))}` : ''),
   );
   let shown = 0;
   for (const g of view.groups) {
     const convs = conv ? g.conversations.filter((x) => x.id.startsWith(conv)) : g.conversations;
     if (!convs.length) continue;
     out.push('');
-    out.push(`${g.client ?? '未知客户端'}  ${dim(`pid ${g.pid ?? '?'}${g.alive ? '' : ' (已退出)'}`)}`);
+    out.push(`${g.client ?? L.unknownClient}  ${dim(`pid ${g.pid ?? '?'}${g.alive ? '' : L.exited}`)}`);
     convs.forEach((cv, ci) => {
       shown++;
       const lastConv = ci === convs.length - 1;
       const p1 = lastConv ? '└─ ' : '├─ ';
       const p1c = lastConv ? '   ' : '│  ';
-      const stateTxt = cv.state === 'running' ? good('运行中') : cv.state === 'queued' ? warn('排队') : dim(cv.state === 'closed' ? '已释放' : '空闲');
-      const ctx = cv.context && cv.context.window ? ` · 上下文 ${Math.round((cv.context.used / cv.context.window) * 100)}%` : '';
-      const tok = cv.tokens ? ` · 累计 ${fmtTokens(tokenInputTotal(cv.tokens))}/${fmtTokens(cv.tokens.output)}` : '';
-      out.push(`${p1}${shortId(cv.id)}  ${clip(cv.title ?? '(无标题)', 40)}  ${stateTxt}${dim(tok + ctx)}  ${dim(`${cv.permission ?? ''} · ${clip(cv.cwd ?? '', 50)}`)}`);
+      const stateTxt = cv.state === 'running' ? good(L.running) : cv.state === 'queued' ? warn(L.queuedState) : dim(cv.state === 'closed' ? L.closed : L.idle);
+      const ctx = cv.context && cv.context.window ? L.context(Math.round((cv.context.used / cv.context.window) * 100)) : '';
+      const tok = cv.tokens ? L.total(fmtTokens(tokenInputTotal(cv.tokens)), fmtTokens(cv.tokens.output)) : '';
+      out.push(`${p1}${shortId(cv.id)}  ${clip(cv.title ?? L.untitled, 40)}  ${stateTxt}${dim(tok + ctx)}  ${dim(`${cv.permission ?? ''} · ${clip(cv.cwd ?? '', 50)}`)}`);
       const rs = cv.runs.slice(-runs);
       rs.forEach((r, ri) => {
         const lastRun = ri === rs.length - 1;
@@ -719,20 +806,20 @@ export function renderText(view, { conv = null, runs = 3, items = 12, color = fa
           r.via ? `[${r.via}]` : null,
           r.status,
           r.duration_ms != null ? fmtMs(r.duration_ms) : null,
-          r.tool_count != null ? `${r.tool_count} 工具` : null,
+          r.tool_count != null ? L.tools(r.tool_count) : null,
           r.tokens ? `${fmtTokens(tokenInputTotal(r.tokens))}↑ ${fmtTokens(r.tokens.output)}↓ tok` : null,
-          r.escalations ? warn(`⚠${r.escalations} 提权`) : null,
-          r.pending_approvals ? warn(`${r.pending_approvals} 待审批`) : null,
+          r.escalations ? warn(L.runEscalations(r.escalations)) : null,
+          r.pending_approvals ? warn(L.pending(r.pending_approvals)) : null,
         ].filter(Boolean);
         out.push(`${p2}${markC} ${r.run}  ${meta.join(' · ')}${r.prompt_preview ? `  ${dim(`“${clip(r.prompt_preview, 60)}”`)}` : ''}`);
         if (r.error) out.push(`${p2c}   ${bad(clip(r.error, 100))}`);
         const its = r.items.slice(-items);
-        if (r.items.length > its.length) out.push(`${p2c}   ${dim(`…前面还有 ${r.items.length - its.length} 条`)}`);
-        for (const it of its) out.push(p2c + '   ' + renderItem(it, { warn, bad, good, dim }, cv.cwd));
+        if (r.items.length > its.length) out.push(`${p2c}   ${dim(L.earlier(r.items.length - its.length))}`);
+        for (const it of its) out.push(p2c + '   ' + renderItem(it, { warn, bad, good, dim }, cv.cwd, L));
       });
     });
   }
-  if (!shown) out.push('', dim(conv ? `没有匹配 ${conv} 的会话。` : '还没有任何事件。派一次活（dsh_send）之后这里就会出现。'));
+  if (!shown) out.push('', dim(conv ? L.noMatch(conv) : L.empty));
   return out.join('\n');
 }
 
@@ -745,18 +832,18 @@ export function relToCwd(text, cwd) {
   return out.split(root).join('.');
 }
 
-function renderItem(it, { warn, bad, good, dim }, cwd) {
+function renderItem(it, { warn, bad, good, dim }, cwd, L = TEXT.zh) {
   if (it.kind === 'tool') {
     const st = it.status === 'completed' ? good('✓') : it.status === 'failed' ? bad('✗') : it.status === 'unfinished' ? dim('·') : warn('▶');
     const what = relToCwd(it.input_preview ?? (it.title !== it.name ? it.title : '') ?? '', cwd);
     return `${st} ${it.name ?? it.title ?? it.id ?? 'tool'}${what ? `  ${dim(clip(what, 70))}` : ''}${it.elapsed_ms != null ? `  ${dim(fmtMs(it.elapsed_ms))}` : ''}`;
   }
   if (it.kind === 'approval') {
-    const decided = it.decided ? ` → ${it.decided.decision ?? it.decided.effective ?? ''}${it.decided.by ? `(${it.decided.by})` : ''}` : it.mode === 'ask' ? warn(' → 等待裁决') : '';
+    const decided = it.decided ? ` → ${it.decided.decision ?? it.decided.effective ?? ''}${it.decided.by ? `(${it.decided.by})` : ''}` : it.mode === 'ask' ? warn(L.waiting) : '';
     const esc = it.escalation ? warn(` ⚠ ${it.escalation}`) : '';
-    return `${warn('◆')} 审批 ${it.mode ?? ''}${esc}${decided}${it.command_preview ? `  ${dim(clip(relToCwd(it.command_preview, cwd), 60))}` : ''}`;
+    return `${warn('◆')} ${L.approval} ${it.mode ?? ''}${esc}${decided}${it.command_preview ? `  ${dim(clip(relToCwd(it.command_preview, cwd), 60))}` : ''}`;
   }
-  if (it.kind === 'interject') return `${warn('↪')} 插话(${it.mode ?? ''})${it.text_preview ? `  ${dim(clip(it.text_preview, 60))}` : ''}`;
-  if (it.kind === 'interrupt') return bad('■ 中断');
+  if (it.kind === 'interject') return `${warn('↪')} ${L.interject}(${it.mode ?? ''})${it.text_preview ? `  ${dim(clip(it.text_preview, 60))}` : ''}`;
+  if (it.kind === 'interrupt') return bad(L.interrupt);
   return dim(it.kind);
 }

@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist'), assets = join(dist, 'assets');
 await mkdir(assets, { recursive: true });
 // Clean only known generated assets, never a computed recursive directory.
-for (const name of await readdir(assets)) if (/^(?:app|demo|release|style)\.[a-f0-9]{10}\.(?:mjs|css)$/.test(name) || /^(?:hero|favicon)\.[a-f0-9]{10}\.(?:jpg|svg)$/.test(name)) await unlink(join(assets, name));
+for (const name of await readdir(assets)) if (/^(?:app|demo|release|style)\.[a-f0-9]{10}\.(?:mjs|css)$/.test(name) || /^(?:hero|favicon|promo-poster)\.[a-f0-9]{10}\.(?:jpg|svg)$/.test(name) || /^promo\.[a-f0-9]{10}\.mp4$/.test(name)) await unlink(join(assets, name));
 const hash = value => createHash('sha256').update(value).digest('hex').slice(0, 10);
 const base64 = value => createHash('sha256').update(value).digest('base64');
 const demo = await readFile(join(root, 'src/demo.mjs'), 'utf8');
@@ -23,6 +23,12 @@ const hero = await readFile(join(root, '../docs/brand/header.jpg'));
 const heroName = `hero.${hash(hero)}.jpg`;
 const favicon = await readFile(join(root, 'src/favicon.svg'));
 const faviconName = `favicon.${hash(favicon)}.svg`;
+// Promo video: a web-sized encode of video/out/dsh-any-agent-promo.mp4 (see video/README.md),
+// committed under src/media so the site builds without rendering the video.
+const promo = await readFile(join(root, 'src/media/promo.mp4'));
+const promoName = `promo.${hash(promo)}.mp4`;
+const promoPoster = await readFile(join(root, 'src/media/promo-poster.jpg'));
+const promoPosterName = `promo-poster.${hash(promoPoster)}.jpg`;
 const pkg = JSON.parse(await readFile(join(root, '../package.json'), 'utf8'));
 const site = JSON.parse(await readFile(join(root, 'site.config.json'), 'utf8'));
 const configuredURL = process.env.SITE_URL || site.url;
@@ -45,6 +51,8 @@ function render(template, lang) {
     APP: `/assets/${appName}`,
     HERO: `/assets/${heroName}`,
     ICON: `/assets/${faviconName}`,
+    VIDEO: `/assets/${promoName}`,
+    VIDEO_POSTER: `/assets/${promoPosterName}`,
     OG_IMAGE: `${origin}/assets/${heroName}`,
     CANONICAL_URL: pageURL,
     CANONICAL: canonical,
@@ -79,6 +87,8 @@ await Promise.all([
   writeFile(join(dist, 'en/index.html'), render(enTemplate, 'en')),
   writeFile(join(assets, heroName), hero),
   writeFile(join(assets, faviconName), favicon),
+  writeFile(join(assets, promoName), promo),
+  writeFile(join(assets, promoPosterName), promoPoster),
   writeFile(join(dist, '_headers'), headers),
   // Source policy for the origin. Cloudflare Managed robots / Content Signals
   // may be prepended in production; mirror that policy here so non-Cloudflare
