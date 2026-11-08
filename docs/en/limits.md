@@ -11,6 +11,13 @@
 7. **`session/list` returns only `{sessionId, cwd}` and excludes already-open sessions** — titles are filled in by this server from DSH's projection cache.
 8. **Memory (measured 300–480 MB per live process)** — since 0.5.0 sessions with the same `(cwd, permission)` **share one ACP process by default**, so that cost is once per group rather than once per conversation; combined with the 0.4.0 defaults (**10-minute idle reaping + `MAX_LIVE=4`**) the worst case is ≈1.2–1.9 GB. `keep_alive=true` sessions are exempt from idle reaping (at the cost of staying resident). You can also: ① cap by measured RSS with `DSH_MCP_MAX_RSS_MB`; ② cap the child heap with `DSH_MCP_CHILD_MAX_OLD_SPACE_MB`. To drop to zero right after a batch of work: **`dsh_release(all=true)`** ✓ (releases idle conversations; busy turns are skipped and keep running — pass `force=true` to interrupt them too. Everything resumes on demand).
 9. **A shared process takes its group down with it** — the default shared host puts sessions with the same `(cwd, permission)` on one PID. Sessions do not interfere with each other (each has its own Agent and context), but **if the process crashes or is killed, every in-flight turn in the group dies at once** (error sentinels are written and waiters wake up; each session resumes on its next call — the conversation itself is intact). Hence: ① `dsh_takeover` requires `force=true` to kill such a process, and lists the other sessions riding on it; ② for strict isolation (untrusted samples, mutually untrusted tasks) set `DSH_MCP_SHARED_PROCESS=0`; ③ different workspaces or permission tiers still get separate processes — that follows from `dsh-base`'s process-wide sandbox and approval config, not a choice.
+10. **Live view (`watch` / `dashboard`) boundaries** —
+   ① **local only**: events are written to this machine's `$DSH_HOME/.dsh-any-agent/live/`, so remote or cloud sessions are not visible;
+   ② **read-only**: you cannot approve, interject or interrupt from the page — use the MCP tools (`dsh_approval_decide` / `dsh_interject` / `dsh_interrupt`);
+   ③ **only tool calls reported over ACP are visible**: whether a DSH subagent's internal calls are reported is up to DSH, and this server does not infer them;
+   ④ **token numbers come from DSH's session record**: before DSH writes them the panel shows no data, and session totals include runs from before the live view;
+   ⑤ **no backfill**: runs before 0.6.1 have no call chain, and runs before 0.6.2 have no token data;
+   ⑥ the interface text is currently Chinese.
 
 ## ❓ Why is the profile still called `dsh-mcp`?
 

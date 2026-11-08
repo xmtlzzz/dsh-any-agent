@@ -38,6 +38,18 @@ DSH 自带两个可编程入口。`sdk` profile 看着更简单，但它的 JSON
 
 **进程模型。** 会话的身份是 `sessionId`，进程只是可丢弃的载体。0.5.0 起同一 `(cwd, permission)` 的会话默认共用一个 ACP 进程（`src/host.mjs`）：DSH 的 ACP 服务端支持一条连接上多会话、每个 session 有自己的 Agent，但沙箱根与审批策略是**进程级**的，所以只能按这两项分组。收益是第二个会话建起来约 300ms（独立进程约 4s），内存也按组只付一份；代价是这**一个**进程崩了，组里所有会话的进行中回合会一起断（会话本体无损，下次派活各自 resume）——因此 `dsh_takeover` 不会在不带 `force` 的情况下杀共享进程。要回到「一会话一进程」就设 `DSH_MCP_SHARED_PROCESS=0`。
 
+**实时查看（0.6.1 起）。** 本服务是每个 MCP 客户端各自拉起的 stdio 子进程，可能同时有好几个实例、内存互不相通，也都没有端口。所以实时查看走文件而不是端口：每个实例在派活过程中把会话的活动（回合、工具调用、审批、token 用量）追加到 `<状态目录>/live/<会话id>/events.jsonl`。写锁本来就保证一个会话同一时刻只有一个写者，所以"一会话一文件"不需要再加锁。`dsh-any-agent watch` 和 `dsh-any-agent dashboard` 是独立的只读进程，tail 这些文件，因此能同时看到所有客户端、所有实例派出的活，服务重启也不丢，并且完全不碰写锁和 DSH：
+
+```
+ MCP 客户端 ─▶ dsh-any-agent（每个客户端一个）──追加──▶ live/<id>/events.jsonl
+                                                                │ tail（只读）
+                                                  ┌─────────────┴─────────────┐
+                                          dsh-any-agent watch        dsh-any-agent dashboard
+                                          （终端，原地刷新）          （127.0.0.1 + token，SSE）
+```
+
+token 数字取自 DSH 自己的投影缓存（`tokenUsage` / `contextPressure`），DSH 每走一个模型步就会更新它。设计细节见 [实时查看设计](live-view-design.md)。
+
 **MCP 兼容性。** 服务端只使用 `initialize`、`ping`、`tools/list`、`tools/call` 四个标准方法。已用一个协商旧版协议、从不发送 `notifications/initialized` 的原始客户端验证。
 
 </details>

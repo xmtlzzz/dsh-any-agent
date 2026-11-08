@@ -11,11 +11,11 @@
 [![license](https://img.shields.io/npm/l/dsh-any-agent.svg?style=flat-square)](LICENSE)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
 
-[Website](https://dsh-any-agent.xmtlz.dev/) · [Quick start](#quick-start) · [Features](#-why-its-different) · [Tools](#-tools) · [Usage notes](USAGE-NOTES.en.md) · [Changelog](CHANGELOG.md)
+[Website](https://dsh-any-agent.xmtlz.dev/) · [Quick start](#quick-start) · [Features](#-why-its-different) · [Tools](#-tools) · [Live view](#-live-view-see-what-the-dispatched-work-is-doing) · [Usage notes](USAGE-NOTES.en.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
-🧪 0.5.2 offline suite green, including the workspace-change detection fix and visible auto-approvals · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 0.6.2 offline suite green · 👀 new live call-chain view (`watch` / `dashboard`, with token usage) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Hand it a goal, let it write code and run scripts, steer it mid-flight, and collect the result when you are ready.
 
@@ -28,7 +28,8 @@ You already have a coding agent in your editor. What you do **not** have is one 
 - **hand a multi-hour job to another agent and walk away** — then collect the result when it's done;
 - **keep the job alive across restarts** of your editor, your session, your machine's idle reap;
 - **cut in mid-flight** when it's going the wrong way, without destroying the work;
-- **run several of them at once** and switch between them.
+- **run several of them at once** and switch between them;
+- **see what it is doing** without asking the agent — which tools it called, which approvals went through, how many tokens it spent.
 
 DSH (DeepSeek Harness) can do all of that — it has file/shell tools, skills, subagents and workflows — but it is a GUI-first application. Its own `sdk` profile exposes only 3 requests and can't resume, cancel, or answer approvals.
 
@@ -44,6 +45,7 @@ DSH (DeepSeek Harness) can do all of that — it has file/shell tools, skills, s
 | 🗣️ **You are never stuck waiting** | Steer a conversation mid-flight — **interject** to stop and redirect (~100 ms to reach idle, measured over four cancelled turns), or **queue** a remark for after the current turn. Interrupting never damages the conversation. |
 | 📡 **Completion notification, not polling** | Long tasks return instantly with a `run_id`; when the turn ends, a **sentinel file** is written atomically so a background task in *your* host wakes you. No polling, no occupied turn. |
 | 🪟 **Many conversations at once** | `dsh_list(only_running)` shows what's live; `dsh_read` gives cursor-based incremental output. Cycle between them like windows. |
+| 👀 **You can see it yourself** | `dsh-any-agent watch` (terminal) or `dsh-any-agent dashboard` (local read-only web page) lays dispatched work out as a call chain — client → conversation → run → tool calls / approvals — with per-run tokens and context-window use, updating while the run is going. Separate processes, never touch the write lock, and show work from every client together. |
 | 🧠 **Reasoning hidden by default** | You get "thought for N chars / M seconds" statistics instead of context-burning prose — and it is never logged, never written to disk. |
 | 🤫 **Silent by default** | Not one byte on stderr, so nothing pollutes your host's logs. stdout carries the protocol and nothing else. |
 | 🧩 **Capabilities compose** | DSH can mount its own MCP servers (IDA Pro, browsers, your internal tooling), so this is a bridge to a whole toolbox. |
@@ -60,7 +62,7 @@ from DSH's tool surface is proxied, duplicated or preloaded.
 |---|---|
 | File I/O, shell, search, editing | Session identity and cross-crash resume |
 | Skills, subagents, Agent Teams, task board | Async dispatch, receipts, completion sentinels |
-| Model routing, sandbox, approval policy | Incremental read, interject, interrupt |
+| Model routing, sandbox, approval policy | Incremental read, interject, interrupt, live call-chain view |
 | Memory/context/compaction | Approval bridge, write-lock governance, queue, inbox |
 | worktrees (the agent creates them with git) | Setup, status, doctor, audit |
 
@@ -105,7 +107,7 @@ The second command previews the changes; `--yes` applies them. Reconnect your cl
 
 - **Quick start** — [Install and connect](#quick-start) · [Changelog](CHANGELOG.md)
 - **Start here** — [The problem](#-the-problem-this-solves) · [Why it's different](#-why-its-different) · [Why not just wrap the DSH CLI](#-why-not-just-wrap-the-dsh-cli) · [Requirements](#-requirements) · [Setup](#-setup)
-- **Using it** — [Tools](#-tools) · [Dispatch then collect](#-workflow-dispatch-then-collect-later) · [Completion notifications](#-workflow-get-notified-on-completion-no-polling) · [Many conversations](#-workflow-many-conversations-at-once)
+- **Using it** — [Tools](#-tools) · [Live view](#-live-view-see-what-the-dispatched-work-is-doing) · [Dispatch then collect](#-workflow-dispatch-then-collect-later) · [Completion notifications](#-workflow-get-notified-on-completion-no-polling) · [Many conversations](#-workflow-many-conversations-at-once)
 - **Behavior** — [Permissions](#-permissions) · [Reasoning](#-reasoning-hidden-by-default) · [Logging and privacy](#-logging-and-privacy) · [Workspace & GUI](#-workspace-visibility-in-the-dsh-gui)
 - **Hard parts** — [The write lock](#-the-write-lock-one-writer-per-conversation-at-a-time)
 - **Reference** — [Environment](#-environment-variables) · [Tests](#-tests) · [Known limitations](#-known-limitations) · [Why the old profile name?](#-why-is-the-profile-still-called-dsh-mcp)
@@ -132,12 +134,43 @@ The second command previews the changes; `--yes` applies them. Reconnect your cl
 | `dsh_queue` | Inspect/modify the session queue: `list` / `remove` / `update` / `promote` (created by `dsh_send(queue=true)`, memory only) |
 | `dsh_doctor` | Read-only health check: DSH version, profile, state/dir writability, orphan locks, sessions and RSS, effective config |
 
+## 👀 Live view: see what the dispatched work is doing
+
+The tools above are for the **calling agent**. **You**, sitting at the client, usually see one `dsh_send` and nothing else. Since 0.6.1 the server writes each conversation's activity to a local event stream, so you can watch the call chain **without going through the agent**:
+
+```text
+claude-code  pid 8328
+└─ e896d16a  temperature module  running · total 278k/17k · context 3%
+   ├─ ✓ run-…-1  [send] · done · 1m24s · 8 tools · 69k↑ 4.1k↓ tok
+   └─ ▶ run-…-2  [queue] · running · 156k↑ 12k↓ tok
+         ✓ read   temp.js                  13ms
+         ✓ edit   temp.js                  18ms
+         ◆ approval auto-allow ⚠ danger-full-access  node --test
+         ▶ pwsh   node --test
+```
+
+```bash
+dsh-any-agent watch
+```
+
+```bash
+dsh-any-agent dashboard
+```
+
+- **`watch`**: the call chain in your terminal, redrawn in place like `top` (no scrolling spam). `watch <conversation id prefix>` follows one conversation; `--once` prints once and exits.
+- **`dashboard`**: a local read-only web page. Left: conversations grouped by client. Middle: the run timeline, with a timing bar per tool call and approvals/escalations highlighted. Right: overview, tool breakdown, files touched, approvals, and **token usage** (input / output / cache hit, context window, per-turn chart).
+- **Doesn't disturb running work**: both are separate processes that only read event files — they never touch the write lock or DSH. Use them to watch progress, and **don't open MCP-driven conversations in the DSH GUI** (that takes the write lock; see [usage notes 3.10](USAGE-NOTES.en.md)).
+- **Safety and privacy**: the dashboard binds `127.0.0.1` only, its URL carries a one-time token, it checks the Host header, and it has no control that changes state. Command, path and prompt previews are redacted first; **reasoning is never written at any level**. `DSH_MCP_LIVE=meta` keeps only tool names and status; `off` disables it.
+
+> The viewers' interface text is currently Chinese; the example above is translated. Details in [Usage · side view](docs/en/usage.md); event format and design trade-offs in the [live view design](docs/zh/live-view-design.md) (Chinese).
+
 ## 📚 Documentation map
 
 | Document | Contents |
 |---|---|
 | [Setup](docs/en/install.md) | Requirements, profile bootstrap, 9 MCP clients |
-| [Usage](docs/en/usage.md) | Dispatch/collect, sentinels, many conversations, reasoning |
+| [Usage](docs/en/usage.md) | Dispatch/collect, sentinels, many conversations, live view, reasoning |
+| [Live view design](docs/zh/live-view-design.md) (Chinese) | Event stream format, `watch` / `dashboard`, token source, privacy trade-offs |
 | [Team mode](docs/en/team.md) | Default behavior, how to disable (per client), verify and revert |
 | [Permissions & privacy](docs/en/security.md) | Tiers, approvals, GUI visibility, logging |
 | [Write lock](docs/en/locking.md) | Four holder classes, takeover, GUI contention |
