@@ -17,8 +17,8 @@ name: tests
 #     dispatch-tools    dispatch surface              59 checks (55 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
-#     live-events       live event stream, write side  33 checks
-#     live-view         watch / dashboard viewers      39 checks
+#     live-events       live event stream, write side  39 checks
+#     live-view         watch / dashboard viewers      54 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            10 checks
 #     bootstrap-profile zero-dependency bootstrap     24 checks

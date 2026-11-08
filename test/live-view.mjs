@@ -13,7 +13,9 @@ const liveDir = join(root, 'live');
 process.env.DSH_MCP_STATE = join(root, 'state.json');
 process.env.DSH_MCP_LIVE_DIR = liveDir;
 
-const { LiveState, LiveTail, splitLines, parseEvent, renderText, writerPid } = await import('../src/live-view.mjs');
+const { LiveState, LiveTail, splitLines, parseEvent, renderText, writerPid, displayWidth, clipLine, layoutFrame, diffFrame, fmtTokens, cacheHitRate } = await import(
+  '../src/live-view.mjs'
+);
 const { startDashboard } = await import('../src/live-dashboard.mjs');
 
 let passed = 0;
@@ -106,6 +108,24 @@ try {
     q.apply(ev('c3', 'run.start', { run: 'r1' }));
     q.apply(ev('c3', 'run.queued', { run: 'r2', position: 1 }));
     check('有运行中的回合时会话是 running，即使后面还有排队', () => q.view({ alive: () => true }).groups[0].conversations[0].state === 'running');
+    // token：回合增量挂到回合上；会话累计与上下文挂到会话上；总数汇总所有会话
+    const u = new LiveState();
+    u.apply(ev('c4', 'run.start', { run: 'r1' }));
+    u.apply(ev('c4', 'usage', { run: 'r1', tokens: { input: 600, output: 60, cache_read: 4000, cache_write: 10 }, session_tokens: { input: 1600, output: 260, cache_read: 9000, cache_write: 10 }, context: { used: 7000, window: 1000000 } }));
+    u.apply(ev('c4', 'run.end', { run: 'r1', status: 'done' }));
+    u.apply(ev('c4', 'usage', { run: 'r1', final: true, tokens: { input: 800, output: 100, cache_read: 7000, cache_write: 10 }, session_tokens: { input: 1800, output: 300, cache_read: 12000, cache_write: 10 }, context: { used: 7400, window: 1000000 } }));
+    u.apply(ev('c5', 'usage', { run: 'r9', tokens: { input: 5, output: 5, cache_read: 0, cache_write: 0 }, session_tokens: { input: 5, output: 5, cache_read: 0, cache_write: 0 } }));
+    const uv = u.view({ alive: () => true });
+    const c4 = uv.groups.flatMap((g) => g.conversations).find((x) => x.id === 'c4');
+    check('最终 usage 覆盖回合内的中间值', () => c4.runs[0].tokens.input === 800 && c4.runs[0].tokens.output === 100);
+    check('会话 token = DSH 累计，上下文取最新', () => c4.tokens.input === 1800 && c4.tokens.cache_read === 12000 && c4.context.used === 7400);
+    check('顶部总数汇总所有会话', () => uv.totals.tokens.input === 1805 && uv.totals.tokens.output === 305);
+    check('坏的 token 字段不报错、记为 0', () => {
+      u.apply(ev('c4', 'usage', { run: 'r1', tokens: { input: 'x', output: -3 } }));
+      const t = u.view({ alive: () => true }).groups.flatMap((g) => g.conversations).find((x) => x.id === 'c4').runs[0].tokens;
+      return t.input === 0 && t.output === 0;
+    });
+    check('fmtTokens / 缓存命中率', () => fmtTokens(950) === '950' && fmtTokens(7256) === '7.3k' && fmtTokens(133451) === '133k' && fmtTokens(2835200) === '2.84M' && Math.abs(cacheHitRate({ input: 100, cache_read: 300, cache_write: 0, output: 1 }) - 0.75) < 1e-9);
     check('未知事件类型不报错', () => {
       d.apply(ev('c2', 'from.the.future', { run: 'r9' }));
       return true;
@@ -149,6 +169,34 @@ try {
     check('树里有客户端、会话、回合、工具、审批', () => ['claude-code', 'abcdef12', 'run-x', '[queue]', 'npm test', '⚠ danger-full-access', 'git push'].every((k) => txt.includes(k)));
     check('无颜色时不含 ANSI', () => !txt.includes('\x1b['));
     check('按会话前缀过滤', () => renderText(s.view({ alive: () => true }), { conv: 'zzz' }).includes('没有匹配'));
+  }
+
+  console.log('\n[4b] 原地刷新：列宽、截断、逐行 diff、标题优先级');
+  {
+    check('中文按 2 列、ASCII 按 1 列、颜色序列不占宽', () => displayWidth('ab中文') === 6 && displayWidth('\x1b[32m✓\x1b[0m ok') === 4);
+    const clipped = clipLine('\x1b[2m在当前目录做一个简易的页面 index.html\x1b[0m', 12);
+    check('截断后可见宽度不超过列数，结尾是 … 且复位颜色', () => displayWidth(clipped) <= 12 && clipped.endsWith('…\x1b[0m') && clipped.startsWith('\x1b[2m'));
+    check('短行原样返回', () => clipLine('abc', 10) === 'abc');
+    const tall = layoutFrame(Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n'), { cols: 80, rows: 10 });
+    check('超过终端高度：保留 rows-1 行 + 一行说明', () => tall.length === 10 && tall[9].includes('还有 21 行'));
+    const a = ['h', 'x', 'y'];
+    check('第一帧整屏重画', () => diffFrame(null, a).startsWith('\x1b[H\x1b[2J') && diffFrame(null, a).includes('x'));
+    check('无变化时不写任何东西', () => diffFrame(a, ['h', 'x', 'y']) === '');
+    const d = diffFrame(a, ['h', 'X', 'y']);
+    check('只重写变化的那一行（定位到第 2 行）', () => d === '\x1b[2;1HX\x1b[0m\x1b[K');
+    check('新帧更短时清掉多余的旧行', () => diffFrame(a, ['h']).endsWith('\x1b[2;1H\x1b[J'));
+
+    // 标题：调用方的 title_hint 优先于 DSH 原生标题（首条 prompt 的截断前缀）
+    const tdir = join(root, 'live-titles');
+    mkdirSync(join(tdir, 'c-t'), { recursive: true });
+    appendFileSync(join(tdir, 'c-t', 'events.jsonl'), line(ev('c-t', 'conv.open', { title_hint: '简易交互式单页 HTML' })));
+    mkdirSync(join(tdir, 'c-u'), { recursive: true });
+    appendFileSync(join(tdir, 'c-u', 'events.jsonl'), line(ev('c-u', 'run.start', { run: 'r' })));
+    const tt = new LiveTail(tdir, { readTitle: () => '在当前目录做一个简易的、可' });
+    tt.poll();
+    const byId = Object.fromEntries(tt.view({ alive: () => true }).groups.flatMap((g) => g.conversations).map((c) => [c.id, c.title]));
+    check('有 title_hint 时用它，不用 DSH 截断标题', () => byId['c-t'] === '简易交互式单页 HTML');
+    check('没有 title_hint 时退回 DSH 原生标题', () => byId['c-u'] === '在当前目录做一个简易的、可');
   }
 
   console.log('\n[5] watch --once（真正走 bin 入口，不启动 Hub）');

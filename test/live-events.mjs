@@ -9,7 +9,7 @@
  *   5. 现有输出不变：tools_used 不混入 live 跟踪字段；
  *   6. 失败路径 / 审批裁决 / 排队 / forget 都有对应事件或清理。
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,8 @@ const liveDir = join(root, 'live');
 process.env.DSH_MCP_STATE = join(root, 'state.json');
 process.env.DSH_MCP_LIVE_DIR = liveDir;
 process.env.DSH_MCP_LIVE = 'detail';
+// token 用量来自 DSH 的投影缓存：指到临时 DSH_HOME，测试里自己写假的缓存文件。
+process.env.DSH_HOME = join(root, 'dsh-home');
 
 const { Conversation } = await import('../src/hub.mjs');
 const live = await import('../src/live.mjs');
@@ -249,6 +251,46 @@ try {
   g.conv.proc = null;
   await g.conv.close({ forget: true });
   check('forget 删除事件目录', () => !existsSync(live.liveConvDir('live-events-forget', liveDir)));
+
+  console.log('\n[7b] token 用量：回合内增量 + 最终值');
+  {
+    const projDir = join(root, 'dsh-home', 'storages', 'session_projcache', 'sessions');
+    mkdirSync(projDir, { recursive: true });
+    const writeProj = (id, totals, pressure) =>
+      writeFileSync(
+        join(projDir, `${id}.json`),
+        JSON.stringify({ record: { rows: { tokenUsage: { val: { totals } }, contextPressure: { val: pressure } } } }),
+      );
+    const id = 'live-events-tokens';
+    // 会话之前已经用过一些 token（更早的回合）
+    writeProj(id, { uncachedInputTokens: 1000, outputTokens: 200, cacheReadTokens: 5000, cacheWriteTokens: 0 }, { pressureTokens: 6000, contextWindow: 1000000 });
+    const k = makeConv(id);
+    const pk = k.conv.prompt('x', { wait: true, timeoutMs: 0 });
+    await k.proc.ready();
+    writeProj(id, { uncachedInputTokens: 1600, outputTokens: 260, cacheReadTokens: 9000, cacheWriteTokens: 10 }, { pressureTokens: 7000, contextWindow: 1000000 });
+    k.conv.onUpdate({ update: { sessionUpdate: 'tool_call', toolCallId: 'k1', title: 'read', status: 'in_progress' } });
+    writeProj(id, { uncachedInputTokens: 1800, outputTokens: 300, cacheReadTokens: 12000, cacheWriteTokens: 10 }, { pressureTokens: 7400, contextWindow: 1000000 });
+    k.proc.end('end_turn');
+    await pk;
+    const uev = events(id).filter((e) => e.type === 'usage');
+    const mid = uev.find((e) => !e.final);
+    const fin = uev.find((e) => e.final);
+    check('回合中发出 usage 增量（相对回合开始的基线）', () => mid && mid.tokens.input === 600 && mid.tokens.output === 60 && mid.tokens.cache_read === 4000 && mid.tokens.cache_write === 10);
+    check('回合结束后发最终值（final=true）', () => fin && fin.tokens.input === 800 && fin.tokens.output === 100 && fin.tokens.cache_read === 7000);
+    check('带会话累计与上下文占用', () => fin.session_tokens.input === 1800 && fin.session_tokens.cache_read === 12000 && fin.context.used === 7400 && fin.context.window === 1000000);
+    check('usage 事件挂在本回合 run 上', () => uev.every((e) => e.run === fin.run && typeof e.run === 'string'));
+    check('final 在 run.end 之后', () => {
+      const ev2 = events(id);
+      return ev2.findIndex((e) => e.type === 'run.end') < ev2.findIndex((e) => e.type === 'usage' && e.final);
+    });
+    // 没有投影缓存（DSH 还没写）：不发 usage，也不报错
+    const nk = makeConv('live-events-no-proj');
+    const pn = nk.conv.prompt('x', { wait: true, timeoutMs: 0 });
+    await nk.proc.ready();
+    nk.proc.end('end_turn');
+    const rn = await pn;
+    check('没有投影缓存时不发 usage、回合照常', () => !events('live-events-no-proj').some((e) => e.type === 'usage') && rn.stop_reason === 'end_turn');
+  }
 
   console.log('\n[8] 写入侧的防御');
   check('非法会话 id 不写（防路径穿越）', () => live.emitLive('../escape', 'tool', {}) === false && !existsSync(join(root, 'escape')));

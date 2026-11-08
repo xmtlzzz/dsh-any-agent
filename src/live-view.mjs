@@ -76,6 +76,9 @@ function newConv(id) {
     opened_at: null,
     last_ts: null,
     closed: false,
+    /** DSH 会话累计 token（含不在 live 里的更早回合）。 */
+    session_tokens: null,
+    context: null,
     runs: [],
   };
 }
@@ -98,8 +101,41 @@ function newRun(id) {
     auto_approvals: null,
     auto_escalations: null,
     writer: null,
+    /** 本回合 token 增量 {input, output, cache_read, cache_write}（来自 usage 事件）。 */
+    tokens: null,
+    /** 上下文窗口占用 {used, window}。 */
+    context: null,
     items: [],
   };
+}
+
+const TOKEN_KEYS = ['input', 'output', 'cache_read', 'cache_write'];
+
+/** 规整一组 token 计数；不是对象时返回 null。 */
+function cleanTokens(t) {
+  if (!t || typeof t !== 'object') return null;
+  const out = {};
+  for (const k of TOKEN_KEYS) out[k] = Number.isFinite(t[k]) && t[k] > 0 ? t[k] : 0;
+  return out;
+}
+
+/** 输入总量（未命中缓存 + 缓存读 + 缓存写）。 */
+export function tokenInputTotal(t) {
+  return t ? t.input + t.cache_read + t.cache_write : 0;
+}
+
+/** 缓存命中率（缓存读 / 输入总量），没有输入时为 null。 */
+export function cacheHitRate(t) {
+  const all = tokenInputTotal(t);
+  return all > 0 ? t.cache_read / all : null;
+}
+
+/** 1234 → 1.2k，1500000 → 1.5M。 */
+export function fmtTokens(n) {
+  if (!Number.isFinite(n)) return '';
+  if (n < 1000) return String(Math.round(n));
+  if (n < 1e6) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1e6).toFixed(n < 1e7 ? 2 : 1)}M`;
 }
 
 /**
@@ -238,6 +274,18 @@ export class LiveState {
         }
         break;
       }
+      case 'usage': {
+        const r = this.#run(c, ev.run);
+        if (r) {
+          const t = cleanTokens(ev.tokens);
+          if (t) r.tokens = t;
+          if (ev.context && Number.isFinite(ev.context.window)) r.context = { used: ev.context.used ?? 0, window: ev.context.window };
+        }
+        const s = cleanTokens(ev.session_tokens);
+        if (s) c.session_tokens = s;
+        if (ev.context && Number.isFinite(ev.context.window)) c.context = { used: ev.context.used ?? 0, window: ev.context.window };
+        break;
+      }
       case 'interject': {
         const r = this.#run(c, ev.run, { create: false });
         if (r) this.#push(r, { kind: 'interject', at: ev.ts, mode: ev.mode ?? null, text_preview: ev.text_preview ?? null, pending_run: ev.pending_run ?? null });
@@ -307,6 +355,9 @@ export class LiveState {
         opened_at: c.opened_at,
         last_ts: c.last_ts,
         state,
+        /** 会话累计（DSH 自己记的，含更早的回合）；没有就用 live 里各回合之和。 */
+        tokens: c.session_tokens ?? sumTokens(runs.map((r) => r.tokens)),
+        context: c.context,
         runs,
       };
     });
@@ -329,10 +380,23 @@ export class LiveState {
         queued: convs.reduce((n, c) => n + c.runs.filter((r) => r.status === 'queued').length, 0),
         pending_approvals: convs.reduce((n, c) => n + c.runs.reduce((m, r) => m + r.pending_approvals, 0), 0),
         escalations: convs.reduce((n, c) => n + c.runs.reduce((m, r) => m + r.escalations, 0), 0),
+        tokens: sumTokens(convs.map((c) => c.tokens)),
       },
       groups: [...groups.values()],
     };
   }
+}
+
+/** 把若干组 token 计数相加；全是空时返回 null。 */
+export function sumTokens(list) {
+  let any = false;
+  const out = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
+  for (const t of list) {
+    if (!t) continue;
+    any = true;
+    for (const k of TOKEN_KEYS) out[k] += t[k] ?? 0;
+  }
+  return any ? out : null;
 }
 
 function rank(state) {
@@ -437,7 +501,11 @@ export class LiveTail {
     return changed;
   }
 
-  /** 标题：DSH 原生标题（投影缓存）> 注册表 titleHint > conv.open 的 title_hint。 */
+  /**
+   * 标题：调用方给的 title_hint（注册表 > conv.open 事件）> DSH 原生标题（投影缓存）。
+   * DSH 原生标题只是首条 prompt 的截断前缀（"在当前目录做一个简易的、可"），
+   * 有显式 title_hint 时它更可读。
+   */
   #refreshTitles() {
     const t = Date.now();
     if (t - this.titlesAt < TITLE_TTL_MS) return false;
@@ -452,16 +520,15 @@ export class LiveTail {
       }
     }
     let changed = false;
-    for (const id of this.state.convs.keys()) {
-      let title = null;
-      if (this.readTitle) {
+    for (const [id, conv] of this.state.convs) {
+      let title = hints.get(id) ?? conv.title_hint ?? null;
+      if (!title && this.readTitle) {
         try {
           title = this.readTitle(id) ?? null;
         } catch {
           title = null;
         }
       }
-      title = title ?? hints.get(id) ?? null;
       if (title && this.titles.get(id) !== title) {
         this.titles.set(id, title);
         changed = true;
@@ -473,6 +540,105 @@ export class LiveTail {
   view(opts = {}) {
     return this.state.view({ titles: this.titles, ...opts });
   }
+}
+
+// ── 终端原地刷新（watch） ───────────────────────────────────────
+
+const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/y;
+
+/** 单个码点在终端里占几列：CJK / 全角 / emoji 记 2，其余 1（框线字符在主流终端里是 1）。 */
+export function charWidth(cp) {
+  if (cp < 0x1100) return 1;
+  if (
+    (cp >= 0x1100 && cp <= 0x115f) ||
+    (cp >= 0x2e80 && cp <= 0x303e) ||
+    (cp >= 0x3041 && cp <= 0x33ff) ||
+    (cp >= 0x3400 && cp <= 0x4dbf) ||
+    (cp >= 0x4e00 && cp <= 0x9fff) ||
+    (cp >= 0xa000 && cp <= 0xa4cf) ||
+    (cp >= 0xac00 && cp <= 0xd7a3) ||
+    (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xfe30 && cp <= 0xfe4f) ||
+    (cp >= 0xff00 && cp <= 0xff60) ||
+    (cp >= 0xffe0 && cp <= 0xffe6) ||
+    (cp >= 0x1f300 && cp <= 0x1faff) ||
+    (cp >= 0x20000 && cp <= 0x3fffd)
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+/** 可见宽度（忽略 ANSI 颜色序列）。 */
+export function displayWidth(s) {
+  let w = 0;
+  for (let i = 0; i < s.length; ) {
+    ANSI_RE.lastIndex = i;
+    const m = ANSI_RE.exec(s);
+    if (m) {
+      i += m[0].length;
+      continue;
+    }
+    const cp = s.codePointAt(i);
+    w += charWidth(cp);
+    i += cp > 0xffff ? 2 : 1;
+  }
+  return w;
+}
+
+/**
+ * 把一行截到 `cols` 列以内（保留颜色序列，超出时末尾放 `…`）。
+ * 不截的话长行会折到下一行，原地刷新时整棵树就错位了。
+ */
+export function clipLine(s, cols) {
+  if (!(cols > 1) || displayWidth(s) <= cols) return s;
+  let w = 0;
+  let out = '';
+  for (let i = 0; i < s.length; ) {
+    ANSI_RE.lastIndex = i;
+    const m = ANSI_RE.exec(s);
+    if (m) {
+      out += m[0];
+      i += m[0].length;
+      continue;
+    }
+    const cp = s.codePointAt(i);
+    const cw = charWidth(cp);
+    if (w + cw > cols - 1) break;
+    out += String.fromCodePoint(cp);
+    w += cw;
+    i += cp > 0xffff ? 2 : 1;
+  }
+  return out + '…\x1b[0m';
+}
+
+/**
+ * 把一帧文本排成"适合这个终端"的行：截宽、截高（超出的行数在最后一行说明）。
+ * 纯函数，方便测试。
+ */
+export function layoutFrame(text, { cols = 120, rows = 40 } = {}) {
+  let lines = String(text).split('\n').map((l) => clipLine(l, cols));
+  if (rows > 2 && lines.length > rows) {
+    const hidden = lines.length - (rows - 1);
+    lines = lines.slice(0, rows - 1);
+    lines.push(clipLine(`\x1b[2m…还有 ${hidden} 行没显示（给会话 id 前缀、或用 --runs / --items 收窄）\x1b[0m`, cols));
+  }
+  return lines;
+}
+
+/**
+ * 计算从上一帧到这一帧要写的终端序列：只重写变化的行，多出来的旧行清掉。
+ * 第一帧（prev 为 null）整屏重画。返回要写出的字符串（无变化时为空串）。
+ */
+export function diffFrame(prev, next) {
+  let out = '';
+  if (!prev) out += '\x1b[H\x1b[2J';
+  for (let i = 0; i < next.length; i++) {
+    if (prev && prev[i] === next[i]) continue;
+    out += `\x1b[${i + 1};1H${next[i]}\x1b[0m\x1b[K`;
+  }
+  if (prev && prev.length > next.length) out += `\x1b[${next.length + 1};1H\x1b[J`;
+  return out;
 }
 
 // ── 终端渲染（watch） ───────────────────────────────────────────
@@ -524,7 +690,8 @@ export function renderText(view, { conv = null, runs = 3, items = 12, color = fa
     `DSH live · ${t.conversations} 会话 · ${t.running} 运行中` +
       (t.queued ? ` · ${t.queued} 排队` : '') +
       (t.pending_approvals ? ` · ${warn(`${t.pending_approvals} 待审批`)}` : '') +
-      (t.escalations ? ` · ${warn(`⚠ ${t.escalations} 次提权`)}` : ''),
+      (t.escalations ? ` · ${warn(`⚠ ${t.escalations} 次提权`)}` : '') +
+      (t.tokens ? ` · token 入 ${fmtTokens(tokenInputTotal(t.tokens))} / 出 ${fmtTokens(t.tokens.output)}` : ''),
   );
   let shown = 0;
   for (const g of view.groups) {
@@ -538,7 +705,9 @@ export function renderText(view, { conv = null, runs = 3, items = 12, color = fa
       const p1 = lastConv ? '└─ ' : '├─ ';
       const p1c = lastConv ? '   ' : '│  ';
       const stateTxt = cv.state === 'running' ? good('运行中') : cv.state === 'queued' ? warn('排队') : dim(cv.state === 'closed' ? '已释放' : '空闲');
-      out.push(`${p1}${shortId(cv.id)}  ${clip(cv.title ?? '(无标题)', 40)}  ${stateTxt}  ${dim(`${cv.permission ?? ''} · ${clip(cv.cwd ?? '', 50)}`)}`);
+      const ctx = cv.context && cv.context.window ? ` · 上下文 ${Math.round((cv.context.used / cv.context.window) * 100)}%` : '';
+      const tok = cv.tokens ? ` · 累计 ${fmtTokens(tokenInputTotal(cv.tokens))}/${fmtTokens(cv.tokens.output)}` : '';
+      out.push(`${p1}${shortId(cv.id)}  ${clip(cv.title ?? '(无标题)', 40)}  ${stateTxt}${dim(tok + ctx)}  ${dim(`${cv.permission ?? ''} · ${clip(cv.cwd ?? '', 50)}`)}`);
       const rs = cv.runs.slice(-runs);
       rs.forEach((r, ri) => {
         const lastRun = ri === rs.length - 1;
@@ -551,6 +720,7 @@ export function renderText(view, { conv = null, runs = 3, items = 12, color = fa
           r.status,
           r.duration_ms != null ? fmtMs(r.duration_ms) : null,
           r.tool_count != null ? `${r.tool_count} 工具` : null,
+          r.tokens ? `${fmtTokens(tokenInputTotal(r.tokens))}↑ ${fmtTokens(r.tokens.output)}↓ tok` : null,
           r.escalations ? warn(`⚠${r.escalations} 提权`) : null,
           r.pending_approvals ? warn(`${r.pending_approvals} 待审批`) : null,
         ].filter(Boolean);

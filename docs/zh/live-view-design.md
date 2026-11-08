@@ -111,6 +111,7 @@ DSH 的工具活动经 ACP 的 `session/update`（`tool_call` / `tool_call_updat
 - **不写** `text` 事件：正文只在哨兵里。
 - **不写** `writer.hello` / `writer.bye`：每条事件已带 `w`，查看端看最后一个写者的 pid 是否存活即可判断"中断"（§6.5）。
 - 排队被取消、插话等待超时、起不来的回合都补一条 `run.end`，查看端不会留下永远"排队 / 运行中"的回合。
+- 新增 `usage`（0.6.1 之后）：本回合 token 增量 `tokens`、会话累计 `session_tokens`、上下文占用 `context {used, window}`。数据来自 DSH 投影缓存的 `tokenUsage.totals` / `contextPressure`。真机实测 DSH 在回合中每个模型步之后就更新它，所以回合开始记基线，工具状态变化 / `usage_update` 时按 2 秒节流发增量，回合结束（git 快照之后）再发一条 `final: true` 的最终值。只是计数，属于 meta 级字段。
 - 真机验证（DSH ACP）发现：`tool_call` **不带 `name`**，工具名在 `title` 里（`read` / `glob` / `write` / `pwsh`），`kind` 恒为 `other`。所以 `title` 是纯标识符时当作 `name` 写进 meta 级字段；带空格的 `title` 仍只进 detail。查看端把路径显示成相对会话目录的形式，并隐藏 `other`。
 
 `tool` 只在状态变化时落盘，避免 DSH 的快照式重复更新刷屏；`tool_call_id` 让查看器原地替换同一工具的行，语义与 `dsh_read` 的"按 seq 替换"一致。

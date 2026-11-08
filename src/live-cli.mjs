@@ -6,7 +6,7 @@
  */
 
 import { LIVE_DIR, STATE_FILE } from './config.mjs';
-import { LiveTail, renderText } from './live-view.mjs';
+import { LiveTail, diffFrame, layoutFrame, renderText } from './live-view.mjs';
 import { readConversationMeta } from './titles.mjs';
 
 function parseFlags(args) {
@@ -59,19 +59,43 @@ export async function runWatch(args, { out = process.stdout } = {}) {
     return 0;
   }
   const interval = intFlag(flags.interval, 500, 100, 10_000);
-  const draw = () => {
-    // 清屏 + 光标回到左上角，再整屏重画（树会变长变短，增量刷新不值得）。
-    out.write('\x1b[2J\x1b[H' + renderText(tail.view(), opts) + `\n\n${'\x1b[2m'}live 目录: ${tail.dir} · Ctrl+C 退出${'\x1b[0m'}\n`);
+  const tty = Boolean(out.isTTY);
+  const clock = () => new Date().toTimeString().slice(0, 8);
+  const frameText = () =>
+    renderText(tail.view(), opts) + `\n\n\x1b[2m更新于 ${clock()} · live 目录: ${tail.dir} · Ctrl+C 退出\x1b[0m`;
+
+  // ★ 在 TTY 上用"备用屏幕"原地刷新（同 top / htop）：每帧只重写变化的行。
+  //   旧实现每次 `ESC[2J` 清屏，Windows Terminal 会把被清掉的整屏推进回滚区，
+  //   往上一翻就是一摞重复的帧。备用屏幕没有回滚区，退出时原样恢复用户的终端。
+  let prev = null;
+  let lastText = '';
+  const draw = (force = false) => {
+    const text = frameText();
+    if (!tty) {
+      // 管道 / 重定向：没有光标控制，内容变了才追加一帧（去掉时间行再比较，免得每次都算变化）。
+      const body = text.slice(0, text.lastIndexOf('\n\n'));
+      if (body !== lastText) out.write(text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '') + '\n\n');
+      lastText = body;
+      return;
+    }
+    const next = layoutFrame(text, { cols: out.columns ?? 120, rows: out.rows ?? 40 });
+    const seq = diffFrame(force ? null : prev, next);
+    if (seq) out.write(seq);
+    prev = next;
   };
-  draw();
-  let lastDraw = Date.now();
+  const restore = () => {
+    if (tty) out.write('\x1b[0m\x1b[?25h\x1b[?1049l');
+  };
+  if (tty) out.write('\x1b[?1049h\x1b[?25l');
+  process.once('exit', restore);
+  draw(true);
+  const onResize = () => draw(true);
+  if (tty) out.on?.('resize', onResize);
   await new Promise((resolve) => {
     const timer = setInterval(() => {
-      // 有新事件就重画；没有也每 5 秒重画一次（刷新"写者是否还活着"）。
-      if (tail.poll() || Date.now() - lastDraw > 5000) {
-        draw();
-        lastDraw = Date.now();
-      }
+      // 有新事件才重算；时间行每秒在变，所以每次都会写，但 diffFrame 只重写真正变了的那几行。
+      tail.poll();
+      draw();
     }, interval);
     const stop = () => {
       clearInterval(timer);
@@ -80,6 +104,9 @@ export async function runWatch(args, { out = process.stdout } = {}) {
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
   });
+  out.off?.('resize', onResize);
+  restore();
+  process.off('exit', restore);
   return 0;
 }
 
