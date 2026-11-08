@@ -54,7 +54,8 @@ button { font: inherit; color: inherit; }
 .stats { display: flex; align-items: stretch; height: 100%; margin-left: 4px; }
 .stat { display: flex; flex-direction: column; justify-content: center; padding: 0 16px; border-left: 1px solid var(--line); min-width: 74px; }
 .stat b { font-size: 15px; font-weight: 650; line-height: 1.1; }
-.stat span { font-size: 11px; color: var(--text-3); }
+.stat span { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat { min-width: 0; }
 .stat.hot b { color: var(--run); }
 .stat.warn b { color: var(--warn); }
 .stat.zero b { color: var(--text-3); font-weight: 500; }
@@ -244,7 +245,7 @@ button { font: inherit; color: inherit; }
 /* ── 窄屏 ───────────────────────────────── */
 @media (max-width: 820px) {
   .top { height: auto; flex-wrap: wrap; gap: 10px 16px; padding: 10px 16px; position: static; }
-  .stats { height: 40px; margin-left: 0; order: 3; width: 100%; }
+  .stats { height: 40px; margin-left: 0; order: 3; width: 100%; overflow: hidden; }
   .stat { flex: 1; min-width: 0; padding: 0 10px; }
   .stat span { white-space: nowrap; }
   .stat:first-child { border-left: 0; padding-left: 0; }
@@ -355,7 +356,8 @@ button { font: inherit; color: inherit; }
     stat(s.escalations, '提权', 'warn');
     if (s.tokens) {
       const d = h('div', 'stat');
-      d.append(h('b', null, ftok(tin(s.tokens) + s.tokens.output)), h('span', null, 'token（入 ' + ftok(tin(s.tokens)) + ' · 出 ' + ftok(s.tokens.output) + '）'));
+      d.title = '全部会话 token：输入 ' + tin(s.tokens).toLocaleString() + '（缓存读 ' + s.tokens.cache_read.toLocaleString() + '）· 输出 ' + s.tokens.output.toLocaleString();
+      d.append(h('b', null, ftok(tin(s.tokens) + s.tokens.output)), h('span', null, 'token · 出 ' + ftok(s.tokens.output)));
       box.append(d);
     }
   }
