@@ -7,6 +7,7 @@
  *   2) 工具输入按审批上下文同一套规则脱敏（密钥类字段 + 常见内联字面量）。
  */
 
+import './live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
 import { spawnSync } from 'node:child_process';
 
 process.env.DSH_MCP_SENTINEL_INCLUDE_REASONING = '';

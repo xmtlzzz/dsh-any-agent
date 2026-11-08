@@ -17,8 +17,9 @@ name: tests
 #     dispatch-tools    dispatch surface              59 checks (55 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
-#     live-events       live event stream, write side  39 checks
+#     live-events       live event stream, write side  43 checks
 #     live-view         watch / dashboard viewers      54 checks
+#     release-notes     Release notes from CHANGELOG   12 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            10 checks
 #     bootstrap-profile zero-dependency bootstrap     24 checks
@@ -181,6 +182,10 @@ jobs:
       - name: live-view (watch / dashboard, read-only viewers)
         env: { DSH_MCP_LOG: silent }
         run: node test/live-view.mjs
+
+      - name: release-notes (GitHub Release notes from the CHANGELOG section)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/release-notes.mjs
 
       - name: review (caller review tickets, verdicts, sentinel rewrite)
         env: { DSH_MCP_LOG: silent }

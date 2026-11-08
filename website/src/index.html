@@ -97,7 +97,7 @@
   <div class="section-heading"><div><span class="tiny-label">BUILT FOR THE LONG RUN</span><h2>从一次调用，<br>到长期共事。</h2></div><p>把「会话」作为单位，而不是包一条命令。<br>DSH 的能力，由你熟悉的客户端来调度。</p></div>
   <div class="feature-grid">
     <article class="feature-card"><span class="feature-index">01 / PERSISTENCE</span><div class="mini-persist" aria-hidden="true"><span class="process-chip">process A <i>×</i></span><div class="persist-wire"></div><span class="disk-chip">sessionId <b>✓</b></span><div class="persist-wire"></div><span class="process-chip">process B <i>↗</i></span></div><h3>进程是缓存，会话有身份</h3><p>已落盘的对话可跨进程恢复。同工作区会话默认共享驻留进程，内存开销有界；下次调用自动 resume 延续上下文。干完可用 <code>dsh_release(all=true)</code> 批量回收。</p><code>session/resume</code></article>
-    <article class="feature-card"><span class="feature-index">02 / OBSERVABILITY</span><div class="mini-output" aria-hidden="true"><div><span>cursor 12</span><span>+ 6 entries</span></div><i></i><i></i><i></i><b>cursor 18 <span>→</span></b></div><h3>只看新进展，不重复读历史</h3><p>运行状态轻量查询，输出按游标增量读取。全量快照比对工作区改动（含未跟踪与二次修改），思考内容默认隐藏只给统计。每个结果还带审核清单与证据——先核验，再用 <code>dsh_review</code> 记录 pass/partial/fail。</p><code>dsh_read · dsh_status · dsh_review</code></article>
+    <article class="feature-card"><span class="feature-index">02 / OBSERVABILITY</span><div class="mini-output" aria-hidden="true"><div><span>run-2 · 排队</span><span>156k↑ 12k↓</span></div><i></i><i></i><i></i><b>▶ pwsh node --test <span>→</span></b></div><h3>它在做什么，你看得见</h3><p><code>dsh-any-agent watch</code>（终端）或 <code>dashboard</code>（本地只读网页）把派出去的活展开成调用链：每次工具调用、审批与提权、每回合 token 与上下文占用，回合进行中实时更新，不碰写锁。agent 这边用 <code>dsh_read</code> 增量读取；每个结果带审核清单，核验后用 <code>dsh_review</code> 记录。</p><code>watch · dashboard · dsh_read · dsh_review</code></article>
     <article class="feature-card"><span class="feature-index">03 / COMPOSABILITY</span><div class="mini-tools" aria-hidden="true"><span>⌘ Shell</span><span>▤ Files</span><span>✦ Skills</span><span>⑂ Subagents</span><span>⌁ Workflows</span><span>↗ Other MCPs</span></div><h3>接进来的，是整个工具箱</h3><p>写代码、跑脚本、派子代理，需要时用 <code>dsh-any-agent team on</code> 开启团队（默认关闭）并调用 DSH 自带的技能；外部 MCP 服务需在 DSH profile 中配置。</p><code>DSH native tools + profile MCP</code></article>
   </div>
   <div class="principles-row"><div><span>✓</span><p><strong>配置只改自己那一项</strong><small>注册前预览，写入前备份，重复执行保持幂等。</small></p></div><div><span>✓</span><p><strong>权限和审批，明确选择</strong><small>支持只读、工作区写入和完整访问；按需开启 ask。</small></p></div><div><span>✓</span><p><strong>协议干净，默认静默</strong><small>stdout 专用于协议，默认不输出运行日志。</small></p></div></div>
@@ -142,7 +142,11 @@ tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-
     </article>
     <article class="faq-row">
       <h3 class="faq-q">可以同时在 DSH 的 GUI 里操作同一个会话吗？</h3>
-      <div class="faq-a"><p>同一会话同时只有一个写者。服务持锁时，在 GUI 中打开是只读的（内容可照常查看，但抢不走写锁）；若会话空闲未持锁，在 GUI 中点开会导致 GUI 永久获取写句柄直至重启 dsh web。看进度建议使用 <code>dsh_read</code> 增量读取；需在 GUI 交互接手时，先调用 <code>dsh_release</code>。完整机制见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/locking.md" target="_blank" rel="noopener noreferrer">写锁文档</a>。</p></div>
+      <div class="faq-a"><p>同一会话同时只有一个写者。服务持锁时，在 GUI 中打开是只读的（内容可照常查看，但抢不走写锁）；若会话空闲未持锁，在 GUI 中点开会导致 GUI 永久获取写句柄直至重启 dsh web。看进度请用 <code>dsh-any-agent watch</code> / <code>dashboard</code>（只读事件文件，不碰写锁），或让 agent 用 <code>dsh_read</code> 增量读取；需在 GUI 交互接手时，先调用 <code>dsh_release</code>。完整机制见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/locking.md" target="_blank" rel="noopener noreferrer">写锁文档</a>。</p></div>
+    </article>
+    <article class="faq-row">
+      <h3 class="faq-q">怎么看它正在做什么、花了多少 token？</h3>
+      <div class="faq-a"><p>0.6.1 起，在终端运行 <code>dsh-any-agent watch</code>，或运行 <code>dsh-any-agent dashboard</code> 打开本地只读网页，按「客户端 → 会话 → 回合 → 工具调用 / 审批」展开调用链；0.6.2 起还显示每回合的输入、输出、缓存命中和上下文占用，回合进行中就会更新。两者都是独立进程，不连 DSH、不碰写锁；页面只监听 127.0.0.1 并要求一次性 token，命令与路径预览先脱敏，思考内容从不写入。详见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/usage.md" target="_blank" rel="noopener noreferrer">用法文档</a>。</p></div>
     </article>
     <article class="faq-row">
       <h3 class="faq-q">团队模式是什么？怎么开启？</h3>

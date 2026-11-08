@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildNotes, extractSection } from './release-notes.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -33,14 +34,31 @@ if (changelog.includes(`## [${version}]`)) ok(`CHANGELOG has a ${version} sectio
 else bad(`CHANGELOG.md is missing "## [${version}]"`);
 
 if (changelog.includes(`## [${version}]`) && version !== '0.0.0') {
-  const section = changelog.split(`## [${version}]`)[1] ?? '';
-  if (section.trim().length > 0) ok('CHANGELOG section is not empty');
+  // ★ 只看这一节自己（到下一个 "## [" 为止）。旧实现取的是"标题之后的全部剩余文本"，
+  //   这一节空着也会因为后面还有别的版本而判通过。
+  const section = extractSection(changelog, version);
+  if (section && section.trim().length > 0) ok('CHANGELOG section is not empty');
   else bad(`CHANGELOG section for ${version} is empty`);
+  // Release 说明就是这一节（scripts/release-notes.mjs），这里先确认它能生成。
+  try {
+    buildNotes(changelog, version);
+    ok('release notes can be built from the CHANGELOG section');
+  } catch (e) {
+    bad(`release notes: ${e.message}`);
+  }
+  if (changelog.includes(`\n[${version}]: `)) ok(`CHANGELOG has a [${version}] compare link`);
+  else bad(`CHANGELOG.md is missing the "[${version}]: …/compare/…" link at the bottom`);
+  if (new RegExp(`\\n\\[Unreleased\\]: \\S+/compare/v${version.replace(/\./g, '\\.')}\\.\\.\\.HEAD`).test(changelog)) {
+    ok('[Unreleased] compares from this version');
+  } else bad(`CHANGELOG.md "[Unreleased]:" link should compare v${version}...HEAD`);
 }
 
 const docFiles = [
   'README.zh.md',
   'README.md',
+  'USAGE-NOTES.md',
+  'USAGE-NOTES.en.md',
+  ...(fs.existsSync(path.join(ROOT, 'SECURITY.md')) ? ['SECURITY.md'] : []),
   ...fs.readdirSync(path.join(ROOT, 'docs/zh')).map((f) => `docs/zh/${f}`),
   ...fs.readdirSync(path.join(ROOT, 'docs/en')).map((f) => `docs/en/${f}`),
 ];

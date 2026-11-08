@@ -292,6 +292,20 @@ try {
     check('没有投影缓存时不发 usage、回合照常', () => !events('live-events-no-proj').some((e) => e.type === 'usage') && rn.stop_reason === 'end_turn');
   }
 
+  console.log('\n[7c] dsh_doctor 的 live 检查');
+  {
+    const { inspectLive } = await import('../src/doctor.mjs');
+    const off = inspectLive({ dir: liveDir, level: 'off' });
+    check('关闭时报 ok 并说明看不到新派活', () => off[0] === 'ok' && off[1].includes('已关闭'));
+    const blocked = inspectLive({ dir: join(root, 'not-a-dir', 'live'), level: 'detail' });
+    check('目录不可写只报 warn（不影响派活）并给出修复建议', () => blocked[0] === 'warn' && blocked[1].includes('不可写') && blocked[2]?.includes('DSH_MCP_LIVE_DIR'));
+    const emptyDir = join(root, 'live-empty');
+    const empty = inspectLive({ dir: emptyDir, level: 'detail' });
+    check('空目录：ok，提示还没有事件', () => empty[0] === 'ok' && empty[1].includes('0 个会话') && empty[1].includes('还没有任何事件'));
+    const normal = inspectLive({ dir: liveDir, level: 'detail' });
+    check('有事件时报会话数、占用和最近事件时间', () => normal[0] === 'ok' && /\d+ 个会话/.test(normal[1]) && !normal[1].includes(' 0 个会话') && normal[1].includes('最近一条事件'));
+  }
+
   console.log('\n[8] 写入侧的防御');
   check('非法会话 id 不写（防路径穿越）', () => live.emitLive('../escape', 'tool', {}) === false && !existsSync(join(root, 'escape')));
   const big = 'y'.repeat(20_000);

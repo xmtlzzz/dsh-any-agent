@@ -1,8 +1,18 @@
 name: release
 
-# Create (or refresh) a GitHub Release for a pushed version tag.
-# The tag itself is pushed by the release process; this workflow only turns it
-# into a Release page with generated notes.
+# A pushed version tag (vX.Y.Z) turns into:
+#   1. a GitHub Release whose notes are that version's CHANGELOG section
+#      (scripts/release-notes.mjs), not GitHub's one-line "generated notes";
+#   2. an npm publish from CI with provenance, via npm Trusted Publishing (OIDC).
+#
+# Trusted Publishing needs a one-time setup on npmjs.com:
+#   package dsh-any-agent → Settings → Trusted Publisher → GitHub Actions,
+#   repository xmtlzzz/dsh-any-agent, workflow file "release.yml".
+# No NPM_TOKEN secret is used. Until that is configured, the npm job fails with an
+# auth error while the GitHub Release job still succeeds; publish manually then.
+#
+# Both jobs are idempotent: re-running (or workflow_dispatch with an existing tag)
+# refreshes the Release notes and skips npm if that version is already published.
 on:
   push:
     tags:
@@ -10,28 +20,122 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to publish a release for'
+        description: 'Existing tag to (re)publish, e.g. v0.6.2'
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  github-release:
+    name: GitHub Release (notes from CHANGELOG)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Resolve tag
+        id: tag
+        shell: bash
         run: |
           set -euo pipefail
           TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build notes from CHANGELOG
+        run: node scripts/release-notes.mjs "${{ steps.tag.outputs.version }}" --out "$RUNNER_TEMP/notes.md"
+
+      - name: Create or update the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release for $TAG already exists; nothing to do."
+            gh release edit "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+            echo "Updated notes for existing release $TAG"
           else
-            gh release create "$TAG" --generate-notes --title "$TAG"
+            gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+            echo "Created release $TAG"
           fi
+
+  npm-publish:
+    name: npm publish (provenance)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for npm Trusted Publishing + provenance
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted Publishing needs npm CLI >= 11.5.1.
+      - name: Ensure a recent npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          need=11.5.1
+          have=$(npm --version)
+          if [ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -n1)" != "$need" ]; then
+            npm install -g "npm@^11.5.1"
+          fi
+          npm --version
+
+      - name: Tag must match package.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$pkg" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "::error::tag ${{ steps.tag.outputs.tag }} but package.json is $pkg"
+            exit 1
+          fi
+
+      - name: Already on npm?
+        id: exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ steps.tag.outputs.version }}"
+          if npm view "dsh-any-agent@$v" version >/dev/null 2>&1; then
+            echo "dsh-any-agent@$v is already published; skipping."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release gate (version, CHANGELOG, docs links) + package check
+        if: steps.exists.outputs.published == 'false'
+        env: { DSH_MCP_LOG: silent }
+        run: |
+          npm run check:release
+          node test/package-check.mjs
+
+      - name: Publish
+        if: steps.exists.outputs.published == 'false'
+        run: npm publish --provenance --access public

@@ -1,13 +1,14 @@
 /**
  * dsh_doctor：只读体检（DSH 可执行文件与版本、profile、状态文件、runs/locks 目录、
- * 孤儿锁、会话数与 RSS、生效配置）。只报告，不修改任何东西。
+ * live 事件流、孤儿锁、会话数与 RSS、生效配置）。只报告，不修改任何东西
+ * （目录可写性用一个临时探测文件，写完立刻删掉）。
  *
  * 从 tools.mjs 拆出来：它是处理器表里最长的一项，且只依赖 `hub` 的两个只读字段
  * （conversations / hosts）与一批探测函数。返回值形状与原处理器一致：
  * `{ structured: { ok, verdict, checks }, text }`。
  */
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   DEFAULT_PERMISSION,
@@ -34,6 +35,58 @@ import {
 import { inspectProfile } from './bootstrap.mjs';
 import { listOrphans, LOCKS_DIR } from './locks.mjs';
 import { rssMb } from './procstat.mjs';
+import { liveSettings } from './live.mjs';
+
+/** live 目录占用超过这个值就提醒（TTL 正常时远到不了）。 */
+const LIVE_WARN_BYTES = 500 * 1024 * 1024;
+
+/**
+ * 体检 live 事件流：级别、目录可写、会话数、占用、最近一条事件的时间。
+ * 返回 `[status, detail, fix]`，供 add('live', …) 使用。
+ */
+export function inspectLive({ dir = liveSettings().dir, level = liveSettings().level, now = Date.now() } = {}) {
+  if (level === 'off') {
+    return ['ok', `已关闭（DSH_MCP_LIVE=off）：watch / dashboard 看不到新的派活；目录 ${dir}`, null];
+  }
+  try {
+    mkdirSync(dir, { recursive: true });
+    const probe = join(dir, `.doctor-${process.pid}`);
+    writeFileSync(probe, '');
+    rmSync(probe, { force: true });
+  } catch (e) {
+    return [
+      'warn',
+      `级别=${level}，但目录不可写：${dir}（${e.message}）—— 派活不受影响，只是 watch / dashboard 看不到事件`,
+      '检查权限，或用 DSH_MCP_LIVE_DIR 指向可写目录',
+    ];
+  }
+  let convs = 0;
+  let bytes = 0;
+  let newest = 0;
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    if (!ent.isDirectory()) continue;
+    convs++;
+    for (const f of readdirSync(join(dir, ent.name), { withFileTypes: true })) {
+      if (!f.isFile()) continue;
+      try {
+        const st = statSync(join(dir, ent.name, f.name));
+        bytes += st.size;
+        if (st.mtimeMs > newest) newest = st.mtimeMs;
+      } catch {
+        /* 正在滚动 / 被清理：跳过 */
+      }
+    }
+  }
+  const mb = (bytes / 1024 / 1024).toFixed(1);
+  const age = newest ? Math.round((now - newest) / 60000) : null;
+  const last = newest ? (age < 1 ? '最近一条事件：刚刚' : `最近一条事件：${age} 分钟前`) : '还没有任何事件';
+  const big = bytes > LIVE_WARN_BYTES;
+  return [
+    big ? 'warn' : 'ok',
+    `级别=${level}，${dir}，${convs} 个会话，${mb}MB；${last}`,
+    big ? '占用偏大：检查 DSH_MCP_SENTINEL_TTL_MS 是否被设成 0（关闭清理），或改用 DSH_MCP_LIVE=meta' : null,
+  ];
+}
 
 export async function runDoctor(hub) {
   const checks = [];
@@ -146,6 +199,14 @@ export async function runDoctor(hub) {
     } catch (e) {
       add(id, 'fail', `${dir}: ${e.message}`, '检查权限，或用对应环境变量指向可写目录');
     }
+  }
+
+  // live 事件流（watch / dashboard 的数据源）。可选功能、写失败不影响派活，
+  // 所以有问题只报 warn，不报 fail；但"为什么 watch 里什么都看不到"要能从这里查出来。
+  try {
+    add('live', ...inspectLive());
+  } catch (e) {
+    add('live', 'warn', e.message);
   }
 
   try {
