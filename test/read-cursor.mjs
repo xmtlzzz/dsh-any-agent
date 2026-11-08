@@ -6,6 +6,7 @@
  * 现在 cursor 是**修订号**：条目被追加后会再次返回，调用方按 seq 替换全文。
  */
 
+import './_live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
 import { Conversation } from '../src/hub.mjs';
 
 let pass = 0;

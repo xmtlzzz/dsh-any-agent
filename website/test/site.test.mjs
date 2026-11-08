@@ -116,7 +116,7 @@ test('FAQ section uses expanded 2-column card rows without requiring clicks', ()
     assert.ok(faqSection, 'faq-section must exist');
     assert.match(faqSection[1], /class="faq-card"/, 'faq-card must exist');
     const rows = [...faqSection[1].matchAll(/<article class="faq-row">/g)];
-    assert.equal(rows.length, 9, 'must contain all 9 FAQ entries');
+    assert.equal(rows.length, 10, 'must contain all 10 FAQ entries');
     assert.doesNotMatch(faqSection[1], /<details>/, 'FAQ must be expanded by default without details/summary');
   }
 });

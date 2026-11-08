@@ -15,6 +15,7 @@
  * 都只加载模块、不拉起 DSH，可以进 CI。
  */
 
+import './_live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
 import { homedir, tmpdir } from 'node:os';
 import { join, parse, sep } from 'node:path';
 import { dirname } from 'node:path';

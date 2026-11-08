@@ -9,6 +9,7 @@
  *   5. `takeover` 杀共享进程前的连坐检查（hostVictimsOf）。
  */
 
+import './_live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';

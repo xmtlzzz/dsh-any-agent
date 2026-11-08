@@ -71,6 +71,8 @@ const OFFLINE = [
   'live-events.mjs',
   // live 查看端：归并 / 增量 tail / watch --once / dashboard 的 token 与 Host 校验。
   'live-view.mjs',
+  // GitHub Release 说明取自 CHANGELOG 的对应一节（release.yml 用它）。纯字符串处理。
+  'release-notes.mjs',
   // 调用方审核：结果/哨兵带审核单，dsh_review 落盘并回写；重启后仍可审核。
   // 纯内存 + 文件系统，不花 token。
   'review.mjs',

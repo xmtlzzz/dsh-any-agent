@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`dsh_doctor` checks the live event stream.** A new `live` check reports the
+  level, whether the live directory is writable, how many conversations it holds,
+  its size and when the last event was written — so "why is `watch` empty?" has
+  an answer. Problems are warnings, not failures: the live view never affects a run.
+- **Release automation.** `release.yml` now builds the GitHub Release notes from
+  the version's CHANGELOG section (`scripts/release-notes.mjs`, with the install
+  command and a compare link) instead of GitHub's one-line generated notes, and
+  updates the notes of an existing Release on re-run. A second job publishes to
+  npm from CI with **provenance via npm Trusted Publishing** (no `NPM_TOKEN`),
+  after checking the tag matches `package.json` and running the release gate; it
+  skips versions already on npm. Needs a one-time Trusted Publisher setup on
+  npmjs.com — see `docs/en/release.md`.
+- **`SECURITY.md`**: how to report a vulnerability privately, supported versions,
+  and what is in and out of scope.
+
+### Changed
+
+- Website: the observability card and a new FAQ entry cover `watch` / `dashboard`
+  and token usage; the GUI FAQ now points to them as the lock-free way to follow
+  progress.
+
+### Fixed
+
+- Running some offline suites on their own (`node test/dispatch-tools.mjs`, …)
+  wrote live events into the real `~/.dsh/.dsh-any-agent/live`, where they showed
+  up in `watch` / `dashboard`. They now use a temporary live directory
+  (`test/_live-sandbox.mjs`), as `npm test` already did.
+- `check:release` treated a version's CHANGELOG section as non-empty whenever any
+  later version followed it; it now checks the section itself, that release notes
+  can be built from it, and the compare links at the bottom. The `[Unreleased]`
+  link and the missing `[0.6.1]` / `[0.6.2]` links were corrected.
+
 ## [0.6.2] — 2026-11-08
 
 ### Added
@@ -1189,7 +1223,9 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.5.0...v0.5.1
