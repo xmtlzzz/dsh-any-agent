@@ -99,9 +99,9 @@ jobs:
             node: '22'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
 
@@ -308,8 +308,8 @@ jobs:
     name: tarball installs and starts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
@@ -351,8 +351,8 @@ jobs:
     name: website build + tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       # The site has no runtime dependencies; build (hash assets, CSP/SEO checks)
@@ -365,8 +365,8 @@ jobs:
     name: Node 22.15 floor
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           # The declared floor, not the latest 22.x. Proves zstdDecompressSync
           # is actually available at the version users are told to install.
