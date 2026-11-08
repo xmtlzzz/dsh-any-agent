@@ -10,6 +10,7 @@
 [![node](https://img.shields.io/node/v/dsh-any-agent.svg?style=flat-square)](https://nodejs.org)
 [![license](https://img.shields.io/npm/l/dsh-any-agent.svg?style=flat-square)](LICENSE)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
+[![tests](https://img.shields.io/github/actions/workflow/status/xmtlzzz/dsh-any-agent/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/xmtlzzz/dsh-any-agent/actions/workflows/tests.yml)
 
 [Website](https://dsh-any-agent.xmtlz.dev/) · [Quick start](#quick-start) · [Features](#-why-its-different) · [Tools](#-tools) · [Live view](#-live-view-see-what-the-dispatched-work-is-doing) · [Usage notes](USAGE-NOTES.en.md) · [Changelog](CHANGELOG.md)
 
@@ -100,6 +101,10 @@ dsh-any-agent-setup --yes
 
 The second command previews the changes; `--yes` applies them. Reconnect your client's MCP server, then ask your agent to start a DSH conversation in your project, dispatch a task, and collect the result. The [dispatch workflow](#-workflow-dispatch-then-collect-later) shows the tool sequence.
 
+> **Want to see it first?** Watch the [54-second promo](https://dsh-any-agent.xmtlz.dev/en/#video) — dispatch, interject, the sentinel landing and the caller's review, with the terminal replayed from a real run:
+>
+> <a href="https://dsh-any-agent.xmtlz.dev/en/#video"><img src="https://raw.githubusercontent.com/xmtlzzz/dsh-any-agent/main/website/src/media/promo-poster.jpg" width="560" alt="▶ Play the dsh-any-agent promo (54 seconds)"></a>
+
 > **Before your first task:** read the [Usage Notes](USAGE-NOTES.en.md), especially the model-config and external-MCP permission boundaries. External MCP tools bypass DSH's sandbox. For a fresh machine, follow the [migration guide](USAGE-MIGRATION.en.md).
 
 <details>
@@ -154,15 +159,18 @@ dsh-any-agent watch
 ```
 
 ```bash
-dsh-any-agent dashboard
+dsh-any-agent dashboard --open
 ```
 
+<img src="https://raw.githubusercontent.com/xmtlzzz/dsh-any-agent/main/docs/images/dashboard.en.png" width="100%" alt="dsh-any-agent dashboard: conversations grouped by client on the left, the run timeline with a timing bar per tool call in the middle, overview, token usage, tools and files on the right (sample data)">
+
 - **`watch`**: the call chain in your terminal, redrawn in place like `top` (no scrolling spam). `watch <conversation id prefix>` follows one conversation; `--once` prints once and exits.
-- **`dashboard`**: a local read-only web page. Left: conversations grouped by client. Middle: the run timeline, with a timing bar per tool call and approvals/escalations highlighted. Right: overview, tool breakdown, files touched, approvals, and **token usage** (input / output / cache hit, context window, per-turn chart).
+- **`dashboard`**: a local read-only web page; `--open` launches it in your default browser. Left: conversations grouped by client. Middle: the run timeline, with a timing bar per tool call and approvals/escalations highlighted. Right: overview, tool breakdown, files touched, approvals, and **token usage** (input / output / cache hit, context window, per-turn chart).
+- **English / 中文**: follows your system language by default; pass `--lang en|zh` to choose, or switch from the page's top-right corner.
 - **Doesn't disturb running work**: both are separate processes that only read event files — they never touch the write lock or DSH. Use them to watch progress, and **don't open MCP-driven conversations in the DSH GUI** (that takes the write lock; see [usage notes 3.10](USAGE-NOTES.en.md)).
 - **Safety and privacy**: the dashboard binds `127.0.0.1` only, its URL carries a one-time token, it checks the Host header, and it has no control that changes state. Command, path and prompt previews are redacted first; **reasoning is never written at any level**. `DSH_MCP_LIVE=meta` keeps only tool names and status; `off` disables it.
 
-> The viewers' interface text is currently Chinese; the example above is translated. Details in [Usage · side view](docs/en/usage.md); event format and design trade-offs in the [live view design](docs/zh/live-view-design.md) (Chinese).
+> Details in [Usage · side view](docs/en/usage.md); event format and design trade-offs in the [live view design](docs/en/live-view-design.md).
 
 ## 📚 Documentation map
 
@@ -170,7 +178,7 @@ dsh-any-agent dashboard
 |---|---|
 | [Setup](docs/en/install.md) | Requirements, profile bootstrap, 9 MCP clients |
 | [Usage](docs/en/usage.md) | Dispatch/collect, sentinels, many conversations, live view, reasoning |
-| [Live view design](docs/zh/live-view-design.md) (Chinese) | Event stream format, `watch` / `dashboard`, token source, privacy trade-offs |
+| [Live view design](docs/en/live-view-design.md) | Event stream format, `watch` / `dashboard`, token source, privacy trade-offs |
 | [Team mode](docs/en/team.md) | Default behavior, how to disable (per client), verify and revert |
 | [Permissions & privacy](docs/en/security.md) | Tiers, approvals, GUI visibility, logging |
 | [Write lock](docs/en/locking.md) | Four holder classes, takeover, GUI contention |

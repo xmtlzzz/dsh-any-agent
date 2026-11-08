@@ -64,6 +64,9 @@ button { font: inherit; color: inherit; }
 .search input { font: inherit; font-size: 12.5px; height: 30px; width: 240px; padding: 0 10px 0 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--sunken); color: var(--text); outline: none; }
 .search input:focus { border-color: var(--accent); background: var(--surface); }
 .search svg { position: absolute; left: 9px; top: 9px; color: var(--text-3); }
+.lang-btn { height: 30px; min-width: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--sunken); color: var(--text-2); font-size: 12px; font-weight: 600; cursor: pointer; }
+.lang-btn:hover { color: var(--text); border-color: var(--line-2); }
+.lang-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ── 布局 ───────────────────────────────── */
 .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: calc(100% - 52px); }
@@ -268,16 +271,17 @@ button { font: inherit; color: inherit; }
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="brand-mark">DS</span>DSH Live <span class="conn" id="conn"><i></i><span>连接中</span></span></div>
+  <div class="brand"><span class="brand-mark">DS</span>DSH Live <span class="conn" id="conn"><i></i><span id="conn-txt">…</span></span></div>
   <div class="stats" id="stats"></div>
   <div class="grow"></div>
   <label class="search">
     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l4 4"/></svg>
-    <input type="search" id="q" placeholder="筛选标题、id、目录" aria-label="筛选会话">
+    <input type="search" id="q">
   </label>
+  <button type="button" class="lang-btn" id="lang-btn"></button>
 </header>
 <div class="layout">
-  <nav class="rail" id="rail" aria-label="会话"></nav>
+  <nav class="rail" id="rail"></nav>
   <main class="main" id="main" aria-live="polite"></main>
 </div>
 <script>
@@ -293,6 +297,110 @@ button { font: inherit; color: inherit; }
   let selected = store.get('dsh-live-sel');
   const collapsed = new Set();
   let q = '';
+  let connected = null;
+
+  // ── 界面语言：?lang= > 上次的手动选择 > 浏览器语言 ──
+  const I18N = {
+    zh: {
+      htmlLang: 'zh-CN', switchTo: 'EN', switchLabel: 'Switch to English',
+      connecting: '连接中', live: '实时', reconnecting: '重连中',
+      search: '筛选标题、id、目录', searchLabel: '筛选会话', railLabel: '会话',
+      justNow: '刚刚', minAgo: (n) => n + ' 分钟前', hrAgo: (n) => n + ' 小时前', dayAgo: (n) => n + ' 天前',
+      STATE: { running: '运行中', queued: '排队中', idle: '空闲', closed: '已释放' },
+      RUN: { running: '运行中', queued: '排队', done: '完成', error: '出错', cancelled: '已取消', interrupted: '中断' },
+      VIA: { send: '派活', queue: '排队', interject: '插话' },
+      TOOL: { pending: '等待', in_progress: '进行中', unfinished: '未完成', completed: '完成', failed: '失败' },
+      MODE: { 'auto-allow': '自动放行', 'auto-deny': '自动拒绝', 'read-only-deny': '只读拒绝', ask: '待人工裁决' },
+      sConversations: '会话', sRunning: '运行中', sQueued: '排队', sPending: '待审批', sEscalations: '提权',
+      tokAllTitle: (i, cr, o) => '全部会话 token：输入 ' + i + '（缓存读 ' + cr + '）· 输出 ' + o,
+      tokStat: (o) => 'token · 出 ' + o,
+      unknownClient: '未知客户端', exited: '已退出', untitledShort: (id) => '无标题 · ' + id,
+      pendN: (n) => n + ' 待审批', noMatch: '没有匹配的会话', noEvents: '还没有事件',
+      noEventsHint: ['用 ', ' 派一次活，调用链会出现在这里。'],
+      approval: '审批', waiting: '等待', interrupted: '中断', interject: '插话',
+      trackTitle: (a, b) => a + ' 起 · ' + b,
+      waitingFirst: '等待第一条事件',
+      firstHint: ['这是只读视图。服务端写入 ', ' 事件流后，这里按 客户端 → 会话 → 回合 → 工具 展开调用链。'],
+      untitledConv: '无标题会话',
+      fState: '状态', fClient: '客户端', unknown: '未知', exitedParen: '（已退出）', fPermission: '权限', fModel: '模型', fConvId: '会话 id', fDir: '目录',
+      chain: '调用链', runsCount: (n) => n + ' 个回合 · 最新在上', noRuns: '这个会话还没有派过活',
+      turnN: (n) => '第 ' + n + ' 轮 · ', escN: (n) => '⚠ ' + n + ' 次提权', toolsSuffix: () => ' 个工具',
+      tokRunTitle: (i, cr, o) => '本回合 token：输入 ' + i + '（缓存读 ' + cr + '）· 输出 ' + o,
+      toolList: '工具调用列表',
+      foot: '只读视图 · 数据来自本机 live 事件流 · 思考内容从不写入 · 点击回合标题折叠',
+      tokTitle: 'Token 消耗', tokNoData: '暂无数据：派一次活之后，这里会实时显示本会话的 token 用量。',
+      tIn: '输入', tOut: '输出', tHit: '缓存命中', tUncached: '未缓存输入', tCacheRead: '缓存读', tCacheWrite: '缓存写',
+      ctxWindow: '上下文窗口', pctParen: (p) => '（' + p + '%）', perRun: '每回合用量',
+      lastN: (n, max) => '最近 ' + n + ' 轮 · 最高 ' + max, barTail: (i, o) => '：输入 ' + i + ' · 输出 ' + o,
+      tokFoot: '数字来自 DSH 自己的会话记录（累计，含 live 之前的回合）。',
+      overview: '概览', kRuns: '回合', kToolCalls: '工具调用', kFailed: '失败', kToolTime: '工具耗时', kApprovals: '审批', kEscalations: '提权',
+      toolDist: '工具分布', noTools: '还没有工具调用', failN: (n) => ' · ' + n + ' 失败',
+      files: '涉及文件', noFiles: '还没有读写文件', opW: '写', opR: '读', approvalsTitle: '审批',
+      moreBelow: (n) => '↓ ' + n + ' 条',
+    },
+    en: {
+      htmlLang: 'en', switchTo: '中', switchLabel: '切换到中文',
+      connecting: 'connecting', live: 'live', reconnecting: 'reconnecting',
+      search: 'Filter by title, id, directory', searchLabel: 'Filter conversations', railLabel: 'Conversations',
+      justNow: 'just now', minAgo: (n) => n + ' min ago', hrAgo: (n) => n + ' h ago', dayAgo: (n) => n + ' d ago',
+      STATE: { running: 'running', queued: 'queued', idle: 'idle', closed: 'released' },
+      RUN: { running: 'running', queued: 'queued', done: 'done', error: 'error', cancelled: 'cancelled', interrupted: 'interrupted' },
+      VIA: { send: 'send', queue: 'queue', interject: 'interject' },
+      TOOL: { pending: 'pending', in_progress: 'in progress', unfinished: 'unfinished', completed: 'done', failed: 'failed' },
+      MODE: { 'auto-allow': 'auto-allowed', 'auto-deny': 'auto-denied', 'read-only-deny': 'denied (read-only)', ask: 'awaiting decision' },
+      sConversations: 'conversations', sRunning: 'running', sQueued: 'queued', sPending: 'awaiting approval', sEscalations: 'escalations',
+      tokAllTitle: (i, cr, o) => 'All conversations: input ' + i + ' (cache read ' + cr + ') · output ' + o,
+      tokStat: (o) => 'tokens · out ' + o,
+      unknownClient: 'unknown client', exited: 'exited', untitledShort: (id) => 'untitled · ' + id,
+      pendN: (n) => n + ' awaiting approval', noMatch: 'No matching conversations', noEvents: 'No events yet',
+      noEventsHint: ['Dispatch something with ', ' and its call chain shows up here.'],
+      approval: 'approval', waiting: 'waiting', interrupted: 'interrupted', interject: 'interject',
+      trackTitle: (a, b) => 'starts at ' + a + ' · ' + b,
+      waitingFirst: 'Waiting for the first event',
+      firstHint: ['Read-only view. Once the server writes the ', ' event stream, the call chain appears here: client → conversation → run → tools.'],
+      untitledConv: 'Untitled conversation',
+      fState: 'State', fClient: 'Client', unknown: 'unknown', exitedParen: ' (exited)', fPermission: 'Permission', fModel: 'Model', fConvId: 'Conversation id', fDir: 'Directory',
+      chain: 'Call chain', runsCount: (n) => n + (n === 1 ? ' run' : ' runs') + ' · newest first', noRuns: 'Nothing dispatched in this conversation yet',
+      turnN: (n) => 'turn ' + n + ' · ', escN: (n) => '⚠ ' + n + (n === 1 ? ' escalation' : ' escalations'), toolsSuffix: (n) => (n === 1 ? ' tool' : ' tools'),
+      tokRunTitle: (i, cr, o) => 'This run: input ' + i + ' (cache read ' + cr + ') · output ' + o,
+      toolList: 'Tool calls',
+      foot: 'Read-only · data from the local live event stream · reasoning is never written · click a run header to collapse',
+      tokTitle: 'Token usage', tokNoData: 'No data yet: dispatch something and this conversation’s token usage shows up here, live.',
+      tIn: 'input', tOut: 'output', tHit: 'cache hit', tUncached: 'uncached input', tCacheRead: 'cache read', tCacheWrite: 'cache write',
+      ctxWindow: 'Context window', pctParen: (p) => ' (' + p + '%)', perRun: 'Per run',
+      lastN: (n, max) => 'last ' + n + ' · max ' + max, barTail: (i, o) => ': input ' + i + ' · output ' + o,
+      tokFoot: 'From DSH’s own session record (cumulative, including runs from before the live view).',
+      overview: 'Overview', kRuns: 'runs', kToolCalls: 'tool calls', kFailed: 'failed', kToolTime: 'tool time', kApprovals: 'approvals', kEscalations: 'escalations',
+      toolDist: 'Tools', noTools: 'No tool calls yet', failN: (n) => ' · ' + n + ' failed',
+      files: 'Files', noFiles: 'No files read or written yet', opW: 'W', opR: 'R', approvalsTitle: 'Approvals',
+      moreBelow: (n) => '↓ ' + n + ' more',
+    },
+  };
+  function pickLang() {
+    const fromUrl = (new URLSearchParams(location.search).get('lang') || '').toLowerCase();
+    if (fromUrl === 'zh' || fromUrl === 'en') return fromUrl;
+    const saved = store.get('dsh-live-lang');
+    if (saved === 'zh' || saved === 'en') return saved;
+    return /^zh/i.test(navigator.language || '') ? 'zh' : 'en';
+  }
+  let lang = pickLang();
+  let L = I18N[lang];
+  /** 切换语言：文案表、静态文字、标签映射一起换，然后重画。 */
+  function applyLang(next) {
+    lang = next;
+    L = I18N[lang];
+    ({ STATE, RUN, VIA, TOOL, MODE } = L);
+    document.documentElement.lang = L.htmlLang;
+    const qi = $('q');
+    qi.placeholder = L.search;
+    qi.setAttribute('aria-label', L.searchLabel);
+    $('rail').setAttribute('aria-label', L.railLabel);
+    const btn = $('lang-btn');
+    btn.textContent = L.switchTo;
+    btn.setAttribute('aria-label', L.switchLabel);
+    btn.title = L.switchLabel;
+    $('conn-txt').textContent = connected === null ? L.connecting : connected ? L.live : L.reconnecting;
+  }
 
   // 只用 textContent 建 DOM：事件内容来自磁盘文件，绝不当 HTML 解析。
   function h(tag, cls, text) {
@@ -313,10 +421,10 @@ button { font: inherit; color: inherit; }
   function ago(ts) {
     if (!ts) return '';
     const s = Math.max(0, (Date.now() - Date.parse(ts)) / 1000);
-    if (s < 45) return '刚刚';
-    if (s < 3600) return Math.round(s / 60) + ' 分钟前';
-    if (s < 86400) return Math.round(s / 3600) + ' 小时前';
-    return Math.round(s / 86400) + ' 天前';
+    if (s < 45) return L.justNow;
+    if (s < 3600) return L.minAgo(Math.round(s / 60));
+    if (s < 86400) return L.hrAgo(Math.round(s / 3600));
+    return L.dayAgo(Math.round(s / 86400));
   }
   const t = (ts) => (ts ? Date.parse(ts) : NaN);
   function ftok(n) {
@@ -327,11 +435,7 @@ button { font: inherit; color: inherit; }
   }
   const tin = (k) => (k ? k.input + k.cache_read + k.cache_write : 0);
   const hit = (k) => { const a = tin(k); return a > 0 ? k.cache_read / a : null; };
-  const STATE = { running: '运行中', queued: '排队中', idle: '空闲', closed: '已释放' };
-  const RUN = { running: '运行中', queued: '排队', done: '完成', error: '出错', cancelled: '已取消', interrupted: '中断' };
-  const VIA = { send: '派活', queue: '排队', interject: '插话' };
-  const TOOL = { pending: '等待', in_progress: '进行中', unfinished: '未完成', completed: '完成', failed: '失败' };
-  const MODE = { 'auto-allow': '自动放行', 'auto-deny': '自动拒绝', 'read-only-deny': '只读拒绝', ask: '待人工裁决' };
+  let STATE, RUN, VIA, TOOL, MODE;
 
   function convs() {
     const out = [];
@@ -349,15 +453,15 @@ button { font: inherit; color: inherit; }
       d.append(h('b', null, String(n)), h('span', null, label));
       box.append(d);
     };
-    stat(s.conversations, '会话', '');
-    stat(s.running, '运行中', 'hot');
-    stat(s.queued, '排队', 'warn');
-    stat(s.pending_approvals, '待审批', 'warn');
-    stat(s.escalations, '提权', 'warn');
+    stat(s.conversations, L.sConversations, '');
+    stat(s.running, L.sRunning, 'hot');
+    stat(s.queued, L.sQueued, 'warn');
+    stat(s.pending_approvals, L.sPending, 'warn');
+    stat(s.escalations, L.sEscalations, 'warn');
     if (s.tokens) {
       const d = h('div', 'stat');
-      d.title = '全部会话 token：输入 ' + tin(s.tokens).toLocaleString() + '（缓存读 ' + s.tokens.cache_read.toLocaleString() + '）· 输出 ' + s.tokens.output.toLocaleString();
-      d.append(h('b', null, ftok(tin(s.tokens) + s.tokens.output)), h('span', null, 'token · 出 ' + ftok(s.tokens.output)));
+      d.title = L.tokAllTitle(tin(s.tokens).toLocaleString(), s.tokens.cache_read.toLocaleString(), s.tokens.output.toLocaleString());
+      d.append(h('b', null, ftok(tin(s.tokens) + s.tokens.output)), h('span', null, L.tokStat(ftok(s.tokens.output))));
       box.append(d);
     }
   }
@@ -372,9 +476,9 @@ button { font: inherit; color: inherit; }
       any = true;
       const grp = h('section', 'grp');
       const gh = h('div', 'grp-h');
-      gh.append(h('b', null, g.client || '未知客户端'));
+      gh.append(h('b', null, g.client || L.unknownClient));
       gh.append(h('span', 'mono', 'pid ' + (g.pid || '?')));
-      if (!g.alive) gh.append(h('span', 'gone', '已退出'));
+      if (!g.alive) gh.append(h('span', 'gone', L.exited));
       grp.append(gh);
       for (const c of list) {
         const row = h('div', 'cv' + (c.id === selected ? ' sel' : ''));
@@ -382,13 +486,13 @@ button { font: inherit; color: inherit; }
         row.setAttribute('role', 'button');
         row.setAttribute('aria-pressed', String(c.id === selected));
         row.append(h('i', 'sd ' + c.state));
-        row.append(h('div', 'ti', c.title || '无标题 · ' + short(c.id)));
+        row.append(h('div', 'ti', c.title || L.untitledShort(short(c.id))));
         row.append(h('div', 'ago', ago(c.last_ts)));
         const sub = h('div', 'sub');
         const active = c.runs.find((r) => r.status === 'running');
         const pend = c.runs.reduce((n, r) => n + r.pending_approvals, 0);
         sub.append(document.createTextNode(active && active.current_tool ? '▸ ' + active.current_tool : STATE[c.state] || c.state));
-        if (pend) sub.append(h('span', 'flag', ' · ' + pend + ' 待审批'));
+        if (pend) sub.append(h('span', 'flag', ' · ' + L.pendN(pend)));
         sub.append(document.createTextNode(' · '));
         const p = h('span', 'mono', base(c.cwd));
         p.title = c.cwd || '';
@@ -403,11 +507,11 @@ button { font: inherit; color: inherit; }
     }
     if (!any) {
       const e = h('div', 'empty');
-      if (q) e.append(h('h3', null, '没有匹配的会话'));
+      if (q) e.append(h('h3', null, L.noMatch));
       else {
-        e.append(h('h3', null, '还没有事件'));
+        e.append(h('h3', null, L.noEvents));
         const p = h('p');
-        p.append('用 ', h('code', null, 'dsh_send'), ' 派一次活，调用链会出现在这里。');
+        p.append(L.noEventsHint[0], h('code', null, 'dsh_send'), L.noEventsHint[1]);
         e.append(p);
       }
       rail.append(e);
@@ -443,7 +547,7 @@ button { font: inherit; color: inherit; }
     if (it.kind === 'approval') {
       const row = h('div', 'span flagged');
       row.append(h('span', 'st', '◆'));
-      row.append(h('span', 'nm', '审批'));
+      row.append(h('span', 'nm', L.approval));
       const inp = h('span', 'in');
       if (it.escalation) inp.append(h('span', 'esc', '⚠ ' + it.escalation));
       const txt = it.command_preview || it.title || it.tool || '';
@@ -452,12 +556,12 @@ button { font: inherit; color: inherit; }
       row.append(inp);
       const d = it.decided;
       row.append(h('span', 'in', d ? '→ ' + (d.decision || d.effective || '') + (d.by ? '（' + d.by + '）' : '') : MODE[it.mode] || it.mode || ''));
-      row.append(h('span', 'tm', it.mode === 'ask' && !d ? '等待' : (MODE[it.mode] ? '' : '')));
+      row.append(h('span', 'tm', it.mode === 'ask' && !d ? L.waiting : ''));
       return row;
     }
     const row = h('div', 'span note' + (it.kind === 'interrupt' ? ' stop' : ''));
     row.append(h('span', 'st', it.kind === 'interrupt' ? '■' : '↪'));
-    row.append(h('span', 'nm', it.kind === 'interrupt' ? '中断' : '插话' + (it.mode ? ' · ' + it.mode : '')));
+    row.append(h('span', 'nm', it.kind === 'interrupt' ? L.interrupted : L.interject + (it.mode ? ' · ' + it.mode : '')));
     row.append(h('span', 'in', it.text_preview || ''));
     row.append(h('span'));
     row.append(h('span', 'tm', ''));
@@ -475,7 +579,7 @@ button { font: inherit; color: inherit; }
     const b = h('b');
     b.style.left = left + '%';
     b.style.width = width + '%';
-    tr.title = dur(start - t0) + ' 起 · ' + dur(end - start);
+    tr.title = L.trackTitle(dur(start - t0), dur(end - start));
     tr.append(b);
     return tr;
   }
@@ -497,9 +601,9 @@ button { font: inherit; color: inherit; }
     if (!c) c = all.find((x) => x.state === 'running') || all[0];
     if (!c) {
       const e = h('div', 'empty');
-      e.append(h('h3', null, '等待第一条事件'));
+      e.append(h('h3', null, L.waitingFirst));
       const p = h('p');
-      p.append('这是只读视图。服务端写入 ', h('code', null, 'live/'), ' 事件流后，这里按 客户端 → 会话 → 回合 → 工具 展开调用链。');
+      p.append(L.firstHint[0], h('code', null, 'live/'), L.firstHint[1]);
       e.append(p);
       main.append(e);
       return;
@@ -507,7 +611,7 @@ button { font: inherit; color: inherit; }
     selected = c.id;
     const wrap = h('div', 'wrap');
     const hd = h('div', 'hd');
-    hd.append(h('h1', null, c.title || '无标题会话'));
+    hd.append(h('h1', null, c.title || L.untitledConv));
     const facts = h('dl', 'facts');
     const fact = (k, v, cls, full) => {
       if (!v) return;
@@ -522,26 +626,26 @@ button { font: inherit; color: inherit; }
       f.append(dd);
       facts.append(f);
     };
-    fact('状态', STATE[c.state] || c.state);
-    fact('客户端', (c.client || '未知') + ' · pid ' + (c.writer ? String(c.writer).split(':')[0] : '?') + (c.writer_alive ? '' : '（已退出）'));
-    fact('权限', [c.permission, c.on_approval].filter(Boolean).join(' · '));
-    fact('模型', c.model);
-    fact('会话 id', short(c.id), 'mono', c.id);
-    fact('目录', c.cwd, 'mono path');
+    fact(L.fState, STATE[c.state] || c.state);
+    fact(L.fClient, (c.client || L.unknown) + ' · pid ' + (c.writer ? String(c.writer).split(':')[0] : '?') + (c.writer_alive ? '' : L.exitedParen));
+    fact(L.fPermission, [c.permission, c.on_approval].filter(Boolean).join(' · '));
+    fact(L.fModel, c.model);
+    fact(L.fConvId, short(c.id), 'mono', c.id);
+    fact(L.fDir, c.cwd, 'mono path');
     hd.append(facts);
     wrap.append(hd);
 
     const cols = h('div', 'cols');
     const left = h('div');
     const sh = h('div', 'sec-h');
-    sh.append(h('h2', null, '调用链'), h('span', null, c.runs.length + ' 个回合 · 最新在上'));
+    sh.append(h('h2', null, L.chain), h('span', null, L.runsCount(c.runs.length)));
     left.append(sh);
 
     const turns = h('div', 'turns');
     const runs = [...c.runs].reverse();
     if (!runs.length) {
       const e = h('div', 'empty');
-      e.append(h('h3', null, '这个会话还没有派过活'));
+      e.append(h('h3', null, L.noRuns));
       turns.append(e);
     }
     for (const r of runs) {
@@ -555,18 +659,18 @@ button { font: inherit; color: inherit; }
       head.append(chev());
       head.append(h('span', 'tag ' + r.status, RUN[r.status] || r.status));
       if (r.via && !(r.status === 'queued' && r.via === 'queue')) head.append(h('span', 'tag ghost', VIA[r.via] || r.via));
-      head.append(h('span', 'rid', (r.turn ? '第 ' + r.turn + ' 轮 · ' : '') + r.run));
-      if (r.escalations) head.append(h('span', 'tag warn', '⚠ ' + r.escalations + ' 次提权'));
-      if (r.pending_approvals) head.append(h('span', 'tag warn', r.pending_approvals + ' 待审批'));
+      head.append(h('span', 'rid', (r.turn ? L.turnN(r.turn) : '') + r.run));
+      if (r.escalations) head.append(h('span', 'tag warn', L.escN(r.escalations)));
+      if (r.pending_approvals) head.append(h('span', 'tag warn', L.pendN(r.pending_approvals)));
       const right = h('span', 'right');
       const tools = r.items.filter((x) => x.kind === 'tool').length;
       const n = r.tool_count != null ? r.tool_count : tools;
-      const rb = h('span'); rb.append(h('b', null, String(n)), ' 个工具'); right.append(rb);
+      const rb = h('span'); rb.append(h('b', null, String(n)), L.toolsSuffix(n)); right.append(rb);
       const t0 = t(r.started_at);
       const total = r.duration_ms != null ? r.duration_ms : r.status === 'running' && isFinite(t0) ? Date.now() - t0 : null;
       if (r.tokens) {
         const tk = h('span', 'tok-run');
-        tk.title = '本回合 token：输入 ' + tin(r.tokens) + '（缓存读 ' + r.tokens.cache_read + '）· 输出 ' + r.tokens.output;
+        tk.title = L.tokRunTitle(tin(r.tokens), r.tokens.cache_read, r.tokens.output);
         tk.append(h('b', null, ftok(tin(r.tokens))), '↑ ', h('b', null, ftok(r.tokens.output)), '↓');
         right.append(tk);
       }
@@ -585,7 +689,7 @@ button { font: inherit; color: inherit; }
         const spans = h('div', 'spans');
         spans.dataset.key = key;
         spans.tabIndex = 0; // 键盘也能滚（方向键 / PageDown）
-        spans.setAttribute('aria-label', '工具调用列表');
+        spans.setAttribute('aria-label', L.toolList);
         for (const it of r.items) spans.append(spanRow(it, r, t0, total, c.cwd));
         boxEl.append(spans, h('span', 'spans-count'));
         body.append(boxEl);
@@ -596,7 +700,7 @@ button { font: inherit; color: inherit; }
       turns.append(turn);
     }
     left.append(turns);
-    left.append(h('div', 'foot', '只读视图 · 数据来自本机 live 事件流 · 思考内容从不写入 · 点击回合标题折叠'));
+    left.append(h('div', 'foot', L.foot));
     cols.append(left, inspector(c));
     wrap.append(cols);
     main.append(wrap);
@@ -605,26 +709,26 @@ button { font: inherit; color: inherit; }
   /** Token 面板：会话累计（DSH 记录）、构成、上下文窗口、每回合用量。 */
   function tokenPanel(c) {
     const p = h('section', 'panel');
-    p.append(h('h3', null, 'Token 消耗'));
+    p.append(h('h3', null, L.tokTitle));
     const k = c.tokens;
     if (!k) {
-      p.append(h('div', 'muted', '暂无数据：派一次活之后，这里会实时显示本会话的 token 用量。'));
+      p.append(h('div', 'muted', L.tokNoData));
       return p;
     }
     const big = h('div', 'tok-big');
     const cell = (v, label) => { const d = h('div'); d.append(h('b', null, v), h('span', null, label)); big.append(d); };
-    cell(ftok(tin(k)), '输入');
-    cell(ftok(k.output), '输出');
+    cell(ftok(tin(k)), L.tIn);
+    cell(ftok(k.output), L.tOut);
     const hr = hit(k);
-    cell(hr == null ? '—' : Math.round(hr * 100) + '%', '缓存命中');
+    cell(hr == null ? '—' : Math.round(hr * 100) + '%', L.tHit);
     p.append(big);
 
     // 构成：未命中缓存的输入 / 缓存读 / 缓存写 / 输出
     const parts = [
-      ['c-unc', '未缓存输入', k.input],
-      ['c-read', '缓存读', k.cache_read],
-      ['c-write', '缓存写', k.cache_write],
-      ['c-out', '输出', k.output],
+      ['c-unc', L.tUncached, k.input],
+      ['c-read', L.tCacheRead, k.cache_read],
+      ['c-write', L.tCacheWrite, k.cache_write],
+      ['c-out', L.tOut, k.output],
     ];
     const sum = parts.reduce((n, x) => n + x[2], 0) || 1;
     const stack = h('div', 'stack');
@@ -649,7 +753,7 @@ button { font: inherit; color: inherit; }
     if (c.context && c.context.window) {
       const pct = Math.min(100, (c.context.used / c.context.window) * 100);
       const hh = h('div', 'ctx-h');
-      hh.append(h('span', null, '上下文窗口'), h('span', null, ftok(c.context.used) + ' / ' + ftok(c.context.window) + '（' + (pct < 1 ? pct.toFixed(1) : Math.round(pct)) + '%）'));
+      hh.append(h('span', null, L.ctxWindow), h('span', null, ftok(c.context.used) + ' / ' + ftok(c.context.window) + L.pctParen(pct < 1 ? pct.toFixed(1) : Math.round(pct))));
       p.append(hh);
       const bar = h('div', 'ctx' + (pct > 85 ? ' crit' : pct > 60 ? ' hi' : ''));
       const b = h('b'); b.style.width = Math.max(1, pct) + '%'; bar.append(b);
@@ -661,23 +765,24 @@ button { font: inherit; color: inherit; }
       const per = runs.map((r) => tin(r.tokens) + r.tokens.output);
       const max = Math.max(...per) || 1;
       const sh = h('div', 'spark-h');
-      sh.append(h('span', null, '每回合用量'), h('span', null, '最近 ' + runs.length + ' 轮 · 最高 ' + ftok(max)));
+      sh.append(h('span', null, L.perRun), h('span', null, L.lastN(runs.length, ftok(max))));
       p.append(sh);
       const sp = h('div', 'spark');
       runs.forEach((r, i) => {
         const bar = h('i', r.status === 'running' ? 'cur' : '');
         bar.style.height = Math.max(6, (per[i] / max) * 100) + '%';
-        bar.title = (r.turn ? '第 ' + r.turn + ' 轮 · ' : '') + r.run + '：输入 ' + ftok(tin(r.tokens)) + ' · 输出 ' + ftok(r.tokens.output);
+        bar.title = (r.turn ? L.turnN(r.turn) : '') + r.run + L.barTail(ftok(tin(r.tokens)), ftok(r.tokens.output));
         sp.append(bar);
       });
       p.append(sp);
     }
-    p.append(h('div', 'foot', '数字来自 DSH 自己的会话记录（累计，含 live 之前的回合）。'));
+    p.append(h('div', 'foot', L.tokFoot));
     return p;
   }
 
   /** 读写类工具：用来从输入预览里认出"涉及的文件"。 */
-  const READ_TOOLS = /^(read|view|cat|open|glob|grep|search|list|ls)/i;
+  // 只认真正读文件的工具；grep / glob / search / ls 的输入是目录或模式，不算"涉及的文件"。
+  const READ_TOOLS = /^(read|view|cat|open)/i;
   const WRITE_TOOLS = /^(write|edit|create|patch|apply|replace|delete|move|rename|mkdir)/i;
   const looksLikePath = (s) => !!s && !/\s/.test(s) && (/[\\/]/.test(s) || /\.[A-Za-z0-9]{1,8}$/.test(s));
 
@@ -695,19 +800,19 @@ button { font: inherit; color: inherit; }
     const esc = approvals.filter((x) => x.escalation).length;
 
     const ov = h('section', 'panel');
-    ov.append(h('h3', null, '概览'));
+    ov.append(h('h3', null, L.overview));
     const kpis = h('div', 'kpis');
     const kpi = (v, label, cls) => {
       const k = h('div', 'kpi ' + (v && v !== '0' ? cls || '' : 'zero'));
       k.append(h('b', null, String(v)), h('span', null, label));
       kpis.append(k);
     };
-    kpi(c.runs.length, '回合');
-    kpi(tools.length, '工具调用');
-    kpi(failed, '失败', 'bad');
-    kpi(toolMs ? dur(toolMs) : '0', '工具耗时');
-    kpi(approvals.length, '审批', 'warn');
-    kpi(esc, '提权', 'warn');
+    kpi(c.runs.length, L.kRuns);
+    kpi(tools.length, L.kToolCalls);
+    kpi(failed, L.kFailed, 'bad');
+    kpi(toolMs ? dur(toolMs) : '0', L.kToolTime);
+    kpi(approvals.length, L.kApprovals, 'warn');
+    kpi(esc, L.kEscalations, 'warn');
     ov.append(kpis);
     box.append(ov);
     box.append(tokenPanel(c));
@@ -720,8 +825,8 @@ button { font: inherit; color: inherit; }
       byName.set(k, e);
     }
     const dist = h('section', 'panel');
-    dist.append(h('h3', null, '工具分布'));
-    if (!byName.size) dist.append(h('div', 'muted', '还没有工具调用'));
+    dist.append(h('h3', null, L.toolDist));
+    if (!byName.size) dist.append(h('div', 'muted', L.noTools));
     else {
       const rows = [...byName.entries()].sort((a, b) => b[1].n - a[1].n || b[1].ms - a[1].ms);
       const max = rows[0][1].n;
@@ -729,7 +834,7 @@ button { font: inherit; color: inherit; }
       for (const [name, e] of rows.slice(0, 8)) {
         const row = h('div', 'dist-row');
         row.append(h('span', 'n', name));
-        row.append(h('span', 'v', '×' + e.n + (e.ms ? ' · ' + dur(e.ms) : '') + (e.fail ? ' · ' + e.fail + ' 失败' : '')));
+        row.append(h('span', 'v', '×' + e.n + (e.ms ? ' · ' + dur(e.ms) : '') + (e.fail ? L.failN(e.fail) : '')));
         const bar = h('span', 'bar'); const b = h('b'); b.style.width = Math.max(4, (e.n / max) * 100) + '%'; bar.append(b); row.append(bar);
         list.append(row);
       }
@@ -749,13 +854,13 @@ button { font: inherit; color: inherit; }
       files.set(key, prev === 'w' || op === 'w' ? 'w' : 'r');
     }
     const fp = h('section', 'panel');
-    fp.append(h('h3', null, '涉及文件'));
-    if (!files.size) fp.append(h('div', 'muted', '还没有读写文件'));
+    fp.append(h('h3', null, L.files));
+    if (!files.size) fp.append(h('div', 'muted', L.noFiles));
     else {
       const ul = h('ul', 'files');
       for (const [p, op] of [...files.entries()].slice(-14).reverse()) {
         const li = h('li');
-        li.append(h('span', 'op ' + op, op === 'w' ? '写' : '读'));
+        li.append(h('span', 'op ' + op, op === 'w' ? L.opW : L.opR));
         const ps = h('span', 'p'); const bdi = document.createElement('bdi'); bdi.textContent = p; ps.append(bdi); ps.title = p;
         li.append(ps);
         ul.append(li);
@@ -766,7 +871,7 @@ button { font: inherit; color: inherit; }
 
     if (approvals.length) {
       const ap = h('section', 'panel');
-      ap.append(h('h3', null, '审批'));
+      ap.append(h('h3', null, L.approvalsTitle));
       const list = h('div', 'aps');
       for (const a of approvals.slice(-6).reverse()) {
         const d = h('div', 'ap');
@@ -794,7 +899,7 @@ button { font: inherit; color: inherit; }
     box.classList.toggle('more-up', spans.scrollTop > 2);
     box.classList.toggle('more-down', spans.scrollTop < max - 2);
     const hiddenBelow = Math.max(0, Math.round((max - spans.scrollTop) / 32));
-    box.lastElementChild.textContent = hiddenBelow ? '↓ ' + hiddenBelow + ' 条' : '';
+    box.lastElementChild.textContent = hiddenBelow ? L.moreBelow(hiddenBelow) : '';
   }
   function restoreScroll() {
     for (const { spans, box, key, running } of pendingScroll) {
@@ -830,6 +935,13 @@ button { font: inherit; color: inherit; }
   }
 
   $('q').addEventListener('input', (e) => { q = e.target.value.trim().toLowerCase(); render(); });
+  $('lang-btn').addEventListener('click', () => {
+    const next = lang === 'zh' ? 'en' : 'zh';
+    store.set('dsh-live-lang', next);
+    applyLang(next);
+    render();
+  });
+  applyLang(lang);
 
   function setConn(on, text) {
     const c = $('conn');
@@ -837,9 +949,9 @@ button { font: inherit; color: inherit; }
     c.lastElementChild.textContent = text;
   }
   const es = new EventSource('/events?t=' + encodeURIComponent(token));
-  es.onopen = () => setConn(true, '实时');
+  es.onopen = () => { connected = true; setConn(true, L.live); };
   es.onmessage = (e) => { try { view = JSON.parse(e.data); } catch { return; } render(); };
-  es.onerror = () => setConn(false, '重连中');
+  es.onerror = () => { connected = false; setConn(false, L.reconnecting); };
   setInterval(render, 15000);
 })();
 </script>

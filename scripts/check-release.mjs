@@ -53,6 +53,28 @@ if (changelog.includes(`## [${version}]`) && version !== '0.0.0') {
   } else bad(`CHANGELOG.md "[Unreleased]:" link should compare v${version}...HEAD`);
 }
 
+// MCP Registry：server.json 与 package.json 必须一致（registry 用 npm 包里的 mcpName 验证归属，
+// 而 release.yml 会在 npm 发布之后把这份 server.json 登记上去）。
+if (fs.existsSync(path.join(ROOT, 'server.json'))) {
+  let srv = null;
+  try {
+    srv = JSON.parse(read('server.json'));
+  } catch (e) {
+    bad(`server.json is not valid JSON: ${e.message}`);
+  }
+  if (srv) {
+    const npmPkg = (srv.packages ?? []).find((p) => p.registryType === 'npm');
+    if (srv.version === version && npmPkg?.version === version) ok(`server.json version is ${version}`);
+    else bad(`server.json version (${srv.version} / npm ${npmPkg?.version}) must equal package.json ${version}`);
+    if (pkg.mcpName && srv.name === pkg.mcpName) ok(`server.json name matches package.json mcpName (${pkg.mcpName})`);
+    else bad(`server.json name (${srv.name}) must equal package.json mcpName (${pkg.mcpName})`);
+    if (npmPkg?.identifier === pkg.name) ok('server.json npm identifier matches the package name');
+    else bad(`server.json npm identifier (${npmPkg?.identifier}) must equal ${pkg.name}`);
+    if (typeof srv.description === 'string' && srv.description.length <= 100) ok('server.json description fits 100 characters');
+    else bad('server.json description must be a string of at most 100 characters');
+  }
+}
+
 const docFiles = [
   'README.zh.md',
   'README.md',
@@ -84,8 +106,11 @@ for (const required of ['docs/zh/team.md', 'docs/en/team.md', 'docs/zh/compatibi
   else bad(`${required} is missing`);
 }
 
-if (pkg.files?.includes('docs/')) ok('package.json ships docs/');
-else bad('package.json "files" does not include docs/');
+// README 与运行时提示里引用 docs/zh、docs/en；docs/brand、docs/images（图片）不进包。
+for (const d of ['docs/zh/', 'docs/en/']) {
+  if (pkg.files?.includes(d)) ok(`package.json ships ${d}`);
+  else bad(`package.json "files" does not include ${d}`);
+}
 
 console.log(`\n${failed === 0 ? 'release check: 通过 ✅' : `release check: ${failed} 项失败 ❌`}`);
 process.exit(failed === 0 ? 0 : 1);

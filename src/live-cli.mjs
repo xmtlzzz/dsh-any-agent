@@ -6,7 +6,7 @@
  */
 
 import { LIVE_DIR, STATE_FILE } from './config.mjs';
-import { LiveTail, diffFrame, layoutFrame, renderText } from './live-view.mjs';
+import { LiveTail, TEXT, detectLang, diffFrame, layoutFrame, renderText } from './live-view.mjs';
 import { readConversationMeta } from './titles.mjs';
 
 function parseFlags(args) {
@@ -36,14 +36,17 @@ export function makeTail(dir = LIVE_DIR) {
   });
 }
 
-export const WATCH_USAGE =
-  '用法: dsh-any-agent watch [会话id前缀] [--once] [--interval 毫秒] [--runs N] [--items N] [--no-color]\n';
+export const WATCH_USAGE = {
+  zh: '用法: dsh-any-agent watch [会话id前缀] [--once] [--interval 毫秒] [--runs N] [--items N] [--no-color] [--lang zh|en]\n',
+  en: 'usage: dsh-any-agent watch [conversation id prefix] [--once] [--interval ms] [--runs N] [--items N] [--no-color] [--lang zh|en]\n',
+};
 
 /** watch：终端里实时显示调用链（Ctrl+C 退出）。`--once` 打印一次就退出。 */
 export async function runWatch(args, { out = process.stdout } = {}) {
   const { flags, positional } = parseFlags(args);
+  const lang = detectLang(typeof flags.lang === 'string' ? flags.lang : null);
   if (flags.help || flags.h) {
-    out.write(WATCH_USAGE);
+    out.write(WATCH_USAGE[lang]);
     return 0;
   }
   const tail = makeTail(typeof flags.dir === 'string' ? flags.dir : LIVE_DIR);
@@ -52,6 +55,7 @@ export async function runWatch(args, { out = process.stdout } = {}) {
     runs: intFlag(flags.runs, 3, 1, 30),
     items: intFlag(flags.items, 12, 1, 300),
     color: !flags['no-color'] && Boolean(out.isTTY),
+    lang,
   };
   tail.poll();
   if (flags.once) {
@@ -61,8 +65,7 @@ export async function runWatch(args, { out = process.stdout } = {}) {
   const interval = intFlag(flags.interval, 500, 100, 10_000);
   const tty = Boolean(out.isTTY);
   const clock = () => new Date().toTimeString().slice(0, 8);
-  const frameText = () =>
-    renderText(tail.view(), opts) + `\n\n\x1b[2m更新于 ${clock()} · live 目录: ${tail.dir} · Ctrl+C 退出\x1b[0m`;
+  const frameText = () => renderText(tail.view(), opts) + `\n\n\x1b[2m${TEXT[lang].footer(clock(), tail.dir)}\x1b[0m`;
 
   // ★ 在 TTY 上用"备用屏幕"原地刷新（同 top / htop）：每帧只重写变化的行。
   //   旧实现每次 `ESC[2J` 清屏，Windows Terminal 会把被清掉的整屏推进回滚区，
@@ -78,7 +81,7 @@ export async function runWatch(args, { out = process.stdout } = {}) {
       lastText = body;
       return;
     }
-    const next = layoutFrame(text, { cols: out.columns ?? 120, rows: out.rows ?? 40 });
+    const next = layoutFrame(text, { cols: out.columns ?? 120, rows: out.rows ?? 40, lang });
     const seq = diffFrame(force ? null : prev, next);
     if (seq) out.write(seq);
     prev = next;
@@ -110,13 +113,49 @@ export async function runWatch(args, { out = process.stdout } = {}) {
   return 0;
 }
 
-export const DASHBOARD_USAGE = '用法: dsh-any-agent dashboard [--port 端口] [--interval 毫秒]\n';
+export const DASHBOARD_USAGE = {
+  zh: '用法: dsh-any-agent dashboard [--port 端口] [--interval 毫秒] [--open] [--lang zh|en]\n',
+  en: 'usage: dsh-any-agent dashboard [--port port] [--interval ms] [--open] [--lang zh|en]\n',
+};
+
+const DASHBOARD_BANNER = {
+  zh: (url, dir) =>
+    `DSH live dashboard（只读）\n  打开: ${url}\n  live 目录: ${dir}\n  链接里带一次性 token，只在本机 127.0.0.1 可访问；Ctrl+C 退出。\n`,
+  en: (url, dir) =>
+    `DSH live dashboard (read-only)\n  open: ${url}\n  live dir: ${dir}\n  The link carries a one-time token and only works on 127.0.0.1; Ctrl+C to quit.\n`,
+};
+
+/**
+ * 用系统默认浏览器打开地址。失败不抛错（打印的地址照样能手动打开）。
+ * 地址里的 token 只含 base64url 字符，不会被 cmd 的 `start` 当成元字符。
+ *
+ * ★ Windows：`start` 的第一个带引号参数是窗口标题，所以要先给一个空标题。
+ *   必须传空字符串 ''（Node 会把它转成 `""`）；传字面量 '""' 会被转义成 `"\"\""`，
+ *   cmd 收到的就不是空标题了（实测）。
+ */
+export function openInBrowser(url, { platform = process.platform, spawnFn } = {}) {
+  const [cmd, args] =
+    platform === 'win32'
+      ? ['cmd', ['/c', 'start', '', url]]
+      : platform === 'darwin'
+        ? ['open', [url]]
+        : ['xdg-open', [url]];
+  return import('node:child_process')
+    .then(({ spawn }) => {
+      const child = (spawnFn ?? spawn)(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true });
+      child.on?.('error', () => {});
+      child.unref?.();
+      return true;
+    })
+    .catch(() => false);
+}
 
 /** dashboard：起一个只读本地页面（127.0.0.1 + 一次性 token），Ctrl+C 退出。 */
 export async function runDashboard(args, { out = process.stdout } = {}) {
   const { flags } = parseFlags(args);
+  const lang = detectLang(typeof flags.lang === 'string' ? flags.lang : null);
   if (flags.help || flags.h) {
-    out.write(DASHBOARD_USAGE);
+    out.write(DASHBOARD_USAGE[lang]);
     return 0;
   }
   const { startDashboard } = await import('./live-dashboard.mjs');
@@ -126,12 +165,10 @@ export async function runDashboard(args, { out = process.stdout } = {}) {
     port: intFlag(flags.port, 0, 0, 65535),
     pollMs: intFlag(flags.interval, 500, 100, 10_000),
   });
-  out.write(
-    `DSH live dashboard（只读）\n` +
-      `  打开: ${dash.url}\n` +
-      `  live 目录: ${tail.dir}\n` +
-      `  链接里带一次性 token，只在本机 127.0.0.1 可访问；Ctrl+C 退出。\n`,
-  );
+  // 页面自己也会按浏览器语言选；这里把命令行的语言带过去，两边一致（页面上还能再切换）。
+  const url = `${dash.url}&lang=${lang}`;
+  out.write(DASHBOARD_BANNER[lang](url, tail.dir));
+  if (flags.open) await openInBrowser(url);
   await new Promise((resolve) => {
     const stop = () => resolve();
     process.once('SIGINT', stop);

@@ -48,7 +48,7 @@ DSH ships two programmable entry points. The `sdk` profile looks simpler, but it
                                           (terminal, in place)         (127.0.0.1 + token, SSE)
 ```
 
-Token numbers are read from DSH's own projection cache (`tokenUsage` / `contextPressure`), which DSH updates after every model step. Design notes: [live view design](../zh/live-view-design.md) (Chinese).
+Token numbers are read from DSH's own projection cache (`tokenUsage` / `contextPressure`), which DSH updates after every model step. Design notes: [live view design](live-view-design.md).
 
 **MCP compatibility.** The server uses only `initialize`, `ping`, `tools/list` and `tools/call`. It has also been verified with a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
 

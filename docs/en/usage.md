@@ -93,7 +93,8 @@ dsh-any-agent dashboard
 ```
 
 - `watch [conversation id prefix]`: live call chain in the terminal (`--once` prints once and exits, `--runs N` shows the last N runs per conversation).
-- `dashboard`: a **read-only** local page; prints a URL with a one-time token (binds `127.0.0.1` only, checks the Host header, has no control that changes state).
+- `dashboard`: a **read-only** local page; prints a URL with a one-time token (binds `127.0.0.1` only, checks the Host header, has no control that changes state); add `--open` to launch it in your default browser.
+- **Interface language**: both follow your system language (`DSH_MCP_LANG` / `LANG` / the OS locale); pass `--lang en|zh` to choose. The page also has a switch in its top-right corner, and remembers your choice.
 - Both are separate processes: they don't start the server, never touch the write lock and never talk to DSH, and they show conversations dispatched from every client (Claude Code, Codex, Cursor, …) together.
 - A run whose writer process has exited without finishing is shown as interrupted.
 - **Token usage**: each run's input / output / cache read-write delta, the session total and context-window use, updated while the run is going (numbers come from DSH's own session record). The dashboard's side column has a "Token 消耗" panel and a per-turn chart.

@@ -7,8 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-11-08
+
 ### Added
 
+- **English interface for `watch` and `dashboard`.** Both follow the system
+  language (`DSH_MCP_LANG`, then `LC_ALL` / `LC_MESSAGES` / `LANG`, then the OS
+  locale) and take `--lang zh|en`; the dashboard also has a switch in its corner
+  and remembers the choice.
+- **`dashboard --open`** launches the page in the default browser.
+- **MCP Registry listing.** `server.json` and `mcpName` in `package.json`; the
+  release workflow publishes to the official MCP Registry after npm, logging in
+  with GitHub OIDC and running a pinned, cosign-verified `mcp-publisher`.
+  `check:release` keeps `server.json` in step with `package.json`.
+- **Community files**: `CONTRIBUTING.md`, issue forms (bug report asks for
+  `dsh_doctor` output), a pull request checklist, and Dependabot for GitHub
+  Actions and `video/`.
+- README: CI badge and dashboard screenshots; the website gets the promo video.
+- `docs/en/live-view-design.md` (the design was Chinese-only).
 - **`dsh_doctor` checks the live event stream.** A new `live` check reports the
   level, whether the live directory is writable, how many conversations it holds,
   its size and when the last event was written — so "why is `watch` empty?" has
@@ -29,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Website: the observability card and a new FAQ entry cover `watch` / `dashboard`
   and token usage; the GUI FAQ now points to them as the lock-free way to follow
   progress.
+- **Smaller npm package** (935 KB → about 370 KB packed): maintainer scripts,
+  images and the archived `DESIGN.md` are no longer shipped; `docs/zh` and
+  `docs/en` still are. `package-check` now fails if repo-only paths come back.
+- `DESIGN.md` is marked as an archived early draft, with links to the current docs.
+- Dashboard "Files" panel lists only files actually read or written, not the
+  directories searched by `grep` / `glob`.
 
 ### Fixed
 
@@ -1223,7 +1245,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.5.2...v0.6.0

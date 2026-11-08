@@ -7,6 +7,7 @@ The order matters; two of these steps exist because a bad release shipped withou
 ```bash
 # 1. Bump the version. SERVER_VERSION reads package.json, nothing else.
 npm version patch --no-git-tag-version
+#    Bump both versions in server.json too (top level and packages[0]); check:release verifies them.
 #    Then edit CHANGELOG.md:
 #      - turn [Unreleased] into the new version (that section IS the GitHub Release notes, written for users)
 #      - link block at the bottom: [Unreleased] → compare/vx.y.z...HEAD, plus [x.y.z]: …/compare/vprevious...vx.y.z
@@ -34,6 +35,7 @@ git push origin vx.y.z
 
 1. **GitHub Release**: notes are this version's CHANGELOG section (`scripts/release-notes.mjs`), followed by the install command and a compare link. If the Release already exists only its notes are updated, so re-running is safe.
 2. **npm publish**: checks the tag matches `package.json`, runs `check:release` and `package-check`, then publishes with **npm Trusted Publishing** (GitHub OIDC) and provenance — no `NPM_TOKEN`, and the npm page shows the package was built by this repository's GitHub Actions. Skipped if the version is already on npm.
+3. **MCP Registry**: after npm, the workflow logs in to the official MCP Registry with its own GitHub OIDC token (the `io.github.xmtlzzz/*` namespace) and publishes `server.json`. The registry checks ownership through the `mcpName` field inside the npm package, which is why it runs after npm. `mcp-publisher` is pinned and its signature is verified with cosign before it runs.
 
 **One-time setup**: npmjs.com → package `dsh-any-agent` → Settings → Trusted Publisher → GitHub Actions, repository `xmtlzzz/dsh-any-agent`, workflow file `release.yml`. Until then the npm job fails with an auth error (the GitHub Release is unaffected); publish locally with `npm publish` as a fallback, and a later re-run simply skips npm.
 

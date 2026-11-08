@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.xmtlzzz/dsh-any-agent",
+  "description": "Drive DeepSeek Harness (DSH) as a long-lived, resumable coding agent from any MCP client.",
+  "repository": {
+    "url": "https://github.com/xmtlzzz/dsh-any-agent",
+    "source": "github"
+  },
+  "version": "0.6.3",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "dsh-any-agent",
+      "version": "0.6.3",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

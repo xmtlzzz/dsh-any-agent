@@ -10,6 +10,7 @@
 [![node](https://img.shields.io/node/v/dsh-any-agent.svg?style=flat-square)](https://nodejs.org)
 [![license](https://img.shields.io/npm/l/dsh-any-agent.svg?style=flat-square)](LICENSE)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
+[![tests](https://img.shields.io/github/actions/workflow/status/xmtlzzz/dsh-any-agent/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/xmtlzzz/dsh-any-agent/actions/workflows/tests.yml)
 
 [官网](https://dsh-any-agent.xmtlz.dev/) · [快速开始](#快速开始) · [主要优势](#-主要优势) · [工具](#-工具) · [实时查看](#-实时查看派出去的活在干什么) · [使用注意事项](USAGE-NOTES.md) · [更新日志](CHANGELOG.md)
 
@@ -95,7 +96,11 @@ dsh-any-agent-setup --yes
 
 > **第一次派活前：** 先读[使用注意事项](USAGE-NOTES.md)，尤其是模型配置与外部 MCP 的权限边界。**外部 MCP 工具的副作用不受 DSH 沙箱约束。** 新机器部署可按[迁移指引](USAGE-MIGRATION.md)逐步操作。
 
-> **想先看效果？** `npm run demo` 是一条能跑通的 5 分钟路径：派活 → 中途插话两次 → 脚本自己复核产物（连 `node --test` 都替你跑）。不想花 token 就先 `npm run demo -- --replay`。见 [5 分钟案例](docs/zh/demo.md)。
+> **想先看效果？** 先看 [54 秒宣传片](https://dsh-any-agent.xmtlz.dev/#video)（派活、插话、哨兵落地、调用方复核，终端画面回放自一次真实运行）：
+>
+> <a href="https://dsh-any-agent.xmtlz.dev/#video"><img src="https://raw.githubusercontent.com/xmtlzzz/dsh-any-agent/main/website/src/media/promo-poster.jpg" width="560" alt="▶ 播放 dsh-any-agent 宣传片（54 秒）"></a>
+>
+> 再自己跑一遍：`npm run demo` 是一条能跑通的 5 分钟路径：派活 → 中途插话两次 → 脚本自己复核产物（连 `node --test` 都替你跑）。不想花 token 就先 `npm run demo -- --replay`。见 [5 分钟案例](docs/zh/demo.md)。
 
 <details>
 <summary>展开完整目录</summary>
@@ -149,11 +154,14 @@ dsh-any-agent watch
 ```
 
 ```bash
-dsh-any-agent dashboard
+dsh-any-agent dashboard --open
 ```
 
+<img src="https://raw.githubusercontent.com/xmtlzzz/dsh-any-agent/main/docs/images/dashboard.zh.png" width="100%" alt="dsh-any-agent dashboard：左栏按客户端分组的会话，中间是回合时间线与每次工具调用的时间条，右栏是概览、Token 消耗、工具分布与涉及文件（示例数据）">
+
 - **`watch`**：终端里原地刷新的调用链（同 `top`，不刷屏）。`watch <会话id前缀>` 只看一个会话，`--once` 打印一次就退出。
-- **`dashboard`**：本地只读网页。左栏按客户端分组列出会话；中间是回合时间线，每次工具调用带一根时间条，审批与提权高亮；右栏是概览、工具分布、涉及文件、审批，以及 **Token 消耗**（输入 / 输出 / 缓存命中、上下文窗口、每回合用量）。
+- **`dashboard`**：本地只读网页，`--open` 直接用默认浏览器打开。左栏按客户端分组列出会话；中间是回合时间线，每次工具调用带一根时间条，审批与提权高亮；右栏是概览、工具分布、涉及文件、审批，以及 **Token 消耗**（输入 / 输出 / 缓存命中、上下文窗口、每回合用量）。
+- **中文 / English**：界面默认跟随系统语言，`--lang zh|en` 可指定；网页右上角也能随时切换。
 - **不打扰正在跑的活**：两者都是独立进程，只读事件文件，不碰写锁、不连 DSH。想看进度就用它们，**别在 DSH GUI 里点开 MCP 驱动的会话**（那会抢走写锁，见[使用注意事项 3.10](USAGE-NOTES.md)）。
 - **安全与隐私**：dashboard 只监听 `127.0.0.1`，地址带一次性 token 并校验 Host 头，没有任何能改变状态的按钮。事件里的命令、路径、prompt 预览都先脱敏；**思考内容任何级别都不写**。`DSH_MCP_LIVE=meta` 只记工具名与状态，`off` 完全关闭。
 

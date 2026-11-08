@@ -3,7 +3,8 @@ name: release
 # A pushed version tag (vX.Y.Z) turns into:
 #   1. a GitHub Release whose notes are that version's CHANGELOG section
 #      (scripts/release-notes.mjs), not GitHub's one-line "generated notes";
-#   2. an npm publish from CI with provenance, via npm Trusted Publishing (OIDC).
+#   2. an npm publish from CI with provenance, via npm Trusted Publishing (OIDC);
+#   3. a listing in the official MCP Registry (server.json), after npm has the version.
 #
 # Trusted Publishing needs a one-time setup on npmjs.com:
 #   package dsh-any-agent → Settings → Trusted Publisher → GitHub Actions,
@@ -139,3 +140,56 @@ jobs:
       - name: Publish
         if: steps.exists.outputs.published == 'false'
         run: npm publish --provenance --access public
+
+  # MCP Registry (registry.modelcontextprotocol.io): register server.json once the
+  # version is on npm — the registry validates ownership through the "mcpName" field
+  # inside the published npm package. Login uses this workflow's GitHub OIDC token,
+  # which grants the io.github.xmtlzzz/* namespace; no secret is stored.
+  mcp-registry:
+    name: MCP Registry
+    needs: npm-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Install mcp-publisher (signature-verified)
+        shell: bash
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          ./mcp-publisher --help > /dev/null
+
+      - name: Log in with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server.json
+        run: ./mcp-publisher publish

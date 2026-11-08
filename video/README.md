@@ -12,7 +12,14 @@ npm run stills -- 300 760 1350   # 只渲染几帧 PNG，检查排版用
 
 首次渲染会自动下载 Remotion 用的 Chrome Headless Shell（约 130 MB）。
 
-如果 `npm run render` 在编码阶段报 `EPIPE` / `Permission denied`（Remotion 自带的 ffmpeg 写不了临时目录，常见于沙箱环境），可以分两步：先只出帧，再用系统 ffmpeg 合成并混入配乐。
+**发布到哪里**：网页版（720p、约 3 MB）放在 `website/src/media/promo.mp4`，封面是 `promo-poster.jpg`（第 300 帧，品牌画面），官网构建时按内容哈希命名；README 用封面图链接到官网的 `#video`。1080p 完整版作为 GitHub Release 附件上传。重新渲染后用下面"分两步"里的系统 ffmpeg 命令重出这两份：
+
+```bash
+ffmpeg -framerate 30 -i out/frames/element-%04d.jpeg -i public/bgm.wav -vf scale=1280:720:flags=lanczos -c:v libx264 -preset slow -crf 26 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -movflags +faststart ../website/src/media/promo.mp4
+ffmpeg -i out/frames/element-0300.jpeg -vf scale=1280:720:flags=lanczos -q:v 3 ../website/src/media/promo-poster.jpg
+```
+
+如果 `npm run render` 在编码阶段报 `EPIPE` / `Permission denied` / `write EOF`（Remotion 自带的 ffmpeg 写不了临时目录，常见于沙箱环境），可以分两步：先只出帧，再用系统 ffmpeg 合成并混入配乐。
 
 ```bash
 npm run music
