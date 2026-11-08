@@ -8,7 +8,7 @@
  *   4. dsh_get 在内存 run 记录过期后，能从哨兵文件回读。
  */
 
-import './_live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
+import './live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

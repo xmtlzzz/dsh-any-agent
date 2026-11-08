@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Running some offline suites on their own (`node test/dispatch-tools.mjs`, …)
   wrote live events into the real `~/.dsh/.dsh-any-agent/live`, where they showed
   up in `watch` / `dashboard`. They now use a temporary live directory
-  (`test/_live-sandbox.mjs`), as `npm test` already did.
+  (`test/live-sandbox.mjs`), as `npm test` already did.
 - `check:release` treated a version's CHANGELOG section as non-empty whenever any
   later version followed it; it now checks the section itself, that release notes
   can be built from it, and the compare links at the bottom. The `[Unreleased]`

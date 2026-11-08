@@ -5,7 +5,7 @@
  * dsh_get 的正文预算。所有对象都是本地 Conversation，不调用模型。
  */
 
-import './_live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
+import './live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
 import assert from 'node:assert';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
