@@ -167,6 +167,24 @@ jobs:
         with:
           ref: ${{ steps.tag.outputs.tag }}
 
+      # npm makes a new version visible asynchronously (PUT 202): right after the publish
+      # job the registry's lookup still gets a 404 ("version '…' was not found"). This
+      # happened on the first v0.6.3 run. Wait until npm serves the version, up to 10 min.
+      - name: Wait for the version on npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="$(node -p "require('./package.json').version")"
+          for i in $(seq 1 40); do
+            if npm view "dsh-any-agent@$v" version --prefer-online >/dev/null 2>&1; then
+              echo "npm serves dsh-any-agent@$v (after ~$(( (i - 1) * 15 ))s)"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::dsh-any-agent@$v is still not visible on npm after 10 minutes"
+          exit 1
+
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
