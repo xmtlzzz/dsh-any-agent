@@ -57,9 +57,16 @@ export class SessionHost {
 
   /** 拉起并完成 ACP 握手；并发调用共享同一个 in-flight promise。 */
   async initialize() {
-    if (this.proc?.alive) return;
+    // ★ 先看 in-flight 握手：`this.proc` 在握手完成前就已赋值且 alive，只看 alive 的话
+    //   并发的第二个调用者会在 initialize 回包前发 session/new（审计 B05）。
     if (this.initializing) return this.initializing;
+    if (this.proc?.alive && this.proc.initialized !== false) return;
     this.initializing = (async () => {
+      // 进程活着但握手没完成（上次握手失败）：在它上面重试握手，不另起一个进程。
+      if (this.proc?.alive) {
+        await this.proc.initialize();
+        return;
+      }
       const proc = new this.AcpProcessClass({
         cwd: this.cwd,
         permission: this.permission,
@@ -75,7 +82,7 @@ export class SessionHost {
           if (!conv) return { outcome: { outcome: 'cancelled' } };
           return conv.onPermissionRequest(params);
         },
-        onExit: (reason) => this.#onExit(reason),
+        onExit: (reason) => this.#onExit(proc, reason),
       });
       proc.start();
       this.proc = proc;
@@ -86,7 +93,9 @@ export class SessionHost {
     return this.initializing;
   }
 
-  #onExit(reason) {
+  #onExit(proc, reason) {
+    // 已被换下的旧进程退出：与当前进程上的会话无关（审计 C05 同类问题）。
+    if (proc !== this.proc) return;
     const convs = [...this.conversations.values()];
     this.conversations.clear();
     this.proc = null;
@@ -114,16 +123,21 @@ export class SessionHost {
    * 最后一个会话离开时停掉进程。
    */
   async detach(conv, { closeSession = true } = {}) {
+    let closed = true;
     if (closeSession && this.proc?.alive && this.conversations.has(conv.id)) {
       try {
         await this.request('session/close', { sessionId: conv.id }, 10_000);
-      } catch {
-        // 已经关闭/进程正在退出都无所谓
+      } catch (e) {
+        // 进程已经不在了就无所谓；进程还活着而 close 被拒，说明这个会话（和它的写锁）仍在里面。
+        closed = !this.proc?.alive;
+        if (!closed) this.log?.info?.(`[host] session/close 失败，会话可能仍持有写锁: ${conv.id}: ${e.message}`);
       }
     }
     this.conversations.delete(conv.id);
+    // 最后一个会话离开时停进程，锁随进程一起释放，此时以 stop 的结果为准。
     if (this.conversations.size === 0) return this.stop();
-    return true;
+    // ★ 进程还载着别的会话、close 又没被确认：不能报告已释放，调用方据此保留写锁登记（审计 B05）。
+    return closed;
   }
 
   /** 只有在没有会话附加时才真正停进程。 */
@@ -141,7 +155,9 @@ export class SessionHost {
       .catch(() => false)
       .finally(() => {
         this.stopping = null;
-        this.hub?.forgetHost?.(this);
+        // ★ 停的过程中同一宿主可能已经拉起新进程、挂上新会话：那时不能把宿主移出进程池，
+        //   否则抢占检查（hostVictimsOf）就查不到新进程上的会话（审计 C05）。
+        if (!this.proc && this.conversations.size === 0) this.hub?.forgetHost?.(this);
       });
     return this.stopping;
   }

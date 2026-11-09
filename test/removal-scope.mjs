@@ -103,6 +103,36 @@ console.log('\n[2] Codex -- top-level settings and other MCP sections survive');
   removeSandbox(home);
 }
 
+// ── Codex: 我们之后的数组表、别的表里同名的键都要留（审计 B01） ─────────
+
+console.log('\n[2b] Codex -- array tables after ours and same-named keys in other tables survive');
+{
+  const original = [
+    'model = "o3"',
+    '',
+    '[mcp_servers.dsh-any-agent]',
+    'command = "npx"',
+    'args = ["-y", "dsh-any-agent"]',
+    '',
+    '[[skills]]',
+    'name = "keep-me"',
+    '',
+    '[projects]',
+    'dsh-any-agent = "trusted"',
+  ].join('\n') + '\n';
+  const home = sandbox({ '.codex/config.toml': original });
+
+  const r = run(home, ['--remove', '--yes', '--only', 'codex']);
+  const after = readFileSync(join(home, '.codex', 'config.toml'), 'utf8');
+
+  check('our table is gone', !after.includes('[mcp_servers.dsh-any-agent]'));
+  check('array table after ours survived', after.includes('[[skills]]') && after.includes('name = "keep-me"'), after);
+  check('same-named key in [projects] survived', after.includes('[projects]') && after.includes('dsh-any-agent = "trusted"'), after);
+  check('exit code is 0', r.status === 0, String(r.status));
+
+  removeSandbox(home);
+}
+
 // ── Zed: 其他设置键与 context_servers 的其他子项都要留 ───────────────
 
 console.log('\n[3] Zed -- unrelated settings and sibling context servers survive');

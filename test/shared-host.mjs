@@ -184,6 +184,80 @@ check('换一个会话视角同样列得出', () =>
 check('查不到该 PID 时返回空', () => assert.deepEqual(bus.hostVictimsOf(9999, 'session-a'), []));
 check('PID 为空时返回空', () => assert.deepEqual(bus.hostVictimsOf(null, 'session-a'), []));
 
+console.log('\n[7] ★ 并发握手：第二个调用者必须等到 initialize 回包（审计 B05）');
+{
+  let nextPid = 5000;
+  class SlowInitAcp extends FakeAcp {
+    constructor(opts) {
+      super(opts);
+      this.pid = nextPid++;
+      this.initialized = false;
+    }
+    async initialize() {
+      await new Promise((r) => setTimeout(r, 80));
+      this.initialized = true;
+    }
+  }
+  const h = new SessionHost({ cwd: process.cwd(), permission: 'read-only', log, hub: null, AcpProcessClass: SlowInitAcp });
+  const first = h.initialize();
+  await h.initialize(); // 并发的第二个调用者
+  check('★ 第二个调用者返回时握手已完成', () => assert.equal(h.proc.initialized, true));
+  await first;
+  const pid = h.proc.pid;
+  await h.initialize();
+  check('握手完成后再调用不会换进程', () => assert.equal(h.proc.pid, pid));
+
+  console.log('\n[8] ★ session/close 被拒绝时不能报告释放成功（审计 B05）');
+  class CloseRejectAcp extends FakeAcp {
+    request(method, params) {
+      this.requests.push({ method, params });
+      return method === 'session/close' ? Promise.reject(new Error('[-32603] Internal error')) : Promise.resolve({});
+    }
+  }
+  const h2 = new SessionHost({ cwd: process.cwd(), permission: 'read-only', log, hub: null, AcpProcessClass: CloseRejectAcp });
+  const x = fakeConv('session-x1');
+  const y = fakeConv('session-y1');
+  h2.attach(x);
+  h2.attach(y);
+  await h2.initialize();
+  const released = await h2.detach(x);
+  check('★ 仍有别的会话时，close 被拒 → detach 返回 false', () => assert.equal(released, false));
+  check('进程没有被停掉（还载着别的会话）', () => assert.equal(h2.proc.stopped, false));
+  const last = await h2.detach(y);
+  check('最后一个会话离开时停进程，锁随进程释放 → true', () => assert.equal(last, true));
+
+  console.log('\n[9] ★ 旧进程慢慢停完，不能把同一宿主上新拉起的进程挤出进程池（审计 C05）');
+  class SlowStopAcp extends FakeAcp {
+    constructor(opts) {
+      super(opts);
+      this.pid = nextPid++;
+    }
+    async stop() {
+      await new Promise((r) => setTimeout(r, 80));
+      return super.stop();
+    }
+  }
+  const pool = new Hub({ log });
+  const h3 = new SessionHost({ cwd: process.cwd(), permission: 'read-only', log, hub: pool, AcpProcessClass: SlowStopAcp });
+  pool.hosts.set('k', h3);
+  const old = fakeConv('session-old');
+  h3.attach(old);
+  await h3.initialize();
+  const stopping = h3.detach(old); // 最后一个会话离开 → 开始停旧进程（很慢）
+  await new Promise((r) => setTimeout(r, 10)); // 让 detach 走过 session/close，真正进入 stop
+  check('旧进程已进入停止流程', () => assert.ok(h3.stopping && h3.proc === null));
+  const n1 = fakeConv('session-n1');
+  const n2 = fakeConv('session-n2');
+  h3.attach(n1);
+  h3.attach(n2);
+  await h3.initialize(); // 同一宿主上拉起新进程
+  const newPid = h3.pid;
+  await stopping;
+  check('★ 旧进程停完后宿主仍在进程池里', () => assert.equal(pool.hosts.get('k'), h3));
+  check('★ 抢占检查仍能查到新进程上的其它会话', () => assert.deepEqual(pool.hostVictimsOf(newPid, 'session-n1'), ['session-n2']));
+  check('新进程还活着', () => assert.equal(h3.alive, true));
+}
+
 // 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
 console.log(`\n===== shared host: passed ${passed}, failed ${failed} =====`);
 console.log(`\n总结果: ${failed === 0 ? '通过 ✅' : `${failed} 项失败 ❌`}`);

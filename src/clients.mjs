@@ -31,6 +31,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { platform } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -405,13 +406,25 @@ function dropContainerIfEmpty(text, containerKey) {
   return without;
 }
 
+/**
+ * ★ 同名键出现多次时，JSON.parse（以及客户端）以**最后一个**为准，而定点编辑只认第一个：
+ *   改了/删了第一个还报成功，生效的却是没动过的那一个（审计 D02）。直接拒绝，让人先去掉重复。
+ */
+function assertUniqueKey(obj, key) {
+  if (obj.entries.filter((e) => e.key === key).length > 1) {
+    throw new Error('"' + key + '" appears more than once in this config; remove the duplicates first');
+  }
+}
+
 function editJsonEntryBody(text, containerKey, entryKey, value, options) {
   const eol = detectEol(text);
   const root = scanJson(text);
   if (root.type !== 'object') throw new Error('the top level of this config is not a JSON object');
 
   const unit = detectIndentUnit(text, root) ?? '  ';
+  assertUniqueKey(root, containerKey);
   const contIdx = indexOfEntry(root, containerKey);
+  if (contIdx >= 0 && root.entries[contIdx].value.type === 'object') assertUniqueKey(root.entries[contIdx].value, entryKey);
 
   if (value === null) {
     if (contIdx < 0) return { changed: false, text };
@@ -479,6 +492,10 @@ export function stripWs(text) {
 // ── TOML（Codex）：按行编辑，保留注释/顶层键/CRLF ────────────────────
 
 const TOML_HEADER = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/;
+// ★ 数组表 `[[name]]` 也是表边界：只认 `[...]` 时它会被当成上一张表的内容，
+//   卸载我们的表时连带删掉紧随其后的数组表（审计 B01）。
+const TOML_ARRAY_HEADER = /^\s*\[\[([^\]]+)\]\]\s*(?:#.*)?$/;
+const INLINE_OURS = /^\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*=/;
 
 /** 这个表头是不是我们的（[mcp_servers.dsh-any-agent] 及其子表）。 */
 function isOurTable(name) {
@@ -491,18 +508,22 @@ function isOurTable(name) {
 function findTomlRanges(lines) {
   const ranges = [];
   let cur = null;
+  // 当前所在的表（'' = 根，已 trim）；数组表记为 null，里面的键一律不是我们的。
+  let table = '';
   for (let k = 0; k < lines.length; k++) {
-    const m = TOML_HEADER.exec(lines[k]);
-    if (m) {
+    const arr = TOML_ARRAY_HEADER.exec(lines[k]);
+    const m = arr ? null : TOML_HEADER.exec(lines[k]);
+    if (arr || m) {
       // 关闭上一个区间时必须把 end 定在「这张表的最后一行」，
       // 而不是文件末尾 —— 否则我们这段会一路吞掉后面所有的表。
       if (cur) { cur.end = k; ranges.push(cur); cur = null; }
-      if (isOurTable(m[1])) cur = { start: k, end: lines.length };
+      table = arr ? null : m[1].trim();
+      if (m && isOurTable(m[1])) cur = { start: k, end: lines.length };
       continue;
     }
-    if (/^\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*=/.test(lines[k])) {
-      ranges.push({ start: k, end: k + 1, inline: true });
-    }
+    // ★ 内联条目只认 `[mcp_servers]` 表里的 `dsh-any-agent = {...}`。别的表里恰好同名的键
+    //   （例如 [projects] 下）是用户的，不能删（审计 B01）。
+    if (table === 'mcp_servers' && INLINE_OURS.test(lines[k])) ranges.push({ start: k, end: k + 1, inline: true });
   }
   if (cur) ranges.push(cur);
   return ranges;
@@ -751,10 +772,19 @@ export function desiredEnv(permission, extra = {}) {
  * 对单个客户端算出「要不要动、动什么」。不写盘。
  * 返回的 next 是把要写入的完整文件内容（没有就不带 next）。
  */
+/** 配置文件当前字节的指纹（不存在为 null）：applyClient 据此发现“规划之后文件被改过”。 */
+function sourceHashOf(file) {
+  try {
+    return createHash('sha256').update(readFileSync(file)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
 export function planClient(client, ctx) {
   const { dirs, remove, launch, env } = ctx;
   const file = client.pathOf(dirs);
-  const base = { id: client.id, label: client.label, path: file };
+  const base = { id: client.id, label: client.label, path: file, sourceHash: client.kind === 'cli' ? undefined : sourceHashOf(file) };
 
   if (client.kind === 'cli') {
     // 计划模式绝不调用会立刻写盘的 add/remove：只做只读探测。
@@ -860,6 +890,17 @@ export function applyClient(plan, ctx, stamp) {
   }
 
   if (typeof plan.next !== 'string') return plan;
+
+  // ★ 规划之后、写入之前文件被别人改过（客户端自己保存了设置）：plan.next 是旧快照，
+  //   照写会把那次保存覆盖掉（审计 C06）。按当前内容重新规划一次；还在变就放弃，不写。
+  if (sourceHashOf(plan.path) !== plan.sourceHash) {
+    if (ctx.replanned) {
+      return { ...plan, status: 'failed', changed: false, summary: 'config file keeps changing while we edit it; left untouched, re-run setup' };
+    }
+    const fresh = planClient(client, ctx);
+    if (!fresh.changed) return fresh;
+    return applyClient(fresh, { ...ctx, replanned: true }, stamp);
+  }
 
   // 只读文件不覆盖：用户把配置设成只读，通常就是不想让程序动它。
   // --force 是显式的「我知道，照做」。

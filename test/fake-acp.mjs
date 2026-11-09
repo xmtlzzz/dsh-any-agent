@@ -13,6 +13,7 @@
  *                      hang-session  只对 FAKE_ACP_HANG_SESSION 指定的会话 id 不应答（同进程里别的会话照常 resume）
  *                      lease         立刻回"写锁被占用"（DSH 真实的措辞，被 ACP 包成 -32603）
  *                      invalid       立刻回 invalid params（-32602）
+ *   FAKE_ACP_NOISE   =1 时每条应答前先输出 null / 数字 / 数组 / 字符串这类非对象 JSON 行
  *
  * stdin EOF → 立刻退出：和真实 DSH "stdin 关闭 → 有界退出" 一致，所以 AcpProcess.stop() 走优雅路径。
  */
@@ -36,7 +37,9 @@ const resumeCount = () =>
         .filter((l) => l.includes('"method":"session/resume"')).length
     : 0;
 
-const send = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
+// FAKE_ACP_NOISE=1：每条应答前先吐几行“合法 JSON 但不是对象”的噪声（null / 数字 / 数组 / 字符串）。
+const NOISE = process.env.FAKE_ACP_NOISE === '1';
+const send = (obj) => process.stdout.write(`${NOISE ? 'null\n42\n[1,2]\n"x"\n' : ''}${JSON.stringify(obj)}\n`);
 const ok = (id, result) => send({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message, data) => send({ jsonrpc: '2.0', id, error: { code, message, ...(data ? { data } : {}) } });
 

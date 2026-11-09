@@ -220,6 +220,19 @@ try {
     check('两份文案的键完全一致', () => JSON.stringify(Object.keys(TEXT.zh).sort()) === JSON.stringify(Object.keys(TEXT.en).sort()));
   }
 
+  console.log('\n[4d] ★ 会话内容里的终端控制序列不会原样输出（审计 A06）');
+  {
+    const s = new LiveState();
+    s.apply(ev('c-ctl', 'conv.open', { cwd: 'D:/p', permission: 'workspace-write', client: 'cli\x1b[2J', title_hint: '\x1b]52;c;SGVsbG8=\x07evil' }));
+    s.apply(ev('c-ctl', 'run.start', { run: 'r1', client: 'cli\x1b[2J', prompt_preview: 'p\x9b2J' }));
+    s.apply(ev('c-ctl', 'approval', { run: 'r1', mode: 'ask', approval_id: 'ap', command_preview: 'rm\x1b]0;t\x07 -rf' }));
+    const plain = renderText(s.view({ alive: () => true }), { color: false });
+    check('无颜色输出里没有任何 C0/C1 控制字符', () => !/[\x00-\x09\x0b-\x1f\x7f-\x9f]/.test(plain), JSON.stringify(plain));
+    check('可见文字保留', () => plain.includes('evil') && plain.includes('rm') && plain.includes('-rf'), plain);
+    const colored = renderText(s.view({ alive: () => true }), { color: true });
+    check('彩色输出只剩 SGR 颜色序列', () => !/\x1b(?!\[[0-9;]*m)/.test(colored) && !/[\x07\x9b]/.test(colored), JSON.stringify(colored));
+  }
+
   console.log('\n[5] watch --once（真正走 bin 入口，不启动 Hub）');
   {
     writeEvents('c-watch', [ev('c-watch', 'run.start', { run: 'r-watch', client: 'cursor', prompt_preview: 'hello-watch' })]);

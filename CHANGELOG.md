@@ -7,11 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] — 2026-11-09
+
+A security and reliability release: every finding from an external audit of
+0.6.3 was reproduced against the real code path, fixed, and given a regression
+test.
+
+### Security
+
+- **The workspace git snapshot no longer runs repository-configured commands.**
+  `git status` ran on the host, outside DSH's sandbox, and executed any clean
+  filter the repository's `.git/config` defined — even for read-only sessions.
+  Filter drivers are now disabled for the snapshot, submodules are not entered,
+  and a driver name that cannot be overridden safely makes the snapshot fail
+  closed. `DSH_MCP_GIT_STATUS=0` still turns snapshots off entirely.
+- **`DSH_MCP_ALLOW_FULL_ACCESS` now also guards resuming.** With the switch off,
+  new `danger-full-access` sessions were refused but an existing one could still
+  be resumed with full access.
+- **Permission check compares the real sandbox, not just the preset name.** A
+  profile could define a preset called `read-only` with a `danger-full-access`
+  sandbox and pass verification.
+- **Cross-drive junctions can no longer pass the disk-root guard** (Windows): a
+  junction on `C:` pointing at `D:\` was compared against the wrong drive.
+- **`watch` strips terminal control sequences** from session titles, tool names
+  and previews, so content such as an OSC 52 sequence cannot rewrite the
+  clipboard of the terminal showing it.
+- **Legacy `llm-deepseek.baseURL` credentials are no longer copied** into the
+  managed profile; `user:pass@` is removed as it already was for `llm-pi-ai`.
+
 ### Fixed
 
+- **`setup --remove` for Codex** no longer deletes a `[[array-table]]` that
+  follows our table, nor `dsh-any-agent = …` keys that belong to other tables.
+- **`setup` no longer overwrites a client config saved after planning**; it
+  re-plans against the current file. A JSON config with **duplicate
+  `dsh-any-agent` keys** is now reported as failed and left untouched, instead of
+  reporting success while the last (stale) entry stays effective.
+- **A malformed line from DSH (`null`, a number, an array) no longer crashes the
+  whole MCP server.**
+- **MCP roots**: two concurrent `dsh_start` calls without `cwd` both wait for the
+  client's answer, and a late reply from before a project switch can no longer
+  overwrite the new project directory.
+- **`forget` is reliable**: it reports failure (and keeps the session) when the
+  tombstone cannot be written, cancels queued runs instead of dispatching them
+  afterwards, refuses while another live instance holds the session's write
+  lock, and no instance dispatches work to a forgotten session.
+- **`dsh_interrupt` during a cold start** (process spawn + resume) now really
+  stops the run before it is sent, instead of reporting `interrupted=true` and
+  dispatching the prompt anyway. `dsh_interject(mode='interject')` gets the same
+  fix.
+- **`client_run_id` stays valid for a long run**: running and queued runs are
+  never evicted from the in-memory history. Two concurrent
+  `dsh_interject(mode='queue')` calls both run instead of one failing.
+- **`workspace_changed`** is now true when a turn edits and commits files (the
+  tree is clean before and after, but HEAD moved).
+- **Shared DSH process**: concurrent callers wait for the ACP handshake; a
+  rejected `session/close` no longer reports the session as released while the
+  process still holds its lock; a slowly stopping old process no longer removes
+  the host (and its new process) from the pool.
+- **Several instances sharing one registry** keep each other's new entries and
+  no longer write turn counts back to stale values.
 - Release workflow: the MCP Registry job now waits (up to 10 minutes) until npm
   serves the new version. On the first v0.6.3 run it registered seconds after
   `npm publish`, and the registry's npm lookup still returned 404.
+
+### Changed
+
+- Docs and website: the raw server default is `workspace-write` (it has been
+  since 0.5.0); `danger-full-access` requires `DSH_MCP_ALLOW_FULL_ACCESS=1`.
+- Tests: `npm test` runs every suite under its own temp root and only cleans up
+  inside it; standalone `node test/cleanup.mjs` no longer deletes
+  `%TEMP%\dsh-any-agent-*` directories unless given `--purge-temp`. The live
+  suites `workspace-effect` and `acceptance` refuse to run (instead of deleting
+  them afterwards) when `Desktop/dsh-any-agent-test-A|B` already exist.
 
 ## [0.6.3] — 2026-11-08
 
@@ -1251,7 +1319,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.0...v0.6.1

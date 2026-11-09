@@ -537,7 +537,9 @@ export function createHandlers(hub, opts = {}) {
         structured: { conversation_id: args.conversation_id, ...r },
         text: r.forgotten
           ? '已释放进程并从注册表移除。会话日志仍在磁盘上。'
-          : '已释放 DSH 进程（写锁已让出，你可以在自己的 DSH GUI 里打开这个会话）。会话仍可 resume。',
+          : args.forget === true
+            ? `⚠️ forget 未完成：${r.error ?? '原因未知'}`
+            : '已释放 DSH 进程（写锁已让出，你可以在自己的 DSH GUI 里打开这个会话）。会话仍可 resume。',
       };
     },
 

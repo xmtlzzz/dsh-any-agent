@@ -35,6 +35,17 @@ const JOBS = [
   { key: 'A', dir: join(DESKTOP, 'dsh-any-agent-test-A'), file: `probe-a-${STAMP}.txt`, marker: `MARKER-A-${STAMP}` },
   { key: 'B', dir: join(DESKTOP, 'dsh-any-agent-test-B'), file: `probe-b-${STAMP}.txt`, marker: `MARKER-B-${STAMP}` },
 ];
+// ★ 桌面目录是固定名字：已经存在时它可能是用户的、或上一轮残留（含证据），收尾的递归删除
+//   不能碰它。直接拒绝运行，让人自己确认后再删（审计 B02）。
+const preexisting = JOBS.map((j) => j.dir).filter((d) => existsSync(d));
+if (preexisting.length) {
+  console.log(`\n✗ 拒绝运行：桌面测试目录已存在，本套件收尾会递归删除它们：\n  ${preexisting.join('\n  ')}`);
+  console.log('  确认是测试残留后手动删除（或 DSH_MCP_PURGE_DESKTOP=1 node test/cleanup.mjs）再重跑。');
+  console.log('\n===== 工作区有效性测试：通过 0，失败 1 =====');
+  process.exit(1);
+}
+/** 本轮自己建出来的目录：收尾只删这些。 */
+const created = new Set();
 // ★ 状态目录收在自己的临时目录里（不要把 DSH_MCP_STATE 直接放 %TEMP% 根下，见 smoke.mjs 同处注释）
 const STATE_ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-wseff-'));
 const STATE = join(STATE_ROOT, 'state.json');
@@ -48,6 +59,7 @@ try {
   console.log('\n[1] 桌面建两个文件夹，各开一个会话');
   for (const j of JOBS) {
     mkdirSync(j.dir, { recursive: true });
+    created.add(j.dir);
     const start = await client.callTool('dsh_start', { cwd: j.dir, permission: 'danger-full-access' }, 180_000);
     const id = start?.structuredContent?.conversation_id;
     convs.push({ ...j, id });
@@ -154,8 +166,8 @@ try {
     for (const j of JOBS) console.log(`  ${join(j.dir, j.file)}`);
     console.log(`  ${STATE_ROOT}（状态目录）`);
   } else {
-    for (const j of JOBS) {
-      try { rmSync(j.dir, { recursive: true, force: true }); } catch {}
+    for (const d of created) {
+      try { rmSync(d, { recursive: true, force: true }); } catch {}
     }
     // 会话已在上面 release 过；只点 id 精确删掉它们（桌面目录是固定名字，不给 roots），
     // 连带摘掉工作区登记、删掉因此变空的桌面测试工作区条目

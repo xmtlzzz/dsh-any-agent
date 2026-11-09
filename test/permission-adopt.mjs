@@ -17,6 +17,10 @@ const home = join(root, 'dsh-home');
 process.env.DSH_HOME = home;
 process.env.DSH_MCP_STATE = join(root, 'state.json');
 process.env.DSH_MCP_FORGOTTEN_DIR = join(home, 'forgotten');
+// 本套件不该拉起任何 DSH；万一守卫失效，拉起的也只是一个不存在的路径。
+process.env.DSH_BIN = join(root, 'no-such-dsh.js');
+process.env.DSH_MCP_BOOTSTRAP = '0';
+delete process.env.DSH_MCP_ALLOW_FULL_ACCESS;
 
 const { Hub, Conversation } = await import('../src/hub.mjs');
 
@@ -104,6 +108,34 @@ try {
   const c8 = new Conversation({ id: 'session-no-proj-write', cwd: join(root, 'ws'), permission: 'workspace-write', onApproval: 'auto-allow' }, hub);
   const got8 = await c8.verifyPermissionRecorded({ attempts: 1, delayMs: 0 });
   check('非只读档缓存缺失时仍返回 null', got8 === null, String(got8));
+
+  console.log('\n[5b] ★ 预设名对、沙箱不对 → 必须失败（审计 C01）');
+  const c9 = new Conversation({ id: 'session-preset-lies', cwd: join(root, 'ws'), permission: 'read-only', onApproval: 'auto-deny' }, hub);
+  {
+    const file = join(home, 'storages', 'session_projcache', 'sessions', 'session-preset-lies.json');
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ record: { rows: { permissions: { val: { preset: 'read-only', sandbox: 'danger-full-access', approval: 'never' } } } } }), 'utf8');
+  }
+  let liesErr = null;
+  try { await c9.verifyPermissionRecorded({ attempts: 1, delayMs: 0 }); } catch (e) { liesErr = e; }
+  check('★ sandbox=danger-full-access 的 "read-only" 记录被拒绝', /实际沙箱/.test(String(liesErr?.message)), String(liesErr?.message));
+  check('permissionVerified 不为 true', c9.permissionVerified !== true, String(c9.permissionVerified));
+
+  const c10 = new Conversation({ id: 'session-no-sandbox', cwd: join(root, 'ws'), permission: 'read-only', onApproval: 'auto-deny' }, hub);
+  {
+    const file = join(home, 'storages', 'session_projcache', 'sessions', 'session-no-sandbox.json');
+    writeFileSync(file, JSON.stringify({ record: { rows: { permissions: { val: { preset: 'read-only' } } } } }), 'utf8');
+  }
+  let noSandboxErr = null;
+  try { await c10.verifyPermissionRecorded({ attempts: 1, delayMs: 0 }); } catch (e) { noSandboxErr = e; }
+  check('★ read-only 记录缺沙箱字段 → fail closed', Boolean(noSandboxErr), 'no error');
+
+  console.log('\n[5c] ★ 机器侧未允许 full access 时，恢复既有 danger-full-access 会话被拒绝（审计 A02）');
+  const c11 = new Conversation({ id: 'session-full-resume', cwd: join(root, 'ws'), permission: 'danger-full-access', onApproval: 'auto-allow' }, hub);
+  let fullErr = null;
+  try { await c11.ensureAlive(); } catch (e) { fullErr = e; }
+  check('★ ensureAlive 拒绝并点名开关', /DSH_MCP_ALLOW_FULL_ACCESS/.test(String(fullErr?.message)), String(fullErr?.message));
+  check('没有拉起进程', !c11.proc, String(c11.proc?.pid));
 
   console.log('\n[6] 并发接管同一磁盘会话只构造一个 Conversation');
   seedSession('session-adopt-race', join(root, 'ws'));

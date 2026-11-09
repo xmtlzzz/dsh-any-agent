@@ -110,6 +110,8 @@ export class Hub {
   #reaper;
   /** 同一 id 的磁盘接管 in-flight Promise，防止并发请求各自构造一个 Conversation。 */
   #adopting = new Map();
+  /** 本实例从注册表移除过的会话 id（save 合并盘上条目时跳过）。 */
+  #removed = new Set();
   /** `dsh_list` 磁盘探测的短缓存（探测要 spawn 一个 DSH 进程，实测约 1 秒）。 */
   #probeCache = null;
 
@@ -161,10 +163,31 @@ export class Hub {
   save() {
     try {
       mkdirSync(dirname(STATE_FILE), { recursive: true });
+      // ★ 多实例共用一份注册表：只写自己内存里的会话，会把另一个实例刚加进去的条目覆盖掉，
+      //   并把它跑出来的轮数写回旧值（审计 C03）。所以先读盘上的版本合并：
+      //   - 盘上有、内存里没有、也没被 forget 的条目原样保留；
+      //   - 轮数与最近使用时间只增不减。
+      let onDisk = [];
+      try {
+        onDisk = JSON.parse(readFileSync(STATE_FILE, 'utf8')).conversations ?? [];
+      } catch {
+        /* 还没有注册表 / 读不出来：只写自己的 */
+      }
+      const extra = [];
+      for (const s of onDisk) {
+        if (!s?.id || !s?.cwd) continue;
+        const mine = this.conversations.get(s.id);
+        if (mine) {
+          if (Number.isFinite(s.turnCount) && s.turnCount > mine.turnCount) mine.turnCount = s.turnCount;
+          if (Number.isFinite(s.lastUsedAt) && s.lastUsedAt > mine.lastUsedAt) mine.lastUsedAt = s.lastUsedAt;
+        } else if (!this.#removed.has(s.id) && !isForgotten(s.id)) {
+          extra.push(s);
+        }
+      }
       const doc = {
         version: 1,
         savedAt: new Date().toISOString(),
-        conversations: [...this.conversations.values()].map((c) => c.toState()),
+        conversations: [...[...this.conversations.values()].map((c) => c.toState()), ...extra],
       };
       const tmp = `${STATE_FILE}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
       writeFileSync(tmp, JSON.stringify(doc, null, 2), 'utf8');
@@ -412,6 +435,8 @@ export class Hub {
 
   remove(id) {
     this.conversations.delete(id);
+    // save() 会合并盘上的条目；本实例主动移除的不能被合并回来。
+    this.#removed.add(id);
     // 注意：**不删侧车元数据**。forget 的语义是“从注册表移除”，
     // 之后按 id 重建（多实例恢复）时，侧车让审批策略/思考深度/标题/轮数不漂移。
     this.save();

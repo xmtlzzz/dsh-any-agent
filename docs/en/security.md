@@ -4,8 +4,8 @@
 
 | Tier | Approval default | Use for |
 |---|---|---|
-| `danger-full-access` (raw server default) | `auto-allow` | Zero friction; `setup` writes `workspace-write` by default |
-| `workspace-write` | `auto-allow` | Writes are limited to the workspace by DSH's sandbox; out-of-workspace requests are auto-allowed unless you pass `on_approval=ask` |
+| `workspace-write` (raw server default; also what `setup` writes) | `auto-allow` | Writes are limited to the workspace by DSH's sandbox; out-of-workspace requests are auto-allowed unless you pass `on_approval=ask` |
+| `danger-full-access` | `auto-allow` | Whole-machine write access; creating or resuming a session in this tier requires `DSH_MCP_ALLOW_FULL_ACCESS=1` on the machine |
 | `read-only` | `auto-deny` | Analyzing untrusted samples (malware, unknown dumps) |
 
 `on_approval` can be `auto-allow`, `auto-deny`, or `ask` (which exposes a pending approval for `dsh_approval_decide` to adjudicate).

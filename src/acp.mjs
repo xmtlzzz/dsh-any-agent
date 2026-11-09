@@ -165,6 +165,12 @@ export class AcpProcess {
         this.#log.debug('[acp] 收到非 JSON 行（已忽略）');
         continue;
       }
+      // ★ `null` / 数字 / 数组也是合法 JSON，但不是 JSON-RPC 消息：#dispatch 访问 msg.id 会抛出
+      //   未捕获异常，在 stdout 的 data 回调里直接杀掉整个 MCP 服务（审计 D01）。
+      if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
+        this.#log.debug('[acp] 收到非对象 JSON 行（已忽略）');
+        continue;
+      }
       this.#dispatch(msg);
     }
   }

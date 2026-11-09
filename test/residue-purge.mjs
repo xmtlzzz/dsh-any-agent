@@ -465,6 +465,30 @@ try {
   check('★ 没有套件把 DSH_MCP_STATE 直接放在 %TEMP% 根下（否则 runs/reviews/locks/meta 会散落且永不被清）', offenders.length === 0, offenders.join(','));
 
   // ───────────────────────────────────────────────────────────
+  console.log('\n[10b] ★ 桌面固定名测试目录已存在时，真机套件拒绝运行、不删它（审计 B02）');
+  for (const suite of ['workspace-effect.mjs', 'acceptance.mjs']) {
+    const fakeHome = join(sandbox, `home-${suite}`);
+    const precious = join(fakeHome, 'Desktop', 'dsh-any-agent-test-A');
+    mkdirSync(precious, { recursive: true });
+    writeFileSync(join(precious, 'mine.txt'), 'user data');
+    const r = spawnSync(process.execPath, [join(HERE, suite)], {
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+        DSH_HOME: dshHome,
+        DSH_BIN: join(sandbox, 'no-such-dsh.js'),
+        DSH_E2E_FORCE: '1',
+        DSH_MCP_KEEP_EVIDENCE: '',
+      },
+    });
+    check(`${suite} 拒绝运行（退出码非 0，说明原因）`, r.status === 1 && /拒绝运行/.test(r.stdout), `${r.status} ${r.stdout.slice(-200)}`);
+    check(`${suite} 没有删掉已存在的目录`, existsSync(join(precious, 'mine.txt')));
+  }
+
+  // ───────────────────────────────────────────────────────────
   console.log('\n[11] ★ DSH_MCP_KEEP_EVIDENCE=1 时 cleanup.mjs 一样东西都不删（PR #11 评审）');
   {
     // 子进程的 tmpdir() 与 DSH_HOME 都指进沙箱：不碰真实 %TEMP% 与 ~/.dsh。
@@ -472,8 +496,8 @@ try {
     const evState = join(evTmp, 'dsh-any-agent-wseff-evidence');
     mkdirSync(evState, { recursive: true });
     writeFileSync(join(evState, 'conversations.json'), '{"version":1,"conversations":[]}');
-    const runCleanup = (extra) =>
-      spawnSync(process.execPath, [join(HERE, 'cleanup.mjs')], {
+    const runCleanup = (extra, args = []) =>
+      spawnSync(process.execPath, [join(HERE, 'cleanup.mjs'), ...args], {
         encoding: 'utf8',
         timeout: 60_000,
         env: {
@@ -491,8 +515,23 @@ try {
     check('保留证据模式下 cleanup 正常退出', kept.status === 0, kept.stderr);
     check('★ 状态目录（证据）原样保留', existsSync(join(evState, 'conversations.json')));
     check('输出里说明了整轮已跳过、以及怎么收尾', /KEEP_EVIDENCE=1：整轮清理已跳过/.test(kept.stdout) && /不带这个开关再运行一次/.test(kept.stdout), kept.stdout.slice(0, 300));
-    const swept = runCleanup({ DSH_MCP_KEEP_EVIDENCE: '' });
-    check('对照：不带开关时同一个临时状态目录会被清掉', swept.status === 0 && !existsSync(evState), swept.stdout.slice(-300));
+    const swept = runCleanup({ DSH_MCP_KEEP_EVIDENCE: '', DSH_MCP_TEST_RUN_ROOT: evTmp });
+    check('对照：run.mjs 的本轮临时根里，不带开关时同一个临时状态目录会被清掉', swept.status === 0 && !existsSync(evState), swept.stdout.slice(-300));
+
+    console.log('\n[12] ★ 独立运行 cleanup.mjs 不递归删除系统临时目录下同名前缀的无关目录（审计 A03）');
+    const sysTmp = join(sandbox, 'system-tmp');
+    const precious = join(sysTmp, 'dsh-any-agent-not-a-test');
+    mkdirSync(precious, { recursive: true });
+    writeFileSync(join(precious, 'keep.txt'), 'user data');
+    const base = { TEMP: sysTmp, TMP: sysTmp, TMPDIR: sysTmp, DSH_MCP_KEEP_EVIDENCE: '', DSH_MCP_TEST_RUN_ROOT: '' };
+    const standalone = runCleanup(base);
+    check('独立运行正常退出', standalone.status === 0, standalone.stderr);
+    check('★ 无关的 dsh-any-agent-* 目录原样保留', existsSync(join(precious, 'keep.txt')));
+    check('输出说明了跳过原因与 --purge-temp', /--purge-temp/.test(standalone.stdout), standalone.stdout.slice(-300));
+    const otherRun = runCleanup({ ...base, DSH_MCP_TEST_RUN_ROOT: join(sandbox, 'another-run-root') });
+    check('★ 别的轮次的临时根（DSH_MCP_TEST_RUN_ROOT 不是本 tmpdir）也不删', otherRun.status === 0 && existsSync(join(precious, 'keep.txt')));
+    const purged = runCleanup(base, ['--purge-temp']);
+    check('显式 --purge-temp 才删除', purged.status === 0 && !existsSync(precious), purged.stdout.slice(-300));
   }
 } catch (e) {
   failed++;

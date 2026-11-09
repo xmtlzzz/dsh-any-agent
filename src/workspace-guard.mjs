@@ -50,20 +50,21 @@ export function homeWorkspaceProblem(cwd, permission) {
   const home = homedir();
   if (!home) return null;
   const caseInsensitive = process.platform === 'win32' || fsCaseInsensitive();
-  const norm = (p) => {
+  const real = (p) => {
     // 解析 symlink：一个指向家目录/根目录的软链不能绕过这两个边界。
     // 路径不存在时（测试里的 "some-project"）回落到 resolve。
-    let r;
     try {
-      r = realpathSync(p);
+      return realpathSync(p);
     } catch {
-      r = resolve(p);
+      return resolve(p);
     }
-    return caseInsensitive ? r.toLowerCase() : r;
   };
+  const norm = (p) => (caseInsensitive ? real(p).toLowerCase() : real(p));
   // 根目录 = 整个磁盘。workspace-write 的沙箱根会跟着 cwd 走，
   // 于是“只写工作区”退化成“可写全盘”，必须显式要求 danger-full-access。
-  const fsRoot = resolve(parse(cwd).root);
+  // ★ 根要从**解析后的真实路径**取：C: 上指向 `D:\` 的 junction 解析后在 D: 盘，
+  //   拿传入路径的盘符比较就会放行（审计 A04）。
+  const fsRoot = resolve(parse(real(cwd)).root);
   if (norm(cwd) === norm(fsRoot)) {
     return [
       'cwd 不能是文件系统根目录: ' + cwd,

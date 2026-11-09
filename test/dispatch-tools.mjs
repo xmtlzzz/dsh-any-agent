@@ -100,8 +100,13 @@ console.log('\n[2] client_run_id 幂等');
 
 const r1 = conv.createRun('任务一', { clientRunId: 'idem-1' });
 check('按键能取回同一个 run', () => assert.equal(conv.getRunByClientId('idem-1'), r1));
-for (let i = 0; i < 20; i++) conv.createRun(`填充 ${i}`);
-check('run 记录被挤出后，幂等键同步失效', () => assert.equal(conv.getRunByClientId('idem-1'), null));
+// ★ 还没结束的 run（及其幂等键）不会被挤掉（审计 C04：长任务期间取消 20 条队列记录曾挤掉它）。
+for (let i = 0; i < 20; i++) conv.createRun(`填充 ${i}`).status = 'cancelled';
+check('★ 未结束的 run 被 20 条已结束记录包围时仍在，幂等键仍有效', () => assert.equal(conv.getRunByClientId('idem-1'), r1));
+r1.status = 'done';
+for (let i = 0; i < 20; i++) conv.createRun(`填充 ${i}`).status = 'done';
+check('已结束的 run 被挤出后，幂等键同步失效', () => assert.equal(conv.getRunByClientId('idem-1'), null));
+check('run 记录总数仍有上限', () => assert.ok(conv.runs.length <= 20, String(conv.runs.length)));
 
 console.log('\n[3] 会话级队列');
 
@@ -126,6 +131,89 @@ check('remove 后队列只剩一条', () => assert.equal(conv.queueList().length
 
 conv.busy = false;
 conv.queue = [];
+
+console.log('\n[3b] 派发竞态（假 ACP 进程，不拉 DSH）');
+
+/** 假 ACP 进程：session/prompt 挂起，直到 end() 或 session/cancel。 */
+function fakeProc() {
+  const pending = [];
+  const proc = {
+    alive: true,
+    prompts: 0,
+    log: [],
+    request(method) {
+      proc.log.push(method);
+      if (method !== 'session/prompt') return Promise.resolve({});
+      proc.prompts += 1;
+      return new Promise((resolve) => pending.push(resolve));
+    },
+    notify(method) {
+      proc.log.push(`notify:${method}`);
+      if (method === 'session/cancel') for (const r of pending.splice(0)) r({ stopReason: 'cancelled' });
+    },
+    end() {
+      for (const r of pending.splice(0)) r({ stopReason: 'end_turn' });
+    },
+  };
+  return proc;
+}
+function raceConv(id, coldMs = 0) {
+  const c = new Conversation({ id, cwd: auditDir, permission: 'workspace-write', onApproval: 'auto-allow' }, hub);
+  const proc = fakeProc();
+  c.ensureAlive = async () => {
+    c.proc = proc;
+    if (coldMs) await new Promise((r) => setTimeout(r, coldMs));
+    return proc;
+  };
+  return { c, proc };
+}
+const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+{
+  // 审计 C02：冷启动（拉进程 + resume）期间 dsh_interrupt 成功，原任务就不能再发出去。
+  const { c, proc } = raceConv('race-cold-interrupt', 200);
+  const pending = c.prompt('任务', { wait: false });
+  await tick();
+  const ir = await c.interrupt();
+  const res = await pending;
+  await tick(300);
+  check('★ 冷启动期间中断：报告 interrupted 且标明 before_dispatch', () => assert.deepEqual(ir, { interrupted: true, before_dispatch: true }));
+  check('★ 冷启动期间中断：session/prompt 从未发出', () => assert.equal(proc.prompts, 0, JSON.stringify(proc.log)));
+  check('冷启动期间中断：回合以 cancelled 收尾并写哨兵', () => {
+    assert.equal(c.getRun(res.run_id).status, 'cancelled');
+    assert.ok(sentinels.some((s) => s.run_id === res.run_id && s.status === 'cancelled'));
+  });
+  check('冷启动期间中断后会话空闲、可再派活', () => assert.equal(c.busy, false));
+}
+{
+  // 审计 C04：两条并发 dsh_interject(mode='queue') 都必须执行，不能一条撞上“正在跑另一个回合”。
+  const { c, proc } = raceConv('race-double-queue');
+  await c.prompt('长任务', { wait: false });
+  for (let i = 0; i < 300 && proc.prompts < 1; i++) await tick(10);
+  const settle = (p) => p.then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+  const a = settle(c.interject('A', { mode: 'queue', clientRunId: 'race-qa' }));
+  const b = settle(c.interject('B', { mode: 'queue', clientRunId: 'race-qb' }));
+  await tick();
+  // 每一轮都等 session/prompt 真的发出再结束它（前面还有 git 快照要跑）。
+  for (let n = 1; n <= 3; n++) {
+    for (let i = 0; i < 300 && proc.prompts < n; i++) await tick(10);
+    proc.end();
+  }
+  const [ra, rb] = await Promise.all([a, b]);
+  check('★ 两条排队插话都成功', () => assert.ok(ra.ok && rb.ok, `${ra.e?.message ?? ''} ${rb.e?.message ?? ''}`));
+  check('★ 一共发出 3 次 session/prompt', () => assert.equal(proc.prompts, 3));
+  check('两条插话的 run 都已完成', () =>
+    assert.deepEqual([c.getRunByClientId('race-qa')?.status, c.getRunByClientId('race-qb')?.status], ['done', 'done']));
+}
+{
+  // 审计 C04：长任务期间取消 20 条队列记录，原任务的 run 与 client_run_id 仍然有效。
+  const { c, proc } = raceConv('race-evict');
+  const first = await c.prompt('长任务', { wait: false, run: c.createRun('长任务', { clientRunId: 'race-long' }) });
+  for (let i = 0; i < 300 && proc.prompts < 1; i++) await tick(10);
+  for (let i = 0; i < 20; i++) c.queueRemove(c.enqueue(`q${i}`).run.run_id);
+  check('★ 原任务的幂等键仍指向在跑的 run', () => assert.equal(c.getRunByClientId('race-long')?.run_id, first.run_id));
+  proc.end();
+  await tick();
+}
 
 console.log('\n[4] dsh_get 正文预算');
 

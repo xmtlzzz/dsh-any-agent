@@ -56,6 +56,11 @@ export function readConversationMetaFile(id) {
 const FORGOTTEN_DIR = process.env.DSH_MCP_FORGOTTEN_DIR ?? join(DSH_HOME, '.dsh-any-agent-forgotten');
 export const forgottenPath = (id) => join(FORGOTTEN_DIR, `${id}.json`);
 
+/**
+ * 写墓碑；返回 null 表示成功，否则返回失败原因。
+ * ★ 失败必须让调用方知道：墓碑是 forget 唯一的持久效力，写不进去还报“已 forget”，
+ *   同一会话随即就能从 DSH 会话存储里被按 id 找回（审计 B04）。
+ */
 export function writeTombstone(id) {
   try {
     mkdirSync(FORGOTTEN_DIR, { recursive: true });
@@ -63,8 +68,9 @@ export function writeTombstone(id) {
     const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
     writeFileSync(tmp, JSON.stringify({ id, forgottenAt: Date.now() }, null, 2), 'utf8');
     renameSync(tmp, file);
-  } catch {
-    /* 墓碑写失败时 forget 仍从注册表移除；下次 get 可能仍会复活，但不影响主流程 */
+    return null;
+  } catch (e) {
+    return e?.message ?? String(e);
   }
 }
 

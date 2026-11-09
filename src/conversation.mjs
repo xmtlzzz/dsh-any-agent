@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  ALLOW_FULL_ACCESS,
   DEFAULT_PERMISSION,
   DEFAULT_REASONING_EFFORT,
   DEFAULT_REVIEW,
@@ -39,7 +40,7 @@ import { applySessionConfig, approvalContext, pickOption } from './acp-session.m
 import { rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
-import { writeTombstone } from './hub-store.mjs';
+import { forgottenPath, isForgotten, writeTombstone } from './hub-store.mjs';
 import { emitLive, livePreview, liveSettings, removeLive, summarizeToolInput } from './live.mjs';
 import {
   classifyHolder,
@@ -141,6 +142,18 @@ export class Conversation {
   }
 
   #hub;
+
+  /** 已置 busy、但 session/prompt 还没发出的回合（冷启动窗口）。 */
+  #undispatched = null;
+  /** 冷启动窗口里收到了 dsh_interrupt：发 session/prompt 之前放弃这个回合。 */
+  #cancelBeforeDispatch = false;
+
+  /** 墓碑存在（本实例或另一个实例 forget 过）时拒绝派活。 */
+  #assertNotForgotten() {
+    if (isForgotten(this.id)) {
+      throw new Error(`会话已被 forget（永久移除）: ${this.id}，不再派活。确实要恢复请删除墓碑 ${forgottenPath(this.id)}。`);
+    }
+  }
 
   /**
    * live 事件流用的工具跟踪：tool_call_id → {at, status, hasInput}。
@@ -350,6 +363,14 @@ export class Conversation {
     //   去抢一个**尚未释放**的写锁（reaper/release 里 await stop() 的那个窗口）。
     if (this.recycling) await this.recycling;
     if (this.proc?.alive) return this.proc;
+    // ★ 机器侧开关同样管 resume：Hub.create 只挡住了“新建”，注册表/侧车里已有的
+    //   danger-full-access 会话照样能被拉起（审计 A02）。
+    if (this.permission === 'danger-full-access' && !ALLOW_FULL_ACCESS) {
+      throw new Error(
+        `会话 ${this.id} 的权限档是 danger-full-access，而本机未设置 DSH_MCP_ALLOW_FULL_ACCESS=1，拒绝恢复。` +
+          ' 设置该开关后重试，或改用 workspace-write / read-only 新建会话。',
+      );
+    }
     const shared = SHARED_PROCESS;
     let proc;
     if (shared) {
@@ -479,6 +500,17 @@ export class Conversation {
               '  这通常意味着 DSH profile 里写了 permission.defaultPreset，覆盖了启动时传入的权限档。\n' +
               `  请检查 ${join(DSH_HOME, 'profiles', process.env.DSH_MCP_PROFILE ?? 'dsh-mcp', 'cordis.patch.yml')}，` +
               '删掉 permission.defaultPreset 后重试。',
+          );
+        }
+        // ★ 预设名只是标签，真正生效的是沙箱：profile 可以把名为 read-only 的预设定义成
+        //   danger-full-access 沙箱（审计 C01）。DSH 记录的 sandbox 值与档位同名，
+        //   有记录就必须一致；read-only 还必须真的有沙箱记录（fail closed）。
+        const sandboxes = [meta.permissions.sandbox, meta.sandboxMode].filter((v) => v !== undefined && v !== null);
+        if (sandboxes.some((s) => s !== this.permission) || (this.permission === 'read-only' && !sandboxes.length)) {
+          throw new Error(
+            `会话权限预设为 ${recorded}，但实际沙箱记录为 ${JSON.stringify(sandboxes)}，与请求的 ${this.permission} 不一致。\n` +
+              '  这通常意味着 DSH profile 改写了该预设的 sandbox。请检查 ' +
+              `${join(DSH_HOME, 'profiles', process.env.DSH_MCP_PROFILE ?? 'dsh-mcp', 'cordis.patch.yml')} 里的 permission.presets。`,
           );
         }
         this.permissionVerified = true;
@@ -832,7 +864,8 @@ export class Conversation {
    *   - 只写哨兵救不了 `dsh_interject`——它等的是 idleWaiters，不是文件；
    *   - 只唤醒不写哨兵，调用方事后 `dsh_get(run_id)` 就永远找不到这次失败。
    */
-  #settleFailedRun(runRecord, error) {
+  #settleFailedRun(runRecord, error, { status = 'error' } = {}) {
+    const stopReason = status === 'cancelled' ? 'cancelled' : 'error';
     const waiters = this.idleWaiters;
     this.idleWaiters = [];
     for (const w of waiters) {
@@ -843,20 +876,20 @@ export class Conversation {
     this.#scheduleDrain();
     if (this.currentRun === runRecord) this.currentRun = null;
     runRecord.ended_at = now();
-    runRecord.status = 'error';
+    runRecord.status = stopReason;
     runRecord.error = error?.message ?? String(error);
     runRecord.elapsed_ms = 0;
     if (this.#liveUsage?.runId === runRecord.run_id) this.#liveUsage = null;
     emitLive(
       this.id,
       'run.end',
-      { run: runRecord.run_id, turn: this.currentTurn, status: 'error', stop_reason: 'error' },
+      { run: runRecord.run_id, turn: this.currentTurn, status: stopReason, stop_reason: stopReason },
       { error: livePreview(runRecord.error, 300) },
     );
     runRecord.result = {
       conversation_id: this.id,
       run_id: runRecord.run_id,
-      stop_reason: 'error',
+      stop_reason: stopReason,
       error: runRecord.error,
       answer: '',
       thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
@@ -945,13 +978,23 @@ export class Conversation {
     //   ★ 同理，git 快照的 await 也必须放在 busy 置位**之后**（见下面的 Promise.all）。
     this.busy = true;
     this.lastUsedAt = now();
-    const beforePromise = gitStatus(this.cwd);
+    // 冷启动窗口（拉进程 + resume）里 dsh_interrupt 只能记一笔，session/prompt 发出前再看。
+    this.#undispatched = runRecord;
+    this.#cancelBeforeDispatch = false;
+    let cancelledBeforeDispatch = false;
     try {
+      // ★ forget 是终态：本实例的排队任务、或另一个实例写了墓碑之后，这里都不能再派活。
+      //   拉进程前后各看一次（冷启动期间墓碑可能刚落地）（审计 B04 / C03）。
+      this.#assertNotForgotten();
+      const beforePromise = gitStatus(this.cwd);
       // 快照与拉起进程并行：快照只是读盘，不改变生命周期，早取晚取语义一致。
       const [beforeSnap, liveProc] = await Promise.all([beforePromise, this.ensureAlive()]);
       before = beforeSnap;
       proc = liveProc;
+      this.#assertNotForgotten();
+      cancelledBeforeDispatch = this.#cancelBeforeDispatch;
     } catch (e) {
+      this.#undispatched = null;
       // 起不来（撞写锁 / 会话损坏）就**必须放开 busy**，否则这个会话被永久占住；
       // 同时别留一条永远 "running" 的幽灵记录。
       // ★ 与 finalize 对齐：失败也必须给等待者一个终态——唤醒插话队列 + 落 error 哨兵。
@@ -962,6 +1005,12 @@ export class Conversation {
       e.status = 'error';
       e.sentinelFile = runRecord.result?.sentinel_file ?? null;
       throw e;
+    }
+    this.#undispatched = null;
+    if (cancelledBeforeDispatch) {
+      // ★ 冷启动期间已被 dsh_interrupt 中断：不再发 session/prompt，回合以 cancelled 收尾（审计 C02）。
+      this.busy = false;
+      return this.#settleFailedRun(runRecord, new Error('回合在发出前被中断（dsh_interrupt）'), { status: 'cancelled' });
     }
     this.currentTurn += 1;
     this.turnStartedAt = now();
@@ -1227,6 +1276,13 @@ export class Conversation {
 
   /** 中断当前回合（ACP 原生，走的就是用户手动停止那条路径）。 */
   async interrupt() {
+    // ★ 冷启动窗口：回合已占住会话但 session/prompt 还没发。此时发 session/cancel 没有可取消的东西，
+    //   回合随后照常派发（审计 C02）。改为记一笔，由 prompt() 在发出前放弃这个回合。
+    if (this.busy && this.#undispatched) {
+      this.#cancelBeforeDispatch = true;
+      this.#live('interrupt', { busy: true, before_dispatch: true });
+      return { interrupted: true, before_dispatch: true };
+    }
     if (!this.proc?.alive) return { interrupted: false, reason: 'DSH 进程未运行' };
     this.proc.notify('session/cancel', { sessionId: this.id });
     this.#live('interrupt', { busy: this.busy });
@@ -1338,10 +1394,13 @@ export class Conversation {
     this.runs.push(run);
     if (clientRunId) this.clientRuns.set(clientRunId, run.run_id);
     if (this.runs.length > MAX_RUNS) {
-      const evicted = this.runs.shift();
+      // ★ 只淘汰已结束的 run：还在跑/在排队的 run 一旦被挤掉，它的 client_run_id 也随之失效，
+      //   调用方用同一幂等键重试就会再派一次（审计 C04）。未结束的 run 数量本身有上限（1 个在跑 + 队列）。
+      const i = this.runs.findIndex((r) => r.status !== 'running' && r.status !== 'queued');
+      const [evicted] = i >= 0 ? this.runs.splice(i, 1) : [];
       // 幂等键必须跟着 run 记录一起淘汰，否则会指向一个已经查不到的 run。
       for (const [k, v] of this.clientRuns) {
-        if (v === evicted.run_id) this.clientRuns.delete(k);
+        if (v === evicted?.run_id) this.clientRuns.delete(k);
       }
     }
     // 防御性清残留：正常情况下该 run_id 从未用过，但确保等待方不会被历史哨兵误触发。
@@ -1660,11 +1719,19 @@ export class Conversation {
     }
     const t0 = now();
     if (mode === 'interject') {
-      this.proc?.notify('session/cancel', { sessionId: this.id });
+      // 冷启动窗口里 session/cancel 没东西可取消（同 interrupt，审计 C02）。
+      if (this.#undispatched) this.#cancelBeforeDispatch = true;
+      else this.proc?.notify('session/cancel', { sessionId: this.id });
     }
     this.#live('interject', { mode, pending_run: run.run_id }, { text_preview: livePreview(message, 200) });
     // 排队等待的时长跟随调用方的 timeoutMs（0 = 一直等），不再固定 30 分钟。
-    const idle = await this.waitIdle(timeoutMs);
+    // ★ 被唤醒时会话可能已被同时等待的另一条插话/队列抢先占住：继续等，而不是撞上
+    //   “正在跑另一个回合”失败、留下一条永远 queued 且没有哨兵的 run（审计 C04）。
+    let idle = await this.waitIdle(timeoutMs);
+    while (idle && this.busy) {
+      const left = timeoutMs > 0 ? timeoutMs - (now() - t0) : 0;
+      idle = timeoutMs > 0 && left <= 0 ? false : await this.waitIdle(left);
+    }
     const waited = now() - t0;
     if (!idle) {
       const err = new Error('等待当前回合结束超时，插话未发送');
@@ -1705,6 +1772,21 @@ export class Conversation {
 
   /** 关闭会话（进程收尾；会话本体留在磁盘上，可再次 resume）。 */
   async close({ forget = false } = {}) {
+    if (forget) {
+      // ★ 另一个活着的实例正握着写锁、还在用这个会话：这边写墓碑并报“已 forget”，
+      //   那边照样继续跑（审计 C03）。先让持有者释放。
+      const holder = this.proc?.alive ? null : classifyHolder(this.id, { knownChildPid: this.lastChildPid });
+      if (holder?.kind === 'live-mcp') {
+        return {
+          closed: false,
+          forgotten: false,
+          error: `另一个活着的 dsh-any-agent 实例（PID ${holder.marker?.mcp_pid ?? '?'}）正持有该会话的写锁：先在那边 dsh_release，再 forget。`,
+        };
+      }
+      // ★ forget 之前先撤掉排队任务（各自落 cancelled 哨兵）：否则停进程时在跑的回合一结束，
+      //   队首就会被 drain 发出去，把已经 forget 的会话又 resume 回来（审计 B04）。
+      for (const item of [...this.queue]) this.queueRemove(item.run.run_id);
+    }
     if (this.recycling) await this.recycling;
     const proc = this.proc;
     let stopped = true;
@@ -1754,7 +1836,12 @@ export class Conversation {
     if (forget) {
       // 先写墓碑再从注册表移除：之后按 id 查询会明确报"已 forget"，
       // 而不是从 DSH 会话存储把它重建回来（否则 forget 形同虚设）。
-      writeTombstone(this.id);
+      // ★ 墓碑写不进去就不能报“已 forget”，也不从注册表移除（审计 B04）。
+      const tombErr = writeTombstone(this.id);
+      if (tombErr) {
+        this.#hub.save();
+        return { closed: stopped, forgotten: false, error: `forget 墓碑写入失败（会话未移除，可修复后重试）：${tombErr}` };
+      }
       this.#hub.remove(this.id);
       // forget 是"永久移除"：事件流也一并删掉，查看器里不再出现这个会话。
       removeLive(this.id);

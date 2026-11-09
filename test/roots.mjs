@@ -219,5 +219,86 @@ console.log('\n[3] 客户端不支持 roots 且没传 cwd：报错要能照着�
   }
 }
 
+// ── 4. 并发与乱序（审计 B03） ───────────────────────────────────────
+
+/**
+ * 起服务并接管它发来的 roots/list：`answer(id, n)` 决定第 n 次请求（从 0 数）怎么回。
+ * 回答用一个不存在的目录，dsh_start 的报错「工作区不存在或不是目录: <路径>」就能看出它选了哪个。
+ */
+function startRootsServer(answer) {
+  const s = startServer();
+  let n = 0;
+  let buf = '';
+  s.child.stdout.on('data', (d) => {
+    buf += d.toString('utf8');
+    let i;
+    while ((i = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line) continue;
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
+      if (msg.method === 'roots/list' && typeof msg.id === 'string') answer(msg.id, n++);
+    }
+  });
+  const reply = (id, dir) =>
+    s.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, result: { roots: [{ uri: pathToFileURL(dir).href }] } }) + '\n');
+  return { ...s, reply, asked: () => n };
+}
+const startText = (r) => r.result?.content?.[0]?.text ?? '';
+const ROOTS_INIT = { protocolVersion: '2025-06-18', capabilities: { roots: { listChanged: true } }, clientInfo: { name: 'roots-race', version: '1' } };
+
+console.log('\n[4a] ★ 两次并发 dsh_start 都不传 cwd：第二次也要等到 roots 回包');
+{
+  const dirC = join(STATE_ROOT, 'no-such-project-C');
+  let s;
+  s = startRootsServer((id) => setTimeout(() => s.reply(id, dirC), 300));
+  try {
+    await s.request('initialize', ROOTS_INIT);
+    const [a, b] = await Promise.all([
+      s.request('tools/call', { name: 'dsh_start', arguments: {} }, 20000),
+      s.request('tools/call', { name: 'dsh_start', arguments: {} }, 20000),
+    ]);
+    check('第一次用上了 root', startText(a).includes(dirC), startText(a).slice(0, 160));
+    check('★ 第二次没有报「没有可用的工作目录」，同样用上了 root', startText(b).includes(dirC), startText(b).slice(0, 160));
+    check('只问了一次 roots', s.asked() === 1, String(s.asked()));
+  } catch (e) {
+    check('并发场景不抛协议级异常', false, e.message);
+  } finally {
+    s.close();
+  }
+}
+
+console.log('\n[4b] ★ 切换项目后，旧 roots 请求的迟到回包不能覆盖新目录');
+{
+  const dirA = join(STATE_ROOT, 'no-such-project-A');
+  const dirB = join(STATE_ROOT, 'no-such-project-B');
+  let s;
+  let firstId = null;
+  s = startRootsServer((id, n) => {
+    if (n === 0) firstId = id; // 先压着第一次，不回
+    else s.reply(id, dirB); // 换项目后的新请求立刻回 B
+  });
+  try {
+    await s.request('initialize', ROOTS_INIT);
+    const pending = s.request('tools/call', { name: 'dsh_start', arguments: {} }, 20000);
+    const until = async (cond) => { for (let i = 0; i < 100 && !cond(); i++) await new Promise((r) => setTimeout(r, 20)); };
+    await until(() => firstId !== null);
+    s.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/roots/list_changed' }) + '\n');
+    await until(() => s.asked() >= 2);
+    await new Promise((r) => setTimeout(r, 100)); // 让新请求的回包先到
+    s.reply(firstId, dirA); // 旧请求的回包迟到
+    const first = await pending;
+    const second = await s.request('tools/call', { name: 'dsh_start', arguments: {} }, 20000);
+    check('★ 换项目之后再 dsh_start 用的是新目录 B', startText(second).includes(dirB), startText(second).slice(0, 160));
+    check('★ 旧请求的迟到回包没有生效', !startText(second).includes(dirA));
+    check('切换前就在等的那次也拿到新目录 B', startText(first).includes(dirB), startText(first).slice(0, 160));
+  } catch (e) {
+    check('乱序场景不抛协议级异常', false, e.message);
+  } finally {
+    s.close();
+  }
+}
+
 console.log('\n===== roots: passed ' + passed + ', failed ' + failed + ' =====');
 process.exit(failed ? 1 : 0);

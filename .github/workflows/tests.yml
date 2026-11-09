@@ -12,30 +12,30 @@ name: tests
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          37 checks
 #     failure-terminal  terminal state on failure     10 checks
-#     shared-host       shared process host           25 checks
-#     resume-retry      cold-resume timeout retry     63 checks (fake ACP server)
-#     dispatch-tools    dispatch surface              59 checks (55 off Windows)
+#     shared-host       shared process host           34 checks
+#     resume-retry      cold-resume timeout retry     65 checks (fake ACP server)
+#     dispatch-tools    dispatch surface              69 checks (64 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
 #     live-events       live event stream, write side  43 checks
-#     live-view         watch / dashboard viewers      66 checks
+#     live-view         watch / dashboard viewers      69 checks
 #     release-notes     Release notes from CHANGELOG   12 checks
 #     review            caller review tickets        70 checks
-#     forget-tombstone  forget is terminal            10 checks
-#     bootstrap-profile zero-dependency bootstrap     24 checks
+#     forget-tombstone  forget is terminal            25 checks
+#     bootstrap-profile zero-dependency bootstrap     27 checks
 #     workspace-safety  data-loss boundaries          23 checks
-#     residue-purge     test residue cleanup, sandboxed 149 checks
-#     permission-adopt  no silent privilege escalation 17 checks
+#     residue-purge     test residue cleanup, sandboxed 158 checks
+#     permission-adopt  no silent privilege escalation 22 checks
 #     state-safety      state/sentinel/lock storage   26 checks
-#     workspace-snapshot workspace_changed full fingerprint  21 checks
+#     workspace-snapshot workspace_changed full fingerprint  27 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     test-counts       report parser + docs sync     92 checks
-#     roots             cwd from MCP roots            12 checks
-#     workspace-titles  home/root cwd guard, title_hint 18 checks (16 off Windows)
+#     roots             cwd from MCP roots            18 checks
+#     workspace-titles  home/root cwd guard, title_hint 19 checks (17 off Windows)
 #     setup             client config writer          45 checks
-#     removal-scope     --remove only touches its own   24 checks
-#     config-safety     in-place edits, format        406 checks
+#     removal-scope     --remove only touches its own   28 checks
+#     config-safety     in-place edits, format        412 checks
 #     real-configs      real config round-trip        skips without client fixtures
 #     package-check     publishability                15 checks
 #     lint              static checks (npm run lint)  syntax, imports, exports, unused

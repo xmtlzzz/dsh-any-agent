@@ -16,6 +16,7 @@
  */
 
 import './live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
+import { existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, parse, sep } from 'node:path';
 import { dirname } from 'node:path';
@@ -73,6 +74,21 @@ check('带尾部分隔符也认得出', Boolean(homeWorkspaceProblem(home + sep,
     homeWorkspaceProblem(fsRoot, 'read-only') === null);
   check('根目录文案说明了沙箱后果',
     /整个磁盘|沙箱根/.test(homeWorkspaceProblem(fsRoot, 'workspace-write') || ''));
+  // ★ 跨盘 junction：C: 上指向 `D:\` 的目录，按传入路径的盘符比较会放行（审计 A04）。
+  //   Windows 有第二个盘时指向它；否则（或非 Windows）指向本盘根目录 —— 检查数在各环境一致。
+  const otherRoot = process.platform === 'win32'
+    ? 'DEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((d) => `${d}:\\`).find((r) => r.toLowerCase() !== fsRoot.toLowerCase() && existsSync(r))
+    : null;
+  const target = otherRoot ?? fsRoot;
+  const jdir = mkdtempSync(join(temp, 'dsh-any-agent-junction-'));
+  const link = join(jdir, 'to-root');
+  try {
+    symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+    check(`★ 指向 ${target} 的链接（junction/symlink）同样拒绝`, Boolean(homeWorkspaceProblem(link, 'workspace-write')));
+  } finally {
+    try { unlinkSync(link); } catch {}
+    rmSync(jdir, { recursive: true, force: true });
+  }
 }
 
 {

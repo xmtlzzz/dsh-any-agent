@@ -185,8 +185,8 @@
 ## 四、权限与安全（认真看）
 
 ### 4.1 服务端裸默认是"完全权限"；setup 写入 `workspace-write`
-- **现象**：未设置 `DSH_MCP_PERMISSION` 时，DSH 能碰你账户能碰的任何东西。
-- **原因**：服务端裸默认 `danger-full-access` —— 这是为了零摩擦，因为**ACP 的审批通道在无人值守时很容易变成"静默失败"**。`dsh-any-agent-setup --yes` 默认会把 `workspace-write` 写进客户端配置（除非显式传 `--permission`）。
+- **现象**：一旦用上 `danger-full-access`，DSH 能碰你账户能碰的任何东西。
+- **原因**：0.5.0 起服务端裸默认已是 `workspace-write`（沙箱把写入限制在工作区内），`dsh-any-agent-setup --yes` 默认写入的也是它；`danger-full-access` 需要机器侧设置 `DSH_MCP_ALLOW_FULL_ACCESS=1` 才能新建或恢复。但 `auto-allow` 下 `workspace-write` 仍是软边界（DSH 申请的沙箱提权会被放行）。
 - **对策**：分析不信任的东西（恶意软件、来路不明的 dump、陌生仓库）时，用 `permission: "read-only"`（沙箱只读 + 审批一律拒绝）。
 
 ### 4.2 公开审批参数是 `on_approval`；DSH 内部 `approval: never` 对应 `auto-deny`
