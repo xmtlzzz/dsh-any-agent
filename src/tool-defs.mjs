@@ -106,7 +106,7 @@ export const TOOL_DEFS = [
       '文件出现后读它即得结果，或用 dsh_get(conversation_id, run_id) 验收，dsh_read 可中途看输出。' +
       '默认隐藏思考内容（只返回正文 + 思考统计）。' +
       '结果与后台收据都会带 `review` 审核单（默认 advisory）：调用方核验后用 dsh_review 提交裁决。' +
-      '若会话正在忙，本工具会报错——改用 dsh_interject 插话、dsh_send(queue=true) 入队，或用 dsh_interrupt 先打断。',
+      '若会话正在忙，本工具会报错——改用 dsh_send(queue=true) 入队（立即返回）、dsh_interject 打断并改口，或 dsh_interrupt 只停下。',
     inputSchema: S(
       {
         conversation_id: CONV_ID,
@@ -136,7 +136,8 @@ export const TOOL_DEFS = [
           type: 'boolean',
           description:
             '会话正忙时是否入队（默认 false = 直接报错）。true 时立即返回 run_id + queue_position，' +
-            '本轮结束后自动执行；哨兵只在真正结束时写，入队时不写。队列仅内存、重启丢失，用 dsh_queue 管理。',
+            '本轮结束后自动执行；哨兵只在真正结束时写，入队时不写。队列仅内存、重启丢失，用 dsh_queue 管理。' +
+            "（dsh_interject(mode='queue') 也排在本轮之后，但它会阻塞到新回合跑完，且不进这个队列。）",
         },
         client_run_id: {
           type: 'string',
@@ -226,7 +227,7 @@ export const TOOL_DEFS = [
   {
     name: 'dsh_review',
     description:
-      '提交对一次回合结果的**调用方审核裁决**。dsh_send / dsh_interject / 哨兵里的 result 会带 `review` 审核单' +
+      '提交对一次**已结束**回合结果的**调用方审核裁决**（回合进行中放行/拒绝 DSH 的权限请求用 dsh_approval_decide）。dsh_send / dsh_interject / 哨兵里的 result 会带 `review` 审核单' +
       '（核验清单 + 证据摘要 + review_id）。在把结果当作完成之前，调用方应自己核验（读改动的文件、看 git diff、跑测试等），' +
       '再调用本工具记录 pass / partial / fail。' +
       '**默认是建议式审核**：不阻塞后续 dsh_send，也不会自动把审核意见回灌给 DSH；需要修就再 dsh_send。' +
@@ -253,9 +254,10 @@ export const TOOL_DEFS = [
   {
     name: 'dsh_interject',
     description:
-      '插话：会话正在跑某个回合时往里补一句话。两种模式——' +
-      'interject（默认）打断当前回合并立刻改口；queue 不打断，等本轮自然结束后紧接着说。' +
-      '会话空闲时按 **wait=true 的普通回合**执行（会阻塞到回合结束并返回完整结果，不是收据）。' +
+      '插话：会话正在跑某个回合时往里补一句话，**本工具会阻塞到新回合跑完**（timeout_ms 到期才转后台）。两种模式——' +
+      'interject（默认）打断当前回合并立刻改口；queue 不打断，等本轮自然结束后紧接着说（不进 dsh_queue 的队列）。' +
+      '只想停下、不说新话用 dsh_interrupt；想排到本轮之后又不阻塞用 dsh_send(queue=true)。' +
+      '会话空闲时按 **wait=true 的普通回合**执行（返回完整结果，不是收据）。' +
       '说明：ACP 明确拒绝并发 prompt，所以做不到"让模型在同一个回合里即时改向"；' +
       'interject 是它的实用等价物（取消 + 立刻开新回合，历史完整保留）。',
     inputSchema: S(
@@ -290,8 +292,9 @@ export const TOOL_DEFS = [
   {
     name: 'dsh_interrupt',
     description:
-      '中断会话当前正在进行的回合（ACP 原生 session/cancel，走的就是用户手动按停止那条路径）。' +
-      '会话本身保持完好，可以立刻继续派新任务。',
+      '只停下、不说新话：中断会话当前正在进行的回合（ACP 原生 session/cancel，走的就是用户手动按停止那条路径）。' +
+      '被中断的回合记为 cancelled，已产出的正文与工具调用留在它的结果里（dsh_get / 哨兵），已改动的文件不会回滚。' +
+      '会话本身保持完好，可以立刻继续派新任务。想停下并立刻改口用 dsh_interject；取消还没开始的排队任务用 dsh_queue(action=remove)。',
     inputSchema: S({ conversation_id: CONV_ID }, ['conversation_id']),
   },
   {
@@ -344,12 +347,12 @@ export const TOOL_DEFS = [
   {
     name: 'dsh_approval_decide',
     description:
-      '裁决一个待决审批（仅当会话的 on_approval=ask 时会出现）。用于把 DSH 的越权/提权请求交给调用方决定，' +
-      '既不一律放行也不一律拒绝。',
+      '回合进行中裁决 DSH 正在等的一个权限请求（仅当会话的 on_approval=ask 时会出现），放行或拒绝后回合继续。' +
+      '用于把 DSH 的越权/提权请求交给调用方决定，既不一律放行也不一律拒绝。给已结束回合的结果打分用 dsh_review。',
     inputSchema: S(
       {
         conversation_id: CONV_ID,
-        approval_id: { type: 'string', description: '来自 dsh_get 的 pending_approvals。' },
+        approval_id: { type: 'string', description: '来自 dsh_inbox 或 dsh_get 的 pending_approvals。' },
         decision: { type: 'string', enum: ['allow', 'deny'], description: '放行或拒绝。' },
       },
       ['conversation_id', 'approval_id', 'decision'],
@@ -357,7 +360,11 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_status',
-    description: '轻量状态查询：会话是否活着、是否在忙、待决审批数、最近一次回合的结果。',
+    description:
+      '单个会话的轻量快照：读本服务内存里的实时状态，不拉起 DSH 进程。返回 state（running/idle/detached）、' +
+      '在跑时的当前工具与已产出字数、最近一次回合的 run_id/状态/审核状态、待决审批、队列长度，' +
+      '以及写锁持有者 lock_holder（撞锁时据此决定用 dsh_takeover 还是让对方 dsh_release）。' +
+      '要回合的完整结果用 dsh_get，看正在跑的输出用 dsh_read，看所有会话用 dsh_list。',
     inputSchema: S({ conversation_id: CONV_ID }, ['conversation_id']),
   },
   {
@@ -377,7 +384,7 @@ export const TOOL_DEFS = [
   {
     name: 'dsh_queue',
     description:
-      '查看/修改会话的待执行队列（由 dsh_send(queue=true) 产生；**仅内存**，重启丢失）。' +
+      '查看/修改会话的待执行队列（只管理已入队的任务，入队用 dsh_send(queue=true)；**仅内存**，重启丢失）。' +
       'action=list 列出；remove 取消并写 cancelled 哨兵；update 改写排队文本；promote 提到队首。',
     inputSchema: S(
       {

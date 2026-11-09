@@ -124,12 +124,12 @@ dsh-any-agent-setup --yes
 | `dsh_read` | **游标式增量读**——看正在跑的会话此刻吐出了什么。cursor 是**修订号**：文本被追加过的条目会再次返回，按 `seq` 替换全文（不要重复累加） |
 | `dsh_get` | 会话详情；带 `run_id` 时返回**那一次派活的完整结果 + 审核单**（"回头验收"的入口）。run 记录只在内存（最近 20 条），服务重启后请读哨兵文件 |
 | `dsh_review` | **调用方审核**。对已完成的 run 提交 `pass` / `partial` / `fail`，可带理由与 findings。裁决写入 `<状态目录>/reviews/<conversation_id>/<run_id>.review.json`，并回写内存 run 与哨兵。默认 advisory：**不阻塞**下一次 `dsh_send` |
-| `dsh_interject` | 会话在忙时插话：`interject` 打断并改口，`queue` 等本轮跑完接着说。**这一轮同样会写哨兵**，返回里给 `sentinel_file`。会话空闲时等价于 `wait=true`，**会阻塞到回合结束** |
+| `dsh_interject` | 会话在忙时插话：`interject` 打断并改口，`queue` 等本轮跑完接着说。**这一轮同样会写哨兵**，返回里给 `sentinel_file`。两种模式以及会话空闲时都会**阻塞到新回合跑完**；想排队又不阻塞用 `dsh_send(queue=true)` |
 | `dsh_takeover` | **抢占写锁**。锁被别的 DSH 进程占着时的唯一出路（DSH 没有夺锁 API，抢 = 杀掉持有者）。先判定持有者：本服务残留的孤儿 → 自动抢；另一个活着的实例 → 需 `force`；**GUI/未知 → 绝不杀**，只报告 |
-| `dsh_interrupt` | 打断当前回合（会话不会损坏） |
+| `dsh_interrupt` | 只停下、不说新话（会话不会损坏）；停下并改口用 `dsh_interject` |
 | `dsh_release` | 交还会话（释放写锁，之后可在你自己的 DSH GUI 里打开）。仍可 resume；`forget=true` 会写墓碑，此后按 id 查询一律拒绝，直到删除 `$DSH_HOME/.dsh-any-agent-forgotten/<id>.json` |
 | `dsh_approval_decide` | 裁决待决审批（仅当 `on_approval=ask`） |
-| `dsh_status` | 轻量状态查询（单个会话） |
+| `dsh_status` | 轻量状态查询（单个会话），含写锁持有者 `lock_holder` |
 | `dsh_inbox` | **跨会话待决审批收件箱**：一次列出所有会话的审批、原因、输入与等待时长；裁决仍用 `dsh_approval_decide` |
 | `dsh_queue` | 查看/修改会话队列：`list` / `remove` / `update` / `promote`（队列由 `dsh_send(queue=true)` 产生，仅内存） |
 | `dsh_doctor` | 只读体检：DSH 版本、profile、状态/目录可写、孤儿锁、会话与 RSS、生效配置 |

@@ -42,7 +42,7 @@ export const INSTRUCTIONS = `本服务把 DeepSeek Harness (DSH) 当作可长期
 
 【铁律】
 - 给目标，不要给命令；DSH 内部工具名（read/pwsh…）不是本服务的工具，本服务只有 dsh_*。
-- 会话在忙时不要再 dsh_send：改口用 dsh_interject，排到本轮之后用 dsh_interject(mode='queue') 或 dsh_send(queue=true)，停下用 dsh_interrupt。
+- 会话在忙时不要再 dsh_send：排到本轮之后用 dsh_send(queue=true)（立即返回）；打断并改口用 dsh_interject（阻塞到新回合跑完）；只停下用 dsh_interrupt。
 - 结果当作"完成"之前，先用你自己的工具独立核验（读文件、git diff、跑测试），再 dsh_review 提交 pass/partial/fail（fail/partial 要写理由）。
 - 本服务驱动的会话**不要在 DSH GUI 里打开**：点开即被 GUI 拿走写锁且不释放。要在 GUI 看，先 dsh_release。
 
