@@ -33,11 +33,11 @@ git push origin vx.y.z
 
 **Everything after the tag push is done by `.github/workflows/release.yml` — no local `npm publish`:**
 
-1. **GitHub Release**: notes are this version's CHANGELOG section (`scripts/release-notes.mjs`), followed by the install command and a compare link. If the Release already exists only its notes are updated, so re-running is safe.
-2. **npm publish**: checks the tag matches `package.json`, runs `check:release` and `package-check`, then publishes with **npm Trusted Publishing** (GitHub OIDC) and provenance — no `NPM_TOKEN`, and the npm page shows the package was built by this repository's GitHub Actions. Skipped if the version is already on npm.
+1. **npm publish**: checks the tag matches `package.json`, runs `check:release` and `package-check`, then publishes with **npm Trusted Publishing** (GitHub OIDC) and provenance — no `NPM_TOKEN`, and the npm page shows the package was built by this repository's GitHub Actions. Skipped if the version is already on npm. The job finishes only once npm actually serves the version.
+2. **GitHub Release**: created only after the npm job. Notes are this version's CHANGELOG section (`scripts/release-notes.mjs`), followed by the install command and a compare link. If the Release already exists only its notes are updated, so re-running is safe. It comes after npm because directories such as Glama rebuild on a new GitHub Release with `npm install -g dsh-any-agent`; a Release that arrives first gets the previous version (on v0.6.4 the Release was public about 2.7 minutes before npm served it).
 3. **MCP Registry**: after npm, the workflow logs in to the official MCP Registry with its own GitHub OIDC token (the `io.github.xmtlzzz/*` namespace) and publishes `server.json`. The registry checks ownership through the `mcpName` field inside the npm package, which is why it runs after npm. `mcp-publisher` is pinned and its signature is verified with cosign before it runs.
 
-**One-time setup**: npmjs.com → package `dsh-any-agent` → Settings → Trusted Publisher → GitHub Actions, repository `xmtlzzz/dsh-any-agent`, workflow file `release.yml`. Until then the npm job fails with an auth error (the GitHub Release is unaffected); publish locally with `npm publish` as a fallback, and a later re-run simply skips npm.
+**One-time setup**: npmjs.com → package `dsh-any-agent` → Settings → Trusted Publisher → GitHub Actions, repository `xmtlzzz/dsh-any-agent`, workflow file `release.yml`. Until then the npm job fails with an auth error and no GitHub Release is created; publish locally with `npm publish` as a fallback, then re-run: the npm job skips and the Release is created.
 
 **Refreshing an old Release's notes**: Actions → release → Run workflow with an existing tag (e.g. `v0.6.2`). The npm job skips because the version exists.
 

@@ -33,11 +33,11 @@ git push origin vx.y.z
 
 **推送 tag 之后的事都由 `.github/workflows/release.yml` 完成，不需要再在本机 `npm publish`：**
 
-1. **GitHub Release**：说明取自 CHANGELOG 里这个版本的那一节（`scripts/release-notes.mjs`），末尾附安装命令和 compare 链接。Release 已存在时只更新说明，所以重跑是安全的。
-2. **npm 发布**：先核对 tag 与 `package.json` 版本一致，再跑 `check:release` 与 `package-check`，然后用 **npm Trusted Publishing**（GitHub OIDC）发布并附带 provenance —— 不需要 `NPM_TOKEN`，npm 页面上会显示"由这个仓库的 GitHub Actions 构建"。这个版本已经在 npm 上就跳过。
+1. **npm 发布**：先核对 tag 与 `package.json` 版本一致，再跑 `check:release` 与 `package-check`，然后用 **npm Trusted Publishing**（GitHub OIDC）发布并附带 provenance —— 不需要 `NPM_TOKEN`，npm 页面上会显示"由这个仓库的 GitHub Actions 构建"。这个版本已经在 npm 上就跳过。发布后一直等到 npm 真能查到这个版本，这一步才算完成。
+2. **GitHub Release**：npm 那一步完成后才创建。说明取自 CHANGELOG 里这个版本的那一节（`scripts/release-notes.mjs`），末尾附安装命令和 compare 链接。Release 已存在时只更新说明，所以重跑是安全的。之所以排在 npm 之后：Glama 等目录在新的 GitHub Release 出现时会重新构建并 `npm install -g dsh-any-agent`，Release 先出来就会装到上一个版本（v0.6.4 时 Release 比 npm 可用早了约 2.7 分钟）。
 3. **MCP Registry**：npm 发布之后，用工作流自己的 GitHub OIDC 登录官方 MCP Registry（`io.github.xmtlzzz/*` 命名空间），把 `server.json` 登记上去。Registry 通过 npm 包里的 `mcpName` 字段确认归属，所以必须在 npm 之后。`mcp-publisher` 版本固定，并用 cosign 校验签名后才执行。
 
-**一次性配置（只需做一次）**：npmjs.com → 包 `dsh-any-agent` → Settings → Trusted Publisher → GitHub Actions，填仓库 `xmtlzzz/dsh-any-agent`、工作流文件 `release.yml`。没配之前，npm 那一步会报认证错误（GitHub Release 不受影响）；这时可以在本机手动 `npm publish` 兜底，之后在 Actions 里重跑也只会跳过 npm。
+**一次性配置（只需做一次）**：npmjs.com → 包 `dsh-any-agent` → Settings → Trusted Publisher → GitHub Actions，填仓库 `xmtlzzz/dsh-any-agent`、工作流文件 `release.yml`。没配之前，npm 那一步会报认证错误，GitHub Release 也不会创建；这时可以在本机手动 `npm publish` 兜底，再在 Actions 里重跑：npm 那一步会跳过，GitHub Release 照常创建。
 
 **重发某个旧版本的 Release 说明**：Actions → release → Run workflow，填已有的 tag（如 `v0.6.2`）。npm 那一步会因为版本已存在而跳过。
 

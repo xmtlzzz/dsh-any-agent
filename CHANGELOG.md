@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The GitHub Release is created only after npm serves the new version.** The
+  release workflow ran both jobs at once, so the Release went public about 2.7
+  minutes before npm had the package; anything that rebuilds on a new Release
+  (Glama's auto-release runs `npm install -g dsh-any-agent`) could install the
+  previous version under the new tag. The npm job now waits until the version is
+  visible, and both the Release and the MCP Registry job run after it.
+
 ## [0.6.4] — 2026-11-09
 
 A security and reliability release: every finding from an external audit of

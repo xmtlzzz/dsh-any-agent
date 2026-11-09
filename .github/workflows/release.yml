@@ -1,16 +1,22 @@
 name: release
 
 # A pushed version tag (vX.Y.Z) turns into:
-#   1. a GitHub Release whose notes are that version's CHANGELOG section
+#   1. an npm publish from CI with provenance, via npm Trusted Publishing (OIDC);
+#      the job ends only once npm actually serves the version;
+#   2. then a GitHub Release whose notes are that version's CHANGELOG section
 #      (scripts/release-notes.mjs), not GitHub's one-line "generated notes";
-#   2. an npm publish from CI with provenance, via npm Trusted Publishing (OIDC);
-#   3. a listing in the official MCP Registry (server.json), after npm has the version.
+#   3. and a listing in the official MCP Registry (server.json).
+#
+# The Release waits for npm because whatever rebuilds on a new GitHub Release (Glama's
+# auto-release runs `npm install -g dsh-any-agent`) would otherwise install the previous
+# version: v0.6.4's Release was public ~2.7 min before npm served the package.
 #
 # Trusted Publishing needs a one-time setup on npmjs.com:
 #   package dsh-any-agent → Settings → Trusted Publisher → GitHub Actions,
 #   repository xmtlzzz/dsh-any-agent, workflow file "release.yml".
 # No NPM_TOKEN secret is used. Until that is configured, the npm job fails with an
-# auth error while the GitHub Release job still succeeds; publish manually then.
+# auth error and no GitHub Release is created; publish manually, then re-run (npm is
+# skipped and the Release is created).
 #
 # Both jobs are idempotent: re-running (or workflow_dispatch with an existing tag)
 # refreshes the Release notes and skips npm if that version is already published.
@@ -30,6 +36,7 @@ permissions:
 jobs:
   github-release:
     name: GitHub Release (notes from CHANGELOG)
+    needs: npm-publish
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -141,6 +148,25 @@ jobs:
         if: steps.exists.outputs.published == 'false'
         run: npm publish --provenance --access public
 
+      # npm makes a new version visible asynchronously (PUT 202): right after the publish
+      # a lookup still gets a 404 ("version '…' was not found"). This happened on the
+      # first v0.6.3 run. Both later jobs need npm to serve the version, so wait here,
+      # up to 10 min.
+      - name: Wait for the version on npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ steps.tag.outputs.version }}"
+          for i in $(seq 1 40); do
+            if npm view "dsh-any-agent@$v" version --prefer-online >/dev/null 2>&1; then
+              echo "npm serves dsh-any-agent@$v (after ~$(( (i - 1) * 15 ))s)"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::dsh-any-agent@$v is still not visible on npm after 10 minutes"
+          exit 1
+
   # MCP Registry (registry.modelcontextprotocol.io): register server.json once the
   # version is on npm — the registry validates ownership through the "mcpName" field
   # inside the published npm package. Login uses this workflow's GitHub OIDC token,
@@ -167,24 +193,7 @@ jobs:
         with:
           ref: ${{ steps.tag.outputs.tag }}
 
-      # npm makes a new version visible asynchronously (PUT 202): right after the publish
-      # job the registry's lookup still gets a 404 ("version '…' was not found"). This
-      # happened on the first v0.6.3 run. Wait until npm serves the version, up to 10 min.
-      - name: Wait for the version on npm
-        shell: bash
-        run: |
-          set -euo pipefail
-          v="$(node -p "require('./package.json').version")"
-          for i in $(seq 1 40); do
-            if npm view "dsh-any-agent@$v" version --prefer-online >/dev/null 2>&1; then
-              echo "npm serves dsh-any-agent@$v (after ~$(( (i - 1) * 15 ))s)"
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "::error::dsh-any-agent@$v is still not visible on npm after 10 minutes"
-          exit 1
-
+      # npm-publish (needs) already waited until npm serves the version.
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
 
