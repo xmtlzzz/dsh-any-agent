@@ -120,15 +120,3 @@ test('FAQ section uses expanded 2-column card rows without requiring clicks', ()
     assert.doesNotMatch(faqSection[1], /<details>/, 'FAQ must be expanded by default without details/summary');
   }
 });
-
-test('Every font the stylesheet loads is a self-hosted hashed woff2 in the build output', async () => {
-  const styleName = assets.find((n) => /^style\.[a-f0-9]{10}\.css$/.test(n));
-  const css = await readFile(resolve(dist, 'assets', styleName), 'utf8');
-  const urls = [...css.matchAll(/url\(([^)]+)\)/g)].map((m) => m[1]);
-  assert.ok(urls.length >= 3, 'serif, sans and mono faces are declared');
-  for (const url of urls) {
-    assert.match(url, /^\/assets\/[a-z0-9-]+\.[a-f0-9]{10}\.woff2$/, `font must be hashed and same-origin (font-src 'self'): ${url}`);
-    const font = await readFile(resolve(dist, '.' + url));
-    assert.equal(font.subarray(0, 4).toString('latin1'), 'wOF2', url);
-  }
-});

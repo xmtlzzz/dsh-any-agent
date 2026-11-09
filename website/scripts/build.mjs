@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist'), assets = join(dist, 'assets');
 await mkdir(assets, { recursive: true });
 // Clean only known generated assets, never a computed recursive directory.
-for (const name of await readdir(assets)) if (/^(?:app|demo|release|style)\.[a-f0-9]{10}\.(?:mjs|css)$/.test(name) || /^(?:hero|favicon|promo-poster)\.[a-f0-9]{10}\.(?:jpg|svg)$/.test(name) || /^promo\.[a-f0-9]{10}\.mp4$/.test(name) || /^[a-z0-9-]+\.[a-f0-9]{10}\.woff2$/.test(name)) await unlink(join(assets, name));
+for (const name of await readdir(assets)) if (/^(?:app|demo|release|style)\.[a-f0-9]{10}\.(?:mjs|css)$/.test(name) || /^(?:hero|favicon|promo-poster)\.[a-f0-9]{10}\.(?:jpg|svg)$/.test(name) || /^promo\.[a-f0-9]{10}\.mp4$/.test(name)) await unlink(join(assets, name));
 const hash = value => createHash('sha256').update(value).digest('hex').slice(0, 10);
 const base64 = value => createHash('sha256').update(value).digest('base64');
 const demo = await readFile(join(root, 'src/demo.mjs'), 'utf8');
@@ -18,16 +18,7 @@ const app = (await readFile(join(root, 'src/app.mjs'), 'utf8'))
   .replace("'./demo.mjs'", `'./${demoName}'`)
   .replace("'./release.mjs'", `'./${releaseName}'`);
 const appName = `app.${hash(app)}.mjs`;
-// Self-hosted fonts (font-src 'self'): hash each file and point the stylesheet's url(./fonts/…) at it.
-const fonts = [];
-for (const file of (await readdir(join(root, 'src/fonts'))).filter(n => n.endsWith('.woff2')).sort()) {
-  const data = await readFile(join(root, 'src/fonts', file));
-  fonts.push({ file, data, name: `${file.slice(0, -6)}.${hash(data)}.woff2` });
-}
-let css = await readFile(join(root, 'src/style.css'), 'utf8');
-for (const font of fonts) css = css.replaceAll(`url(./fonts/${font.file})`, `url(/assets/${font.name})`);
-if (/url\(\.\/fonts\//.test(css)) throw Error('Stylesheet references a font missing from src/fonts');
-const cssName = `style.${hash(css)}.css`;
+const css = await readFile(join(root, 'src/style.css'), 'utf8'), cssName = `style.${hash(css)}.css`;
 const hero = await readFile(join(root, '../docs/brand/header.jpg'));
 const heroName = `hero.${hash(hero)}.jpg`;
 const favicon = await readFile(join(root, 'src/favicon.svg'));
@@ -98,7 +89,6 @@ await Promise.all([
   writeFile(join(assets, faviconName), favicon),
   writeFile(join(assets, promoName), promo),
   writeFile(join(assets, promoPosterName), promoPoster),
-  ...fonts.map(font => writeFile(join(assets, font.name), font.data)),
   writeFile(join(dist, '_headers'), headers),
   // Source policy for the origin. Cloudflare Managed robots / Content Signals
   // may be prepended in production; mirror that policy here so non-Cloudflare
