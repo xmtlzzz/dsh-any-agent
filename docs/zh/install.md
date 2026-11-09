@@ -11,7 +11,7 @@
 
 ### 1. 让 profile 自己就绪（通常无需手工操作）
 
-> 📌 **为什么还叫 `dsh-mcp`？** 项目已改名 **dsh-any-agent**，但 DSH profile 名、`DSH_MCP_*` 环境变量、`# dsh-mcp:managed` 标记行都**故意保留旧名**。它们是已落盘的稳定标识符：改了会让现存 profile、会话和你的客户端配置一起失联。这是刻意的向后兼容，不是漏改。
+> 📌 **为什么还叫 `dsh-mcp`？** 本服务起步于 [Deepseek-DSH-MCP](https://github.com/Moer2831/Deepseek-DSH-MCP)，在那里叫 `dsh-mcp`；现已改名 **dsh-any-agent**，但 DSH profile 名、`DSH_MCP_*` 环境变量、`# dsh-mcp:managed` 标记行都**故意保留旧名**。它们是已落盘的稳定标识符：改了会让现存 profile、会话和你的客户端配置一起失联。这是刻意的向后兼容，不是漏改。
 
 首次拉起 DSH 时，[`src/bootstrap.mjs`](../../src/bootstrap.mjs) 会自动：
 

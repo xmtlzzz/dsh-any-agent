@@ -33,4 +33,4 @@
 | `DSH_MCP_*` 环境变量 | 你的客户端配置 | 所有部署都得同时改 |
 | `# dsh-mcp:managed` 标记行 | 生成的 `cordis.patch.yml` 首行 | bootstrap 不再认它是自己写的，从此不再同步 |
 
-所以**产品名**是 `dsh-any-agent`，**持久标识**故意保留旧名。这是刻意的兼容决定，不是漏改。如果你是全新部署、想要别的 profile 名，直接设 `DSH_MCP_PROFILE` —— 服务会照你给的名字用。
+所以**产品名**是 `dsh-any-agent`，**持久标识**故意保留旧名 —— `dsh-mcp` 是本服务在它的起点项目 [Deepseek-DSH-MCP](https://github.com/Moer2831/Deepseek-DSH-MCP) 里的名字。这是刻意的兼容决定，不是漏改。如果你是全新部署、想要别的 profile 名，直接设 `DSH_MCP_PROFILE` —— 服务会照你给的名字用。

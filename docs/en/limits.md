@@ -30,4 +30,4 @@ When you first start this server it creates a DSH profile under `~/.dsh/profiles
 | `DSH_MCP_*` environment variables | your client configs | every deployment must change at once |
 | `# dsh-mcp:managed` marker line | first line of the generated `cordis.patch.yml` | bootstrap no longer recognizes the file as its own and stops syncing it |
 
-So the **product name** is `dsh-any-agent`, while the **on-disk identifiers** deliberately keep the old name. This is a compatibility decision, not an oversight. For a fresh deployment that wants a different profile name, set `DSH_MCP_PROFILE` — the server will use the name you give it.
+So the **product name** is `dsh-any-agent`, while the **on-disk identifiers** deliberately keep the old name — `dsh-mcp` is what this server was called in [Deepseek-DSH-MCP](https://github.com/Moer2831/Deepseek-DSH-MCP), the project it started from. This is a compatibility decision, not an oversight. For a fresh deployment that wants a different profile name, set `DSH_MCP_PROFILE` — the server will use the name you give it.

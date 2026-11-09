@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Credit the project dsh-any-agent started from.** dsh-any-agent began as
+  [Moer2831/Deepseek-DSH-MCP](https://github.com/Moer2831/Deepseek-DSH-MCP)
+  (MIT), where the server was called `dsh-mcp`. Its copyright notice is now kept
+  in `LICENSE` next to ours, as the MIT license asks, and both READMEs plus the
+  "why is the profile still called `dsh-mcp`" notes say where the code came from.
+
 ## [0.6.6] — 2026-11-09
 
 `dsh-any-agent-setup` edits Codex's `config.toml` more carefully: your comments

@@ -193,6 +193,10 @@ dsh-any-agent dashboard --open
 
 > 完整步骤（命令、验证、回退）见 [团队模式](docs/zh/team.md)。
 
+## 🙏 致谢
+
+dsh-any-agent 基于 [Moer2831/Deepseek-DSH-MCP](https://github.com/Moer2831/Deepseek-DSH-MCP)（MIT）发展而来，本服务在那里叫 `dsh-mcp`。ACP 客户端、会话中枢、写锁处理、哨兵文件、`DESIGN.md` 以及最初的测试套件都来自该项目；客户端安装与恢复、团队模式、实时调用链视图、调用方审核和发布流程是在这里新增的。原项目的版权声明保留在 [LICENSE](LICENSE) 中。
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=xmtlzzz%2Fdsh-any-agent&type=date&legend=top-left">

@@ -199,6 +199,10 @@ for one call with `dsh_send(team=false)`.
 
 > Full steps (commands, verification, rollback) are in [Team mode](docs/en/team.md).
 
+## 🙏 Acknowledgements
+
+dsh-any-agent started from [Moer2831/Deepseek-DSH-MCP](https://github.com/Moer2831/Deepseek-DSH-MCP) (MIT), where this server was called `dsh-mcp`. The ACP client, the session hub, write-lock handling, sentinel files, `DESIGN.md` and the first test suites come from that project; client setup and restore, team mode, the live view, caller review and the release pipeline were added here. The original copyright notice is kept in [LICENSE](LICENSE).
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=xmtlzzz%2Fdsh-any-agent&type=date&legend=top-left">
