@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.6] — 2026-11-09
+
+`dsh-any-agent-setup` edits Codex's `config.toml` more carefully: your comments
+survive, multi-line strings are never cut, and forms it cannot edit safely are
+refused instead of duplicated. The MCP server itself is unchanged.
+
 ### Fixed
 
 - **`dsh-any-agent-setup` no longer deletes your comments in Codex's
@@ -1360,7 +1366,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.2...v0.6.3
