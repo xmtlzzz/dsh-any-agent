@@ -16,7 +16,7 @@
 
 </div>
 
-🧪 0.6.2 本机离线套件全绿 · 👀 新增实时调用链视图（`watch` / `dashboard`，含 token 用量）· 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
+🧪 离线套件在 CI 中全绿（Linux / Windows / macOS）· 👀 新增实时调用链视图（`watch` / `dashboard`，含 token 用量）· 🔌 MCP over stdio · 📦 零依赖 · 📜 MIT
 
 一个 MCP 服务端，把 DeepSeek Harness 当作**长驻的编码 agent** 来驱动。开个会话、扔个目标，它自己写代码、跑脚本、派子代理；你随时能看、能插话、能回头验收。
 

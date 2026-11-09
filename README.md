@@ -16,7 +16,7 @@
 
 </div>
 
-🧪 0.6.2 offline suite green · 👀 new live call-chain view (`watch` / `dashboard`, with token usage) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
+🧪 Offline suite green in CI on Linux, Windows and macOS · 👀 new live call-chain view (`watch` / `dashboard`, with token usage) · 🔌 MCP over stdio · 📦 Zero dependencies · 📜 MIT
 
 An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Hand it a goal, let it write code and run scripts, steer it mid-flight, and collect the result when you are ready.
 
