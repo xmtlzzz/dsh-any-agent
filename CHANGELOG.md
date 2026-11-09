@@ -7,8 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5] — 2026-11-09
+
+Tool descriptions now say which sibling tool to use where the choice is easy to
+get wrong, and the release workflow publishes to npm before it creates the
+GitHub Release. No runtime behavior changed.
+
 ### Changed
 
+- **Tool descriptions name the right sibling where agents could pick the wrong
+  one.** The server instructions listed `dsh_interject(mode='queue')` and
+  `dsh_send(queue=true)` as interchangeable, but only `dsh_send(queue=true)`
+  returns at once: `dsh_interject` blocks until the new turn ends, and its queue
+  mode does not enter the `dsh_queue` queue. `dsh_interrupt` / `dsh_interject`
+  and `dsh_review` / `dsh_approval_decide` now state the boundary up front;
+  `dsh_interrupt` says the cancelled turn keeps its partial output and does not
+  roll back file changes; `dsh_status` says it reads in-memory state without
+  starting DSH and returns the write-lock holder `lock_holder`.
 - **The GitHub Release is created only after npm serves the new version.** The
   release workflow ran both jobs at once, so the Release went public about 2.7
   minutes before npm had the package; anything that rebuilds on a new Release
@@ -1328,7 +1343,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.4...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.5...HEAD
+[0.6.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.1...v0.6.2
