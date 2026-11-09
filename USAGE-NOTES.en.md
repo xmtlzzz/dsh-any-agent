@@ -70,7 +70,7 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 
 ## 4. Permissions and safety
 
-**4.1 The raw server default is full access; `setup` writes `workspace-write`.** With no `DSH_MCP_PERMISSION`, DSH can touch anything your account can. That default exists because, unattended, ACP's approval channel tends to degrade into silent failures. `dsh-any-agent-setup --yes` writes `workspace-write` into the client config unless you pass `--permission`. For untrusted material (malware, unknown dumps, unfamiliar repos) use `permission: "read-only"`.
+**4.1 The raw server default is `workspace-write`; full access is opt-in per machine.** Since 0.5.0, with no `DSH_MCP_PERMISSION` the server uses `workspace-write` (DSH's sandbox limits writes to the workspace), and `dsh-any-agent-setup --yes` writes the same into the client config unless you pass `--permission`. `danger-full-access` — where DSH can touch anything your account can — is refused for new and resumed sessions unless the machine sets `DSH_MCP_ALLOW_FULL_ACCESS=1`. Under `auto-allow`, `workspace-write` is still a soft boundary (sandbox escalations DSH requests are granted). For untrusted material (malware, unknown dumps, unfamiliar repos) use `permission: "read-only"`.
 
 **4.2 The public approval policy is `on_approval` (`auto-allow` / `auto-deny` / `ask`).** DSH's internal `approval: never` corresponds to `auto-deny`: it deterministically rejects prompts, it does not auto-allow. Under `danger-full-access` the sandbox produces no asks, so the distinction is invisible. To let the caller adjudicate escalation, use `workspace-write` + `on_approval: "ask"` + `dsh_approval_decide`.
 
