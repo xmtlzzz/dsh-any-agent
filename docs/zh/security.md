@@ -4,8 +4,8 @@
 
 | 档位 | 审批默认 | 用途 |
 |---|---|---|
-| `danger-full-access`（服务端裸默认） | `auto-allow` | 零摩擦；`setup` 默认写入 `workspace-write` |
-| `workspace-write` | `auto-allow` | DSH 沙箱限制可写范围；越界请求默认放行，传 `on_approval=ask` 才挂起审批 |
+| `workspace-write`（服务端裸默认；`setup` 也默认写入它） | `auto-allow` | DSH 沙箱限制可写范围；越界请求默认放行，传 `on_approval=ask` 才挂起审批 |
+| `danger-full-access` | `auto-allow` | 整机写权限；需要机器侧设置 `DSH_MCP_ALLOW_FULL_ACCESS=1` 才能新建或恢复这一档的会话 |
 | `read-only` | `auto-deny` | 分析不信任样本（恶意软件、来路不明 dump） |
 
 `on_approval` 可选 `auto-allow` / `auto-deny` / `ask`（`ask` 会把审批挂起，交给 `dsh_approval_decide` 裁决）。

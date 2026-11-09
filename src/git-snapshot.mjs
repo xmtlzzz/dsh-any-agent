@@ -29,9 +29,6 @@ export function sameWorkspaceSnapshot(a, b) {
   return JSON.stringify(a.entries ?? []) === JSON.stringify(b.entries ?? []);
 }
 
-/** 干净工作区的固定指纹（任何非空状态的指纹都至少包含一条状态行，不会与它相同）。 */
-const CLEAN_FINGERPRINT = createHash('sha256').update('clean\0').digest('hex');
-
 const GIT_TIMEOUT_MS = 8000;
 const GIT_MAX_BUFFER = 64 * 1024 * 1024;
 const MAX_UNTRACKED_DIR_ENTRIES = 2000;
@@ -60,6 +57,48 @@ async function gitOutput(cwd, args) {
     env: gitEnv(),
   });
   return stdout;
+}
+
+/**
+ * 把仓库配置里出现的所有 filter 驱动都置空的 `-c` 参数。
+ *
+ * ★ `git status` 在文件 stat 变了时会对它跑 clean filter（`.gitattributes` 选驱动名，
+ *   `.git/config` 定义命令）。快照在宿主机上、DSH 沙箱与审批层之外执行，不可信仓库的
+ *   本地配置就能借此执行任意命令（审计 A01）。命令行 `-c` 优先级最高，空值即不跑，
+ *   `required=false` 让 git 不因“没有 filter”而报错。
+ *   驱动名含 `=` 时 `-c` 无法无歧义地表达，直接拒绝快照（fail closed）。
+ */
+async function filterOverrides(cwd) {
+  let out;
+  try {
+    out = await gitOutput(cwd, [...GIT_SAFE, 'config', '-z', '--get-regexp', '^filter\\.']);
+  } catch (e) {
+    if (e?.code === 1) return []; // 没有任何 filter 配置
+    throw e;
+  }
+  const names = new Set();
+  for (const entry of String(out ?? '').split('\0')) {
+    const key = entry.split('\n', 1)[0];
+    const dot = key.lastIndexOf('.');
+    if (dot > 'filter.'.length) names.add(key.slice('filter.'.length, dot));
+  }
+  const args = [];
+  for (const name of names) {
+    if (name.includes('=')) throw new Error(`refusing filter driver name with '=': ${name}`);
+    for (const k of ['clean', 'smudge', 'process']) args.push('-c', `filter.${name}.${k}=`);
+    args.push('-c', `filter.${name}.required=false`);
+  }
+  return args;
+}
+
+/** HEAD 的提交号；未出生分支（还没有提交）返回空串。 */
+async function headOid(cwd) {
+  try {
+    return String(await gitOutput(cwd, [...GIT_SAFE, 'rev-parse', '-q', '--verify', 'HEAD'])).trim();
+  } catch (e) {
+    if (e?.code === 1) return '';
+    throw e;
+  }
 }
 
 /** 解析 porcelain v1 -z 状态行；rename/copy 的“原路径”是下一个 NUL 段。 */
@@ -138,15 +177,24 @@ export async function gitStatus(cwd) {
     //   命令发生在 DSH 沙箱与审批层之外。禁用可选锁与 fsmonitor，并允许用
     //   DSH_MCP_GIT_STATUS=0 完全关掉。
     // porcelain 的路径相对 **仓库根**（cwd 是子目录时也是），所以同时取 top-level。
-    const [statusOut, rootOut] = await Promise.all([
-      gitOutput(cwd, [...GIT_SAFE, 'status', '--porcelain', '-z']),
+    // ★ 先置空仓库配置的 filter 驱动；`--ignore-submodules=dirty` 让 git 不再钻进子模块
+    //   跑它们自己的 status（子模块的配置同样不可信，且不受上面那组 `-c` 的驱动名覆盖）。
+    const noFilters = await filterOverrides(cwd);
+    const [statusOut, rootOut, head] = await Promise.all([
+      gitOutput(cwd, [...GIT_SAFE, ...noFilters, 'status', '--porcelain', '-z', '--ignore-submodules=dirty']),
       gitOutput(cwd, [...GIT_SAFE, 'rev-parse', '--show-toplevel']),
+      headOid(cwd),
     ]);
     const rows = parsePorcelainZ(statusOut);
+    // ★ HEAD 参与指纹：回合内“改完就提交”前后都是干净状态，只看状态行会判成没变（审计 A05）。
     // ★ 干净的仓库返回“0 个改动”的快照，而不是 null：null 专指“拿不到快照”（非 git 目录、
     //   git 不可用、总开关关闭）。以前两者混用，一轮把唯一的改动删干净时就会出现
     //   workspace_changed=true 却 diff_stat=null —— 看不出是“现在干净了”还是“没查成”。
-    if (!rows.length) return { changed_files: 0, entries: [], fingerprint: CLEAN_FINGERPRINT };
+    if (!rows.length) {
+      // 干净工作区的指纹只由 HEAD 决定（非空状态的指纹至少多一条状态行，不会与它相同）。
+      const fingerprint = createHash('sha256').update(`clean\0${head}\0`).digest('hex');
+      return { changed_files: 0, entries: [], fingerprint };
+    }
     // git 输出的是 `C:/...` 风格，统一成原生分隔符，后面 startsWith 才不会误判越界。
     const root = resolve(String(rootOut ?? '').trim() || cwd);
 
@@ -166,6 +214,7 @@ export async function gitStatus(cwd) {
       );
 
     const hash = createHash('sha256');
+    hash.update(`head\0${head}\0`);
     const budget = { left: MAX_UNTRACKED_DIR_ENTRIES };
     const entries = [];
     const rootPrefix = root.endsWith(sep) ? root : root + sep;

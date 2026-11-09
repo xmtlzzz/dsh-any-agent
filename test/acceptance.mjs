@@ -175,9 +175,16 @@ async function runSession(client, t) {
 
 // ── 主流程 ────────────────────────────────────────────────────────
 
-for (const d of [FOLDER_A, FOLDER_B]) {
-  if (!existsSync(d)) mkdirSync(d, { recursive: true });
+// ★ 桌面目录是固定名字：已经存在时它可能是用户的、或上一轮残留（含证据），收尾的递归删除
+//   不能碰它。直接拒绝运行，让人自己确认后再删（审计 B02）。
+const preexisting = [FOLDER_A, FOLDER_B].filter((d) => existsSync(d));
+if (preexisting.length) {
+  console.log(`\n✗ 拒绝运行：桌面测试目录已存在，本套件收尾会递归删除它们：\n  ${preexisting.join('\n  ')}`);
+  console.log('  确认是测试残留后手动删除（或 DSH_MCP_PURGE_DESKTOP=1 node test/cleanup.mjs）再重跑。');
+  rmSync(STATE_ROOT, { recursive: true, force: true });
+  process.exit(1);
 }
+for (const d of [FOLDER_A, FOLDER_B]) mkdirSync(d, { recursive: true });
 
 const tasks = MODE === 'preflight' ? [TASKS[0]] : TASKS;
 console.log(`模式: ${MODE}    会话数: ${tasks.length}`);

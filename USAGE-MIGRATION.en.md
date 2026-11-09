@@ -106,8 +106,10 @@ Set `DSH_MCP_BOOTSTRAP=0` to disable profile writing entirely, or
 | `workspace-write` | Writes are limited to the workspace by DSH's sandbox |
 | `danger-full-access` | No workspace sandbox |
 
-The server's raw default is `danger-full-access` when `DSH_MCP_PERMISSION` is
-not set; `setup` writes `workspace-write` into the client config. Out-of-
+The server's raw default is `workspace-write` when `DSH_MCP_PERMISSION` is
+not set, and `setup` writes the same into the client config;
+`danger-full-access` is refused unless the machine sets
+`DSH_MCP_ALLOW_FULL_ACCESS=1`. Out-of-
 workspace approval requests default to `auto-allow`; pass `on_approval=ask`
 when creating a session if you want `dsh_approval_decide` to adjudicate them.
 

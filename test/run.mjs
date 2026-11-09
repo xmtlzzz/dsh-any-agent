@@ -14,6 +14,8 @@
  */
 
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { StringDecoder } from 'node:string_decoder';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,13 +33,21 @@ try {
 }
 const startedAt = Date.now();
 
+// ★ 每轮一个专属临时根：子进程的 TEMP/TMP/TMPDIR 都指向它，各套件 mkdtemp 出来的目录、
+//   测试会话的 cwd 都落在里面。收尾的 cleanup.mjs 因此只扫这一轮自己的东西 ——
+//   以前它直接扫系统临时目录下所有 `dsh-any-agent-*`，会递归删掉恰好同名的无关目录，
+//   以及并行的另一轮测试的临时根（审计 A03）。
+const RUN_ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-run-'));
+process.env.TEMP = RUN_ROOT;
+process.env.TMP = RUN_ROOT;
+process.env.TMPDIR = RUN_ROOT;
+process.env.DSH_MCP_TEST_RUN_ROOT = RUN_ROOT;
+
 // live 事件流：不少离线套件用假 hub 直接驱动 Conversation，不设 DSH_MCP_STATE。
 // 不隔离的话它们的事件会写进用户真实的 ~/.dsh/.dsh-any-agent/live。整轮共用一个临时目录，
-// 收尾的 cleanup.mjs 会按 `dsh-any-agent-` 前缀把它删掉。
+// 它在本轮临时根里，收尾时随之删除。
 if (!process.env.DSH_MCP_LIVE_DIR) {
-  const { mkdtempSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  process.env.DSH_MCP_LIVE_DIR = mkdtempSync(join(tmpdir(), 'dsh-any-agent-live-'));
+  process.env.DSH_MCP_LIVE_DIR = mkdtempSync(join(RUN_ROOT, 'dsh-any-agent-live-'));
 }
 
 /** 离线套件：不拉 DSH（smoke 除外，它在无 DSH 时自动跳过会话段）、不花 token，每次必跑。 */
@@ -237,6 +247,14 @@ for (const script of [...OFFLINE, ...(all ? MODEL : [])]) {
 // ★ cleanup 的退出码必须计入总结果：以前忽略它，清理悄悄失败也会显示全绿。
 const cleanupCode = await run('cleanup.mjs');
 if (cleanupCode !== 0) failed.push({ script: 'cleanup.mjs', code: cleanupCode });
+// 本轮临时根是 run.mjs 自己 mkdtemp 的，里面只有这一轮的东西；保留证据模式下照旧留着。
+if (process.env.DSH_MCP_KEEP_EVIDENCE !== '1') {
+  try {
+    rmSync(RUN_ROOT, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+  } catch (e) {
+    console.log(`⚠ 本轮临时根没删干净（${RUN_ROOT}）：${e.message}`);
+  }
+}
 
 // JSON 报告：写失败时，用户点名的 --report 算失败（CI 后面的同步步骤要靠它），
 // 默认位置只警告 —— 不能因为 .state/ 不可写就让一次本来全绿的测试变红。

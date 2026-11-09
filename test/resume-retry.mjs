@@ -269,6 +269,23 @@ try {
   } else {
     console.log('\n[6] （共享宿主专属场景，本轮 DSH_MCP_SHARED_PROCESS=0 跳过）');
   }
+
+  // ── [7] DSH 吐出非对象 JSON 行 → 忽略，不能让本进程崩掉（审计 D01） ─────
+  console.log('\n[7] ★ DSH stdout 里出现 null / 数字 / 数组行：忽略并照常 resume（不崩进程）');
+  {
+    scenario('ok', { FAKE_ACP_NOISE: '1' });
+    const conv = newConv('noise-ok');
+    let err = null;
+    try {
+      await conv.ensureAlive();
+    } catch (e) {
+      err = e;
+    }
+    check('★ 夹着噪声行也能正常 resume，进程还活着', err === null && conv.proc?.alive === true, err?.message);
+    await conv.close();
+    delete process.env.FAKE_ACP_NOISE;
+    await settle();
+  }
 } catch (e) {
   failed++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

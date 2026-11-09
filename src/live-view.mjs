@@ -755,6 +755,24 @@ function clip(s, n) {
 }
 
 /**
+ * 深拷贝 view，去掉所有字符串里的 C0/C1 控制字符（空白类换成空格）。
+ *
+ * ★ 标题、工具名、命令预览都来自会话内容（模型/工作区可控）。原样写进终端时，
+ *   ESC/OSC 序列会被终端执行 —— 例如 OSC 52 改写剪贴板（审计 A06）。颜色由
+ *   renderText 自己在清洗之后加，所以这里可以一律剥掉。
+ */
+function scrubView(v) {
+  if (typeof v === 'string') return v.replace(/[\t\n\r\v\f]/g, ' ').replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+  if (Array.isArray(v)) return v.map(scrubView);
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const [k, x] of Object.entries(v)) o[k] = scrubView(x);
+    return o;
+  }
+  return v;
+}
+
+/**
  * 把调用链快照渲染成纯文本树（watch 用）。
  * @param {object} view LiveState.view() 的返回
  * @param {object} [opts]
@@ -765,6 +783,7 @@ function clip(s, n) {
  * @param {'zh'|'en'} [opts.lang] 界面语言（默认中文）
  */
 export function renderText(view, { conv = null, runs = 3, items = 12, color = false, lang = 'zh' } = {}) {
+  view = scrubView(view);
   const L = T(lang);
   const c = (code, s) => (color ? `\x1b[${code}m${s}\x1b[0m` : s);
   const dim = (s) => c('2', s);

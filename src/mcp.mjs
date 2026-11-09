@@ -79,9 +79,14 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
   let clientCapabilities = {};
   let rootsSeq = 0;
   const pendingRoots = new Map();
-  /** 客户端当前打开的项目目录（来自 MCP roots）。null 表示还没有/不支持。 */
-  let clientRoots = null;
-  let rootsRequested = false;
+  /**
+   * 当前这一代 roots 的查询（进行中或已完成）。null 表示还没问过 / 客户端说换了项目。
+   * ★ 缓存的是 **promise** 而不是结果：并发的第二个 dsh_start 必须等同一次回包，
+   *   而不是在回包到达前拿到 null、误报“没有工作目录”（审计 B03）。
+   */
+  let rootsPromise = null;
+  /** roots 的代数：每次 list_changed 加一，旧代的迟到回包不再生效。 */
+  let rootsGen = 0;
 
   /**
    * 主动向客户端要一次 roots。
@@ -91,12 +96,12 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
    * 一个更聪明的默认值，拿不到就让调用方显式传 cwd。
    */
   function requestRoots(timeoutMs = 1500) {
-    if (rootsRequested) return Promise.resolve(clientRoots);
-    rootsRequested = true;
+    if (rootsPromise) return rootsPromise;
     const caps = clientCapabilities?.roots;
-    if (!caps) return Promise.resolve(null);
+    if (!caps) return (rootsPromise = Promise.resolve(null));
+    const gen = rootsGen;
     const id = 'roots-' + (rootsSeq++);
-    return new Promise((resolve) => {
+    rootsPromise = new Promise((resolve) => {
       const timer = setTimeout(() => {
         pendingRoots.delete(id);
         resolve(null);
@@ -104,11 +109,14 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
       timer.unref?.();
       pendingRoots.set(id, (roots) => {
         clearTimeout(timer);
-        clientRoots = roots;
         resolve(roots);
       });
       write({ jsonrpc: '2.0', id, method: 'roots/list', params: {} });
-    });
+    }).then((roots) =>
+      // ★ 等待期间客户端换了项目：这份回包已经过时，改等新一代的结果（审计 B03）。
+      gen === rootsGen ? roots : requestRoots(timeoutMs),
+    );
+    return rootsPromise;
   }
 
   /** 从 roots 里挑一个最像“项目目录”的路径。 */
@@ -142,8 +150,8 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
       if (method === 'notifications/initialized') initialized = true;
       // 客户端换了打开的项目：丢掉缓存并重新问一次，下一次 dsh_start 才会用新目录。
       if (method === 'notifications/roots/list_changed') {
-        clientRoots = null;
-        rootsRequested = false;
+        rootsGen += 1;
+        rootsPromise = null;
         requestRoots().catch(() => {});
       }
       return;

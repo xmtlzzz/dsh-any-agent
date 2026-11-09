@@ -294,7 +294,7 @@ codex mcp list      # 应看到 dsh-any-agent ... enabled
 
 ### 权限档怎么选
 
-服务端未设置 `DSH_MCP_PERMISSION` 时默认 `danger-full-access`；`setup --yes` 默认写入 **`workspace-write`**。建议按用途改：
+服务端未设置 `DSH_MCP_PERMISSION` 时默认 `workspace-write`；`setup --yes` 默认写入的也是 **`workspace-write`**。`danger-full-access` 需要机器侧设置 `DSH_MCP_ALLOW_FULL_ACCESS=1` 才可用。建议按用途改：
 
 | 档位 | 适用于 |
 |---|---|

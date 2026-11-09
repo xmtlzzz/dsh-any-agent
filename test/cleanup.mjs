@@ -18,12 +18,14 @@
  *   - 仓库 `.state/` 里除 ws-probe-* 以外的内容
  *   - 桌面 `dsh-any-agent-test-*` 文件夹本身 —— 要删它得设 DSH_MCP_PURGE_DESKTOP=1
  *
- * 用法：node test/cleanup.mjs [--dry-run]
+ * 用法：node test/cleanup.mjs [--dry-run] [--purge-temp]
+ *   --purge-temp  独立运行时也递归删除 tmpdir() 下的 `dsh-any-agent-*` 目录（run.mjs 收尾时
+ *                 tmpdir() 是本轮专属临时根，无需此开关）。
  */
 
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { listWorkspaces } from '../src/workspace.mjs';
 import { sweepTestResidue } from '../src/residue.mjs';
 
@@ -81,6 +83,12 @@ if (r.workspaces.error) log(`    ⚠️ 跳过（${r.workspaces.error}）`);
 for (const w of r.workspaces.removed.slice(0, 8)) log(`    - ${w.path}`);
 
 // 5) 崩溃遗留的临时工作区目录与状态文件（各测试用 mkdtempSync 造在系统临时目录下，正常路径会自删）
+// ★ 按名字前缀递归删除只在 run.mjs 给的**本轮专属临时根**里做：那里的东西只可能是这一轮造的。
+//   独立运行时 tmpdir() 是系统临时目录，同名前缀的目录可能是用户自己的、或并行另一轮测试的
+//   临时根（审计 A03）—— 默认只报告，确需清理时显式加 --purge-temp。
+const runRoot = process.env.DSH_MCP_TEST_RUN_ROOT;
+const inRunRoot = Boolean(runRoot) && resolve(runRoot) === resolve(tmpdir());
+const purgeTemp = inRunRoot || process.argv.includes('--purge-temp');
 let dirsRemoved = 0;
 let filesRemoved = 0;
 try {
@@ -91,19 +99,26 @@ try {
     if (!/^dsh-any-agent-/.test(e.name)) continue;
     const p = join(tmpdir(), e.name);
     if (e.isDirectory()) {
-      if (!dryRun) rmSync(p, { recursive: true, force: true });
+      if (!dryRun && purgeTemp) rmSync(p, { recursive: true, force: true });
       dirsRemoved++;
     } else if (e.isFile() && /^dsh-any-agent-[a-z0-9-]+-state-\d+\.json(\.tmp\..+)?$/.test(e.name)) {
       // 旧版套件把注册表直接放在 %TEMP% 根下（`dsh-any-agent-<套件>-state-<毫秒>.json`），
       // 崩溃时不会自删。**只认这个严格形状**：同前缀的 .txt/.md 是别人的提交信息/PR 正文。
-      if (!dryRun) rmSync(p, { force: true });
+      if (!dryRun && purgeTemp) rmSync(p, { force: true });
       filesRemoved++;
     }
   }
 } catch {
   /* 临时目录不可读就算了 */
 }
-log(`  遗留临时工作区目录：删除 ${dirsRemoved} 个；遗留状态文件：删除 ${filesRemoved} 个`);
+if (purgeTemp) {
+  log(`  遗留临时工作区目录：删除 ${dirsRemoved} 个；遗留状态文件：删除 ${filesRemoved} 个`);
+} else {
+  log(
+    `  遗留临时工作区目录 ${dirsRemoved} 个、状态文件 ${filesRemoved} 个：已跳过（不在 run.mjs 的本轮临时根里，` +
+      `${tmpdir()} 下同名目录未必是本仓库测试造的；确需清理请加 --purge-temp）`,
+  );
+}
 
 // 5b) 桌面上遗留的测试文件夹（`dsh-any-agent-test-A/B`、`dsh-conc-*`）——
 //     验收测试与旧版并发测试会在这两个位置造真实工作区。验收测试自己会删；

@@ -157,7 +157,8 @@ function extractRouting(entries) {
 function sanitizeDeepseek(config) {
   const out = {};
   for (const key of ['apiKeyEnv', 'baseURL', 'reasoningEffort']) {
-    if (config[key] !== undefined) out[key] = config[key];
+    // ★ baseURL 与 providers 走同一套清洗：URL 里的 user:pass@ 不能抄进受管 profile（审计 B06）。
+    if (config[key] !== undefined) out[key] = scrubSecrets(config[key], key);
   }
   if (typeof out.apiKeyEnv === 'string' && (!ENV_NAME.test(out.apiKeyEnv) || LOOKS_LIKE_SECRET.test(out.apiKeyEnv))) {
     delete out.apiKeyEnv;

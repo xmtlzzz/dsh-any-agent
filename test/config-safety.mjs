@@ -1610,5 +1610,39 @@ section('[18] dsh-any-agent-restore：能把文件退回某一份备份', () => 
   dropSandbox(home);
 });
 
+{
+  const C = await import(new URL('../src/clients.mjs', import.meta.url).href);
+  const home = makeSandboxHome('dsh-race-', {});
+  try {
+    const dirs = C.resolveDirs(home);
+    const clients = C.clientList(dirs);
+    const byId = new Map(clients.map((c) => [c.id, c]));
+    const cursor = byId.get('cursor');
+    const file = cursor.pathOf(dirs);
+    mkdirSync(dirname(file), { recursive: true });
+    const ctx = (remove) => ({ dirs, remove, write: true, launch: C.defaultLaunch(), env: C.desiredEnv('workspace-write'), byId, force: false });
+
+    console.log('\n[race] ★ 规划之后文件被客户端改过：不能把旧快照写回去（审计 C06）');
+    writeFileSync(file, JSON.stringify({ model: 'old', mcpServers: {} }, null, 2));
+    const plan = C.planClient(cursor, ctx(false));
+    writeFileSync(file, JSON.stringify({ model: 'saved-after-plan', mcpServers: {} }, null, 2));
+    const applied = C.applyClient(plan, ctx(false), 'race');
+    const after = JSON.parse(readFileSync(file, 'utf8'));
+    check('cursor: 仍然注册成功', applied.status === 'applied' && Boolean(after.mcpServers?.['dsh-any-agent']), applied.status + ' ' + applied.summary);
+    check('★ cursor: 规划之后保存的设置没有被旧快照覆盖', after.model === 'saved-after-plan', String(after.model));
+
+    console.log('\n[dupkey] ★ 同名重复键：不能报告成功却留下生效的旧条目（审计 D02）');
+    const dup = '{\n  "mcpServers": {\n    "dsh-any-agent": { "command": "first" },\n    "dsh-any-agent": { "command": "stale-last" }\n  }\n}\n';
+    for (const remove of [false, true]) {
+      writeFileSync(file, dup);
+      const r = C.applyClient(C.planClient(cursor, ctx(remove)), ctx(remove), 'dup');
+      check(`★ cursor: ${remove ? '卸载' : '注册'}时遇到重复键 → failed 并说明原因`, r.status === 'failed' && /more than once/.test(r.summary), r.status + ' ' + r.summary);
+      check(`cursor: ${remove ? '卸载' : '注册'}失败时文件一字节不动`, readFileSync(file, 'utf8') === dup);
+    }
+  } finally {
+    removeSandbox(home);
+  }
+}
+
 console.log('\n===== config safety: passed ' + passed + ', failed ' + failed + ' =====');
 process.exit(failed ? 1 : 0);

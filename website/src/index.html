@@ -143,7 +143,7 @@ tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-
     </article>
     <article class="faq-row">
       <h3 class="faq-q">如何控制写入权限和审批？</h3>
-      <div class="faq-a"><p>可选 read-only、workspace-write 和 danger-full-access。服务端未设置环境变量时默认 danger-full-access；setup 会把 <code>workspace-write</code> 写入客户端配置。越界审批默认 auto-allow，每次放行与提权均完整记录并汇总进审核单；需要逐条人工裁决时，在建会话时显式设置 on_approval=ask。外部 MCP 工具的副作用不受 DSH 沙箱约束，使用前请阅读<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.md" target="_blank" rel="noopener noreferrer">使用注意事项</a>。</p></div>
+      <div class="faq-a"><p>可选 read-only、workspace-write 和 danger-full-access。服务端未设置环境变量时默认 <code>workspace-write</code>，setup 写入客户端配置的也是它；danger-full-access 需要机器侧设置 <code>DSH_MCP_ALLOW_FULL_ACCESS=1</code> 才可用。越界审批默认 auto-allow，每次放行与提权均完整记录并汇总进审核单；需要逐条人工裁决时，在建会话时显式设置 on_approval=ask。外部 MCP 工具的副作用不受 DSH 沙箱约束，使用前请阅读<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.md" target="_blank" rel="noopener noreferrer">使用注意事项</a>。</p></div>
     </article>
     <article class="faq-row">
       <h3 class="faq-q">可以同时在 DSH 的 GUI 里操作同一个会话吗？</h3>

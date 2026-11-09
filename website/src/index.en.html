@@ -143,7 +143,7 @@ tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-
     </article>
     <article class="faq-row">
       <h3 class="faq-q">How do I control write access and approvals?</h3>
-      <div class="faq-a"><p>Choose read-only, workspace-write, or danger-full-access. With no env override the server defaults to danger-full-access; setup writes <code>workspace-write</code> into the client config. Out-of-workspace approvals default to auto-allow with all auto-approvals and escalations audited in the review ticket; pass on_approval=ask when creating a session to adjudicate them. Side effects of external MCP tools are outside DSH's sandbox; read the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.en.md" target="_blank" rel="noopener noreferrer">usage notes</a> first.</p></div>
+      <div class="faq-a"><p>Choose read-only, workspace-write, or danger-full-access. With no env override the server defaults to <code>workspace-write</code>, which is also what setup writes into the client config; danger-full-access is refused unless the machine sets <code>DSH_MCP_ALLOW_FULL_ACCESS=1</code>. Out-of-workspace approvals default to auto-allow with all auto-approvals and escalations audited in the review ticket; pass on_approval=ask when creating a session to adjudicate them. Side effects of external MCP tools are outside DSH's sandbox; read the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.en.md" target="_blank" rel="noopener noreferrer">usage notes</a> first.</p></div>
     </article>
     <article class="faq-row">
       <h3 class="faq-q">Can I operate the same session in the DSH GUI at the same time?</h3>

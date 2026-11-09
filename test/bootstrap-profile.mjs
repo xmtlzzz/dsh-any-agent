@@ -168,6 +168,29 @@ try {
   check('错误信息说明缺少默认模型', /默认 provider\/model/.test(String(dres?.error)), JSON.stringify(dres));
   check('没有写出空 acp 配置', !existsSync(join(home, 'profiles', 'deepseek-mcp', 'cordis.patch.yml')));
 
+  console.log('\n[4b] ★ 旧式 llm-deepseek.baseURL 里的用户名/密码不进受管 profile（审计 B06）');
+  seedProfile('legacy-deepseek', `- id: llm-deepseek
+  name: "@deepseek-ai/dsh-llm-deepseek-api-key"
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    baseURL: https://legacyuser:legacypass@api.deepseek.example/v1
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: deepseek
+    model: deepseek-chat
+`);
+  const lr = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `const { ensureProfile } = await import(${JSON.stringify(BOOT)}); console.log(JSON.stringify(ensureProfile()));`],
+  { encoding: 'utf8', timeout: 30_000, env: { ...process.env, DSH_HOME: home, DSH_MCP_PROFILE: 'legacy-mcp', DSH_MCP_BOOTSTRAP: '', DSH_MCP_ROUTE_SOURCE: 'legacy-deepseek' } });
+  let lres = null;
+  try { lres = JSON.parse(String(lr.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop()); } catch {}
+  const legacyOut = join(home, 'profiles', 'legacy-mcp', 'cordis.patch.yml');
+  const legacyText = existsSync(legacyOut) ? readFileSync(legacyOut, 'utf8') : '';
+  check('旧式路由也能生成受管 profile', lres?.ok === true && legacyText.length > 0, JSON.stringify(lres || lr.stderr));
+  check('★ baseURL 里的用户名/密码被清掉', !/legacyuser|legacypass/.test(legacyText), legacyText.match(/baseURL:[^\n]*/)?.[0] ?? '');
+  check('baseURL 的主机与路径保留', legacyText.includes('https://api.deepseek.example/v1'), legacyText.match(/baseURL:[^\n]*/)?.[0] ?? '');
+
   console.log('\n[5] 坏 YAML 不猜');
   seedProfile('broken', '- id: llm-pi-ai\n  config:\n    providers: [unclosed\n');
   const br = spawnSync(process.execPath, ['--input-type=module', '-e',

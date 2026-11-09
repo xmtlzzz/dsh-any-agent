@@ -7,7 +7,7 @@
  *   DSH_RUNTIME                 拉起 DSH 的可执行文件（默认：桌面版用其自带运行时，其余用本进程 node）
  *   DSH_MCP_PROFILE             驱动用的 DSH profile（默认 dsh-mcp）
  *   DSH_MCP_STATE               会话注册表路径（默认 $DSH_HOME/.dsh-any-agent/conversations.json）
- *   DSH_MCP_PERMISSION          新建会话的默认权限档（默认 danger-full-access）
+ *   DSH_MCP_PERMISSION          新建会话的默认权限档（默认 workspace-write）
  *   DSH_MCP_APPROVAL            默认审批策略（非只读档默认 auto-allow；ask = 挂起待裁决）
  *   DSH_MCP_REVIEW              调用方审核策略（默认 advisory；off 关闭自动审核单）
  *   DSH_MCP_REVIEWS_DIR         审核记录目录（默认 <状态文件同目录>/reviews）

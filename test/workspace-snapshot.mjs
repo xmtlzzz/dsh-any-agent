@@ -13,7 +13,7 @@
  * 临时目录一律 os.tmpdir() + mkdtemp，收尾经 sandbox-home 的守卫删除。
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -152,6 +152,50 @@ try {
     const clean1 = await gitStatus(repo);
     check('★ 删掉唯一的改动：有变化，且 after 是 0 个改动（不是 null）', sameWorkspaceSnapshot(dirty, clean1) === false && clean1?.changed_files === 0, JSON.stringify(clean1));
     check('干净 → 干净：没有变化', sameWorkspaceSnapshot(clean0, clean1) === true);
+  }
+
+  console.log('\n[3c] ★ 回合内改完就提交：前后都干净，但 HEAD 变了（审计 A05）');
+  {
+    const repo = makeRepo('commit-in-turn');
+    writeFileSync(join(repo, 'f.txt'), '1\n');
+    commitAll(repo);
+    const before = await gitStatus(repo);
+    writeFileSync(join(repo, 'f.txt'), '2\n');
+    git(repo, 'commit', '-qam', 'turn');
+    const after = await gitStatus(repo);
+    check('前后都是 0 个改动', before?.changed_files === 0 && after?.changed_files === 0);
+    check('★ 判定为 workspace_changed', sameWorkspaceSnapshot(before, after) === false);
+    const again = await gitStatus(repo);
+    check('不再提交 → 未变化', sameWorkspaceSnapshot(after, again) === true);
+  }
+
+  console.log('\n[3d] ★ 仓库配置的 clean filter 不会被快照执行（审计 A01）');
+  {
+    const repo = makeRepo('evil-filter');
+    writeFileSync(join(repo, '.gitattributes'), '*.txt filter=pwn\n*.md filter=a.b\n');
+    writeFileSync(join(repo, 'a.txt'), 'one\n');
+    writeFileSync(join(repo, 'b.md'), 'one\n');
+    commitAll(repo);
+    const marker = join(root, 'FILTER-RAN').replace(/\\/g, '/');
+    const cmd = `node -e "require('fs').writeFileSync('${marker}','x');process.stdin.pipe(process.stdout)"`;
+    git(repo, 'config', 'filter.pwn.clean', cmd);
+    git(repo, 'config', 'filter.pwn.process', cmd);
+    git(repo, 'config', 'filter.pwn.required', 'true');
+    git(repo, 'config', 'filter.a.b.clean', cmd); // 驱动名带点
+    writeFileSync(join(repo, 'a.txt'), 'two\n');
+    writeFileSync(join(repo, 'b.md'), 'two\n');
+    const snap = await gitStatus(repo);
+    check('快照仍然拿得到（required=true 也不报错）', snap?.changed_files === 2, JSON.stringify(snap));
+    check('★ filter 命令没有执行', !existsSync(join(root, 'FILTER-RAN')));
+
+    const repoEq = makeRepo('evil-filter-eq');
+    writeFileSync(join(repoEq, '.gitattributes'), '*.txt filter=x=y\n');
+    writeFileSync(join(repoEq, 'a.txt'), 'one\n');
+    commitAll(repoEq);
+    git(repoEq, 'config', 'filter.x=y.clean', cmd);
+    writeFileSync(join(repoEq, 'a.txt'), 'two\n');
+    const snapEq = await gitStatus(repoEq);
+    check('★ 驱动名含 = 时拒绝快照（返回 null），且命令没有执行', snapEq === null && !existsSync(join(root, 'FILTER-RAN')), JSON.stringify(snapEq));
   }
 
   console.log('\n[4] 非 git 目录与总开关');

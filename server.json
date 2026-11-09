@@ -6,12 +6,12 @@
     "url": "https://github.com/xmtlzzz/dsh-any-agent",
     "source": "github"
   },
-  "version": "0.6.3",
+  "version": "0.6.4",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "dsh-any-agent",
-      "version": "0.6.3",
+      "version": "0.6.4",
       "transport": {
         "type": "stdio"
       }
