@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.7] — 2026-11-09
+
+A licensing and documentation release: the package now carries the copyright
+notice of the project it started from. No code changed.
+
 ### Changed
 
 - **Credit the project dsh-any-agent started from.** dsh-any-agent began as
@@ -1374,7 +1379,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.6...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.7...HEAD
+[0.6.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.3...v0.6.4
