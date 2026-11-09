@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`dsh-any-agent-setup` no longer deletes your comments in Codex's
+  `config.toml`.** A comment right after our table — typically the note above
+  the next table, or a setting you had commented out — was treated as part of
+  our table and removed by `--remove`, and again whenever `--yes` rewrote an
+  outdated entry. Trailing comments and blank lines now stay where they are.
+- **A line inside a multi-line string is no longer mistaken for a table
+  header.** A `"""` / `'''` string containing a line like
+  `[mcp_servers.dsh-any-agent]` was cut in half, leaving a file Codex could not
+  read.
+- **Entries setup cannot edit safely are refused instead of duplicated.** If our
+  server was written by hand as a dotted key (`dsh-any-agent.command = …`) or
+  inside an inline `mcp_servers = { … }` table, `--remove` left it in place and
+  `--yes` appended a second definition, which made the whole config invalid.
+  Setup now reports it and leaves the file untouched.
+
 ## [0.6.5] — 2026-11-09
 
 Tool descriptions now say which sibling tool to use where the choice is easy to

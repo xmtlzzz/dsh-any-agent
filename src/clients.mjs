@@ -496,6 +496,52 @@ const TOML_HEADER = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/;
 //   卸载我们的表时连带删掉紧随其后的数组表（审计 B01）。
 const TOML_ARRAY_HEADER = /^\s*\[\[([^\]]+)\]\]\s*(?:#.*)?$/;
 const INLINE_OURS = /^\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*=/;
+// ★ 我们的条目也可能被手写成点号键或根上的内联表。按行编辑改不动这些写法：
+//   以前删除时它原样留下，添加时又追加一张同名表，Codex 因"重复定义"读不了配置。现在一律拒绝。
+const DOTTED_OURS = /^\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*\./;
+const ROOT_DOTTED_OURS = /^\s*mcp_servers\s*\.\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*[.=]/;
+const ROOT_INLINE_SERVERS = /^\s*mcp_servers\s*=/;
+const COMMENT_OR_BLANK = /^\s*(?:#.*)?$/;
+
+/**
+ * 每一行开头是否处在多行字符串（""" / '''）里。
+ * ★ 字符串里像表头的行是文本：当成表头会把字符串从中间截断，写出一个读不了的文件。
+ */
+function multilineMask(lines) {
+  const mask = new Array(lines.length);
+  let open = null;
+  for (let k = 0; k < lines.length; k++) {
+    mask[k] = open !== null;
+    const s = lines[k];
+    let i = 0;
+    while (i < s.length) {
+      if (open) {
+        if (open === '"""' && s[i] === '\\') { i += 2; continue; }
+        if (s.startsWith(open, i)) {
+          i += 3;
+          // 结束符可以再贴最多两个同样的引号（它们属于字符串内容）。
+          for (let extra = 0; extra < 2 && s[i] === open[0]; extra++) i++;
+          open = null;
+          continue;
+        }
+        i++;
+        continue;
+      }
+      if (s[i] === '#') break;
+      if (s.startsWith('"""', i) || s.startsWith("'''", i)) { open = s.slice(i, i + 3); i += 3; continue; }
+      if (s[i] === '"' || s[i] === "'") {
+        // 单行字符串：跳到配对的引号，里面的 # 和三引号都不算数。
+        const q = s[i];
+        let j = i + 1;
+        while (j < s.length && s[j] !== q) j += q === '"' && s[j] === '\\' ? 2 : 1;
+        i = j + 1;
+        continue;
+      }
+      i++;
+    }
+  }
+  return mask;
+}
 
 /** 这个表头是不是我们的（[mcp_servers.dsh-any-agent] 及其子表）。 */
 function isOurTable(name) {
@@ -504,19 +550,32 @@ function isOurTable(name) {
   return Boolean(m);
 }
 
-/** 找出 Codex 配置里属于我们的行区间。 */
+/**
+ * 找出 Codex 配置里属于我们的行区间。
+ * unsupported 非空表示我们的条目用了改不动的写法（点号键 / 根上的内联表），调用方必须拒绝。
+ */
 function findTomlRanges(lines) {
   const ranges = [];
+  const mask = multilineMask(lines);
   let cur = null;
+  let unsupported = null;
   // 当前所在的表（'' = 根，已 trim）；数组表记为 null，里面的键一律不是我们的。
   let table = '';
+  // 关闭区间时必须把 end 定在「这张表的最后一行」，而不是文件末尾 —— 否则我们这段会一路吞掉后面所有的表。
+  // ★ 表尾的注释和空行也不算我们的：它们通常是下一张表的说明，或用户注释掉的设置，删掉就找不回来了。
+  const close = (k) => {
+    let end = k;
+    while (end > cur.start + 1 && !mask[end - 1] && COMMENT_OR_BLANK.test(lines[end - 1])) end--;
+    cur.end = end;
+    ranges.push(cur);
+    cur = null;
+  };
   for (let k = 0; k < lines.length; k++) {
+    if (mask[k]) continue;
     const arr = TOML_ARRAY_HEADER.exec(lines[k]);
     const m = arr ? null : TOML_HEADER.exec(lines[k]);
     if (arr || m) {
-      // 关闭上一个区间时必须把 end 定在「这张表的最后一行」，
-      // 而不是文件末尾 —— 否则我们这段会一路吞掉后面所有的表。
-      if (cur) { cur.end = k; ranges.push(cur); cur = null; }
+      if (cur) close(k);
       table = arr ? null : m[1].trim();
       if (m && isOurTable(m[1])) cur = { start: k, end: lines.length };
       continue;
@@ -524,9 +583,14 @@ function findTomlRanges(lines) {
     // ★ 内联条目只认 `[mcp_servers]` 表里的 `dsh-any-agent = {...}`。别的表里恰好同名的键
     //   （例如 [projects] 下）是用户的，不能删（审计 B01）。
     if (table === 'mcp_servers' && INLINE_OURS.test(lines[k])) ranges.push({ start: k, end: k + 1, inline: true });
+    else if (table === 'mcp_servers' && DOTTED_OURS.test(lines[k])) unsupported ??= 'dotted key on line ' + (k + 1);
+    else if (table === '' && ROOT_DOTTED_OURS.test(lines[k])) unsupported ??= 'dotted key on line ' + (k + 1);
+    else if (table === '' && ROOT_INLINE_SERVERS.test(lines[k]) && lines[k].includes(ENTRY_NAME)) {
+      unsupported ??= 'inline mcp_servers table on line ' + (k + 1);
+    }
   }
-  if (cur) ranges.push(cur);
-  return ranges;
+  if (cur) close(lines.length);
+  return { ranges, unsupported };
 }
 
 /** 去掉一个区间时顺带收掉多出来的空行，避免越删越空。 */
@@ -551,7 +615,13 @@ export function editTomlBlock(text, block) {
   const body = trailing ? text.slice(0, text.length - trailing.length) : text;
   const lines = body === '' ? [] : body.split(/\r?\n/);
 
-  const ranges = findTomlRanges(lines);
+  const { ranges, unsupported } = findTomlRanges(lines);
+  if (unsupported) {
+    throw new Error(
+      'the existing ' + ENTRY_NAME + ' entry uses a TOML form setup cannot edit safely (' + unsupported +
+        '); file left untouched, edit it by hand',
+    );
+  }
   const hadOurs = ranges.length > 0;
   const finish = (outLines) => (outLines.length ? outLines.join(eol) : '') + trailing;
 
@@ -566,10 +636,11 @@ export function editTomlBlock(text, block) {
 
   const blockLines = block.split('\n');
   if (hadOurs) {
-    // 已经一模一样就不动：幂等的关键。
-    const current = lines.slice(ranges[0].start, ranges[ranges.length - 1].end)
-      .filter((l) => l.trim() !== '');
-    if (current.join('\n') === blockLines.filter((l) => l.trim() !== '').join('\n')) {
+    // 已经一模一样就不动：幂等的关键。只比我们区间里的键值行（注释、空行不算），
+    // 否则留在原处的用户注释会让每次 --yes 都重写一遍。
+    const keyLines = (ls) => ls.filter((l) => !COMMENT_OR_BLANK.test(l));
+    const current = ranges.flatMap((r) => lines.slice(r.start, r.end));
+    if (keyLines(current).join('\n') === keyLines(blockLines).join('\n')) {
       return { changed: false, text };
     }
   }

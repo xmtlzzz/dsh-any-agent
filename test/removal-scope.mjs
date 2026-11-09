@@ -133,6 +133,94 @@ console.log('\n[2b] Codex -- array tables after ours and same-named keys in othe
   removeSandbox(home);
 }
 
+// ── Codex: 我们表尾的注释属于用户，删除和改写都要留 ─────────────────
+//   注释常写在下一张表上方（"# 浏览器工具"），按行切表时它落在我们的区间里，以前会被一起删掉。
+
+console.log('\n[2c] Codex -- comments after our table survive removal and rewrite');
+{
+  const original = [
+    'model = "o3"',
+    '',
+    '[mcp_servers.dsh-any-agent]',
+    'command = "node"',
+    'args = ["old.mjs"]',
+    '# DSH_BIN = "C:/dsh/dsh.exe"',
+    '',
+    '# Browser automation - keep this note',
+    '[mcp_servers.playwright]',
+    'command = "npx"',
+  ].join('\n') + '\n';
+  const home = sandbox({ '.codex/config.toml': original });
+
+  // 条目过时（args 不同）：--yes 会改写我们的表。
+  run(home, ['--yes', '--only', 'codex']);
+  const rewritten = readFileSync(join(home, '.codex', 'config.toml'), 'utf8');
+  check('rewrite: note above the next table survived',
+    rewritten.includes('# Browser automation - keep this note\n[mcp_servers.playwright]'), rewritten);
+  check('rewrite: commented-out line survived', rewritten.includes('# DSH_BIN = "C:/dsh/dsh.exe"'), rewritten);
+  check('rewrite: our table written once', (rewritten.match(/^\[mcp_servers\.dsh-any-agent\]$/gm) || []).length === 1, rewritten);
+  const again = run(home, ['--yes', '--only', 'codex']);
+  check('rewrite: second --yes changes nothing',
+    readFileSync(join(home, '.codex', 'config.toml'), 'utf8') === rewritten && /0 changed/.test(again.stdout || ''),
+    (again.stdout || '').split('\n').find((l) => /Summary/.test(l)) ?? '');
+
+  const r = run(home, ['--remove', '--yes', '--only', 'codex']);
+  const after = readFileSync(join(home, '.codex', 'config.toml'), 'utf8');
+  check('remove: our table is gone', !after.includes('[mcp_servers.dsh-any-agent'), after);
+  check('remove: note above the next table survived',
+    after.includes('# Browser automation - keep this note\n[mcp_servers.playwright]'), after);
+  check('remove: commented-out line survived', after.includes('# DSH_BIN = "C:/dsh/dsh.exe"'), after);
+  check('remove: exit code is 0', r.status === 0, String(r.status));
+
+  removeSandbox(home);
+}
+
+// ── Codex: 多行字符串里像表头的行不是表头 ──────────────────────────────
+
+console.log('\n[2d] Codex -- a header-looking line inside a multi-line string is text, not a table');
+{
+  const original = [
+    '[profiles.p]',
+    'note = """',
+    '[mcp_servers.dsh-any-agent]',
+    'text',
+    '"""',
+    'after = 1',
+    '',
+    '[features]',
+    'x = true',
+  ].join('\n') + '\n';
+  const home = sandbox({ '.codex/config.toml': original });
+
+  const rm = run(home, ['--remove', '--yes', '--only', 'codex']);
+  check('remove: file untouched (nothing of ours there)',
+    readFileSync(join(home, '.codex', 'config.toml'), 'utf8') === original, String(rm.status));
+
+  run(home, ['--yes', '--only', 'codex']);
+  const added = readFileSync(join(home, '.codex', 'config.toml'), 'utf8');
+  check('add: the string and every line after it survived', added.startsWith(original.trimEnd()), added);
+  check('add: our real table appended once', (added.match(/^\[mcp_servers\.dsh-any-agent\]$/gm) || []).length === 2, added);
+
+  removeSandbox(home);
+}
+
+// ── Codex: 认不出、改不了的写法（点号键 / 内联表）宁可拒绝，不写坏 ───
+
+console.log('\n[2e] Codex -- forms we cannot edit safely are refused, file untouched');
+for (const [label, original] of [
+  ['dotted key under [mcp_servers]', '[mcp_servers]\ndsh-any-agent.command = "node"\n'],
+  ['dotted key at root', 'mcp_servers.dsh-any-agent.command = "node"\n'],
+  ['inline table at root', 'mcp_servers = { dsh-any-agent = { command = "node" } }\n'],
+]) {
+  const home = sandbox({ '.codex/config.toml': original });
+  const add = run(home, ['--yes', '--only', 'codex']);
+  check(label + ': add refused (exit 1)', add.status === 1, String(add.status) + ' ' + (add.stdout || '').trim().split('\n').find((l) => /codex/i.test(l)));
+  const rm = run(home, ['--remove', '--yes', '--only', 'codex']);
+  check(label + ': remove refused (exit 1)', rm.status === 1, String(rm.status));
+  check(label + ': file untouched', readFileSync(join(home, '.codex', 'config.toml'), 'utf8') === original);
+  removeSandbox(home);
+}
+
 // ── Zed: 其他设置键与 context_servers 的其他子项都要留 ───────────────
 
 console.log('\n[3] Zed -- unrelated settings and sibling context servers survive');
