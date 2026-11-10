@@ -57,6 +57,12 @@ try {
   for (const n of ['dsh_start', 'dsh_send', 'dsh_list', 'dsh_read', 'dsh_get', 'dsh_review', 'dsh_interject', 'dsh_interrupt', 'dsh_release', 'dsh_takeover', 'dsh_approval_decide', 'dsh_status']) {
     check(`含工具 ${n}`, names.includes(n));
   }
+  const HINTS = ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'];
+  const unhinted = tools.filter((t) => !HINTS.every((h) => typeof t.annotations?.[h] === 'boolean')).map((t) => t.name);
+  check('每个工具的四个注解都是布尔值', unhinted.length === 0, unhinted.join(','));
+  const readOnly = tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name).sort().join(',');
+  check('只读工具是 doctor/get/inbox/list/read/status', readOnly === 'dsh_doctor,dsh_get,dsh_inbox,dsh_list,dsh_read,dsh_status', readOnly);
+  check('只读工具不标成破坏性', tools.every((t) => !(t.annotations?.readOnlyHint && t.annotations?.destructiveHint)));
 
   let ws = null;
   if (!hasDsh) {

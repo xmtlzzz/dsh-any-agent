@@ -189,6 +189,7 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
             name: t.name,
             description: t.description,
             inputSchema: t.inputSchema,
+            annotations: t.annotations,
           })),
         });
         return;

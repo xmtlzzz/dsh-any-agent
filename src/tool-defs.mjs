@@ -1,7 +1,7 @@
 /**
  * 工具清单（JSON Schema）。
  *
- * 从 tools.mjs 拆出来：这是一张纯数据表（名字 / 描述 / inputSchema），不含任何处理逻辑；
+ * 从 tools.mjs 拆出来：这是一张纯数据表（名字 / 注解 / 描述 / inputSchema），不含任何处理逻辑；
  * 描述文字里的默认值读自 config.mjs。tools.mjs 仍然重新导出 `TOOL_DEFS`，外部的导入路径不变。
  */
 
@@ -25,10 +25,27 @@ const CONV_ID = {
   description: '会话 id，来自 dsh_start 或 dsh_list。',
 };
 
+/**
+ * MCP 工具注解。四项全部显式给出：缺省值是「会改东西、有破坏性、非幂等、对外」，
+ * 留空会让客户端把只读查询也当成危险操作，有的目录还会直接拒收缺项的工具。
+ *   readOnly    不改任何状态；
+ *   destructive 可能丢东西：中断回合、杀进程、取消排队任务，或让 agent 去改文件；
+ *   idempotent  同样的参数再调一次没有额外效果；
+ *   openWorld   会让 agent 跑起来（它会调模型，也可能联网）。
+ */
+const H = (readOnly, destructive, idempotent, openWorld) => ({
+  readOnlyHint: readOnly,
+  destructiveHint: destructive,
+  idempotentHint: idempotent,
+  openWorldHint: openWorld,
+});
+const READ_ONLY = H(true, false, true, false);
+
 /** 工具清单（JSON Schema）。 */
 export const TOOL_DEFS = [
   {
     name: 'dsh_start',
+    annotations: H(false, false, false, true),
     description:
       '新建一个 DSH 会话（一个可长期共事的编码 agent）。会话活在磁盘上，进程只是缓存；' +
       '进程被回收或崩溃后会自动用 ACP session/resume 复活，对话不丢。' +
@@ -92,6 +109,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_send',
+    annotations: H(false, true, false, true),
     description:
       '向会话派一个任务。**给目标，不要给命令**：DSH 自己决定用哪些文件/shell/搜索/技能/子代理/团队工具，' +
       '本服务不预先加载或代理 DSH 的工具面。' +
@@ -158,6 +176,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_list',
+    annotations: READ_ONLY,
     description:
       '列出会话及其运行状态，用来掌控多个会话实例。' +
       'state: running（正在跑回合）/ idle（进程活着但空闲）/ detached（进程没开，可 resume 复活）。' +
@@ -179,6 +198,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_read',
+    annotations: READ_ONLY,
     description:
       '读会话的运行期输出（**游标式增量**）——用它可以看到"正在跑的会话"当前吐出了什么，' +
       '不必等回合结束。典型用法：dsh_list(only_running) 找到在跑的会话 → 反复 dsh_read 并回传上次的 cursor，' +
@@ -198,6 +218,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_get',
+    annotations: READ_ONLY,
     description:
       '查看单个会话的详情；带 run_id 时**取那一次派活的最终结果**（异步模式的验收入口）。' +
       '不传 run_id 则取最近一次回合。返回：标题、工作区、权限档、状态、轮数、token 用量、' +
@@ -226,6 +247,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_review',
+    annotations: H(false, false, false, false),
     description:
       '提交对一次**已结束**回合结果的**调用方审核裁决**（回合进行中放行/拒绝 DSH 的权限请求用 dsh_approval_decide）。dsh_send / dsh_interject / 哨兵里的 result 会带 `review` 审核单' +
       '（核验清单 + 证据摘要 + review_id）。在把结果当作完成之前，调用方应自己核验（读改动的文件、看 git diff、跑测试等），' +
@@ -253,6 +275,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_interject',
+    annotations: H(false, true, false, true),
     description:
       '插话：会话正在跑某个回合时往里补一句话，**本工具会阻塞到新回合跑完**（timeout_ms 到期才转后台）。两种模式——' +
       'interject（默认）打断当前回合并立刻改口；queue 不打断，等本轮自然结束后紧接着说（不进 dsh_queue 的队列）。' +
@@ -291,6 +314,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_interrupt',
+    annotations: H(false, true, true, false),
     description:
       '只停下、不说新话：中断会话当前正在进行的回合（ACP 原生 session/cancel，走的就是用户手动按停止那条路径）。' +
       '被中断的回合记为 cancelled，已产出的正文与工具调用留在它的结果里（dsh_get / 哨兵），已改动的文件不会回滚。' +
@@ -299,6 +323,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_takeover',
+    annotations: H(false, true, false, false),
     description:
       '**抢占会话的写锁**（DSH 的写锁是跨进程内核信号量，持有者活着就不过期，没有 API 能直接夺走——' +
       '唯一手段是杀掉持有者进程，所以本工具会先判定持有者是谁）：' +
@@ -321,6 +346,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_release',
+    annotations: H(false, true, true, false),
     description:
       '释放会话占用的 DSH 进程（释放写锁，让用户能在自己的 DSH GUI 里打开同一个会话）。' +
       '会话本体留在磁盘上，之后仍可 resume；**forget=true 会写墓碑**：从注册表移除，此后按 id 查询明确报“已被 forget”' +
@@ -346,6 +372,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_approval_decide',
+    annotations: H(false, true, false, false),
     description:
       '回合进行中裁决 DSH 正在等的一个权限请求（仅当会话的 on_approval=ask 时会出现），放行或拒绝后回合继续。' +
       '用于把 DSH 的越权/提权请求交给调用方决定，既不一律放行也不一律拒绝。给已结束回合的结果打分用 dsh_review。',
@@ -360,6 +387,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_status',
+    annotations: READ_ONLY,
     description:
       '单个会话的轻量快照：读本服务内存里的实时状态，不拉起 DSH 进程。返回 state（running/idle/detached）、' +
       '在跑时的当前工具与已产出字数、最近一次回合的 run_id/状态/审核状态、待决审批、队列长度，' +
@@ -369,6 +397,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_inbox',
+    annotations: READ_ONLY,
     description:
       '**跨会话的待决审批收件箱**（dsh_status 只看单个会话）。' +
       '一次列出所有会话里等你裁决的审批：会话 id/标题、审批 id、工具、原因、命令/路径摘要、等待时长。' +
@@ -383,6 +412,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_queue',
+    annotations: H(false, true, false, false),
     description:
       '查看/修改会话的待执行队列（只管理已入队的任务，入队用 dsh_send(queue=true)；**仅内存**，重启丢失）。' +
       'action=list 列出；remove 取消并写 cancelled 哨兵；update 改写排队文本；promote 提到队首。',
@@ -398,6 +428,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_doctor',
+    annotations: READ_ONLY,
     description:
       '只读体检：DSH 可执行文件与版本、profile 是否存在/漂移、状态文件、runs/locks 目录可写、孤儿锁、' +
       '当前会话数与 RSS、生效配置。只报告不修改；ok=false 表示存在 fail 项。',

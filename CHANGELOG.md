@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Every tool now declares all four MCP annotations** (`readOnlyHint`,
+  `destructiveHint`, `idempotentHint`, `openWorldHint`). The six query tools —
+  `dsh_list`, `dsh_read`, `dsh_get`, `dsh_status`, `dsh_inbox`, `dsh_doctor` —
+  are marked read-only, so clients no longer have to treat them like the tools
+  that dispatch work or stop processes.
+
+### Fixed
+
+- **`dsh-any-agent-setup --remove` puts a config back the way it was before
+  setup touched it.** Three cases did not round-trip. An empty container that
+  was already yours (for example `"mcpServers": {}`) was deleted along with our
+  entry; it now stays. A config file setup had created itself (`--force` on a
+  client that was not installed) was left behind as an empty `{}` or a
+  zero-byte `config.toml`; it is now deleted, after the usual backup. Removal
+  decides by comparing against the `.bak-dsh-*` backups taken before install.
+- **Removing our entry from a file that holds nothing else deletes the file.**
+  This also applies to a config you wrote by hand that contains only the
+  `dsh-any-agent` entry. A backup is kept first, and a file that was already
+  empty before setup ran is left alone.
+- **A UTF-8 BOM at the start of Codex's `config.toml` is no longer dropped.**
+  JSON configs already kept theirs; the TOML path did not.
+
 ## [0.6.7] — 2026-11-09
 
 A licensing and documentation release: the package now carries the copyright
