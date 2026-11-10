@@ -92,3 +92,14 @@ test('fetchGitHubStars returns unavailable when network fails', async () => {
   const res = await fetchGitHubStars(async () => { throw new Error('network down'); }, null);
   assert.deepEqual(res, { stars: null, source: 'unavailable' });
 });
+
+test('fetchGitHubStars falls back to stale cache when network is rate-limited or down', async () => {
+  const staleTs = Date.now() - 60 * 60 * 1000;
+  const store = new Map([['dsh_gh_stars_cache', JSON.stringify({ stars: 77, ts: staleTs })]]);
+  const mockStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, v),
+  };
+  const res = await fetchGitHubStars(async () => ({ ok: false, status: 403 }), mockStorage);
+  assert.deepEqual(res, { stars: 77, source: 'stale-cache' });
+});

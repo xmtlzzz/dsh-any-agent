@@ -56,12 +56,13 @@ test('English demo mirrors every scenario, frame count, and status label', () =>
 });
 
 test('Demo snippets use the real MCP argument and response keys', () => {
-  const frames = Object.values(scenarios).flatMap(s => s.frames);
+  const frames = [...Object.values(scenarios), ...Object.values(scenariosEn)].flatMap(s => s.frames);
   const interject = frames.filter(f => f.tool === 'dsh_interject');
   const reads = frames.filter(f => f.tool === 'dsh_read');
   const status = frames.filter(f => f.tool === 'dsh_status');
   const gets = frames.filter(f => f.tool === 'dsh_get');
-  assert.ok(interject.length > 0 && reads.length > 0 && status.length > 0 && gets.length > 0);
+  const sends = frames.filter(f => f.tool === 'dsh_send' && f.code.includes('conversation_id:'));
+  assert.ok(interject.length > 0 && reads.length > 0 && status.length > 0 && gets.length > 0 && sends.length > 0);
   for (const f of interject) {
     assert.match(f.code, /message:/);
     assert.doesNotMatch(f.code, /\bprompt:/);
@@ -72,10 +73,15 @@ test('Demo snippets use the real MCP argument and response keys', () => {
   }
   for (const f of status) {
     assert.match(f.code, /conversation_id:/);
+    assert.match(f.code, /current_tool:/);
+    assert.doesNotMatch(f.code, /\btool:/);
     assert.doesNotMatch(f.code, /\bhistory:/);
   }
   for (const f of gets) {
     assert.match(f.code, /conversation_id:/);
     assert.match(f.code, /run_id:/);
+  }
+  for (const f of sends) {
+    assert.doesNotMatch(f.code, /\bwait:\s*false\b/);
   }
 });
