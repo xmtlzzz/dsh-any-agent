@@ -709,7 +709,6 @@ export function describeEntry(shape, entry) {
 }
 // ── 客户端注册表 ────────────────────────────────────────────────────
 
-import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -732,15 +731,6 @@ export function resolveDirs(homeOverride) {
   return { home, appData };
 }
 
-export function which(cmd) {
-  const probe = spawnSync(IS_WIN ? 'where' : 'which', [cmd], {
-    encoding: 'utf8',
-    shell: IS_WIN,
-    windowsHide: true,
-  });
-  return probe.status === 0;
-}
-
 function jsonClient(id, label, shape, containerKey, pathOf) {
   return { id, label, kind: 'json', shape, containerKey, pathOf };
 }
@@ -752,9 +742,9 @@ function jsonClient(id, label, shape, containerKey, pathOf) {
  *   - VS Code 的 mcp.json 用 servers，不是 mcpServers；
  *   - opencode 用容器 mcp，且 command 是一个数组；
  *   - Zed 的 context_servers 里 command 是对象 { path, args, env }。
- * Claude Code 不走文件：它的用户级配置在 ~/.claude.json，那个文件的 projects
- * 映射里存在大小写不同的重复键，朴素 JSON.parse 会直接失败 —— 重写它等于
- * 毁掉用户的项目列表。所以只经它自己的 claude mcp 子命令。
+ * Claude Code 和其它客户端一样按文本定点编辑：它的用户级配置在 ~/.claude.json，
+ * 那个文件的 projects 映射里存在大小写不同的重复键，朴素 JSON.parse 会直接失败，
+ * 整份重写等于毁掉用户的项目列表 —— 所以只扫描字符区间，从不构造值对象。
  */
 /** 既有条目用的是什么写法（只对形状有多种合法写法的客户端有意义）。 */
 export function existingShapeMode(client, file) {
@@ -803,7 +793,6 @@ export function clientList(dirs) {
 
 /** 让每个客户端「能被检测到」的依据各不相同，但都不写盘。 */
 export function isPresent(client, dirs) {
-  if (client.kind === 'cli') return which(client.cli);
   return existsSync(client.pathOf(dirs));
 }
 
@@ -883,30 +872,7 @@ const DELETES_FILE = '; nothing else is in the file, so the file itself would be
 export function planClient(client, ctx) {
   const { dirs, remove, launch, env } = ctx;
   const file = client.pathOf(dirs);
-  const base = { id: client.id, label: client.label, path: file, sourceHash: client.kind === 'cli' ? undefined : sourceHashOf(file) };
-
-  if (client.kind === 'cli') {
-    // 计划模式绝不调用会立刻写盘的 add/remove：只做只读探测。
-    if (!which(client.cli)) {
-      return { ...base, status: 'skipped', changed: false, summary: client.cli + ' CLI not found; its file is never edited by hand' };
-    }
-    const probe = spawnSync(client.cli, ['mcp', 'get', ENTRY_NAME], {
-      encoding: 'utf8', shell: IS_WIN, windowsHide: true,
-    });
-    const registered = probe.status === 0;
-    if (remove) {
-      return registered
-        ? { ...base, status: 'planned', changed: true, cliAction: 'remove', summary: 'would unregister via ' + client.cli + ' mcp remove' }
-        : { ...base, status: 'absent', changed: false, summary: 'not registered' };
-    }
-    return {
-      ...base,
-      status: 'planned',
-      changed: true,
-      cliAction: 'add',
-      summary: registered ? 'would re-register (replacing the existing entry)' : 'would register via ' + client.cli + ' mcp add',
-    };
-  }
+  const base = { id: client.id, label: client.label, path: file, sourceHash: sourceHashOf(file) };
 
   if (client.kind === 'toml') {
     const block = remove ? null : codexBlock(launch, env);
@@ -966,37 +932,8 @@ export function planClient(client, ctx) {
 export function applyClient(plan, ctx, stamp) {
   if (!plan || !plan.changed || !ctx.write) return plan;
 
-  const { remove, launch, env } = ctx;
+  const { remove } = ctx;
   const client = ctx.byId.get(plan.id);
-
-  if (client.kind === 'cli') {
-    const run = (a) => spawnSync(client.cli, a, { encoding: 'utf8', shell: IS_WIN, windowsHide: true });
-    const textOf = (r) => ((r.stdout || '') + (r.stderr || '')).toLowerCase();
-
-    if (plan.cliAction === 'remove') {
-      const r = run(['mcp', 'remove', ENTRY_NAME, '-s', 'user']);
-      if (r.status !== 0) {
-        const msg = textOf(r);
-        if (msg.includes('no mcp server named')) return { ...plan, status: 'absent', changed: false, summary: 'not registered' };
-        return { ...plan, status: 'failed', changed: false, summary: msg.trim().split('\n')[0] || client.cli + ' exited ' + r.status };
-      }
-      return { ...plan, status: 'removed', summary: 'removed via ' + client.cli + ' mcp remove (user scope)' };
-    }
-
-    // add 不会覆盖既有条目，所以先删再建；缺条目不是错误。
-    run(['mcp', 'remove', ENTRY_NAME, '-s', 'user']);
-    // Windows 上子进程经 cmd 拉起，含空格的参数不加引号会被拆开：
-    // "C:\Program Files\nodejs\node.exe" 会变成 "C:\Program" + 一个多余参数，
-    // 写出来的配置看着没错，客户端却报 CONNECTION_CLOSED。
-    const quote = (s) => (IS_WIN && /\s/.test(s) ? '"' + s + '"' : s);
-    const envs = [];
-    for (const [k, v] of Object.entries(env)) envs.push('-e', k + '=' + v);
-    const r = run(['mcp', 'add', ENTRY_NAME, '-s', 'user', ...envs, '--', quote(launch.command), ...launch.args.map(quote)]);
-    if (r.status !== 0) {
-      return { ...plan, status: 'failed', changed: false, summary: textOf(r).trim().split('\n')[0] || client.cli + ' exited ' + r.status };
-    }
-    return { ...plan, status: 'applied', summary: 'registered via ' + client.cli + ' mcp add (user scope)' };
-  }
 
   if (typeof plan.next !== 'string' && !plan.deleteFile) return plan;
 
@@ -1009,17 +946,6 @@ export function applyClient(plan, ctx, stamp) {
     const fresh = planClient(client, ctx);
     if (!fresh.changed) return fresh;
     return applyClient(fresh, { ...ctx, replanned: true }, stamp);
-  }
-
-  // 只读文件不覆盖：用户把配置设成只读，通常就是不想让程序动它。
-  // --force 是显式的「我知道，照做」。
-  if (!ctx.force && !isWritable(plan.path)) {
-    return {
-      ...plan,
-      status: 'failed',
-      changed: false,
-      summary: 'config file is read-only, refusing to overwrite it (use --force to override)',
-    };
   }
 
   // 只读文件默认不覆盖：用户把它设成只读，通常就是不想让程序动它。
