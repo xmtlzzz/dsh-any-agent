@@ -382,7 +382,7 @@ export const TOOL_DEFS = [
       '释放会话占用的 DSH 进程（释放写锁，让用户能在自己的 DSH GUI 里打开同一个会话）。' +
       '会话本体留在磁盘上，之后仍可 resume；**forget=true 会写墓碑**：从注册表移除，此后按 id 查询明确报“已被 forget”' +
       '（想恢复可按错误里的路径删除墓碑文件，默认在 `$DSH_HOME/.dsh-any-agent-forgotten/<id>.json`）。' +
-      '★ 用完了想一次性腾内存就传 all=true（每个会话约 300-480MB；默认 `MAX_LIVE=8` 会回收最久未用者，' +
+      '★ 用完了想一次性腾内存就传 all=true（每个会话约 300-480MB；默认 `MAX_LIVE=4` 会回收最久未用者，' +
       'all=true 会释放**空闲**会话，正在跑回合的默认跳过；确实要连跑着的也停掉请传 force=true）。' +
       '对单个会话 release 会停掉其 DSH 进程；若它正在跑回合，该回合会被中断。',
     inputSchema: S(

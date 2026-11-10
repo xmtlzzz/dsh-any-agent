@@ -23,8 +23,8 @@ const FIRST_PROMPT = process.argv[3] ?? '只回复六个字：持锁演示就绪
 const ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-demo-'));
 const { McpClient } = await import('./mcp-client.mjs');
 
-// ★ 不设 DSH_MCP_IDLE_TTL_MS —— 用**默认值**（现在的默认就是 0 = 永不回收）
-const client = new McpClient({ env: { DSH_MCP_STATE: join(ROOT, 'state.json') } }).start();
+// ★ 显式 DSH_MCP_IDLE_TTL_MS=0（永不回收）—— 0.4.0 起默认是 10 分钟，不设的话演示中途锁会被腾出来
+const client = new McpClient({ env: { DSH_MCP_STATE: join(ROOT, 'state.json'), DSH_MCP_IDLE_TTL_MS: '0' } }).start();
 let conv = null;
 let stopping = false;
 

@@ -11,7 +11,8 @@
  *   DSH_MCP_APPROVAL            默认审批策略（非只读档默认 auto-allow；ask = 挂起待裁决）
  *   DSH_MCP_REVIEW              调用方审核策略（默认 advisory；off 关闭自动审核单）
  *   DSH_MCP_REVIEWS_DIR         审核记录目录（默认 <状态文件同目录>/reviews）
- *   DSH_MCP_IDLE_TTL_MS         空闲多久回收会话进程（默认 0 = 永不回收）
+ *   DSH_MCP_IDLE_TTL_MS         空闲多久回收会话进程（默认 600000 = 10 分钟；0 = 永不回收）
+ *   DSH_MCP_MAX_LIVE            最多同时保活几个会话进程（默认 4；0 = 不限）
  *   DSH_MCP_PROMPT_TIMEOUT_MS   wait=true 时的等待上限（默认 0 = 不设超时）
  *   DSH_MCP_LOCK_STALE_MS       写锁登记多久没心跳算"持有者失联"（默认 90 秒）
  *   DSH_MCP_LOG                 silent(默认) | info | debug —— 日志级别

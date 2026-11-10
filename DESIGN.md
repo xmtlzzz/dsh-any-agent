@@ -276,7 +276,7 @@ Profile = `~/.dsh/profiles/<name>/`，由 `package.json` 的 `dsh.profile.bundle
   → 这正是"任务跑完后调用方接不回去"的典型成因（旧代码还会把它包成 `Internal error`）。所以运行中的回合**不要在 GUI 里点进去看**；要看先 `dsh_release`。
   → **★ 而且"切走"不会还回来（同样实测）**：你切到别的会话之后再探测，锁**仍然**被 `dsh web` 持有。**点开一次 = 这个会话在整个 web 进程生命周期内归 GUI**，MCP 要等重启 `dsh web` 才能再碰它。这才是"**总是**接不回去"的原因（不是每次都被抢，而是抢一次就长期生效）。看进度应该用 `dsh_read`。
   → **★ 归档也不释放（实测，且已核实归档确实生效）**：文档说"归档主 Session 会释放其 reference"，但写锁没跟着释放。**唯一已知的解除方式 = 重启 `dsh web`**（数据无损，重启后照常 resume）。
-  → **★★ 因此无损解法是"别让锁空出来"**：**`DSH_MCP_IDLE_TTL_MS=0`（永不回收，现为默认）** → MCP 一直握着写锁 → GUI 抢不走。**实测**：你在 GUI 里点开它是**只读打开**（照样看得到内容 ✓），用独立实例探测确认**持有者仍是本服务的 PID、心跳新鲜** ✓ —— 即"**你看得见，我们写得动**"，两边都不受影响。代价是每会话常驻一个 DSH 进程。`test/cycle.mjs` 第 5 节守着这条语义（TTL=0 时子进程不被收、`lock_holder` 仍是 `self`、心跳仍在续）。
+  → **★★ 因此无损解法是"别让锁空出来"**：**`dsh_start(keep_alive=true)` 或 `DSH_MCP_IDLE_TTL_MS=0`（永不回收；0.4.0 起默认改为 10 分钟以控制内存，需要握锁时显式开启）** → MCP 一直握着写锁 → GUI 抢不走。**实测**：你在 GUI 里点开它是**只读打开**（照样看得到内容 ✓），用独立实例探测确认**持有者仍是本服务的 PID、心跳新鲜** ✓ —— 即"**你看得见，我们写得动**"，两边都不受影响。代价是每会话常驻一个 DSH 进程。`test/cycle.mjs` 第 5 节守着这条语义（TTL=0 时子进程不被收、`lock_holder` 仍是 `self`、心跳仍在续）。
 - **多实例共存（实测）**：多个实例共用一份注册表时 `save()` 是"整份文档、最后写入者获胜" —— 后保存的会把**它没见过**的会话从文件里抹掉（`test/multi.mjs` 复现）。因此**注册表只当缓存**：`Hub.get(id)` 查不到时用 `findSessionHeader(id)` 从**会话存储**按 id 接回来（跨分桶扫会话头），权限档取自**会话自己的记录**（`permissions.preset`），所以"只有 id"也足以驱动任何磁盘上存在的会话，且**不会提权**。另：`save()` 的临时文件必须**唯一命名**（pid + 随机），否则多实例并发保存会互相踩踏（写死 `${STATE_FILE}.tmp` 是真实 bug）。
 - **★★ 权限档的无声提权（最严重的一个，`test/permission.mjs` 守着）**：profile 里写 `defaultPreset` 会让 `dsh-permission-presets` 在**会话创建时**把它应用到 sandbox 模式与审批策略，**盖掉** `dsh-base` 从 `DSH_PERMISSION_MODE` 推导的模式 —— 于是 `dsh_start(permission:'read-only')` 返回 read-only 而会话实为完全权限。**正确写法：只定义预设、不写 `defaultPreset`**（插件改用"按 sandbox+approval 组合推断"的默认值，正好与三档一一对应）。**验证方式很关键**：不读工具的返回值（那正是会说谎的地方），而读**会话自己记录的事实**（投影缓存 `permissions.preset` / `sandboxMode`）。附带结论：档位在 `dsh_start` 时定下，DSH 设计上**resume 会保留会话已记录的权限**，事后改参数不生效。
 - **错误翻译**：`SessionAlreadyOwnedError` 不是 `RequestError`，ACP 把它包成 `-32603 "Internal error"` 并把真实原因放 `error.data`；本服务取出 `data`，识别 `already owned` / `writer-held` / 中文「已被占用」，转成"谁持有 + 该怎么办"。
@@ -466,7 +466,7 @@ MCP 服务器增删查（F2）、插件与技能管理、`dsh_doctor`、分叉/�
 | # | 问题 | 我的建议 |
 |---|---|---|
 | Q1 | 会话空间：与用户 GUI 共用 `~/.dsh`（历史统一、但会抢写锁）还是独立 `DSH_HOME`（隔离、但要另配凭据）？ | 默认共用，提供 `--dsh-home` 覆盖；MCP 起的会话打标记便于过滤 |
-| Q2 | 空闲回收 TTL 默认值？（太长会占锁让用户打不开，太短会反复重启丢上下文） | ✅ **已定：默认 `0` = 永不回收**（`dsh_release` 可显式交还；显式设非零值才回收） |
+| Q2 | 空闲回收 TTL 默认值？（太长会占锁让用户打不开，太短会反复重启丢上下文） | ✅ **已定：默认 10 分钟（0.4.0 起；之前为 `0` = 永不回收），并配 `DSH_MCP_MAX_LIVE=4` 保活上限**。并发一高时常驻进程会把内存堆到几 GB，所以默认回收；必须握锁的会话用 `dsh_start(keep_alive=true)`，或全局设 `0` |
 | Q3 | **中断怎么做？** SDK 协议没有 cancel，且杀进程 = 永久失去该会话（约束 6） | 强烈倾向 ②：写个极小 DSH 插件补 `session/interrupt`。① 已排除——headless 无法接管 web 建的会话 |
 | Q4 | 默认权限档给哪一档？ | ✅ **已定：服务端裸默认 `danger-full-access`；`setup` 写入 `workspace-write`；其余可选。** 成因几经变化：SDK 协议没有审批通道时中间档等于废档（越界操作静默失败）；**改用 ACP 后 `session/request_permission` 让中间档复活**，所以现在是"默认最省事 + 需要时可收窄"，而不是被迫只留一档。`read-only` 留给分析不信任样本的场景。注意 `approval.policy: never` 的语义是"每次询问都确定性拒绝"（不是自动放行），它只在 `danger-full-access` 下无副作用——因为沙箱根本不产生询问 |
 | Q5 | 会话 id 是否直接采用 DSH 原生 `session-<uuid>`？ | ✅ 已定：采用。实测语义 = 全新 id 落成磁盘会话 id（磁盘/标题/GUI 全对齐）；已存在的 id 直接报错。故**每个会话只在首次 prompt 生成一次 id，之后仅在本进程内复用** |

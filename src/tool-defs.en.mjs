@@ -247,7 +247,7 @@ export const TOOL_TEXT_EN = {
       'is removed from the registry and later lookups by id say it was forgotten (to bring it back, delete the tombstone file ' +
       'named in the error, by default `$DSH_HOME/.dsh-any-agent-forgotten/<id>.json`). ' +
       'To free memory in one go when you are done, pass all=true (each conversation is about 300-480 MB; the default ' +
-      '`MAX_LIVE=8` already reaps the least recently used one; all=true releases **idle** conversations and skips ones running ' +
+      '`MAX_LIVE=4` already reaps the least recently used one; all=true releases **idle** conversations and skips ones running ' +
       'a turn unless force=true). Releasing a single conversation stops its DSH process; if a turn is running, it is interrupted.',
     params: {
       conversation_id: CONV_ID,
