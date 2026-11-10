@@ -14,7 +14,42 @@
       "version": "0.6.7",
       "transport": {
         "type": "stdio"
-      }
+      },
+      "environmentVariables": [
+        {
+          "name": "DSH_BIN",
+          "description": "Path to @deepseek-ai/dsh/lib/bin.js. Leave unset to auto-detect the DeepSeek Harness desktop app, an npm global install, or the npx cache.",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "DSH_MCP_PERMISSION",
+          "description": "Default permission tier for dsh_start: read-only, workspace-write, or danger-full-access (the last one also needs DSH_MCP_ALLOW_FULL_ACCESS=1).",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "workspace-write",
+          "choices": ["read-only", "workspace-write", "danger-full-access"]
+        },
+        {
+          "name": "DSH_MCP_APPROVAL",
+          "description": "What happens when DSH asks to go beyond its sandbox: auto-allow, auto-deny, or ask (the caller decides with dsh_approval_decide). read-only sessions always use auto-deny.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "auto-allow",
+          "choices": ["auto-allow", "auto-deny", "ask"]
+        },
+        {
+          "name": "DSH_MCP_LANG",
+          "description": "Language of the tool descriptions and server instructions: en or zh. Unset follows the system locale.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false,
+          "choices": ["en", "zh"]
+        }
+      ]
     }
   ]
 }

@@ -1,0 +1,11 @@
+.git
+.github
+.state
+node_modules
+test
+video
+website
+docs
+demo
+scripts
+*.md
