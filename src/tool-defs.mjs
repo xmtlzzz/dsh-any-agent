@@ -1,7 +1,7 @@
 /**
  * 工具清单（JSON Schema）。
  *
- * 从 tools.mjs 拆出来：这是一张纯数据表（名字 / 注解 / 描述 / inputSchema），不含任何处理逻辑；
+ * 从 tools.mjs 拆出来：这是一张纯数据表（名字 / 标题 / 注解 / 描述 / inputSchema），不含任何处理逻辑；
  * 描述文字里的默认值读自 config.mjs。tools.mjs 仍然重新导出 `TOOL_DEFS`，外部的导入路径不变。
  */
 
@@ -17,6 +17,7 @@ import {
   REVIEW_MODES,
 } from './config.mjs';
 import { REVIEW_VERDICTS } from './review.mjs';
+import { TOOL_TEXT_EN } from './tool-defs.en.mjs';
 
 const S = (props, required = []) => ({ type: 'object', properties: props, required, additionalProperties: false });
 
@@ -41,10 +42,19 @@ const H = (readOnly, destructive, idempotent, openWorld) => ({
 });
 const READ_ONLY = H(true, false, true, false);
 
+/**
+ * 结构化输出的 schema。只给三个工具声明：它们的 structuredContent 就是 tools.mjs 里当场拼出来的
+ * 固定形状。其余工具的形状随路径变化（dsh_send 可能是完整结果也可能是后台收据，dsh_queue 每个
+ * action 都不同），而声明了 schema 的工具，客户端会按它校验返回值 —— 写错一个字段，那次调用
+ * 就被客户端当成失败。所以这里宁可少写：required 只列永远存在的键，也不禁止多出来的键。
+ */
+const OUT = (props, required) => ({ type: 'object', properties: props, required });
+
 /** 工具清单（JSON Schema）。 */
 export const TOOL_DEFS = [
   {
     name: 'dsh_start',
+    title: '新建会话',
     annotations: H(false, false, false, true),
     description:
       '新建一个 DSH 会话（一个可长期共事的编码 agent）。会话活在磁盘上，进程只是缓存；' +
@@ -109,6 +119,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_send',
+    title: '派发任务',
     annotations: H(false, true, false, true),
     description:
       '向会话派一个任务。**给目标，不要给命令**：DSH 自己决定用哪些文件/shell/搜索/技能/子代理/团队工具，' +
@@ -176,6 +187,19 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_list',
+    title: '列出会话',
+    outputSchema: OUT(
+      {
+        count: { type: 'integer' },
+        running: { type: 'integer' },
+        conversations: { type: 'array', items: { type: 'object' } },
+        orphan_holders: { type: 'array', items: { type: 'object' } },
+        probe_ok: { type: ['boolean', 'null'] },
+        probe_error: { type: ['string', 'null'] },
+        probe_cached: { type: 'boolean' },
+      },
+      ['count', 'running', 'conversations'],
+    ),
     annotations: READ_ONLY,
     description:
       '列出会话及其运行状态，用来掌控多个会话实例。' +
@@ -198,6 +222,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_read',
+    title: '读取运行输出',
     annotations: READ_ONLY,
     description:
       '读会话的运行期输出（**游标式增量**）——用它可以看到"正在跑的会话"当前吐出了什么，' +
@@ -218,6 +243,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_get',
+    title: '查看会话或回合结果',
     annotations: READ_ONLY,
     description:
       '查看单个会话的详情；带 run_id 时**取那一次派活的最终结果**（异步模式的验收入口）。' +
@@ -247,6 +273,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_review',
+    title: '提交审核裁决',
     annotations: H(false, false, false, false),
     description:
       '提交对一次**已结束**回合结果的**调用方审核裁决**（回合进行中放行/拒绝 DSH 的权限请求用 dsh_approval_decide）。dsh_send / dsh_interject / 哨兵里的 result 会带 `review` 审核单' +
@@ -275,6 +302,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_interject',
+    title: '插话',
     annotations: H(false, true, false, true),
     description:
       '插话：会话正在跑某个回合时往里补一句话，**本工具会阻塞到新回合跑完**（timeout_ms 到期才转后台）。两种模式——' +
@@ -314,6 +342,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_interrupt',
+    title: '中断回合',
     annotations: H(false, true, true, false),
     description:
       '只停下、不说新话：中断会话当前正在进行的回合（ACP 原生 session/cancel，走的就是用户手动按停止那条路径）。' +
@@ -323,6 +352,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_takeover',
+    title: '抢占写锁',
     annotations: H(false, true, false, false),
     description:
       '**抢占会话的写锁**（DSH 的写锁是跨进程内核信号量，持有者活着就不过期，没有 API 能直接夺走——' +
@@ -346,6 +376,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_release',
+    title: '释放会话',
     annotations: H(false, true, true, false),
     description:
       '释放会话占用的 DSH 进程（释放写锁，让用户能在自己的 DSH GUI 里打开同一个会话）。' +
@@ -372,6 +403,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_approval_decide',
+    title: '裁决审批',
     annotations: H(false, true, false, false),
     description:
       '回合进行中裁决 DSH 正在等的一个权限请求（仅当会话的 on_approval=ask 时会出现），放行或拒绝后回合继续。' +
@@ -387,6 +419,20 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_status',
+    title: '会话状态',
+    outputSchema: OUT(
+      {
+        conversation_id: { type: 'string' },
+        state: { type: 'string', enum: ['running', 'idle', 'detached'] },
+        alive: { type: 'boolean' },
+        busy: { type: 'boolean' },
+        turns: { type: 'number' },
+        pending_approvals: { type: 'array', items: { type: 'string' } },
+        run: { type: ['object', 'null'] },
+        review: { type: ['object', 'null'] },
+      },
+      ['conversation_id', 'state'],
+    ),
     annotations: READ_ONLY,
     description:
       '单个会话的轻量快照：读本服务内存里的实时状态，不拉起 DSH 进程。返回 state（running/idle/detached）、' +
@@ -397,6 +443,14 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_inbox',
+    title: '审批收件箱',
+    outputSchema: OUT(
+      {
+        count: { type: 'integer' },
+        approvals: { type: 'array', items: { type: 'object' } },
+      },
+      ['count', 'approvals'],
+    ),
     annotations: READ_ONLY,
     description:
       '**跨会话的待决审批收件箱**（dsh_status 只看单个会话）。' +
@@ -412,6 +466,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_queue',
+    title: '管理队列',
     annotations: H(false, true, false, false),
     description:
       '查看/修改会话的待执行队列（只管理已入队的任务，入队用 dsh_send(queue=true)；**仅内存**，重启丢失）。' +
@@ -428,6 +483,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_doctor',
+    title: '体检',
     annotations: READ_ONLY,
     description:
       '只读体检：DSH 可执行文件与版本、profile 是否存在/漂移、状态文件、runs/locks 目录可写、孤儿锁、' +
@@ -435,3 +491,20 @@ export const TOOL_DEFS = [
     inputSchema: S({}, []),
   },
 ];
+
+/**
+ * 按语言给出工具清单。中文就是 TOOL_DEFS 本身；英文把标题、描述和参数描述换成
+ * tool-defs.en.mjs 里的文字，名字、schema 结构与注解一律不变。
+ */
+export function localizeToolDefs(lang, defs = TOOL_DEFS) {
+  if (lang !== 'en') return defs;
+  return defs.map((t) => {
+    const en = TOOL_TEXT_EN[t.name];
+    if (!en) return t;
+    const properties = {};
+    for (const [key, schema] of Object.entries(t.inputSchema.properties)) {
+      properties[key] = en.params?.[key] ? { ...schema, description: en.params[key] } : schema;
+    }
+    return { ...t, title: en.title, description: en.description, inputSchema: { ...t.inputSchema, properties } };
+  });
+}

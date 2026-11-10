@@ -59,7 +59,7 @@ while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit
 - **不串台**：哨兵路径为 `<状态目录>/runs/<conversation_id>/<run_id>.json`，按会话分目录。`run_id` 的序号是每会话独立计数的，不同会话在同一毫秒可能生成同名 `run_id`——分目录后各写各的，绝不互相覆盖。每个 run 起一个独立后台任务即可，各自完成、各自唤醒。
 - **闩锁语义**：文件写一次并保留。即便 run 在你启动等待任务**之前**就已完成，`[ -f ]` 也立刻为真，不会漏。
 - **原子落地**：`tmp` + `rename`，文件一旦存在内容必然完整；每个 run 用独立 tmp，并发写互不干扰。
-- **无主动推送**：本服务在 MCP 协议上只应答请求、不发通知；"跑完通知"完全由这个哨兵文件 + 你的后台等待任务实现。
+- **完成不靠推送**："跑完通知"完全由这个哨兵文件 + 你的后台等待任务实现，本服务不为此发 MCP 通知。唯一会发的通知是进度：调用带 `progressToken` 时，阻塞中的调用（`dsh_send(wait=true)`、`dsh_interject`）每 5 秒回报一次已等时长、当前工具名和本轮已产出字数，不含命令、路径或正文。
 - **审核不随哨兵消失**：`result.review` 随结果一起写入，所以只读文件的调用方也能看到清单。之后 `dsh_review` 会**原子重写**这个审核块（`status` → `pass`/`partial`/`fail`，并写入 `notes`、`reviewed_at`、`review_file`），闩锁文件本身始终存在。审核记录在 `<状态目录>/reviews/` 下，和哨兵一样按 7 天 TTL 清理。
 - **★ 哨兵里没有思考内容**：载荷含正文、思考**统计**、用量与（已脱敏的）工具输入，但没有思考正文；`result.thinking` 会被剥掉，并始终给出布尔 `thinking_omitted`（剥离了为 `true`，本来没有为 `false`）——本服务自己的落盘物里不写思考。`dsh_get(run_id)` 在内存里仍能看到它（记录还在时）。设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 可以故意打破这条保证。注意：**DSH 自己的会话日志仍含思考**，见“日志与隐私”。
 

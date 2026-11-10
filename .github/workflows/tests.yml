@@ -5,8 +5,9 @@ name: tests
 # This project's suite has two halves, and only one of them can run here.
 #
 #   OFFLINE (runs in CI)
-#     smoke             protocol + instructions length cap, no DSH   20 checks
+#     smoke             protocol + instructions length cap, no DSH   33 checks
 #     line-decoder      UTF-8 chunk boundaries          4 checks
+#     progress          MCP progress notifications     15 checks
 #     guards            env-var edge cases            40 checks
 #     dsh-locate        DSH auto-discovery (asar)     21 checks
 #     prune             sentinel retention            11 checks
@@ -131,6 +132,10 @@ jobs:
       - name: line-decoder (multi-byte UTF-8 chunk boundaries)
         env: { DSH_MCP_LOG: silent }
         run: node test/line-decoder.mjs
+
+      - name: progress (MCP progress notifications)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/progress.mjs
 
       - name: guards (environment-variable edge cases)
         env: { DSH_MCP_LOG: silent }

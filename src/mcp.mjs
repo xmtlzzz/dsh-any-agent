@@ -8,7 +8,10 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHandlers, TOOL_DEFS } from './tools.mjs';
+import { createHandlers } from './tools.mjs';
+import { localizeToolDefs } from './tool-defs.mjs';
+import { INSTRUCTIONS_EN } from './tool-defs.en.mjs';
+import { detectLang } from './live-view.mjs';
 import { DEFAULT_PERMISSION } from './config.mjs';
 import { LineDecoder } from './line-decoder.mjs';
 import { setLiveClient } from './live.mjs';
@@ -37,6 +40,14 @@ const FALLBACK_PROTOCOL = '2025-06-18';
  * test/smoke.mjs 守住长度上限 INSTRUCTIONS_MAX_CHARS。
  */
 export const INSTRUCTIONS_MAX_CHARS = 2400;
+/** 英文说明的上限：同样的内容英文更长，但仍要留在客户端的截断点（约 4000 字符）之内。 */
+export const INSTRUCTIONS_EN_MAX_CHARS = 3600;
+
+/**
+ * 工具描述与服务说明用哪种语言：DSH_MCP_LANG 优先，否则跟系统语言走（与 watch / dashboard 同一条规则）。
+ * 进程启动时定一次；工具返回的正文不在此列，仍是中文。
+ */
+export const LANG = detectLang();
 
 export const INSTRUCTIONS = `本服务把 DeepSeek Harness (DSH) 当作可长期共事的编码 agent 驱动。DSH 自带文件/shell/搜索/技能/子代理；你给**目标**，它自己决定怎么做。
 
@@ -50,7 +61,7 @@ export const INSTRUCTIONS = `本服务把 DeepSeek Harness (DSH) 当作可长期
 
 【流程】dsh_start(cwd?) → dsh_send(conversation_id, prompt) 默认不阻塞，立刻返回 run_id + sentinel_file → 等哨兵 → 读哨兵或 dsh_get 验收 → dsh_review。随时可用 dsh_status / dsh_read / dsh_list(only_running=true)。用完 dsh_release。
 
-【等结果：哨兵文件，不要轮询】每个回合结束（成功/失败/取消）都会原子写出哨兵 JSON。用你的**后台任务**等它出现（收据里给了现成命令：sentinel_file_posix 给 Bash，sentinel_wait_powershell 给 PowerShell），文件一到宿主就唤醒你；读它拿 status 与 result（Windows PowerShell 读取要 -Encoding UTF8，收据里有 sentinel_read_powershell）。wait=true 会原地阻塞，等超时只转后台、不取消回合。本服务不发 MCP 通知。
+【等结果：哨兵文件，不要轮询】每个回合结束（成功/失败/取消）都会原子写出哨兵 JSON。用你的**后台任务**等它出现（收据里给了现成命令：sentinel_file_posix 给 Bash，sentinel_wait_powershell 给 PowerShell），文件一到宿主就唤醒你；读它拿 status 与 result（Windows PowerShell 读取要 -Encoding UTF8，收据里有 sentinel_read_powershell）。wait=true 会原地阻塞，等超时只转后台、不取消回合。只有调用带 progressToken 时才发进度通知。
 
 【写锁】一个会话同时只能有一个写者。撞上 "already owned by an active write handle"（或笼统的 Internal error）时别重试，先看 dsh_status 的 lock_holder：stale-mcp → dsh_takeover；live-mcp → 那边 dsh_release，确需再 dsh_takeover(force=true)；none 多半是 GUI 持有 → 请用户在 GUI 里关掉，本服务绝不杀 GUI。
 
@@ -72,7 +83,14 @@ function fileURLToPathSafe(uri) {
   }
 }
 
-export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHandlers(hub), log }) {
+export function createMcpServer({
+  hub,
+  toolDefs = localizeToolDefs(LANG),
+  handlers = createHandlers(hub),
+  log,
+  instructions = LANG === 'en' ? INSTRUCTIONS_EN : INSTRUCTIONS,
+  progressIntervalMs = 5000,
+}) {
   const write = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
   const lineDecoder = new LineDecoder();
   let initialized = false;
@@ -132,6 +150,28 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
   }
 
   const ok = (id, result) => write({ jsonrpc: '2.0', id, result });
+
+  /**
+   * 调用方带了 progressToken 才发进度通知（MCP 的约定：不带就是不想要）。
+   * 只有会阻塞的调用才等得到第一条：dsh_send(wait=true) 与 dsh_interject。
+   * 内容只有已等时长、当前工具名和本轮已产出字数 —— 不含命令、路径或正文。
+   * 返回一个停止函数。
+   */
+  function startProgress(token, args) {
+    if ((typeof token !== 'string' && typeof token !== 'number') || !(progressIntervalMs > 0)) return () => {};
+    const startedAt = Date.now();
+    let progress = 0;
+    const timer = setInterval(() => {
+      const conv = hub?.conversations?.get?.(args?.conversation_id);
+      const bits = [Math.round((Date.now() - startedAt) / 1000) + 's'];
+      if (conv?.currentTool) bits.push(String(conv.currentTool));
+      if (conv?.turnOutChars) bits.push(conv.turnOutChars + ' chars');
+      progress += 1;
+      write({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: token, progress, message: bits.join(' | ') } });
+    }, progressIntervalMs);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  }
   const fail = (id, code, message) => write({ jsonrpc: '2.0', id, error: { code, message } });
 
   async function handle(msg) {
@@ -171,7 +211,7 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
           protocolVersion: typeof requested === 'string' ? requested : FALLBACK_PROTOCOL,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-          instructions: INSTRUCTIONS,
+          instructions,
         });
         return;
       }
@@ -187,8 +227,10 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
         ok(id, {
           tools: toolDefs.map((t) => ({
             name: t.name,
+            title: t.title,
             description: t.description,
             inputSchema: t.inputSchema,
+            outputSchema: t.outputSchema,
             annotations: t.annotations,
           })),
         });
@@ -203,8 +245,10 @@ export function createMcpServer({ hub, toolDefs = TOOL_DEFS, handlers = createHa
           ok(id, { content: [{ type: 'text', text: `未知工具: ${name}` }], isError: true });
           return;
         }
+        const stopProgress = startProgress(params?._meta?.progressToken, args);
         try {
-          const out = await fn(args);
+          // 进度通知必须在响应之前停下：协议不允许对已结束的请求再发进度。
+          const out = await Promise.resolve().then(() => fn(args)).finally(stopProgress);
           const result = { content: [{ type: 'text', text: out.text ?? '' }] };
           if (out.structured !== undefined) result.structuredContent = out.structured;
           ok(id, result);

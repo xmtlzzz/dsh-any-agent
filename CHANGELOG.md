@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are marked read-only, so clients no longer have to treat them like the tools
   that dispatch work or stop processes.
 
+- **Tool descriptions and the server instructions are available in English.**
+  Titles, tool descriptions, parameter descriptions and `instructions` now
+  follow the system language, the same rule `watch` and `dashboard` already
+  use; set `DSH_MCP_LANG=en` or `zh` to choose. On a system that is not set to
+  Chinese this changes what the client shows from Chinese to English. The text
+  a tool returns at run time is still Chinese.
+- **Every tool has a `title`, and `dsh_list`, `dsh_status` and `dsh_inbox`
+  declare an `outputSchema`.** Only those three have a fixed result shape; the
+  others vary by path, and a wrong schema would make clients reject their
+  results, so they declare none.
+- **Progress notifications for blocking calls.** When a `tools/call` carries a
+  `progressToken`, the server sends `notifications/progress` every 5 seconds
+  until the call returns: elapsed time, current tool name and characters
+  produced so far. Nothing is sent without a token. Completion is still
+  signalled by the sentinel file.
+- **`server.json` lists the environment variables a client may want to set**
+  (`DSH_BIN`, `DSH_MCP_PERMISSION`, `DSH_MCP_APPROVAL`, `DSH_MCP_LANG`).
+- **A `Dockerfile`** that runs the server over stdio. It has not been built in
+  CI yet.
+
 ### Fixed
 
 - **`dsh-any-agent-setup --remove` puts a config back the way it was before

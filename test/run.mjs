@@ -75,6 +75,8 @@ const OFFLINE = [
   'read-cursor.mjs',
   // 行式 UTF-8 解码：守住“chunk 边界不能把中文/emoji 截成 U+FFFD”。
   'line-decoder.mjs',
+  // MCP 进度通知：进程内起服务 + 假 handlers，守住三件事：不带 token 不发、响应之后不再发、消息不含正文。
+  'progress.mjs',
   // 哨兵落盘脱敏：纯内存，不花 token；守住“思考永不进哨兵、工具输入先脱敏”。
   'sentinel-redaction.mjs',
   // live 事件流写入侧：假 hub + 假 ACP 进程，守住“思考不落盘、预览脱敏、写失败不影响派活”。

@@ -18,6 +18,21 @@ try { resolveDshBin(); } catch { hasDsh = false; }
 
 let pass = 0;
 let failCount = 0;
+/** 极简 schema 校验（零依赖）：required 的键都在，声明了类型的键类型对得上。返回不符之处。 */
+function schemaMismatches(schema, value) {
+  const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : Number.isInteger(v) ? 'integer' : typeof v);
+  const fits = (v, type) => [].concat(type).some((t) => t === typeOf(v) || (t === 'number' && typeOf(v) === 'integer'));
+  if (typeOf(value) !== 'object') return [`structuredContent 是 ${typeOf(value)}，不是对象`];
+  const bad = [];
+  for (const key of schema.required ?? []) if (!(key in value)) bad.push(`缺 ${key}`);
+  for (const [key, prop] of Object.entries(schema.properties ?? {})) {
+    if (!(key in value)) continue;
+    if (prop.type && !fits(value[key], prop.type)) bad.push(`${key} 是 ${typeOf(value[key])}，声明的是 ${prop.type}`);
+    if (prop.enum && !prop.enum.includes(value[key])) bad.push(`${key}=${value[key]} 不在枚举里`);
+  }
+  return bad;
+}
+
 function check(name, cond, detail = '') {
   if (cond) {
     pass++;
@@ -63,7 +78,49 @@ try {
   const readOnly = tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name).sort().join(',');
   check('只读工具是 doctor/get/inbox/list/read/status', readOnly === 'dsh_doctor,dsh_get,dsh_inbox,dsh_list,dsh_read,dsh_status', readOnly);
   check('只读工具不标成破坏性', tools.every((t) => !(t.annotations?.readOnlyHint && t.annotations?.destructiveHint)));
+  check('每个工具都有标题', tools.every((t) => typeof t.title === 'string' && t.title.length > 0));
+  const withSchema = tools.filter((t) => t.outputSchema).map((t) => t.name).sort().join(',');
+  check('声明 outputSchema 的是 inbox/list/status', withSchema === 'dsh_inbox,dsh_list,dsh_status', withSchema);
+  // 声明了 schema 的工具，客户端会按它校验返回值：这里用同一份 schema 自己先验一遍。
+  for (const [name, args] of [['dsh_list', { include_closed: false }], ['dsh_inbox', {}]]) {
+    const res = await client.callTool(name, args, 30_000);
+    const bad = schemaMismatches(tools.find((t) => t.name === name).outputSchema, res?.structuredContent);
+    check(`${name} 的返回值符合它声明的 outputSchema`, bad.length === 0, bad.join('; '));
+  }
 
+  console.log('\n[2b] DSH_MCP_LANG=en：标题、描述、说明都是英文');
+  {
+    const en = new McpClient({ env: { DSH_MCP_STATE: join(ROOT, 'state-en.json'), DSH_MCP_LANG: 'en' } }).start();
+    try {
+      const { INSTRUCTIONS_EN_MAX_CHARS } = await import('../src/mcp.mjs');
+      const enInit = await en.initialize();
+      const enInstr = String(enInit?.instructions ?? '');
+      const enTools = await en.listTools();
+      const cjk = /[㐀-鿿]/;
+      check(`英文说明不超过 ${INSTRUCTIONS_EN_MAX_CHARS} 字`, enInstr.length > 0 && enInstr.length <= INSTRUCTIONS_EN_MAX_CHARS, `${enInstr.length} 字`);
+      check('英文说明里铁律在前 800 字内', /Iron rules/.test(enInstr.slice(0, 800)) && /dsh_review/.test(enInstr.slice(0, 1100)));
+      check('英文说明里没有中文', !cjk.test(enInstr));
+      const leftover = [];
+      for (const t of enTools) {
+        if (cjk.test(`${t.title}${t.description}`)) leftover.push(t.name);
+        for (const [key, p] of Object.entries(t.inputSchema.properties)) if (p.description && cjk.test(p.description)) leftover.push(`${t.name}.${key}`);
+      }
+      check('英文工具清单里没有中文', leftover.length === 0, leftover.join(','));
+      // 中文那份有描述的参数，英文那份也必须有：新加的参数不能悄悄漏翻。
+      const untranslated = [];
+      for (const t of tools) {
+        const other = enTools.find((e) => e.name === t.name);
+        for (const [key, p] of Object.entries(t.inputSchema.properties)) {
+          if (p.description && !other?.inputSchema.properties[key]?.description) untranslated.push(`${t.name}.${key}`);
+        }
+      }
+      check('每个有描述的参数都有英文描述', untranslated.length === 0, untranslated.join(','));
+      const shape = (list) => JSON.stringify(list.map((t) => [t.name, Object.keys(t.inputSchema.properties), t.inputSchema.required, t.annotations, t.outputSchema]));
+      check('两种语言的名字、参数、注解与 schema 完全一致', shape(tools) === shape(enTools));
+    } finally {
+      await en.close();
+    }
+  }
   let ws = null;
   if (!hasDsh) {
     console.log('\n[3-5] 跳过 DSH 会话部分（未找到 DSH CLI；其余离线套件仍会执行）');
@@ -95,6 +152,9 @@ try {
   console.log(`    conversation_id = ${convId}`);
 
   console.log('\n[4] dsh_get / dsh_list');
+  const statusRes = await client.callTool('dsh_status', { conversation_id: convId });
+  const statusBad = schemaMismatches(tools.find((t) => t.name === 'dsh_status').outputSchema, statusRes?.structuredContent);
+  check('dsh_status 的返回值符合它声明的 outputSchema', statusBad.length === 0, statusBad.join('; '));
   const getRes = await client.callTool('dsh_get', { conversation_id: convId });
   check('dsh_get 能读到该会话', getRes?.structuredContent?.conversation_id === convId);
   const listRes = await client.callTool('dsh_list', { cwd: ws });
