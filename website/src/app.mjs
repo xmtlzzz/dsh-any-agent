@@ -25,8 +25,9 @@ const UI = {
     receiptLanded: '完成哨兵已落地', receiptCollected: '结果已收取',
     actionInterject: '插话：先补测试 ↗', actionInterrupt: '模拟进程中断 ↗', actionInterjectBranch: '需求变了？试试中途插话 ↗',
     step: '步', copied: '已复制到剪贴板', selected: '已选中文本，请按 Ctrl/Cmd + C 复制',
-    terminal: '终端执行', genericPath: '通用 JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
-    vscodePath: '.vscode/mcp.json (VS Code · servers)',
+    terminal: '终端执行', genericPath: '通用 JSON (Claude Desktop / Windsurf / Gemini CLI) · mcpServers',
+    vscodePath: '用户级 mcp.json（或项目 .vscode/mcp.json · servers）',
+    zedPath: '~/.config/zed/settings.json（Windows: %APPDATA%\\Zed\\settings.json）',
     conversations: ['配置加载器重构', '配置模块回归测试', '配置使用文档'],
     goals: ['完成配置模块重构。', '补齐回归测试并核对行为。', '更新使用说明与配置示例。'],
     interjectGoal: '先补回归测试，再继续配置加载器重构。',
@@ -42,8 +43,9 @@ const UI = {
     receiptLanded: 'Completion sentinel landed', receiptCollected: 'Result collected',
     actionInterject: 'Interject: tests first ↗', actionInterrupt: 'Simulate process exit ↗', actionInterjectBranch: 'Need to steer? Try interject ↗',
     step: 'Step', copied: 'Copied to clipboard', selected: 'Text selected; press Ctrl/Cmd + C to copy',
-    terminal: 'Terminal command', genericPath: 'Generic JSON (Claude Desktop / Windsurf / Zed) · mcpServers',
-    vscodePath: '.vscode/mcp.json (VS Code · servers)',
+    terminal: 'Terminal command', genericPath: 'Generic JSON (Claude Desktop / Windsurf / Gemini CLI) · mcpServers',
+    vscodePath: 'User mcp.json (or project .vscode/mcp.json · servers)',
+    zedPath: '~/.config/zed/settings.json (Windows: %APPDATA%\\Zed\\settings.json)',
     conversations: ['Config loader refactor', 'Config module regression tests', 'Config usage docs'],
     goals: ['Finish the config module refactor.', 'Add regression tests and verify behaviour.', 'Update docs and config examples.'],
     interjectGoal: 'Add regression tests first, then continue the config loader refactor.',
@@ -214,7 +216,9 @@ const configs = {
   codex: { path: '~/.codex/config.toml', code: '[mcp_servers.dsh-any-agent]\ncommand = "dsh-any-agent"\nargs = []\nstartup_timeout_sec = 20.0\ntool_timeout_sec = 120.0' },
   claude: { path: t('terminal'), code: 'claude mcp add dsh-any-agent -- dsh-any-agent' },
   cursor: { path: '~/.cursor/mcp.json', code: '{\n  "mcpServers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
-  vscode: { path: t('vscodePath'), code: '{\n  "servers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
+  vscode: { path: t('vscodePath'), code: '{\n  "servers": {\n    "dsh-any-agent": {\n      "type": "stdio",\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
+  zed: { path: t('zedPath'), code: '{\n  "context_servers": {\n    "dsh-any-agent": {\n      "command": {\n        "path": "dsh-any-agent",\n        "args": []\n      }\n    }\n  }\n}' },
+  opencode: { path: '~/.config/opencode/opencode.json', code: '{\n  "mcp": {\n    "dsh-any-agent": {\n      "type": "local",\n      "command": ["dsh-any-agent"],\n      "enabled": true\n    }\n  }\n}' },
   generic: { path: t('genericPath'), code: '{\n  "mcpServers": {\n    "dsh-any-agent": {\n      "command": "dsh-any-agent",\n      "args": []\n    }\n  }\n}' },
 };
 let config = 'codex';
@@ -224,11 +228,18 @@ $$('[data-config]').forEach(button => button.addEventListener('click', () => {
   $('#config-panel').setAttribute('aria-labelledby', button.id);
   $$('[data-config]').forEach(tab => { const active = tab === button; tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1; });
 }));
+const configTabs = $('.config-tabs');
+const compactTabs = matchMedia('(max-width: 540px)');
+function syncConfigOrientation() {
+  if (configTabs) configTabs.setAttribute('aria-orientation', compactTabs.matches ? 'horizontal' : 'vertical');
+}
+syncConfigOrientation();
+compactTabs.addEventListener('change', syncConfigOrientation);
 $$('[role="tablist"]').forEach(list => {
-  const vertical = list.getAttribute('aria-orientation') === 'vertical';
-  const prevKey = vertical ? 'ArrowUp' : 'ArrowLeft';
-  const nextKey = vertical ? 'ArrowDown' : 'ArrowRight';
   list.addEventListener('keydown', event => {
+    const vertical = list.getAttribute('aria-orientation') === 'vertical';
+    const prevKey = vertical ? 'ArrowUp' : 'ArrowLeft';
+    const nextKey = vertical ? 'ArrowDown' : 'ArrowRight';
     if (![prevKey, nextKey, 'Home', 'End'].includes(event.key)) return;
     const tabs = [...list.querySelectorAll('[role="tab"]')], active = tabs.indexOf(document.activeElement);
     if (active < 0) return;
@@ -266,9 +277,18 @@ fetchLatestVersion().then(({ version, source }) => {
 });
 
 // GitHub Star 数量运行时同步：公开 API + localStorage 缓存；无 Token、免频控
-fetchGitHubStars().then(({ stars }) => {
-  if (typeof stars !== 'number') return;
+const updateStarsUI = (stars) => {
   const label = formatStars(stars);
   if (!label) return;
-  $$('[data-github-stars]').forEach(el => { el.textContent = label; });
+  $$('[data-github-stars]').forEach(el => {
+    el.textContent = label;
+    el.closest('.github-nav')?.setAttribute('aria-label', LANG === 'en' ? `Star dsh-any-agent on GitHub (★ ${label})` : `GitHub 上的 dsh-any-agent (★ ${label})`);
+  });
+};
+try {
+  const cached = JSON.parse(localStorage.getItem('dsh_gh_stars_cache') || 'null');
+  if (typeof cached?.stars === 'number') updateStarsUI(cached.stars);
+} catch {}
+fetchGitHubStars().then(({ stars }) => {
+  if (typeof stars === 'number') updateStarsUI(stars);
 });

@@ -102,7 +102,7 @@ test('Install card notes use block wrappers and manual config note resides insid
 
 test('GitHub Star badge is rendered in the header and queries repository stars', async () => {
   for (const page of [html, enHtml]) {
-    assert.match(page, /<span class="github-star-badge"[^>]*>[\s\S]*?<span data-github-stars="true">\d+<\/span>/);
+    assert.match(page, /<span class="github-star-badge"[^>]*>[\s\S]*?<span data-github-stars="true">(?:\d+|—)<\/span>/);
     assert.match(page, /class="github-nav" href="https:\/\/github\.com\/xmtlzzz\/dsh-any-agent"/);
   }
   const releaseName = assets.find((name) => /^release\.[a-f0-9]{10}\.mjs$/.test(name));
@@ -118,5 +118,30 @@ test('FAQ section uses expanded 2-column card rows without requiring clicks', ()
     const rows = [...faqSection[1].matchAll(/<article class="faq-row">/g)];
     assert.equal(rows.length, 10, 'must contain all 10 FAQ entries');
     assert.doesNotMatch(faqSection[1], /<details>/, 'FAQ must be expanded by default without details/summary');
+  }
+});
+
+test('Website docs alignment: compatibility range, 15 tools, dashboard showcase, and client schemas', async () => {
+  const appName = assets.find((name) => /^app\.[a-f0-9]{10}\.mjs$/.test(name));
+  assert.ok(appName, 'app bundle exists');
+  const app = await readFile(resolve(dist, 'assets', appName), 'utf8');
+  assert.doesNotMatch(app, /Claude Desktop \/ Windsurf \/ Zed/, 'Zed must not be grouped under mcpServers');
+  assert.match(app, /context_servers/, 'Zed manual example uses context_servers');
+  assert.match(app, /"type":\s*"stdio"/, 'VS Code manual example includes stdio type');
+  assert.match(app, /"type":\s*"local"/, 'opencode manual example includes local mcp format');
+
+  const expectedTools = [
+    'dsh_start', 'dsh_send', 'dsh_interject', 'dsh_interrupt', 'dsh_queue',
+    'dsh_list', 'dsh_status', 'dsh_read', 'dsh_get', 'dsh_review',
+    'dsh_inbox', 'dsh_approval_decide', 'dsh_takeover', 'dsh_release', 'dsh_doctor',
+  ];
+  for (const page of [html, enHtml]) {
+    assert.match(page, /0\.1\.7 ~ 0\.2\.2/);
+    assert.match(page, /0\.2\.3\+/);
+    assert.doesNotMatch(page, /0\.2\.x 尚未验证|0\.2\.x is unverified/);
+    assert.match(page, /data-config="zed"/);
+    assert.match(page, /data-config="opencode"/);
+    assert.match(page, /src="\/assets\/dashboard-(?:zh|en)\.[a-f0-9]{10}\.png"/);
+    for (const tool of expectedTools) assert.ok(page.includes(tool), `page includes ${tool}`);
   }
 });

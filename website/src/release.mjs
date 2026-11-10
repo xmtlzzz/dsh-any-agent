@@ -71,12 +71,16 @@ export function formatStars(count) {
 export async function fetchGitHubStars(fetchImpl = fetch, storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
   const CACHE_KEY = 'dsh_gh_stars_cache';
   const CACHE_TTL_MS = 15 * 60 * 1000;
+  let staleStars = null;
   try {
     const raw = storage?.getItem(CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (typeof parsed?.stars === 'number' && Date.now() - parsed?.ts < CACHE_TTL_MS) {
-        return { stars: parsed.stars, source: 'cache' };
+      if (typeof parsed?.stars === 'number' && parsed.stars >= 0) {
+        if (Date.now() - parsed?.ts < CACHE_TTL_MS) {
+          return { stars: parsed.stars, source: 'cache' };
+        }
+        staleStars = parsed.stars;
       }
     }
   } catch {}
@@ -99,5 +103,6 @@ export async function fetchGitHubStars(fetchImpl = fetch, storage = (typeof loca
     }
   } catch {}
 
+  if (staleStars !== null) return { stars: staleStars, source: 'stale-cache' };
   return { stars: null, source: 'unavailable' };
 }

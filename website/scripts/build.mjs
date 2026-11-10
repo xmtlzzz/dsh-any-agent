@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist'), assets = join(dist, 'assets');
 await mkdir(assets, { recursive: true });
 // Clean only known generated assets, never a computed recursive directory.
-for (const name of await readdir(assets)) if (/^(?:app|demo|release|style)\.[a-f0-9]{10}\.(?:mjs|css)$/.test(name) || /^(?:hero|favicon|promo-poster)\.[a-f0-9]{10}\.(?:jpg|svg)$/.test(name) || /^promo\.[a-f0-9]{10}\.mp4$/.test(name)) await unlink(join(assets, name));
+for (const name of await readdir(assets)) if (/^(?:app|demo|release|style)\.[a-f0-9]{10}\.(?:mjs|css)$/.test(name) || /^(?:hero|favicon|promo-poster|dashboard-(?:zh|en))\.[a-f0-9]{10}\.(?:jpg|svg|png)$/.test(name) || /^promo\.[a-f0-9]{10}\.mp4$/.test(name)) await unlink(join(assets, name));
 const hash = value => createHash('sha256').update(value).digest('hex').slice(0, 10);
 const base64 = value => createHash('sha256').update(value).digest('base64');
 const demo = await readFile(join(root, 'src/demo.mjs'), 'utf8');
@@ -21,6 +21,10 @@ const appName = `app.${hash(app)}.mjs`;
 const css = await readFile(join(root, 'src/style.css'), 'utf8'), cssName = `style.${hash(css)}.css`;
 const hero = await readFile(join(root, '../docs/brand/header.jpg'));
 const heroName = `hero.${hash(hero)}.jpg`;
+const dashboardZh = await readFile(join(root, '../docs/images/dashboard.zh.png'));
+const dashboardZhName = `dashboard-zh.${hash(dashboardZh)}.png`;
+const dashboardEn = await readFile(join(root, '../docs/images/dashboard.en.png'));
+const dashboardEnName = `dashboard-en.${hash(dashboardEn)}.png`;
 const favicon = await readFile(join(root, 'src/favicon.svg'));
 const faviconName = `favicon.${hash(favicon)}.svg`;
 // Promo video: a web-sized encode of video/out/dsh-any-agent-promo.mp4 (see video/README.md),
@@ -50,6 +54,7 @@ function render(template, lang) {
     STYLE: `/assets/${cssName}`,
     APP: `/assets/${appName}`,
     HERO: `/assets/${heroName}`,
+    DASHBOARD: `/assets/${lang === 'en' ? dashboardEnName : dashboardZhName}`,
     ICON: `/assets/${faviconName}`,
     VIDEO: `/assets/${promoName}`,
     VIDEO_POSTER: `/assets/${promoPosterName}`,
@@ -86,6 +91,8 @@ await Promise.all([
   writeFile(join(dist, 'index.html'), render(zhTemplate, 'zh')),
   writeFile(join(dist, 'en/index.html'), render(enTemplate, 'en')),
   writeFile(join(assets, heroName), hero),
+  writeFile(join(assets, dashboardZhName), dashboardZh),
+  writeFile(join(assets, dashboardEnName), dashboardEn),
   writeFile(join(assets, faviconName), favicon),
   writeFile(join(assets, promoName), promo),
   writeFile(join(assets, promoPosterName), promoPoster),
