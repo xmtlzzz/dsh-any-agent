@@ -7,7 +7,7 @@
  * 注册再注销，逐字段比对其余部分是否原样。
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -261,6 +261,87 @@ console.log('\n[4] removing something that is not there is a no-op');
   check('exit code is 0', r.status === 0, String(r.status));
 
   removeSandbox(home);
+}
+
+// ── 装一次再卸掉：回到安装前的样子 ──────────────────────────────────
+
+console.log('\n[5] install then remove puts back what was there before');
+{
+  const cursor = (home) => join(home, '.cursor', 'mcp.json');
+  const roundTrip = (home, extra = []) => {
+    run(home, ['--yes', '--only', 'cursor,codex', ...extra]);
+    return run(home, ['--remove', '--yes', '--only', 'cursor,codex', ...extra]);
+  };
+
+  // 用户自己的空容器：卸载后还在。
+  for (const [label, original] of [
+    ['inline', '{\n  "theme": "dark",\n  "mcpServers": {},\n  "x": 1\n}\n'],
+    ['multi-line', '{\n  "theme": "dark",\n  "mcpServers": {\n  },\n  "x": 1\n}\n'],
+    ['only key', '{"mcpServers":{}}'],
+  ]) {
+    const home = sandbox({ '.cursor/mcp.json': original });
+    roundTrip(home);
+    check('an empty container that was already there survives (' + label + ')', readFileSync(cursor(home), 'utf8') === original);
+    removeSandbox(home);
+  }
+
+  // 容器是我们加的：卸载后连容器一起收掉。
+  {
+    const original = '{\n  "theme": "dark"\n}\n';
+    const home = sandbox({ '.cursor/mcp.json': original });
+    roundTrip(home);
+    check('a container we added is taken out again', readFileSync(cursor(home), 'utf8') === original);
+    removeSandbox(home);
+  }
+
+  // 文件原本就只有 {}：留着，不删。
+  {
+    const home = sandbox({ '.cursor/mcp.json': '{}' });
+    roundTrip(home);
+    check('a file that was "{}" before is still "{}"', existsSync(cursor(home)) && readFileSync(cursor(home), 'utf8') === '{}');
+    removeSandbox(home);
+  }
+
+  // 文件是我们建的：卸载后不留空壳。
+  {
+    const home = sandbox({});
+    const r = roundTrip(home, ['--force']);
+    check('a JSON config we created is deleted again', !existsSync(cursor(home)), existsSync(cursor(home)) ? JSON.stringify(readFileSync(cursor(home), 'utf8')) : '');
+    check('a TOML config we created is deleted again', !existsSync(join(home, '.codex', 'config.toml')));
+    check('exit code is 0', r.status === 0, String(r.status));
+    removeSandbox(home);
+  }
+
+  // 原本是空文件的 Codex 配置：留着。
+  {
+    const home = sandbox({ '.codex/config.toml': '' });
+    roundTrip(home);
+    check('a TOML config that was empty before is kept', existsSync(join(home, '.codex', 'config.toml')));
+    removeSandbox(home);
+  }
+
+  // Codex 配置开头的 BOM：装和卸都不能丢。
+  {
+    const original = '﻿model = "x"\n';
+    const home = sandbox({ '.codex/config.toml': original });
+    run(home, ['--yes', '--only', 'codex']);
+    const toml = join(home, '.codex', 'config.toml');
+    check('a BOM in the TOML config survives install', readFileSync(toml, 'utf8').startsWith('﻿'));
+    run(home, ['--remove', '--yes', '--only', 'codex']);
+    check('and the file is byte-identical after removal', readFileSync(toml, 'utf8') === original);
+    removeSandbox(home);
+  }
+
+  // 手写的、只有我们这一条的文件：删掉，但删之前留了备份。
+  {
+    const original = JSON.stringify({ mcpServers: { 'dsh-any-agent': { command: 'mine', args: [] } } }, null, 2);
+    const home = sandbox({ '.cursor/mcp.json': original });
+    run(home, ['--remove', '--yes', '--only', 'cursor']);
+    const backups = readdirSync(join(home, '.cursor')).filter((f) => f.startsWith('mcp.json.bak-dsh-'));
+    check('a file holding nothing but our entry is deleted', !existsSync(cursor(home)));
+    check('and a backup of it was kept first', backups.length === 1 && readFileSync(join(home, '.cursor', backups[0]), 'utf8') === original);
+    removeSandbox(home);
+  }
 }
 
 console.log('\n===== removal scope: passed ' + passed + ', failed ' + failed + ' =====');

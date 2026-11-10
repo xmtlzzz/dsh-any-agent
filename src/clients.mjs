@@ -852,6 +852,34 @@ function sourceHashOf(file) {
   }
 }
 
+/** 这个文件现存备份的内容（还原前的安全副本不算：它记的是还原前的状态，不是用户原本的配置）。 */
+function backupTexts(file) {
+  const prefix = basename(file) + '.bak-dsh-';
+  try {
+    return readdirSync(dirname(file))
+      .filter((name) => name.startsWith(prefix) && !name.startsWith(prefix + 'pre-restore-'))
+      .map((name) => { try { return readFileSync(join(dirname(file), name), 'utf8'); } catch { return null; } });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 卸载后该留下什么。摘掉我们那条之后有两处分不清「原本就这样」还是「我们留下的」：
+ * 一个空容器，和一个除了空壳什么都没有的文件。安装前的备份记着原样，以它为准 ——
+ *   - 留着空容器的结果（kept）和某份备份一模一样：那个空容器是用户的，留着；
+ *   - 结果只剩空壳、又没有哪份备份长这样：文件里除了我们什么都没有，删掉文件；
+ *   - 其余情况写回收掉空容器的结果（dropped）。
+ */
+function settleRemoval(file, dropped, kept, isBare) {
+  const before = backupTexts(file);
+  if (kept !== dropped && before.includes(kept)) return { next: kept };
+  if (isBare(dropped) && !before.includes(dropped)) return { deleteFile: true };
+  return { next: dropped };
+}
+
+const DELETES_FILE = '; nothing else is in the file, so the file itself would be deleted';
+
 export function planClient(client, ctx) {
   const { dirs, remove, launch, env } = ctx;
   const file = client.pathOf(dirs);
@@ -886,13 +914,18 @@ export function planClient(client, ctx) {
       if (remove) return { ...base, status: 'absent', changed: false, summary: 'config file does not exist' };
       return { ...base, status: 'planned', changed: true, next: editTomlBlock('', block).text, summary: 'would create the config file with our table' };
     }
-    const { raw, text } = readConfigFile(file);
-    void raw;
-    const r = editTomlBlock(text, block);
+    // BOM 不属于 TOML 正文，但必须原样写回去。
+    const { bom, text } = readConfigFile(file);
+    const edited = editTomlBlock(text, block);
+    const r = { changed: edited.changed, text: bom + edited.text };
     if (!r.changed) {
       return { ...base, status: 'unchanged', changed: false, summary: remove ? 'not present' : 'already up to date' };
     }
-    return { ...base, status: 'planned', changed: true, next: r.text, summary: remove ? 'TOML block would be removed' : 'TOML block would be written' };
+    if (remove) {
+      const settled = settleRemoval(file, r.text, r.text, (t) => t.trim() === '');
+      return { ...base, status: 'planned', changed: true, ...settled, summary: 'TOML block would be removed' + (settled.deleteFile ? DELETES_FILE : '') };
+    }
+    return { ...base, status: 'planned', changed: true, next: r.text, summary: 'TOML block would be written' };
   }
 
   // JSON / JSONC
@@ -918,7 +951,12 @@ export function planClient(client, ctx) {
   if (!r.changed) {
     return { ...base, status: 'unchanged', changed: false, summary: remove ? 'not present' : 'already up to date' };
   }
-  return { ...base, status: 'planned', changed: true, next: r.text, summary: remove ? 'entry would be removed' : 'entry would be written' };
+  if (remove) {
+    const kept = editJsonEntry(raw, client.containerKey, ENTRY_NAME, null).text;
+    const settled = settleRemoval(file, r.text, kept, (t) => stripWs(t) === '{}');
+    return { ...base, status: 'planned', changed: true, ...settled, summary: 'entry would be removed' + (settled.deleteFile ? DELETES_FILE : '') };
+  }
+  return { ...base, status: 'planned', changed: true, next: r.text, summary: 'entry would be written' };
 }
 
 /**
@@ -960,7 +998,7 @@ export function applyClient(plan, ctx, stamp) {
     return { ...plan, status: 'applied', summary: 'registered via ' + client.cli + ' mcp add (user scope)' };
   }
 
-  if (typeof plan.next !== 'string') return plan;
+  if (typeof plan.next !== 'string' && !plan.deleteFile) return plan;
 
   // ★ 规划之后、写入之前文件被别人改过（客户端自己保存了设置）：plan.next 是旧快照，
   //   照写会把那次保存覆盖掉（审计 C06）。按当前内容重新规划一次；还在变就放弃，不写。
@@ -1011,8 +1049,9 @@ export function applyClient(plan, ctx, stamp) {
     let backup;
     if (existsSync(plan.path)) backup = backupFile(plan.path, stamp);
     mkdirSync(dirname(plan.path), { recursive: true });
-    atomicWrite(plan.path, plan.next);
-    if (originalMode !== null) {
+    if (plan.deleteFile) unlinkSync(plan.path);
+    else atomicWrite(plan.path, plan.next);
+    if (originalMode !== null && !plan.deleteFile) {
       try { chmodSync(plan.path, originalMode); } catch { /* 尽力而为 */ }
     }
     // ★ 不再调用客户端 CLI 做验证。
@@ -1022,7 +1061,7 @@ export function applyClient(plan, ctx, stamp) {
     return {
       ...plan,
       status: remove ? 'removed' : 'applied',
-      summary: (remove ? 'entry removed' : 'entry written') + (originalMode !== null ? ' (read-only file overridden by --force)' : ''),
+      summary: (plan.deleteFile ? 'entry removed; the file held nothing else and was deleted' : remove ? 'entry removed' : 'entry written') + (originalMode !== null ? ' (read-only file overridden by --force)' : ''),
       backup,
     };
   } catch (e) {

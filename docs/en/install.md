@@ -39,6 +39,7 @@ Run the three commands in [Quick start](../../README.md#quick-start), then recon
 - the config is parsed before and after writing, so a broken config never lands; malformed JSON and a read-only file are refused rather than forced, while a missing directory is created safely
 - **text-level writes**: only the bytes of setup's own entry are replaced, so indentation (2-space, 4-space, tabs), key order, CRLF endings, a UTF-8 BOM and a missing trailing newline all survive untouched
 - **idempotent** — re-running only changes what differs, and a second `--yes` writes nothing and adds no `.bak`
+- **install then remove returns to where you started** — `--remove` goes by the backup taken before install: an empty container that was already yours (such as `"mcpServers": {}`) stays, a container we added goes with our entry, and a file that holds nothing but our entry and did not look that way before (typically one created by `--force`) is backed up and then deleted rather than left as an empty shell
 
 **Measured impact scope (2026-11-02, plan mode on this machine):** 5 of the 9 clients were detected (Claude Code, Codex, Cursor, Zed, VS Code) and 4 were skipped; `--json` reported `mode=plan, changed=5, skipped=4, failed=0`. The SHA-256, size and mtime of every existing client config were unchanged. A real `--yes` is additive: only the single `dsh-any-agent` entry is written, every other byte is preserved, and a `.bak-dsh-<timestamp>` copy is taken first; `--remove` deletes only that entry.
 
