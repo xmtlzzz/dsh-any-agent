@@ -10,7 +10,7 @@
 
 ### 1. Prepare the DSH profile
 
-On first launch, the server prepares a `dsh-mcp` profile from the shipped ACP template and copies the model route from your existing DSH configuration. Credentials stay with DSH. Use `DSH_MCP_ROUTE_SOURCE` to choose a source profile, or `DSH_MCP_BOOTSTRAP=0` to manage the profile yourself. See [Environment variables](reference.md#-environment-variables).
+On first launch, the server prepares a `dsh-mcp` profile from the shipped ACP template and copies the model route from your existing DSH configuration. Credentials stay with DSH. Use `DSH_MCP_ROUTE_SOURCE` to choose a source profile, or `DSH_MCP_BOOTSTRAP=0` to manage the profile yourself. See [Environment variables](reference.md).
 
 <details>
 <summary>Manual profile setup and ACP configuration details</summary>

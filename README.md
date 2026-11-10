@@ -92,7 +92,7 @@ outer worktree isolation. For collaboration, prefer letting DSH run the team its
 
 ## Quick start
 
-Requires **Node.js ≥ 22.15** and **DSH installed with a working model route and credentials**. See [Requirements](#-requirements) for details.
+Requires **Node.js ≥ 22.15** and **DSH installed with a working model route and credentials**. See [Requirements](docs/en/install.md) for details.
 
 ```bash
 npm install -g dsh-any-agent
@@ -100,7 +100,7 @@ dsh-any-agent-setup
 dsh-any-agent-setup --yes
 ```
 
-The second command previews the changes; `--yes` applies them. Reconnect your client's MCP server, then ask your agent to start a DSH conversation in your project, dispatch a task, and collect the result. The [dispatch workflow](#-workflow-dispatch-then-collect-later) shows the tool sequence.
+The second command previews the changes; `--yes` applies them. Reconnect your client's MCP server, then ask your agent to start a DSH conversation in your project, dispatch a task, and collect the result. The [dispatch workflow](docs/en/usage.md) shows the tool sequence.
 
 > **Want to see it first?** Watch the [54-second promo](https://dsh-any-agent.xmtlz.dev/en/#video) — dispatch, interject, the sentinel landing and the caller's review, with the terminal replayed from a real run:
 >
@@ -112,11 +112,11 @@ The second command previews the changes; `--yes` applies them. Reconnect your cl
 <summary>Full contents</summary>
 
 - **Quick start** — [Install and connect](#quick-start) · [Changelog](CHANGELOG.md)
-- **Start here** — [The problem](#-the-problem-this-solves) · [Why it's different](#-why-its-different) · [Why not just wrap the DSH CLI](#-why-not-just-wrap-the-dsh-cli) · [Requirements](#-requirements) · [Setup](#-setup)
-- **Using it** — [Tools](#-tools) · [Live view](#-live-view-see-what-the-dispatched-work-is-doing) · [Dispatch then collect](#-workflow-dispatch-then-collect-later) · [Completion notifications](#-workflow-get-notified-on-completion-no-polling) · [Many conversations](#-workflow-many-conversations-at-once)
-- **Behavior** — [Permissions](#-permissions) · [Reasoning](#-reasoning-hidden-by-default) · [Logging and privacy](#-logging-and-privacy) · [Workspace & GUI](#-workspace-visibility-in-the-dsh-gui)
-- **Hard parts** — [The write lock](#-the-write-lock-one-writer-per-conversation-at-a-time)
-- **Reference** — [Environment](#-environment-variables) · [Tests](#-tests) · [Known limitations](#-known-limitations) · [Why the old profile name?](#-why-is-the-profile-still-called-dsh-mcp)
+- **Start here** — [The problem](#-the-problem-this-solves) · [Why it's different](#-why-its-different) · [Why not just wrap the DSH CLI](docs/en/architecture.md) · [Requirements](docs/en/install.md) · [Setup](docs/en/install.md)
+- **Using it** — [Tools](#-tools) · [Live view](#-live-view-see-what-the-dispatched-work-is-doing) · [Dispatch then collect](docs/en/usage.md) · [Completion notifications](docs/en/usage.md) · [Many conversations](docs/en/usage.md)
+- **Behavior** — [Permissions](docs/en/security.md) · [Reasoning](docs/en/usage.md) · [Logging and privacy](docs/en/security.md) · [Workspace & GUI](docs/en/security.md)
+- **Hard parts** — [The write lock](docs/en/locking.md)
+- **Reference** — [Environment](docs/en/reference.md) · [Tests](docs/en/tests.md) · [Known limitations](docs/en/limits.md) · [Why the old profile name?](docs/en/limits.md)
 
 </details>
 
@@ -139,6 +139,8 @@ The second command previews the changes; `--yes` applies them. Reconnect your cl
 | `dsh_inbox` | **Cross-conversation approval inbox**: every pending approval with reason, input and age; decide with `dsh_approval_decide` |
 | `dsh_queue` | Inspect/modify the session queue: `list` / `remove` / `update` / `promote` (created by `dsh_send(queue=true)`, memory only) |
 | `dsh_doctor` | Read-only health check: DSH version, profile, state/dir writability, orphan locks, sessions and RSS, effective config |
+
+Every tool declares all four MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). Six only read state and are marked read-only: `dsh_list`, `dsh_read`, `dsh_get`, `dsh_status`, `dsh_inbox`, `dsh_doctor`.
 
 ## 👀 Live view: see what the dispatched work is doing
 

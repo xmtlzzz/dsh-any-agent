@@ -85,7 +85,7 @@ profile 切到 `dsh-team`（含实验性 Agent Teams），`dsh_send` 会提示"�
 
 ## 快速开始
 
-需要 **Node.js ≥ 22.15**，并且**已安装 DSH、配置好可用的模型路由与凭据**。详见[前置要求](#-前置要求)。
+需要 **Node.js ≥ 22.15**，并且**已安装 DSH、配置好可用的模型路由与凭据**。详见[前置要求](docs/zh/install.md)。
 
 ```bash
 npm install -g dsh-any-agent
@@ -93,7 +93,7 @@ dsh-any-agent-setup
 dsh-any-agent-setup --yes
 ```
 
-第二条命令只预览，加 `--yes` 才会写入配置。重新连接客户端的 MCP 服务，然后让你的 agent 在当前项目中开启 DSH 会话、派活、收结果。[先派活，回头验收](#-用法先派活回头再验收)展示了完整的工具调用顺序。
+第二条命令只预览，加 `--yes` 才会写入配置。重新连接客户端的 MCP 服务，然后让你的 agent 在当前项目中开启 DSH 会话、派活、收结果。[先派活，回头验收](docs/zh/usage.md)展示了完整的工具调用顺序。
 
 > **第一次派活前：** 先读[使用注意事项](USAGE-NOTES.md)，尤其是模型配置与外部 MCP 的权限边界。**外部 MCP 工具的副作用不受 DSH 沙箱约束。** 新机器部署可按[迁移指引](USAGE-MIGRATION.md)逐步操作。
 
@@ -107,11 +107,11 @@ dsh-any-agent-setup --yes
 <summary>展开完整目录</summary>
 
 - **快速开始** —— [安装并连接](#快速开始) · [更新日志](CHANGELOG.md)
-- **先看这里** —— [解决什么问题](#-解决什么问题) · [主要优势](#-主要优势) · [为什么不是包一层](#-为什么不是直接把-dsh-包一层) · [前置要求](#-前置要求) · [安装配置](#-安装配置)
-- **怎么用** —— [工具](#-工具) · [实时查看](#-实时查看派出去的活在干什么) · [先派活回头验收](#-用法先派活回头再验收) · [跑完自动通知](#-用法跑完自动通知不轮询) · [多会话并发](#-用法同时控制多个会话)
-- **行为** —— [权限](#-权限) · [思考内容](#-思考内容默认隐藏) · [日志与隐私](#-日志与隐私) · [工作区与 GUI](#-会话在-dsh-gui-里的可见性)
-- **难点** —— [写锁](#-写锁一个会话同一时刻只有一个写者)
-- **参考** —— [环境变量](#-环境变量) · [测试](#-测试) · [已知限制](#-已知限制) · [为什么还叫旧 profile 名？](#-为什么-profile-还叫-dsh-mcp)
+- **先看这里** —— [解决什么问题](#-解决什么问题) · [主要优势](#-主要优势) · [为什么不是包一层](docs/zh/architecture.md) · [前置要求](docs/zh/install.md) · [安装配置](docs/zh/install.md)
+- **怎么用** —— [工具](#-工具) · [实时查看](#-实时查看派出去的活在干什么) · [先派活回头验收](docs/zh/usage.md) · [跑完自动通知](docs/zh/usage.md) · [多会话并发](docs/zh/usage.md)
+- **行为** —— [权限](docs/zh/security.md) · [思考内容](docs/zh/usage.md) · [日志与隐私](docs/zh/security.md) · [工作区与 GUI](docs/zh/security.md)
+- **难点** —— [写锁](docs/zh/locking.md)
+- **参考** —— [环境变量](docs/zh/reference.md) · [测试](docs/zh/tests.md) · [已知限制](docs/zh/limits.md) · [为什么还叫旧 profile 名？](docs/zh/limits.md)
 
 </details>
 
@@ -134,6 +134,8 @@ dsh-any-agent-setup --yes
 | `dsh_inbox` | **跨会话待决审批收件箱**：一次列出所有会话的审批、原因、输入与等待时长；裁决仍用 `dsh_approval_decide` |
 | `dsh_queue` | 查看/修改会话队列：`list` / `remove` / `update` / `promote`（队列由 `dsh_send(queue=true)` 产生，仅内存） |
 | `dsh_doctor` | 只读体检：DSH 版本、profile、状态/目录可写、孤儿锁、会话与 RSS、生效配置 |
+
+每个工具都声明了全部四个 MCP 注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`）。只读取状态的六个标成只读：`dsh_list`、`dsh_read`、`dsh_get`、`dsh_status`、`dsh_inbox`、`dsh_doctor`。
 
 ## 👀 实时查看：派出去的活在干什么
 

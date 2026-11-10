@@ -1,5 +1,7 @@
 # Moving to a new machine / first-time setup (English)
 
+**English** | [中文](USAGE-MIGRATION.md)
+
 This is the short English version of `USAGE-MIGRATION.md`. It covers a fresh
 install, registering the MCP server with your client, and the checks worth
 doing before you trust it with real work.
@@ -158,6 +160,19 @@ client cannot see the server, restart the client after setup.
 not rewritten by an upgrade; run `dsh-any-agent-setup` again only if you want
 to refresh the entry or permission env. `dsh-any-agent-restore` can restore a
 client config from a `.bak-dsh-*` backup.
+
+## 9. Uninstall
+
+1. Take the entry out of your clients: `dsh-any-agent-setup --remove --yes`
+   (removes only its own entry, after a backup). Entries you added by hand you
+   remove by hand — in Codex that is `[mcp_servers.dsh-any-agent]` and its
+   `.env` sub-table.
+2. `npm uninstall -g dsh-any-agent`.
+3. Optional: delete `~/.dsh/profiles/dsh-mcp/` (harmless to keep; it is simply
+   no longer used).
+
+Your DSH credentials and session history are untouched: this server never
+wrote to them.
 
 For the full Chinese guide, environment-variable reference and write-lock
 measurements, see `USAGE-MIGRATION.md`, `README.md` and `USAGE-NOTES.en.md`.

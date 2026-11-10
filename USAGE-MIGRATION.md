@@ -36,16 +36,13 @@
 
 ### 1.1 确认 DSH 的位置
 
-本服务需要一个 DSH 入口路径。**自动探测只找两处**：npx 缓存、npm 全局安装目录
-（`%APPDATA%\npm\node_modules`、`/usr/local/lib/node_modules`、`/usr/lib/node_modules`）。
+本服务需要一个 DSH 入口路径，**通常不用你填**。自动探测会找三处，按这个顺序优先：
 
-**实测结论**：用 `npx @deepseek-ai/dsh` 跑过 DSH 的机器，缓存里就有，**不设 `DSH_BIN` 也能自动找到**
-（已验证：不给 `DSH_BIN` 时握手和建会话都成功）。
+- **DeepSeek Harness 桌面版** —— Windows 读卸载注册表，各平台另查默认安装位置；用桌面版自带的运行时跑 `app.asar` 里的 CLI
+- **npm 全局安装**
+- **npx 缓存** —— 用 `npx @deepseek-ai/dsh` 跑过就有，但 `npm cache clean` 之后会消失
 
-但两种情况探测不到，必须手动指定：
-
-- **DSH 桌面版（Electron）** —— 装在 `...\WindowsApps\...\app.asar\dsh\`，探测逻辑不查那里
-- **DSH 装在自定义路径**，或 npx 缓存被清理过
+先让 agent 调一次 `dsh_doctor`，看 `dsh_candidates` 里找到了哪些。只有**便携版、自定义安装路径**探测不到，才需要手动指定 `DSH_BIN`。
 
 手动找入口文件：
 
@@ -218,8 +215,8 @@ Zed **不用** `mcpServers`。它的键叫 `context_servers`，且 `command` 是
 
 #### 其他任意 MCP 客户端
 
-只要能启动 stdio MCP 服务就行。它只实现四个标准方法
-（`initialize` / `ping` / `tools/list` / `tools/call`），
+只要能启动 stdio MCP 服务就行。它只要求四个标准方法
+（`initialize` / `ping` / `tools/list` / `tools/call`）；客户端支持 `roots` 时会顺带用它取当前项目目录，不支持也照常工作。
 不依赖任何宿主专有扩展 —— 连协议版本协商到旧版、不发 `notifications/initialized` 的客户端都测过。
 
 ### 3.2 装完先验证
@@ -237,7 +234,7 @@ codex mcp list      # 应看到 dsh-any-agent ... enabled
 
 ## 4. 跑通第一轮对话
 
-服务暴露 11 个 `dsh_*` 工具。最小闭环只有三步：
+服务暴露 15 个 `dsh_*` 工具。最小闭环只有三步：
 
 ```
 1. dsh_start(cwd="D:/你的/项目目录")
@@ -286,7 +283,7 @@ codex mcp list      # 应看到 dsh-any-agent ... enabled
 | 现象 | 原因 | 解法 |
 |---|---|---|
 | `no adapter registered for provider "…"` | profile 还没建，或来源 profile 没有可用路由 | 确认 DSH 本身能聊天；删掉 `~/.dsh/profiles/dsh-mcp/cordis.patch.yml` 让它重新生成 |
-| `DSH CLI 入口未找到` | 自动探测只查 npx 缓存和 npm 全局 | 显式设 `DSH_BIN` 指向 `@deepseek-ai/dsh/lib/bin.js` |
+| `DSH CLI 入口未找到` | 桌面版、npm 全局、npx 缓存里都没找到（便携版或自定义路径） | 先看 `dsh_doctor` 的 `dsh_candidates`；再显式设 `DSH_BIN` 指向 `@deepseek-ai/dsh/lib/bin.js` |
 | 首次调用很慢（十几秒） | 要拉起 DSH 进程 + 建 profile | 正常，第二次起就快了 |
 | 工具列表里没有 `dsh_*` | 客户端没启动服务 | 看客户端的 MCP 日志；确认 `command` 路径正确 |
 | 会话报写锁被占 | 你在 DSH GUI 里打开过同一个会话 | GUI 的写锁**切走也不释放**。用 `dsh_read` 看进度，或先 `dsh_release` |
@@ -312,7 +309,7 @@ codex mcp list      # 应看到 dsh-any-agent ... enabled
 
 ## 6. 卸载
 
-1. 从客户端配置里移除 `dsh-any-agent` 那一段（Codex 是 `[mcp_servers.dsh-any-agent]` 及其 `.env` 子表）。
+1. 从客户端配置里移除 `dsh-any-agent` 那一段：`dsh-any-agent-setup --remove --yes`（只摘自己那条，先备份）。手工配置的客户端自己删，Codex 是 `[mcp_servers.dsh-any-agent]` 及其 `.env` 子表。
 2. npm 全局安装：`npm uninstall -g dsh-any-agent`；迁移包：直接删解压目录。
 3. 可选：删 `~/.dsh/profiles/dsh-mcp/`（保留也无害，只是不再使用）。
 4. 你的 DSH 凭据、会话历史**不受影响**，本服务从未写入过它们。
