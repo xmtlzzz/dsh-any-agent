@@ -45,7 +45,7 @@ dsh --profile dsh-mcp --from-default-profile acp
 
 执行[快速开始](../../README.zh.md#快速开始)中的三条命令，再重新连接客户端。需要手工配置时，可展开下方的客户端示例。
 
-`setup` 会找出你机器上的 MCP 客户端 —— **Claude Code、Claude Desktop、Codex、Cursor、Windsurf、Zed、Gemini CLI、opencode、VS Code** —— 逐个写进去，没装的跳过。它的安全性是结构性保证的：
+`setup` 会找出你机器上的 MCP 客户端 —— **Claude Code、Claude Desktop、Codex、Cursor、Windsurf、Zed、Gemini CLI、Antigravity、opencode、VS Code** —— 逐个写进去，没装的跳过。它的安全性是结构性保证的：
 
 - **默认 dry-run**，必须加 `--yes` 才写；预览模式下**不启动任何子进程**，只读取它将要触及的那些文件
 - 每个文件写前备份成 `<file>.bak-dsh-<时间戳>`，内容是**写入前的原始字节**
@@ -86,6 +86,7 @@ dsh-any-agent-setup --remove --yes               # 全部移除，只摘自己�
 | Windsurf（`windsurf`） | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
 | Zed（`zed`） | Windows `%APPDATA%\Zed\settings.json`；其他平台 `~/.config/zed/settings.json` | `context_servers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
 | Gemini CLI（`gemini`） | `~/.gemini/settings.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
+| Antigravity（`antigravity`） | `~/.gemini/config/mcp_config.json`（IDE 与 CLI 共用）；只有旧版本的 `~/.gemini/antigravity/mcp_config.json` 存在、新文件不存在时写旧文件。两个都没有时，凭 `~/.gemini/antigravity` 或 `~/.gemini/antigravity-cli` 目录判定已安装 | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
 | opencode（`opencode`） | `~/.config/opencode/opencode.json` | `mcp` | 只增 / 改自己那条，且按 opencode 的形状写：`{ type: "local", command: [exe, ...args], enabled: true }` —— 一个数组，不是分开的 `command`/`args` | 删掉自己那条 | 把备份复制回去 |
 | VS Code（`vscode`） | Windows `%APPDATA%\Code\User\mcp.json`；其他平台是 VS Code 用户目录下的同名 `mcp.json` | `servers` —— **不是** `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
 

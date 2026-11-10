@@ -33,7 +33,7 @@ ffmpeg -framerate 30 -i out/frames/element-%04d.jpeg -i public/bgm.wav -c:v libx
 |---|---|---|
 | hook | 6s | 痛点：编辑器一关就没、想改口只能等、长活得守着 |
 | brand | 6s | README 主视觉（`docs/brand/header.jpg`）+ 标语 |
-| clients | 6s | 9 个 MCP 客户端 → dsh-any-agent → DSH |
+| clients | 6s | 10 个 MCP 客户端 → dsh-any-agent → DSH |
 | run | 16s | 回放 `demo/transcript.json` 的真实运行：派活、插话、哨兵、复核 |
 | caps | 12s | 断线 resume、多会话并发、调用方验收、只读档 |
 | outro | 8s | 安装命令、官网、GitHub |

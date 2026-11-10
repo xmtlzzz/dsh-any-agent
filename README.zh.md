@@ -21,7 +21,7 @@
 
 一个 MCP 服务端，把 DeepSeek Harness 当作**长驻的编码 agent** 来驱动。开个会话、扔个目标，它自己写代码、跑脚本、派子代理；你随时能看、能插话、能回头验收。
 
-**Claude Code · Claude Desktop · Codex · Cursor · Windsurf · Zed · Gemini CLI · opencode · VS Code**，以及任何支持 MCP over stdio 的客户端。
+**Claude Code · Claude Desktop · Codex · Cursor · Windsurf · Zed · Gemini CLI · Antigravity · opencode · VS Code**，以及任何支持 MCP over stdio 的客户端。
 
 ## 🎯 解决什么问题
 

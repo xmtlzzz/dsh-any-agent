@@ -38,7 +38,7 @@ dsh-any-agent-setup --remove --yes
 ```
 
 Supported clients: **Claude Code, Claude Desktop, Codex, Cursor, Windsurf,
-Zed, Gemini CLI, opencode, VS Code**. Clients that are not installed are
+Zed, Gemini CLI, Antigravity, opencode, VS Code**. Clients that are not installed are
 reported as skipped, not failed.
 
 The writer is deliberately conservative:

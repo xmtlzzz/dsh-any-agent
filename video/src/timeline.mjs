@@ -120,8 +120,8 @@ export function cues() {
 
   const c = SCENES.clients.from;
   add(c, 'whoosh');
-  const penta = [72, 74, 76, 79, 81, 84, 86, 88, 91];
-  for (let i = 0; i < 9; i++) add(c + CLIENTS.chipStart + i * CLIENTS.chipStep, 'blip', { note: penta[i] });
+  const penta = [72, 74, 76, 79, 81, 84, 86, 88, 91, 93];
+  for (let i = 0; i < penta.length; i++) add(c + CLIENTS.chipStart + i * CLIENTS.chipStep, 'blip', { note: penta[i] });
   add(c + CLIENTS.wires, 'sweep');
   add(c + CLIENTS.dsh, 'pluck', { note: 84 });
   add(c + CLIENTS.footer, 'pluck', { note: 88 });

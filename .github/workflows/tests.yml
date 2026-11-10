@@ -36,7 +36,7 @@ name: tests
 #     workspace-titles  home/root cwd guard, title_hint 19 checks (17 off Windows)
 #     setup             client config writer          45 checks
 #     removal-scope     --remove only touches its own   61 checks
-#     config-safety     in-place edits, format        412 checks
+#     config-safety     in-place edits, format        442 checks
 #     real-configs      real config round-trip        skips without client fixtures
 #     package-check     publishability                15 checks
 #     lint              static checks (npm run lint)  syntax, imports, exports, unused

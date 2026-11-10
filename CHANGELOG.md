@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arguments, unknown conversations and write-lock conflicts. Still Chinese
   only: `dsh_doctor`'s report, the takeover report, and less common errors
   raised deeper in a turn.
+- **`dsh-any-agent-setup` registers with Antigravity.** The entry goes into
+  `~/.gemini/config/mcp_config.json` (`mcpServers`), which the Antigravity IDE
+  and CLI share. Antigravity counts as installed when that file exists or when
+  `~/.gemini/antigravity` / `~/.gemini/antigravity-cli` does, since the file is
+  only created once the first MCP server is added. Older builds read
+  `~/.gemini/antigravity/mcp_config.json`; that file is used instead when it
+  exists and the new one does not.
 
 ### Changed
 

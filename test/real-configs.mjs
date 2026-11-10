@@ -54,6 +54,7 @@ const SOURCES = {
   windsurf: [join(HOME, '.codeium', 'windsurf', 'mcp_config.json')],
   zed: [join(APP_BASE, 'Zed', 'settings.json'), join(HOME, '.config', 'zed', 'settings.json')],
   gemini: [join(HOME, '.gemini', 'settings.json')],
+  antigravity: [join(HOME, '.gemini', 'config', 'mcp_config.json')],
   opencode: [join(HOME, '.config', 'opencode', 'opencode.json')],
   vscode: [join(APP_BASE, 'Code', 'User', 'mcp.json'), join(HOME, '.config', 'Code', 'User', 'mcp.json')],
 };
@@ -67,6 +68,7 @@ const TARGETS = {
   windsurf: ['', '.codeium/windsurf/mcp_config.json'],
   zed: ['app', 'Zed/settings.json'],
   gemini: ['', '.gemini/settings.json'],
+  antigravity: ['', '.gemini/config/mcp_config.json'],
   opencode: ['', '.config/opencode/opencode.json'],
   vscode: ['app', 'Code/User/mcp.json'],
 };

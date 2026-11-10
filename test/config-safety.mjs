@@ -17,7 +17,7 @@
  *   13) claude-code 走 ~/.claude.json 的文本级定点编辑（不是 claude mcp CLI）：只增删自己
  *       那条、projects 大映射与顶层键逐字节不变、删除后整文件还原；CLI 在不在 PATH 上
  *       都不得报 failed，且只有 CLI 存在时才允许在 summary 里出现 'confirmed by claude mcp get'；
- *   14) 幂等矩阵扩展到全部 9 个客户端；
+ *   14) 幂等矩阵扩展到全部 10 个客户端；
  *   15) 真实 HOME 只读回归：plan 模式覆盖全部已存在客户端，size+mtime 与备份名单都不变。
  *
  * 两条硬约束（和 sandbox-home.mjs 的由来同源：2026-10-29 那次事故把真实
@@ -33,7 +33,7 @@
  *   --json 时 stdout 是单个 JSON 对象
  *   {ok, mode, clients:[{id,label,path,status,summary,error?}], changed, skipped, failed}
  *   客户端 id：claude-code, claude-desktop, codex, cursor, windsurf, zed,
- *             gemini, opencode, vscode
+ *             gemini, antigravity, opencode, vscode
  * 实现还没跟上契约时，测试会失败（而不是跳过），但绝不会碰真实 HOME。
  */
 
@@ -52,10 +52,10 @@ const FAKE_DSH_BIN = '/fake/dsh/bin.js';
 
 const CLIENT_IDS = [
   'claude-code', 'claude-desktop', 'codex', 'cursor', 'windsurf',
-  'zed', 'gemini', 'opencode', 'vscode',
+  'zed', 'gemini', 'antigravity', 'opencode', 'vscode',
 ];
 /** 以 JSON 文件承载 MCP 配置的客户端；codex 是 TOML，单独测。 */
-const JSON_CLIENTS = ['claude-desktop', 'cursor', 'windsurf', 'zed', 'gemini', 'opencode', 'vscode'];
+const JSON_CLIENTS = ['claude-desktop', 'cursor', 'windsurf', 'zed', 'gemini', 'antigravity', 'opencode', 'vscode'];
 
 /** 实现没有在 --json 里给出 path 时的兜底猜测（只为让测试能跑，失败会明说）。 */
 const CANDIDATES = {
@@ -66,6 +66,7 @@ const CANDIDATES = {
   windsurf: ['.codeium/windsurf/mcp_config.json'],
   zed: ['Zed/settings.json'],
   gemini: ['.gemini/settings.json'],
+  antigravity: ['.gemini/config/mcp_config.json'],
   opencode: ['.config/opencode/opencode.json'],
   vscode: ['Code/User/mcp.json'],
 };
@@ -84,6 +85,7 @@ const HOME_REL_REAL = {
   windsurf: '.codeium/windsurf/mcp_config.json',
   zed: 'Zed/settings.json',
   gemini: '.gemini/settings.json',
+  antigravity: '.gemini/config/mcp_config.json',
   opencode: '.config/opencode/opencode.json',
   vscode: 'Code/User/mcp.json',
 };
@@ -124,6 +126,7 @@ const CONTAINERS = {
   windsurf: 'mcpServers',
   zed: 'context_servers',
   gemini: 'mcpServers',
+  antigravity: 'mcpServers',
   opencode: 'mcp',
   vscode: 'servers',
 };
@@ -493,7 +496,7 @@ const REAL_BAK_BEFORE = realBackupSnapshot();
 // [0] CLI 契约探测
 // ══════════════════════════════════════════════════════════════════════
 
-section('[0] CLI 契约：--json 单个对象 / 9 个客户端 / path 在沙箱内', () => {
+section('[0] CLI 契约：--json 单个对象 / 10 个客户端 / path 在沙箱内', () => {
   check('bin/setup.mjs 存在', existsSync(SETUP), SETUP);
 
   const r = runJson(PROBE_HOME, ['--only', 'cursor']);
@@ -509,7 +512,7 @@ section('[0] CLI 契约：--json 单个对象 / 9 个客户端 / path 在沙箱�
   const clients = Array.isArray(r.json.clients) ? r.json.clients : [];
   const ids = new Set(clients.map((c) => c && c.id));
   const missingIds = CLIENT_IDS.filter((id) => !ids.has(id));
-  check('clients 覆盖 9 个客户端 id', missingIds.length === 0, '缺少 ' + missingIds.join(','));
+  check('clients 覆盖 10 个客户端 id', missingIds.length === 0, '缺少 ' + missingIds.join(','));
 
   const badPath = clients.filter((c) => c && c.path && !isInside(PROBE_HOME, c.path));
   check('每个客户端 path 都落在沙箱 home 内（越界=会写真实配置）', badPath.length === 0,
@@ -1390,10 +1393,10 @@ section('[16] claude-code：CLI 在 PATH 上也不会被 setup 调用', () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════
-// [14] 幂等矩阵：全部 9 个客户端，第二次 changed=0 且无新 .bak
+// [14] 幂等矩阵：全部 10 个客户端，第二次 changed=0 且无新 .bak
 // ══════════════════════════════════════════════════════════════════════
 
-section('[14] 幂等矩阵：9 个客户端连续两次 --yes，第二次 0 changed', () => {
+section('[14] 幂等矩阵：10 个客户端连续两次 --yes，第二次 0 changed', () => {
   for (const id of CLIENT_IDS) {
     const home = sandbox({});
     const p = resolvePath(id, home);
@@ -1641,6 +1644,54 @@ section('[18] dsh-any-agent-restore：能把文件退回某一份备份', () => 
     }
   } finally {
     removeSandbox(home);
+  }
+}
+
+{
+  // Antigravity 没加过任何 MCP 服务器时还没有 mcp_config.json：只凭数据目录也要认出它，
+  // 而 --yes 要把配置文件建出来。
+  console.log('\n[antigravity] 只有数据目录、没有配置文件：仍判为已安装，--yes 会建出配置');
+  const C = await import(new URL('../src/clients.mjs', import.meta.url).href);
+  for (const sub of ['antigravity', 'antigravity-cli']) {
+    const home = sandbox({});
+    const dirs = C.resolveDirs(home);
+    const ag = C.clientList(dirs).find((c) => c.id === 'antigravity');
+    const file = ag.pathOf(dirs);
+    check(sub + ': 空 home 不算已安装', C.isPresent(ag, dirs) === false);
+    mkdirSync(join(home, '.gemini', sub), { recursive: true });
+    check(sub + ': 有 ~/.gemini/' + sub + ' 就算已安装', C.isPresent(ag, dirs) === true);
+    const r = run(home, ['--yes', '--only', 'antigravity']);
+    const parsed = safeParse(readText(file) || '');
+    check(sub + ': --yes 退出码 0', r.code === 0, 'exit ' + r.code + ' ' + firstLine(r.out));
+    check(sub + ': 建出 mcp_config.json 且含我们的条目', Boolean(parsed?.mcpServers?.['dsh-any-agent']), preview(readText(file)));
+    dropSandbox(home);
+  }
+
+  console.log('\n[antigravity] 旧版路径 ~/.gemini/antigravity/mcp_config.json：只有它在时写它，新路径在时写新路径');
+  const legacyRel = '.gemini/antigravity/mcp_config.json';
+  const currentRel = '.gemini/config/mcp_config.json';
+  const seed = JSON.stringify({ mcpServers: { blender: { command: 'uvx', args: ['mcp-for-blender'] } } }, null, 2) + '\n';
+  {
+    const home = sandbox({ [legacyRel]: seed });
+    const legacy = join(home, ...legacyRel.split('/'));
+    const current = join(home, ...currentRel.split('/'));
+    const r = run(home, ['--yes', '--only', 'antigravity']);
+    check('旧版：--yes 退出码 0', r.code === 0, 'exit ' + r.code + ' ' + firstLine(r.out));
+    check('★ 旧版：条目写进旧路径', Boolean(safeParse(readText(legacy) || '')?.mcpServers?.['dsh-any-agent']), preview(readText(legacy)));
+    check('★ 旧版：不凭空建出新路径', !existsSync(current));
+    const rm = run(home, ['--remove', '--yes', '--only', 'antigravity']);
+    check('旧版：卸载后逐字节还原', rm.code === 0 && readText(legacy) === seed, diffPreview(seed, readText(legacy)));
+    dropSandbox(home);
+  }
+  {
+    const home = sandbox({ [legacyRel]: seed, [currentRel]: seed });
+    const legacy = join(home, ...legacyRel.split('/'));
+    const current = join(home, ...currentRel.split('/'));
+    const r = run(home, ['--yes', '--only', 'antigravity']);
+    check('新旧都在：--yes 退出码 0', r.code === 0, 'exit ' + r.code + ' ' + firstLine(r.out));
+    check('★ 新旧都在：写新路径', Boolean(safeParse(readText(current) || '')?.mcpServers?.['dsh-any-agent']), preview(readText(current)));
+    check('★ 新旧都在：旧文件一字节不动', readText(legacy) === seed);
+    dropSandbox(home);
   }
 }
 

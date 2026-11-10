@@ -4,9 +4,9 @@ import { CLIENTS } from '../timeline.mjs';
 import { C, MONO } from '../theme.js';
 import { TinyLabel, WhaleMark, ease, enter, pop } from '../ui.jsx';
 
-const NAMES = ['Claude Code', 'Claude Desktop', 'Codex', 'Cursor', 'Windsurf', 'Zed', 'Gemini CLI', 'opencode', 'VS Code'];
+const NAMES = ['Claude Code', 'Claude Desktop', 'Codex', 'Cursor', 'Windsurf', 'Zed', 'Gemini CLI', 'Antigravity', 'opencode', 'VS Code'];
 
-const CHIP = { x: 130, w: 340, h: 58, top: 262, gap: 72 };
+const CHIP = { x: 130, w: 340, h: 58, top: 262, gap: 66 };
 const HUB = { x: 760, y: 452, w: 420, h: 236 };
 const HUB_CY = HUB.y + HUB.h / 2;
 const DSH = { x: 1400, y: HUB_CY - 175, w: 400, h: 350 };
@@ -20,7 +20,7 @@ const wire = (i) => {
   const y0 = CHIP.top + i * CHIP.gap + CHIP.h / 2;
   const x0 = CHIP.x + CHIP.w;
   const x3 = HUB.x;
-  const y3 = HUB_CY + (i - 4) * 16;
+  const y3 = HUB_CY + (i - (NAMES.length - 1) / 2) * 16;
   const cx = (x0 + x3) / 2;
   return { x0, y0, x1: cx, y1: y0, x2: cx, y2: y3, x3, y3 };
 };

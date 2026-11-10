@@ -660,6 +660,7 @@ export const CONTAINER_KEY = {
   cursor: 'mcpServers',
   windsurf: 'mcpServers',
   gemini: 'mcpServers',
+  antigravity: 'mcpServers',
   zed: 'context_servers',
   vscode: 'servers',
   opencode: 'mcp',
@@ -670,7 +671,7 @@ export const CONTAINER_KEY = {
  *   zed      -> command 是对象 { path, args, env }
  *   vscode   -> 需要 type: "stdio"
  *   opencode -> command 是数组，环境变量叫 environment
- * 其余（claude-desktop / cursor / windsurf / gemini）是 { command, args, env }。
+ * 其余（claude-desktop / cursor / windsurf / gemini / antigravity）是 { command, args, env }。
  */
 export function entryShape(shape, launch, env, shapeMode) {
   switch (shape) {
@@ -783,6 +784,17 @@ export function clientList(dirs) {
     jsonClient('zed', 'Zed', 'zed', 'context_servers',
       () => IS_WIN || IS_MAC ? join(appData, 'Zed', 'settings.json') : join(home, '.config', 'zed', 'settings.json')),
     jsonClient('gemini', 'Gemini CLI', 'default', 'mcpServers', () => join(home, '.gemini', 'settings.json')),
+    // Antigravity 的 IDE 与 CLI 共用 ~/.gemini/config/mcp_config.json。旧版本读的是
+    // ~/.gemini/antigravity/mcp_config.json：只有它在、新文件不在时才写旧文件，否则写到旧版读不到的地方。
+    // 没加过任何 MCP 服务器时两个文件都还不存在，所以另外按它的数据目录判断是否已安装。
+    {
+      ...jsonClient('antigravity', 'Antigravity', 'default', 'mcpServers', () => {
+        const current = join(home, '.gemini', 'config', 'mcp_config.json');
+        const legacy = join(home, '.gemini', 'antigravity', 'mcp_config.json');
+        return !existsSync(current) && existsSync(legacy) ? legacy : current;
+      }),
+      detectPaths: [join(home, '.gemini', 'antigravity'), join(home, '.gemini', 'antigravity-cli')],
+    },
     jsonClient('opencode', 'opencode', 'opencode', 'mcp', () => join(home, '.config', 'opencode', 'opencode.json')),
     jsonClient('vscode', 'VS Code', 'vscode', 'servers',
       () => IS_WIN || IS_MAC
@@ -793,7 +805,7 @@ export function clientList(dirs) {
 
 /** 让每个客户端「能被检测到」的依据各不相同，但都不写盘。 */
 export function isPresent(client, dirs) {
-  return existsSync(client.pathOf(dirs));
+  return existsSync(client.pathOf(dirs)) || (client.detectPaths ?? []).some((p) => existsSync(p));
 }
 
 // ── 计划 / 执行 ─────────────────────────────────────────────────────

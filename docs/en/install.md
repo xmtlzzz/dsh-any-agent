@@ -32,7 +32,7 @@ Then edit `~/.dsh/profiles/dsh-mcp/cordis.patch.yml`, remove its `# dsh-mcp:mana
 
 Run the three commands in [Quick start](../../README.md#quick-start), then reconnect your client. For a manual configuration, expand the client examples below.
 
-`setup` finds the MCP clients on your machine — **Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Zed, Gemini CLI, opencode, VS Code** — and writes the entry into each one it finds, skipping the rest. It is safe by construction:
+`setup` finds the MCP clients on your machine — **Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Zed, Gemini CLI, Antigravity, opencode, VS Code** — and writes the entry into each one it finds, skipping the rest. It is safe by construction:
 
 - **dry-run by default**; `--yes` is required to write anything, and a preview starts **no subprocess at all** — it only reads the files it would touch
 - every file is backed up to `<file>.bak-dsh-<timestamp>` first, holding the exact **pre-write bytes**
@@ -73,6 +73,7 @@ A `.bak-dsh-<timestamp>` backup lands beside every file before it is written. Pa
 | Windsurf (`windsurf`) | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` | its own entry only | its own entry only | copy the backup back |
 | Zed (`zed`) | Windows `%APPDATA%\Zed\settings.json`; elsewhere `~/.config/zed/settings.json` | `context_servers` | its own entry only | its own entry only | copy the backup back |
 | Gemini CLI (`gemini`) | `~/.gemini/settings.json` | `mcpServers` | its own entry only | its own entry only | copy the backup back |
+| Antigravity (`antigravity`) | `~/.gemini/config/mcp_config.json` (shared by the IDE and the CLI); the older `~/.gemini/antigravity/mcp_config.json` is written instead only when it exists and the new file does not. With neither file, detected by the `~/.gemini/antigravity` or `~/.gemini/antigravity-cli` directory | `mcpServers` | its own entry only | its own entry only | copy the backup back |
 | opencode (`opencode`) | `~/.config/opencode/opencode.json` | `mcp` | its own entry only, written in opencode's shape: `{ type: "local", command: [exe, ...args], enabled: true }` — one array, not separate `command`/`args` | its own entry only | copy the backup back |
 | VS Code (`vscode`) | Windows `%APPDATA%\Code\User\mcp.json`; elsewhere the same `mcp.json` under your VS Code user directory | `servers` — not `mcpServers` | its own entry only | its own entry only | copy the backup back |
 

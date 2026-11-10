@@ -101,7 +101,7 @@ dsh-any-agent-setup --yes --permission read-only
 dsh-any-agent-setup --remove --yes
 ```
 
-支持的客户端：**Claude Code、Claude Desktop、Codex、Cursor、Windsurf、Zed、Gemini CLI、opencode、VS Code**。没装的那些会被跳过，不算失败。
+支持的客户端：**Claude Code、Claude Desktop、Codex、Cursor、Windsurf、Zed、Gemini CLI、Antigravity、opencode、VS Code**。没装的那些会被跳过，不算失败。
 
 它做的几件保证安全的事：
 
