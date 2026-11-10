@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.8] — 2026-11-10
+
+Clients now see the tools in English when the system is not set to Chinese,
+every tool carries MCP annotations and a title, and `dsh-any-agent-setup
+--remove` puts a config back exactly as it was before install.
+
 ### Added
 
 - **Every tool now declares all four MCP annotations** (`readOnlyHint`,
@@ -1423,7 +1429,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.7...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.8...HEAD
+[0.6.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.4...v0.6.5
