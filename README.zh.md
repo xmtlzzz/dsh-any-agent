@@ -11,6 +11,7 @@
 [![license](https://img.shields.io/npm/l/dsh-any-agent.svg?style=flat-square)](LICENSE)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
 [![tests](https://img.shields.io/github/actions/workflow/status/xmtlzzz/dsh-any-agent/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/xmtlzzz/dsh-any-agent/actions/workflows/tests.yml)
+[![M8ven Score](https://m8ven.ai/badge/mcp/xmtlzzz-dsh-any-agent-ypgfnj?v=7c88b6fc8313c05af27cf83f262b9ac1)](https://m8ven.ai/mcp/xmtlzzz-dsh-any-agent-ypgfnj?s=readme)
 
 [官网](https://dsh-any-agent.xmtlz.dev/) · [快速开始](#快速开始) · [主要优势](#-主要优势) · [工具](#-工具) · [实时查看](#-实时查看派出去的活在干什么) · [使用注意事项](USAGE-NOTES.md) · [更新日志](CHANGELOG.md)
 

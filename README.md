@@ -11,6 +11,7 @@
 [![license](https://img.shields.io/npm/l/dsh-any-agent.svg?style=flat-square)](LICENSE)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
 [![tests](https://img.shields.io/github/actions/workflow/status/xmtlzzz/dsh-any-agent/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/xmtlzzz/dsh-any-agent/actions/workflows/tests.yml)
+[![M8ven Score](https://m8ven.ai/badge/mcp/xmtlzzz-dsh-any-agent-ypgfnj?v=7c88b6fc8313c05af27cf83f262b9ac1)](https://m8ven.ai/mcp/xmtlzzz-dsh-any-agent-ypgfnj?s=readme)
 
 [Website](https://dsh-any-agent.xmtlz.dev/) · [Quick start](#quick-start) · [Features](#-why-its-different) · [Tools](#-tools) · [Live view](#-live-view-see-what-the-dispatched-work-is-doing) · [Usage notes](USAGE-NOTES.en.md) · [Changelog](CHANGELOG.md)
 
