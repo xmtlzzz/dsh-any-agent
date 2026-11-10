@@ -117,6 +117,17 @@ try {
       check('每个有描述的参数都有英文描述', untranslated.length === 0, untranslated.join(','));
       const shape = (list) => JSON.stringify(list.map((t) => [t.name, Object.keys(t.inputSchema.properties), t.inputSchema.required, t.annotations, t.outputSchema]));
       check('两种语言的名字、参数、注解与 schema 完全一致', shape(tools) === shape(enTools));
+      // 工具返回的正文也跟语言走：正常结果、未知工具、参数校验报错各验一条。
+      for (const [name, args] of [
+        ['dsh_list', { include_closed: false }],
+        ['dsh_inbox', {}],
+        ['dsh_nope', {}],
+        ['dsh_start', { cwd: 'relative/path' }],
+        ['dsh_start', { cwd: ROOT, permission: 'read-only', on_approval: 'ask' }],
+      ]) {
+        const text = McpClient.text(await en.callTool(name, args, 30_000));
+        check(`英文模式下 ${name}(${Object.keys(args).join(',')}) 的返回正文是英文`, text.length > 0 && !cjk.test(text), text.slice(0, 120));
+      }
     } finally {
       await en.close();
     }

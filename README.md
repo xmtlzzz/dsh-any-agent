@@ -140,7 +140,7 @@ The second command previews the changes; `--yes` applies them. Reconnect your cl
 | `dsh_queue` | Inspect/modify the session queue: `list` / `remove` / `update` / `promote` (created by `dsh_send(queue=true)`, memory only) |
 | `dsh_doctor` | Read-only health check: DSH version, profile, state/dir writability, orphan locks, sessions and RSS, effective config |
 
-Every tool declares all four MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). Six only read state and are marked read-only: `dsh_list`, `dsh_read`, `dsh_get`, `dsh_status`, `dsh_inbox`, `dsh_doctor`. Tool titles, descriptions and the server instructions come in English and Chinese: they follow your system language, or set `DSH_MCP_LANG=en|zh`. The text a tool returns is still Chinese.
+Every tool declares all four MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). Six only read state and are marked read-only: `dsh_list`, `dsh_read`, `dsh_get`, `dsh_status`, `dsh_inbox`, `dsh_doctor`. Tool titles, descriptions and the server instructions come in English and Chinese: they follow your system language, or set `DSH_MCP_LANG=en|zh`. Tool results follow the same setting; a few less common error messages are still Chinese only.
 
 ## 👀 Live view: see what the dispatched work is doing
 

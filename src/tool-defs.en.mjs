@@ -6,8 +6,9 @@
  * is `en`. test/smoke.mjs checks that every tool and every described parameter has an entry here,
  * so a description added in Chinese cannot silently stay untranslated.
  *
- * Only what the client reads up front is translated: titles, descriptions, parameter
- * descriptions and the instructions. The text a tool returns at run time is still Chinese.
+ * This file holds what the client reads up front: titles, descriptions, parameter descriptions
+ * and the instructions. The text a tool returns at run time is translated where it is produced,
+ * with `L('中文', 'English')` from lang.mjs.
  */
 
 import {
@@ -333,4 +334,4 @@ export const INSTRUCTIONS_EN = `This server drives DeepSeek Harness (DSH) as a c
 
 [Privacy] This server's logs, sentinels and registry never contain reasoning text, but DSH's own ~/.dsh/sessions does store it. Sentinels contain the answer and tool inputs (common secrets redacted) and are kept for 7 days.
 
-Tool results are written in Chinese; the field names in structured output are English.`;
+Tool results follow the same language as this text. A few less common error messages are still Chinese; the field names in structured output are always English.`;

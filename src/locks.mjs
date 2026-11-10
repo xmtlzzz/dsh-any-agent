@@ -31,6 +31,7 @@ import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { STATE_FILE, REAP_INTERVAL_MS, numEnv } from './config.mjs';
+import { L } from './lang.mjs';
 
 /** 每个 MCP 进程一个身份串（防 PID 复用误判）。 */
 export const MCP_TOKEN = randomUUID();
@@ -165,7 +166,10 @@ export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
         mcpAlive: true,
         ageMs: 0,
         known_child_pid: knownChildPid,
-        reason: `本进程**上一代**子进程（PID ${knownChildPid}）还活着并握着锁，但它的登记已随回收被删除`,
+        reason: L(
+          `本进程**上一代**子进程（PID ${knownChildPid}）还活着并握着锁，但它的登记已随回收被删除`,
+          `this process's **previous** child (PID ${knownChildPid}) is still alive and holding the lock, but its registration was deleted when it was reaped`,
+        ),
       };
     }
     return {
@@ -174,7 +178,10 @@ export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
       childAlive: false,
       mcpAlive: false,
       ageMs: null,
-      reason: '没有登记文件：持有者不是本 MCP 拉起的进程（多半是你自己的 DSH GUI）',
+      reason: L(
+        '没有登记文件：持有者不是本 MCP 拉起的进程（多半是你自己的 DSH GUI）',
+        'no registration file: the holder is not a process this MCP started (most likely your own DSH GUI)',
+      ),
     };
   }
   const childAlive = isPidAlive(marker.child_pid);
@@ -191,13 +198,19 @@ export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
         mcpAlive,
         ageMs,
         known_child_pid: knownChildPid,
-        reason: `登记里的子进程已退出，但**本进程上一代子进程**（PID ${knownChildPid}）还活着并握着锁`,
+        reason: L(
+          `登记里的子进程已退出，但**本进程上一代子进程**（PID ${knownChildPid}）还活着并握着锁`,
+          `the registered child has exited, but **this process's previous child** (PID ${knownChildPid}) is still alive and holding the lock`,
+        ),
       };
     }
-    return { kind: 'none', marker, childAlive, mcpAlive, ageMs, reason: '登记还在，但它记录的 DSH 子进程已经退出（锁已释放）' };
+    return {
+      kind: 'none', marker, childAlive, mcpAlive, ageMs,
+      reason: L('登记还在，但它记录的 DSH 子进程已经退出（锁已释放）', 'the registration is still there, but the DSH child it names has exited (the lock is free)'),
+    };
   }
   if (isSelf) {
-    return { kind: 'self', marker, childAlive, mcpAlive, ageMs, reason: '是本进程自己拉起的子进程' };
+    return { kind: 'self', marker, childAlive, mcpAlive, ageMs, reason: L('是本进程自己拉起的子进程', 'a child this process started itself') };
   }
   const stale = !mcpAlive || (ageMs !== null && ageMs > STALE_MS);
   if (stale) {
@@ -208,8 +221,14 @@ export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
       mcpAlive,
       ageMs,
       reason: mcpAlive
-        ? `持有者 MCP 进程（PID ${marker.mcp_pid}）还在，但心跳已过期 ${Math.round(ageMs / 1000)}s（判定为卡死）`
-        : `持有者 MCP 进程（PID ${marker.mcp_pid}）已经退出，留下孤儿子进程 PID ${marker.child_pid}`,
+        ? L(
+            `持有者 MCP 进程（PID ${marker.mcp_pid}）还在，但心跳已过期 ${Math.round(ageMs / 1000)}s（判定为卡死）`,
+            `the holder MCP process (PID ${marker.mcp_pid}) is still there, but its heartbeat expired ${Math.round(ageMs / 1000)}s ago (treated as wedged)`,
+          )
+        : L(
+            `持有者 MCP 进程（PID ${marker.mcp_pid}）已经退出，留下孤儿子进程 PID ${marker.child_pid}`,
+            `the holder MCP process (PID ${marker.mcp_pid}) has exited and left the orphan child PID ${marker.child_pid}`,
+          ),
     };
   }
   return {
@@ -218,7 +237,10 @@ export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
     childAlive,
     mcpAlive,
     ageMs,
-    reason: `另一个**活着**的 dsh-any-agent 实例（PID ${marker.mcp_pid}）正持有它，心跳 ${Math.round(ageMs / 1000)}s 前`,
+    reason: L(
+      `另一个**活着**的 dsh-any-agent 实例（PID ${marker.mcp_pid}）正持有它，心跳 ${Math.round(ageMs / 1000)}s 前`,
+      `another **live** dsh-any-agent instance (PID ${marker.mcp_pid}) holds it; last heartbeat ${Math.round(ageMs / 1000)}s ago`,
+    ),
   };
 }
 
@@ -227,7 +249,7 @@ export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
  * 的、由本 MCP 登记过的进程调用** —— 调用方负责先做分类。
  */
 export function killHolderChild(pid, { expectedSpawnedAt } = {}) {
-  if (!pid || !isPidAlive(pid)) return { killed: false, reason: '进程已经不在了' };
+  if (!pid || !isPidAlive(pid)) return { killed: false, reason: L('进程已经不在了', 'the process is already gone') };
   // ★ PID 会被复用。抢占是"杀进程"这种不可逆动作，所以先核对启动时间：
   //   登记时间与 OS 记录的启动时间差太多 → 这已经不是当初登记的那个进程，拒绝杀。
   if (Number.isFinite(expectedSpawnedAt)) {
@@ -235,18 +257,21 @@ export function killHolderChild(pid, { expectedSpawnedAt } = {}) {
     if (Number.isFinite(actual) && Math.abs(actual - expectedSpawnedAt) > 10 * 60 * 1000) {
       return {
         killed: false,
-        reason:
+        reason: L(
           `PID ${pid} 的启动时间与登记不符（登记 ${new Date(expectedSpawnedAt).toISOString()}，` +
-          `实际 ${new Date(actual).toISOString()}），疑似 PID 已被复用，拒绝杀。`,
+            `实际 ${new Date(actual).toISOString()}），疑似 PID 已被复用，拒绝杀。`,
+          `PID ${pid} started at a different time than registered (registered ${new Date(expectedSpawnedAt).toISOString()}, ` +
+            `actual ${new Date(actual).toISOString()}); the PID was probably reused, so it is not killed.`,
+        ),
       };
     }
   }
   try {
     process.kill(pid, 'SIGKILL');
   } catch (e) {
-    return { killed: false, reason: `杀不掉: ${e.message}` };
+    return { killed: false, reason: L(`杀不掉: ${e.message}`, `could not kill it: ${e.message}`) };
   }
-  return { killed: true, reason: `已向 PID ${pid} 发送 SIGKILL` };
+  return { killed: true, reason: L(`已向 PID ${pid} 发送 SIGKILL`, `sent SIGKILL to PID ${pid}`) };
 }
 
 /**
@@ -337,18 +362,39 @@ export function isLeaseError(message) {
 /** 把锁错误翻译成调用方能照做的中文说明。 */
 export function describeLeaseConflict(conversationId, holder) {
   const lines = [
-    `会话 ${conversationId} 的写锁被别的 DSH 进程占用，本服务无法接管。`,
-    `判定：${holder.reason}`,
+    L(
+      `会话 ${conversationId} 的写锁被别的 DSH 进程占用，本服务无法接管。`,
+      `The write lock of conversation ${conversationId} is held by another DSH process, so this server cannot take the conversation.`,
+    ),
+    L(`判定：${holder.reason}`, `Why: ${holder.reason}`),
   ];
   if (holder.kind === 'stale-mcp') {
-    lines.push('→ 这是本服务自己留下的孤儿进程，可以安全抢占：调用 dsh_takeover 即可（无需 force）。');
+    lines.push(L(
+      '→ 这是本服务自己留下的孤儿进程，可以安全抢占：调用 dsh_takeover 即可（无需 force）。',
+      "→ It is an orphan this server left behind and is safe to preempt: call dsh_takeover (no force needed).",
+    ));
   } else if (holder.kind === 'live-mcp') {
-    lines.push('→ 另一个活着的 dsh-any-agent 实例正在用它（可能是你另一个宿主窗口）。');
-    lines.push('  建议：在那边用 dsh_release 交还；确实要夺过来再调 dsh_takeover(force=true)。');
+    lines.push(L(
+      '→ 另一个活着的 dsh-any-agent 实例正在用它（可能是你另一个宿主窗口）。',
+      '→ Another live dsh-any-agent instance is using it (perhaps another of your host windows).',
+    ));
+    lines.push(L(
+      '  建议：在那边用 dsh_release 交还；确实要夺过来再调 dsh_takeover(force=true)。',
+      '  Suggested: dsh_release on that side; call dsh_takeover(force=true) only if you really must take it.',
+    ));
   } else {
-    lines.push('→ 持有者不是本服务拉起的进程，**多半是你自己的 DSH GUI 正开着这个会话**。');
-    lines.push('  本服务**不会**去杀它（那会连你的界面和正在看的对话一起杀掉）。');
-    lines.push('  请在那个窗口里关掉该会话（或切走），然后重试。');
+    lines.push(L(
+      '→ 持有者不是本服务拉起的进程，**多半是你自己的 DSH GUI 正开着这个会话**。',
+      '→ The holder is not a process this server started; **most likely your own DSH GUI has this conversation open**.',
+    ));
+    lines.push(L(
+      '  本服务**不会**去杀它（那会连你的界面和正在看的对话一起杀掉）。',
+      '  This server will **not** kill it (that would take your UI and the conversation you are reading down with it).',
+    ));
+    lines.push(L(
+      '  请在那个窗口里关掉该会话（或切走），然后重试。',
+      '  Close the conversation in that window (or switch away from it), then retry.',
+    ));
   }
   return lines.join('\n');
 }

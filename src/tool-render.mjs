@@ -8,6 +8,7 @@
  */
 
 import { toPosixPath } from './config.mjs';
+import { L } from './lang.mjs';
 
 /**
  * 把审核单渲染成调用方一眼能看到的文本块。
@@ -19,32 +20,41 @@ export function renderReviewSection(review) {
   if (!review || typeof review !== 'object') return '';
   const lines = [];
   const pending = review.status === 'pending';
-  lines.push(`【调用方审核${pending ? ' · 待提交' : ` · ${review.status}`}】`);
-  if (review.prompt_preview) lines.push(`原任务: ${review.prompt_preview}`);
+  lines.push(L(
+    `【调用方审核${pending ? ' · 待提交' : ` · ${review.status}`}】`,
+    `[Caller review${pending ? ' · not submitted yet' : ` · ${review.status}`}]`,
+  ));
+  if (review.prompt_preview) lines.push(L(`原任务: ${review.prompt_preview}`, `Task: ${review.prompt_preview}`));
   const ev = review.evidence ?? {};
   const bits = [];
   if (ev.stop_reason) bits.push(`stop=${ev.stop_reason}`);
-  if (ev.workspace_changed != null) bits.push(`工作区变化=${ev.workspace_changed ? '是' : '否'}`);
-  if (ev.changed_files != null) bits.push(`改动文件=${ev.changed_files}`);
-  if (Array.isArray(ev.tools) && ev.tools.length) bits.push(`工具=[${ev.tools.join(', ')}]`);
-  if (ev.auto_approvals) {
-    bits.push(`⚠ 自动放行审批=${ev.auto_approvals}${ev.auto_escalations ? `（含提权 ${ev.auto_escalations}）` : ''}`);
+  if (ev.workspace_changed != null) {
+    bits.push(L(`工作区变化=${ev.workspace_changed ? '是' : '否'}`, `workspace changed=${ev.workspace_changed ? 'yes' : 'no'}`));
   }
-  if (bits.length) lines.push(`证据: ${bits.join(' · ')}`);
+  if (ev.changed_files != null) bits.push(L(`改动文件=${ev.changed_files}`, `changed files=${ev.changed_files}`));
+  if (Array.isArray(ev.tools) && ev.tools.length) bits.push(L(`工具=[${ev.tools.join(', ')}]`, `tools=[${ev.tools.join(', ')}]`));
+  if (ev.auto_approvals) {
+    bits.push(L(
+      `⚠ 自动放行审批=${ev.auto_approvals}${ev.auto_escalations ? `（含提权 ${ev.auto_escalations}）` : ''}`,
+      `⚠ auto-allowed approvals=${ev.auto_approvals}${ev.auto_escalations ? ` (${ev.auto_escalations} escalations)` : ''}`,
+    ));
+  }
+  if (bits.length) lines.push(L(`证据: ${bits.join(' · ')}`, `Evidence: ${bits.join(' · ')}`));
   if (pending) {
-    lines.push('在把这次结果当作完成之前，请独立核验：');
+    lines.push(L('在把这次结果当作完成之前，请独立核验：', 'Before treating this result as done, verify it independently:'));
     (review.checklist ?? []).forEach((item, i) => lines.push(`${i + 1}. ${item}`));
     if (review.instructions) lines.push(review.instructions);
     lines.push(
-      `提交裁决: dsh_review(conversation_id="${review.conversation_id}", run_id="${review.run_id}", ` +
-        'verdict="pass|partial|fail", notes="审核理由")',
+      L('提交裁决: ', 'Submit the verdict: ') +
+        `dsh_review(conversation_id="${review.conversation_id}", run_id="${review.run_id}", ` +
+        `verdict="pass|partial|fail", notes="${L('审核理由', 'reason')}")`,
     );
   } else {
-    if (review.notes) lines.push(`审核理由: ${review.notes}`);
+    if (review.notes) lines.push(L(`审核理由: ${review.notes}`, `Reason: ${review.notes}`));
     if (Array.isArray(review.findings) && review.findings.length) {
-      lines.push(`审核问题: ${review.findings.join('；')}`);
+      lines.push(L(`审核问题: ${review.findings.join('；')}`, `Findings: ${review.findings.join('; ')}`));
     }
-    if (review.review_file) lines.push(`审核记录: ${review.review_file}`);
+    if (review.review_file) lines.push(L(`审核记录: ${review.review_file}`, `Review record: ${review.review_file}`));
   }
   return lines.join('\n');
 }
@@ -105,31 +115,46 @@ export function psReadCommand(sentinelPath) {
 export function renderSendResult(r) {
   const lines = [];
   if (r.answer?.trim()) lines.push(r.answer.trim());
-  else lines.push('(DSH 本次没有产生正文输出)');
+  else lines.push(L('(DSH 本次没有产生正文输出)', '(DSH produced no answer text this turn)'));
 
   if (r.thinking && r.thinking.trim()) {
     lines.push('');
-    lines.push('--- 思考内容 ---');
+    lines.push(L('--- 思考内容 ---', '--- Reasoning ---'));
     lines.push(r.thinking.trim());
   }
 
   const meta = [];
   meta.push(`stop=${r.stop_reason}`);
-  if (typeof r.elapsed_ms === 'number') meta.push(`耗时=${(r.elapsed_ms / 1000).toFixed(1)}s`);
+  if (typeof r.elapsed_ms === 'number') {
+    const sec = (r.elapsed_ms / 1000).toFixed(1);
+    meta.push(L(`耗时=${sec}s`, `elapsed=${sec}s`));
+  }
   if (r.thinking_stats?.chars) {
+    const chars = r.thinking_stats.chars;
     meta.push(
       r.thinking_stats.hidden
-        ? `思考已隐藏(${r.thinking_stats.chars}字/${(r.thinking_stats.ms / 1000).toFixed(1)}s)`
-        : `思考=${r.thinking_stats.chars}字`,
+        ? L(
+            `思考已隐藏(${chars}字/${(r.thinking_stats.ms / 1000).toFixed(1)}s)`,
+            `reasoning hidden (${chars} chars/${(r.thinking_stats.ms / 1000).toFixed(1)}s)`,
+          )
+        : L(`思考=${chars}字`, `reasoning=${chars} chars`),
     );
   }
   const tools = (r.tools_used ?? []).map((t) => t.name ?? t.title).filter(Boolean);
-  if (tools.length) meta.push(`工具=[${[...new Set(tools)].join(', ')}]`);
-  if (r.workspace_changed) meta.push(`本轮工作区状态发生变化(当前共 ${r.diff_stat?.changed_files ?? '?'} 个文件有改动)`);
+  if (tools.length) meta.push(L(`工具=[${[...new Set(tools)].join(', ')}]`, `tools=[${[...new Set(tools)].join(', ')}]`));
+  if (r.workspace_changed) {
+    const n = r.diff_stat?.changed_files ?? '?';
+    meta.push(L(
+      `本轮工作区状态发生变化(当前共 ${n} 个文件有改动)`,
+      `the workspace changed this turn (${n} files currently modified)`,
+    ));
+  }
   if (r.auto_approvals_total) {
     meta.push(
-      `自动放行审批 ${r.auto_approvals_total} 次` +
-        (r.auto_escalations_total ? `(含沙箱提权 ${r.auto_escalations_total} 次)` : ''),
+      L(`自动放行审批 ${r.auto_approvals_total} 次`, `${r.auto_approvals_total} approvals auto-allowed`) +
+        (r.auto_escalations_total
+          ? L(`(含沙箱提权 ${r.auto_escalations_total} 次)`, ` (${r.auto_escalations_total} sandbox escalations)`)
+          : ''),
     );
   }
   lines.push('');
@@ -142,7 +167,7 @@ export function renderSendResult(r) {
 
   if (r.error) {
     lines.push('');
-    lines.push(`⚠️ 回合失败: ${r.error}`);
+    lines.push(L(`⚠️ 回合失败: ${r.error}`, `⚠️ Turn failed: ${r.error}`));
   }
   return lines.join('\n');
 }
@@ -155,9 +180,16 @@ export function backgroundReceipt(hub, conv, res) {
   const sentinel = res.sentinel_file ?? hub.runSentinelPath(conv.id, res.run_id);
   const sentinelPosix = toPosixPath(sentinel);
   const review = conv.pendingReviewTicket?.(res.run_id) ?? null;
-  const waited = res.waited_ms
-    ? `已等待 ${(res.waited_ms / 1000).toFixed(0)}s 仍未结束，改为后台继续（**回合没有被取消**）。`
-    : '已在后台执行（**回合没有被取消**）。';
+  const waitedSec = res.waited_ms ? (res.waited_ms / 1000).toFixed(0) : null;
+  const waited = waitedSec
+    ? L(
+        `已等待 ${waitedSec}s 仍未结束，改为后台继续（**回合没有被取消**）。`,
+        `Still running after ${waitedSec}s of waiting; it continues in the background (**the turn was not cancelled**).`,
+      )
+    : L('已在后台执行（**回合没有被取消**）。', 'Running in the background (**the turn was not cancelled**).');
+  const bashWait =
+    `  Bash(run_in_background): sent="${sentinelPosix}"; \\\n` +
+    `    dl=$(( $(date +%s)+2100 )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE\n`;
   return {
     structured: {
       conversation_id: conv.id,
@@ -175,25 +207,46 @@ export function backgroundReceipt(hub, conv, res) {
       ...(review ? { review } : {}),
     },
     text:
-      `${waited}（run_id=${res.run_id}）\n\n` +
-      `【跑完自动通知，无需轮询】完成时（成功/失败/被取消）会原子写出这个文件（含最终结果，但**不含思考内容**）：\n` +
+      `${waited}${L('（', ' (')}run_id=${res.run_id}${L('）', ')')}\n\n` +
+      L(
+        `【跑完自动通知，无需轮询】完成时（成功/失败/被取消）会原子写出这个文件（含最终结果，但**不含思考内容**）：\n`,
+        `[You are notified when it ends; no polling] On completion (success, failure or cancel) this file is written atomically (it holds the final result but **no reasoning**):\n`,
+      ) +
       `  ${sentinel}\n` +
-      `直接用下面这个 Bash 形式路径，**不要手工转换**（写错会一直等到超时）：\n` +
+      L(
+        `直接用下面这个 Bash 形式路径，**不要手工转换**（写错会一直等到超时）：\n`,
+        `Use the Bash-form path below as is; **do not convert it by hand** (a wrong path waits until the timeout):\n`,
+      ) +
       `  ${sentinelPosix}\n` +
-      `推荐用后台任务等它出现，文件一到就会唤醒你：\n` +
-      `  Bash(run_in_background): sent="${sentinelPosix}"; \\\n` +
-      `    dl=$(( $(date +%s)+2100 )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE\n` +
+      L(
+        `推荐用后台任务等它出现，文件一到就会唤醒你：\n`,
+        `Wait for it with a background task; you are woken as soon as the file exists:\n`,
+      ) +
+      bashWait +
       (process.platform === 'win32'
-        ? `Windows 上 Bash 不可用（或会挂住）时，用 PowerShell 版本（原生路径，已转义好）：\n` +
+        ? L(
+            `Windows 上 Bash 不可用（或会挂住）时，用 PowerShell 版本（原生路径，已转义好）：\n`,
+            `On Windows, when Bash is unavailable (or hangs), use the PowerShell version (native path, already escaped):\n`,
+          ) +
           `  PowerShell(run_in_background): ${psWaitCommand(sentinel)}\n` +
-          `读取时必须带 -Encoding UTF8（Windows PowerShell 5.1 默认按 ANSI 读，会乱码/解析失败）：\n` +
+          L(
+            `读取时必须带 -Encoding UTF8（Windows PowerShell 5.1 默认按 ANSI 读，会乱码/解析失败）：\n`,
+            `Read it with -Encoding UTF8 (Windows PowerShell 5.1 reads as ANSI by default, which garbles the text and breaks parsing):\n`,
+          ) +
           `  ${psReadCommand(sentinel)}\n`
         : '') +
-      `文件出现后：直接读它拿结果（推荐——不受内存窗口限制、还扛服务重启），或 dsh_get(conversation_id, run_id) 验收。\n` +
-      `消费完可以 rm 掉它。其它随时可用：dsh_status（是否在跑）、dsh_read（增量看输出）。` +
+      L(
+        `文件出现后：直接读它拿结果（推荐——不受内存窗口限制、还扛服务重启），或 dsh_get(conversation_id, run_id) 验收。\n` +
+          `消费完可以 rm 掉它。其它随时可用：dsh_status（是否在跑）、dsh_read（增量看输出）。`,
+        `Once the file exists: read it for the result (recommended: it is not limited by the in-memory window and survives a server restart), or collect with dsh_get(conversation_id, run_id).\n` +
+          `You may delete it after reading. Available at any time: dsh_status (is it running), dsh_read (incremental output).`,
+      ) +
       (review ? `\n\n${renderReviewSection(review)}` : '') +
       (res.waited_ms
-        ? `\n\n下次想立刻返回就传 wait=false；想等更久就调大 timeout_ms（**0 = 一直等**）。`
+        ? L(
+            `\n\n下次想立刻返回就传 wait=false；想等更久就调大 timeout_ms（**0 = 一直等**）。`,
+            `\n\nTo return at once next time pass wait=false; to wait longer raise timeout_ms (**0 = wait forever**).`,
+          )
         : ''),
   };
 }
@@ -206,13 +259,17 @@ export function replayRun(hub, conv, run, wantResult) {
   const sentinel = hub.runSentinelPath(conv.id, run.run_id);
   const sentinelPosix = toPosixPath(sentinel);
   const terminal = run.status === 'done' || run.status === 'error' || run.status === 'cancelled';
+  const sentinelLine = L(`哨兵文件: ${sentinel}`, `Sentinel file: ${sentinel}`);
   if (terminal && run.result) {
     return {
       structured: { ...run.result, replayed: true, ...(wantResult ? {} : { background: true }) },
       text:
-        `（幂等命中：client_run_id 已对应一个已结束的回合，未重复派活）\n` +
+        L(
+          `（幂等命中：client_run_id 已对应一个已结束的回合，未重复派活）\n`,
+          `(Idempotent replay: this client_run_id already maps to a finished turn; nothing was dispatched again)\n`,
+        ) +
         renderSendResult(run.result) +
-        `\n哨兵文件: ${sentinel}`,
+        `\n${sentinelLine}`,
     };
   }
   const review = conv.pendingReviewTicket?.(run.run_id) ?? null;
@@ -230,8 +287,12 @@ export function replayRun(hub, conv, run, wantResult) {
       ...(review ? { review } : {}),
     },
     text:
-      `（幂等命中：同一个 client_run_id 已在跑或排队，未重复派活）run_id=${run.run_id} status=${run.status}\n` +
-      `哨兵文件: ${sentinel}` +
+      L(
+        `（幂等命中：同一个 client_run_id 已在跑或排队，未重复派活）`,
+        `(Idempotent replay: this client_run_id is already running or queued; nothing was dispatched again) `,
+      ) +
+      `run_id=${run.run_id} status=${run.status}\n` +
+      sentinelLine +
       (review ? `\n\n${renderReviewSection(review)}` : ''),
   };
 }
@@ -254,9 +315,15 @@ export function queuedReceipt(hub, conv, run, position) {
       ...(review ? { review } : {}),
     },
     text:
-      `已入队（第 ${position} 位）。当前回合结束后自动执行；**入队时不会写哨兵**，真正结束时才写：\n` +
+      L(
+        `已入队（第 ${position} 位）。当前回合结束后自动执行；**入队时不会写哨兵**，真正结束时才写：\n`,
+        `Queued (position ${position}). It runs automatically after the current turn; **no sentinel is written when queued**, only when it really ends:\n`,
+      ) +
       `  ${sentinel}\n` +
-      `用 dsh_queue list 查看/修改/删除；取消：dsh_queue(conversation_id, action="remove", run_id="${run.run_id}")。` +
+      L(
+        `用 dsh_queue list 查看/修改/删除；取消：dsh_queue(conversation_id, action="remove", run_id="${run.run_id}")。`,
+        `Use dsh_queue list to inspect, change or delete; to cancel: dsh_queue(conversation_id, action="remove", run_id="${run.run_id}").`,
+      ) +
       (review ? `\n\n${renderReviewSection(review)}` : ''),
   };
 }

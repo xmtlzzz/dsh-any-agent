@@ -8,6 +8,7 @@
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, parse, resolve, sep } from 'node:path';
+import { L } from './lang.mjs';
 
 /**
  * 当前文件系统是否大小写不敏感（缓存一次）。
@@ -66,25 +67,35 @@ export function homeWorkspaceProblem(cwd, permission) {
   //   拿传入路径的盘符比较就会放行（审计 A04）。
   const fsRoot = resolve(parse(real(cwd)).root);
   if (norm(cwd) === norm(fsRoot)) {
-    return [
-      'cwd 不能是文件系统根目录: ' + cwd,
-      '  workspace-write 的沙箱根会变成整个磁盘，等于绕过“只写工作区”的权限档。',
-      '  请传一个具体的项目目录；确实要全盘访问请显式用 permission=danger-full-access。',
-    ].join('\n');
+    return L(
+      [
+        'cwd 不能是文件系统根目录: ' + cwd,
+        '  workspace-write 的沙箱根会变成整个磁盘，等于绕过“只写工作区”的权限档。',
+        '  请传一个具体的项目目录；确实要全盘访问请显式用 permission=danger-full-access。',
+      ],
+      [
+        'cwd must not be a filesystem root: ' + cwd,
+        '  The workspace-write sandbox root would be the whole disk, which bypasses the "write only in the workspace" tier.',
+        '  Pass a specific project directory; if you really want whole-disk access, say so with permission=danger-full-access.',
+      ],
+    ).join('\n');
   }
   if (norm(cwd) !== norm(home)) return null;
 
   const temp = tmpdir();
   const tempInside = norm(temp) === norm(home) || norm(temp).startsWith(norm(home) + sep);
-  const lines = ['cwd 不能是用户家目录本身: ' + cwd];
-  if (tempInside) lines.push('  临时目录 ' + temp + ' 就在它里面，');
+  const lines = [L('cwd 不能是用户家目录本身: ', "cwd must not be the user's home directory itself: ") + cwd];
+  if (tempInside) lines.push(L('  临时目录 ' + temp + ' 就在它里面，', '  The temp directory ' + temp + ' is inside it,'));
   lines.push(
-    '  DSH 的 ACL 沙箱要求临时目录在工作区之外，否则第一次起 shell 就会报:',
+    L(
+      '  DSH 的 ACL 沙箱要求临时目录在工作区之外，否则第一次起 shell 就会报:',
+      "  and DSH's ACL sandbox needs the temp directory outside the workspace; otherwise the first shell fails with:",
+    ),
     '    Windows ACL: temp root must be outside the workspace',
     '',
-    '  换个具体项目目录最省事，或者改权限档：',
-    '    permission=read-only           不写盘，不需要该沙箱',
-    '    permission=danger-full-access  不受该沙箱约束',
+    L('  换个具体项目目录最省事，或者改权限档：', '  The easiest fix is a specific project directory; or change the tier:'),
+    L('    permission=read-only           不写盘，不需要该沙箱', '    permission=read-only           writes nothing, so it does not need that sandbox'),
+    L('    permission=danger-full-access  不受该沙箱约束', '    permission=danger-full-access  is not bound by that sandbox'),
   );
   return lines.join('\n');
 }

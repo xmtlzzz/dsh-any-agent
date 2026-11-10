@@ -42,6 +42,8 @@ process.env.TEMP = RUN_ROOT;
 process.env.TMP = RUN_ROOT;
 process.env.TMPDIR = RUN_ROOT;
 process.env.DSH_MCP_TEST_RUN_ROOT = RUN_ROOT;
+// 给调用方看的文字跟系统语言走；套件断言的是中文那一份，所以整轮钉成 zh（要测英文的套件自己传 en）。
+process.env.DSH_MCP_LANG ??= 'zh';
 
 // live 事件流：不少离线套件用假 hub 直接驱动 Conversation，不设 DSH_MCP_STATE。
 // 不隔离的话它们的事件会写进用户真实的 ~/.dsh/.dsh-any-agent/live。整轮共用一个临时目录，

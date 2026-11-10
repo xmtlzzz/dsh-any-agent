@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { createHandlers } from './tools.mjs';
 import { localizeToolDefs } from './tool-defs.mjs';
 import { INSTRUCTIONS_EN } from './tool-defs.en.mjs';
-import { detectLang } from './live-view.mjs';
+import { L, LANG } from './lang.mjs';
 import { DEFAULT_PERMISSION } from './config.mjs';
 import { LineDecoder } from './line-decoder.mjs';
 import { setLiveClient } from './live.mjs';
@@ -47,7 +47,7 @@ export const INSTRUCTIONS_EN_MAX_CHARS = 3600;
  * 工具描述与服务说明用哪种语言：DSH_MCP_LANG 优先，否则跟系统语言走（与 watch / dashboard 同一条规则）。
  * 进程启动时定一次；工具返回的正文不在此列，仍是中文。
  */
-export const LANG = detectLang();
+export { LANG };
 
 export const INSTRUCTIONS = `本服务把 DeepSeek Harness (DSH) 当作可长期共事的编码 agent 驱动。DSH 自带文件/shell/搜索/技能/子代理；你给**目标**，它自己决定怎么做。
 
@@ -242,7 +242,7 @@ export function createMcpServer({
         // 原型链名字不能被当成工具调用。
         const fn = Object.hasOwn(handlers, name) ? handlers[name] : null;
         if (typeof fn !== 'function') {
-          ok(id, { content: [{ type: 'text', text: `未知工具: ${name}` }], isError: true });
+          ok(id, { content: [{ type: 'text', text: L(`未知工具: ${name}`, `Unknown tool: ${name}`) }], isError: true });
           return;
         }
         const stopProgress = startProgress(params?._meta?.progressToken, args);
@@ -255,7 +255,7 @@ export function createMcpServer({
         } catch (e) {
           // 只记错误摘要，不记工具内容（可能含对话正文或思考）
           log?.debug(`[tools/call ${name}] 失败: ${e.message}`);
-          ok(id, { content: [{ type: 'text', text: `工具执行失败: ${e.message}` }], isError: true });
+          ok(id, { content: [{ type: 'text', text: L(`工具执行失败: ${e.message}`, `Tool failed: ${e.message}`) }], isError: true });
         }
         return;
       }

@@ -5,7 +5,7 @@ name: tests
 # This project's suite has two halves, and only one of them can run here.
 #
 #   OFFLINE (runs in CI)
-#     smoke             protocol + instructions length cap, no DSH   33 checks
+#     smoke             protocol + instructions length cap, no DSH   38 checks
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     progress          MCP progress notifications     15 checks
 #     guards            env-var edge cases            40 checks
@@ -80,6 +80,11 @@ permissions:
 # The repository root IS the package root: <repo>/bin, <repo>/src, <repo>/test.
 # Do not add 'working-directory: server' -- no such directory exists in a
 # fresh checkout, and every run step then fails before its first command.
+
+# Text shown to the caller follows the system language; the suites assert on the Chinese text,
+# so every job pins it (the English checks pass DSH_MCP_LANG=en themselves).
+env:
+  DSH_MCP_LANG: zh
 
 jobs:
   offline-suites:

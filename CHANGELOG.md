@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tool results are available in English.** What a tool returns now follows the
+  same language setting as the tool descriptions (`DSH_MCP_LANG`, else the
+  system language): the result text of every tool, background and queue
+  receipts, review tickets and their checklists, and the errors for bad
+  arguments, unknown conversations and write-lock conflicts. Still Chinese
+  only: `dsh_doctor`'s report, the takeover report, and less common errors
+  raised deeper in a turn.
+
+### Changed
+
+- **`dsh-any-agent-setup` lost code no client used.** The path that registered
+  through a client's own CLI has been dead since Claude Code moved to in-place
+  edits; it and a duplicated read-only check are gone. No behavior changed.
+
 ## [0.6.8] — 2026-11-10
 
 Clients now see the tools in English when the system is not set to Chinese,

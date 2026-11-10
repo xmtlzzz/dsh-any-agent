@@ -56,6 +56,7 @@ import {
 import { normalizeReviewMode } from './review.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
 import { assertSafeId } from './ids.mjs';
+import { L } from './lang.mjs';
 import { AcpProcess } from './acp.mjs';
 import { applySessionConfig } from './acp-session.mjs';
 import { SessionHost } from './host.mjs';
@@ -315,10 +316,12 @@ export class Hub {
     // ★ forget 是终态：墓碑存在时，任何按 id 的查询都必须明确失败，
     //   否则 DSH 会话存储里的记录会让它悄悄复活（"forget 不持久"）。
     if (isForgotten(id)) {
-      throw new Error(
+      throw new Error(L(
         `会话已被 forget（永久移除）: ${id}\n` +
           `  它不会再被按 id 自动恢复。确实要恢复的话，删除墓碑文件 ${forgottenPath(id)} 后重试。`,
-      );
+        `This conversation was forgotten (removed for good): ${id}\n` +
+          `  It is no longer restored by id. To bring it back anyway, delete the tombstone file ${forgottenPath(id)} and retry.`,
+      ));
     }
     let c = this.conversations.get(id);
     if (!c) {
@@ -344,7 +347,7 @@ export class Hub {
       try {
       const found = await findSessionHeaderStatus(id);
       if (found.status === 'error') {
-        throw new Error(`无法读取会话 ${id} 的会话头：${found.reason}`);
+        throw new Error(L(`无法读取会话 ${id} 的会话头：${found.reason}`, `Cannot read the session header of ${id}: ${found.reason}`));
       }
       const header = found.header;
       if (header?.cwd) {
@@ -402,9 +405,10 @@ export class Hub {
       }
     }
     if (!c) {
-      throw new Error(
+      throw new Error(L(
         `未知会话: ${id}（用 dsh_list 查看可用会话；也可能是 id 写错了）`,
-      );
+        `Unknown conversation: ${id} (use dsh_list to see the available ones; the id may also be mistyped)`,
+      ));
     }
     return c;
   }
@@ -479,58 +483,75 @@ export class Hub {
   /** 新建一个会话：拉起进程 + ACP 初始化 + session/new。 */
   async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false, review } = {}) {
     if (!cwd) {
-      throw new Error(
+      throw new Error(L(
         '没有可用的工作目录。你既没传 cwd，客户端也没有提供当前打开的项目（MCP roots）。\n' +
           '  传一个项目目录即可，例如 cwd: "D:/code/my-project"。\n' +
           '  不要传用户家目录本身 —— 那会让 DSH 的 ACL 沙箱起不来。',
-      );
+        'No working directory. You passed no cwd and the client did not report an open project (MCP roots).\n' +
+          '  Pass a project directory, for example cwd: "D:/code/my-project".\n' +
+          "  Do not pass the user's home directory itself: DSH's ACL sandbox cannot start there.",
+      ));
     }
-    if (!isAbsolute(cwd)) throw new Error(`cwd 必须是绝对路径: ${cwd}`);
+    if (!isAbsolute(cwd)) throw new Error(L(`cwd 必须是绝对路径: ${cwd}`, `cwd must be an absolute path: ${cwd}`));
     if (!existsSync(cwd)) {
-      throw new Error(`工作区不存在或不是目录: ${cwd}（请先创建这个目录）`);
+      throw new Error(L(
+        `工作区不存在或不是目录: ${cwd}（请先创建这个目录）`,
+        `The workspace does not exist or is not a directory: ${cwd} (create the directory first)`,
+      ));
     }
     if (!statSync(cwd).isDirectory()) {
-      throw new Error(`工作区不存在或不是目录: ${cwd}（这是一个文件路径，请传目录）`);
+      throw new Error(L(
+        `工作区不存在或不是目录: ${cwd}（这是一个文件路径，请传目录）`,
+        `The workspace does not exist or is not a directory: ${cwd} (this is a file path; pass a directory)`,
+      ));
     }
+    const oneOf = (name, values) => L(`${name} 必须是 ${values.join(' | ')} 之一`, `${name} must be one of ${values.join(' | ')}`);
     if (!PERMISSION_TIERS.includes(permission)) {
-      throw new Error(`permission 必须是 ${PERMISSION_TIERS.join(' | ')} 之一`);
+      throw new Error(oneOf('permission', PERMISSION_TIERS));
     }
     // title_hint 会写进注册表与侧车，每一轮 save() 都会重复落盘；不设上限就是一个
     // 稳定的磁盘/内存放大点（调用方可以传任意长度）。可读标签 200 字足够。
     if (titleHint !== undefined && titleHint !== null) {
-      if (typeof titleHint !== 'string') throw new Error('title_hint 必须是字符串');
-      if (titleHint.length > 200) throw new Error('title_hint 最长 200 字符');
+      if (typeof titleHint !== 'string') throw new Error(L('title_hint 必须是字符串', 'title_hint must be a string'));
+      if (titleHint.length > 200) throw new Error(L('title_hint 最长 200 字符', 'title_hint may be at most 200 characters'));
     }
     // ★ 0.5.0：danger-full-access 不再默认可用。它把整机写权限交给调用方，
     //   而本服务可能被任何 MCP 客户端拉起；必须由机器所有者显式放行。
     if (permission === 'danger-full-access' && !ALLOW_FULL_ACCESS) {
-      throw new Error(
+      throw new Error(L(
         'permission=danger-full-access 需要机器侧显式允许：设置 DSH_MCP_ALLOW_FULL_ACCESS=1 后重试。' +
           ' 默认请用 workspace-write（写入限制在工作区内）或 read-only。',
-      );
+        'permission=danger-full-access must be allowed on this machine: set DSH_MCP_ALLOW_FULL_ACCESS=1 and retry.' +
+          ' By default use workspace-write (writes limited to the workspace) or read-only.',
+      ));
     }
     const policy = onApproval ?? defaultApprovalPolicy(permission);
     if (!APPROVAL_POLICIES.includes(policy)) {
-      throw new Error(`on_approval 必须是 ${APPROVAL_POLICIES.join(' | ')} 之一`);
+      throw new Error(oneOf('on_approval', APPROVAL_POLICIES));
     }
     // ★ read-only 是硬边界：显式 auto-allow/ask 会放行 DSH 的 sandbox 提权，
     //   实测能把文件写进工作区而会话记录仍显示 read-only。直接拒绝这个组合。
     if (permission === 'read-only' && policy !== 'auto-deny') {
-      throw new Error(
+      throw new Error(L(
         'permission=read-only 强制要求 on_approval=auto-deny（或不传）。' +
           ' auto-allow/ask 会放行 DSH 的 sandbox 提权，使只读档失效。',
-      );
+        'permission=read-only requires on_approval=auto-deny (or leaving it unset).' +
+          " auto-allow and ask would let DSH's sandbox escalation through and defeat the read-only tier.",
+      ));
     }
     const effort = reasoningEffort ?? DEFAULT_REASONING_EFFORT;
     if (!REASONING_EFFORTS.includes(effort)) {
-      throw new Error(`reasoning_effort 必须是 ${REASONING_EFFORTS.join(' | ')} 之一`);
+      throw new Error(oneOf('reasoning_effort', REASONING_EFFORTS));
     }
     const reviewMode = normalizeReviewMode(review ?? DEFAULT_REVIEW);
     if (!REVIEW_MODES.includes(reviewMode)) {
-      throw new Error(`review 必须是 ${REVIEW_MODES.join(' | ')} 之一`);
+      throw new Error(oneOf('review', REVIEW_MODES));
     }
     if (model && !provider) {
-      throw new Error('指定 model 时必须同时给 provider（ACP 的模型标识是 [provider, model] 二元组）');
+      throw new Error(L(
+        '指定 model 时必须同时给 provider（ACP 的模型标识是 [provider, model] 二元组）',
+        "model needs provider as well (ACP identifies a model by the [provider, model] pair)",
+      ));
     }
     // 家目录当选工作区 → DSH 的 ACL 沙箱起不来，第一次起 shell 才暴露。
     // 与其让用户以为服务坏了，不如在这里把原因和出路一起说清楚。
@@ -587,10 +608,12 @@ export class Hub {
       //   不注册会话，直接报错（不传 provider/model 才走 profile 默认）。
       const modelFailure = (conv.lastConfigApplied.failed ?? []).find((f) => String(f).includes('模型='));
       if (modelFailure) {
-        throw new Error(
+        throw new Error(L(
           `指定的 provider/model 无效，会话未创建：${modelFailure}\n` +
             `  请检查 ${provider}/${model} 是否在 profile 中声明；不传这两个参数可使用 profile 默认模型。`,
-        );
+          `The provider/model you gave is not valid, so no conversation was created: ${modelFailure}\n` +
+            `  Check that ${provider}/${model} is declared in the profile; leave both out to use the profile's default model.`,
+        ));
       }
       // ★ 回读会话自己的权限记录；不一致会在这里失败并走 catch（停进程、删登记）。
       await conv.verifyPermissionRecorded();

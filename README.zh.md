@@ -135,7 +135,7 @@ dsh-any-agent-setup --yes
 | `dsh_queue` | 查看/修改会话队列：`list` / `remove` / `update` / `promote`（队列由 `dsh_send(queue=true)` 产生，仅内存） |
 | `dsh_doctor` | 只读体检：DSH 版本、profile、状态/目录可写、孤儿锁、会话与 RSS、生效配置 |
 
-每个工具都声明了全部四个 MCP 注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`）。只读取状态的六个标成只读：`dsh_list`、`dsh_read`、`dsh_get`、`dsh_status`、`dsh_inbox`、`dsh_doctor`。工具标题、描述与服务说明有中英文两份：默认跟随系统语言，也可以设 `DSH_MCP_LANG=zh|en`。工具返回的正文目前只有中文。
+每个工具都声明了全部四个 MCP 注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`）。只读取状态的六个标成只读：`dsh_list`、`dsh_read`、`dsh_get`、`dsh_status`、`dsh_inbox`、`dsh_doctor`。工具标题、描述与服务说明有中英文两份：默认跟随系统语言，也可以设 `DSH_MCP_LANG=zh|en`。工具返回的正文也跟这个设置走；少数不常见的报错目前只有中文。
 
 ## 👀 实时查看：派出去的活在干什么
 

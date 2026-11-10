@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { DEFAULT_REVIEW, REVIEWS_DIR, REVIEW_MODES } from './config.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
 import { assertSafeId } from './ids.mjs';
+import { L } from './lang.mjs';
 
 /** dsh_review 允许的裁决。 */
 export const REVIEW_VERDICTS = ['pass', 'partial', 'fail'];
@@ -62,40 +63,65 @@ function toolNames(result) {
 export function buildReviewChecklist({ result = {}, permission = null } = {}) {
   const tools = toolNames(result);
   const items = [
-    '逐条对照原任务：答复是真正完成了要求，还是只描述计划 / 只完成了一部分？',
-    '不要只复述 DSH 的答复：至少做一项独立核验（读改动的文件、查看 git diff、运行相关测试或命令）。',
+    L(
+      '逐条对照原任务：答复是真正完成了要求，还是只描述计划 / 只完成了一部分？',
+      'Compare against the original task item by item: did the answer really do what was asked, or only describe a plan / do part of it?',
+    ),
+    L(
+      '不要只复述 DSH 的答复：至少做一项独立核验（读改动的文件、查看 git diff、运行相关测试或命令）。',
+      "Do not just relay DSH's answer: do at least one independent check (read the changed files, look at git diff, run the relevant tests or commands).",
+    ),
   ];
   if (tools.length) {
-    items.push(
+    items.push(L(
       `核对工具执行结果：本轮用到 [${tools.join(', ')}]，确认关键命令/写入的退出状态与产出符合预期。`,
-    );
+      `Check what the tools did: this turn used [${tools.join(', ')}]; confirm the exit status and output of the key commands and writes are what you expect.`,
+    ));
   }
   if (result.workspace_changed) {
     const n = result.diff_stat?.changed_files;
-    items.push(
+    items.push(L(
       `检查改动范围：工作区发生了变化${Number.isFinite(n) ? `（当前有 ${n} 个文件有改动）` : ''}，确认都在预期内，没有越界修改。`,
-    );
+      `Check the scope of the changes: the workspace changed${Number.isFinite(n) ? ` (${n} files currently modified)` : ''}; confirm every change is expected and nothing outside the task was touched.`,
+    ));
   } else if (tools.length) {
-    items.push('如果 DSH 声称做了修改，确认工作区确实发生了变化（workspace_changed=false 可能意味着没有真正落地）。');
+    items.push(L(
+      '如果 DSH 声称做了修改，确认工作区确实发生了变化（workspace_changed=false 可能意味着没有真正落地）。',
+      'If DSH claims it made changes, confirm the workspace really changed (workspace_changed=false may mean nothing landed).',
+    ));
   }
   if (result.error || (result.stop_reason && result.stop_reason !== 'end_turn')) {
-    items.push(
+    items.push(L(
       `回合没有正常结束（stop_reason=${result.stop_reason ?? 'null'}${
         result.error ? `；error=${String(result.error).slice(0, 160)}` : ''
       }），确认影响并决定是否重派。`,
-    );
+      `The turn did not end normally (stop_reason=${result.stop_reason ?? 'null'}${
+        result.error ? `; error=${String(result.error).slice(0, 160)}` : ''
+      }); work out the impact and decide whether to dispatch again.`,
+    ));
   }
   const autoTotal = Number(result.auto_approvals_total) || 0;
   if (autoTotal > 0) {
     const esc = Number(result.auto_escalations_total) || 0;
-    items.push(
+    items.push(L(
       `本轮有 ${autoTotal} 次审批被自动放行（on_approval=auto-allow）` +
         (esc > 0 ? `，其中 ${esc} 次申请了沙箱提权（如 danger-full-access），这些操作已在 ${permission ?? '权限档'} 之外执行` : '') +
         '：对照 result.auto_approvals 逐条确认是否在预期内；需要逐次把关就用 on_approval=ask 新建会话。',
-    );
+      `${autoTotal} approvals were auto-allowed this turn (on_approval=auto-allow)` +
+        (esc > 0 ? `, ${esc} of them sandbox escalations (such as danger-full-access) that ran outside ${permission ?? 'the permission tier'}` : '') +
+        ': go through result.auto_approvals and confirm each was expected; to decide each one yourself, create a conversation with on_approval=ask.',
+    ));
   }
-  if (permission) items.push(`确认操作没有超出会话权限档（${permission}）。`);
-  items.push('裁决：pass（可直接采用）/ partial（部分可用，需补充）/ fail（不可用，需重做）；fail/partial 必须在 notes 里说明理由。');
+  if (permission) {
+    items.push(L(
+      `确认操作没有超出会话权限档（${permission}）。`,
+      `Confirm nothing went beyond the conversation's permission tier (${permission}).`,
+    ));
+  }
+  items.push(L(
+    '裁决：pass（可直接采用）/ partial（部分可用，需补充）/ fail（不可用，需重做）；fail/partial 必须在 notes 里说明理由。',
+    'Verdict: pass (usable as is) / partial (partly usable, needs more work) / fail (unusable, redo); fail and partial must give the reason in notes.',
+  ));
   return items;
 }
 
@@ -138,12 +164,18 @@ export function buildReviewTicket({
         conversation_id: conversationId,
         run_id: runId,
         verdict: 'pass|partial|fail',
-        notes: '审核理由',
+        notes: L('审核理由', 'reason'),
       },
     },
     instructions: pending
-      ? '回合还在后台跑。等哨兵文件出现、拿到结果后，先按清单独立核验，再调用 dsh_review 提交裁决。'
-      : '在把这次结果当作完成之前，先按清单独立核验，再调用 dsh_review 提交裁决。建议式审核：不阻塞后续 dsh_send，但未审核的结果不应直接当作完成。',
+      ? L(
+          '回合还在后台跑。等哨兵文件出现、拿到结果后，先按清单独立核验，再调用 dsh_review 提交裁决。',
+          'The turn is still running in the background. Once the sentinel file exists and you have the result, verify it against the checklist, then submit a verdict with dsh_review.',
+        )
+      : L(
+          '在把这次结果当作完成之前，先按清单独立核验，再调用 dsh_review 提交裁决。建议式审核：不阻塞后续 dsh_send，但未审核的结果不应直接当作完成。',
+          'Before treating this result as done, verify it against the checklist, then submit a verdict with dsh_review. Reviews are advisory: they do not block later dsh_send calls, but an unreviewed result should not be taken as done.',
+        ),
   };
 }
 
@@ -195,7 +227,7 @@ export function writeReviewRecord({ ticket, verdict, notes, findings, reviewedAt
     writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
     renameSync(tmp, file);
   } catch (e) {
-    throw new Error(`写审核记录失败（${file}）: ${e.message}`);
+    throw new Error(L(`写审核记录失败（${file}）: ${e.message}`, `Could not write the review record (${file}): ${e.message}`));
   }
   return { file, payload };
 }
