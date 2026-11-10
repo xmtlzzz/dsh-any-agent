@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.9] — 2026-11-10
+
+Tool results now come back in English as well, `dsh-any-agent-setup` can
+register with Antigravity, and the docs stop describing the pre-0.4.0
+idle-reaping defaults.
+
 ### Added
 
 - **Tool results are available in English.** What a tool returns now follows the
@@ -29,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`dsh-any-agent-setup` lost code no client used.** The path that registered
   through a client's own CLI has been dead since Claude Code moved to in-place
   edits; it and a duplicated read-only check are gone. No behavior changed.
+
+### Fixed
+
+- **Stale idle-reaping defaults in the docs and the `dsh_release` description.**
+  Several places still said `DSH_MCP_IDLE_TTL_MS` defaults to `0` (never reap)
+  and `DSH_MCP_MAX_LIVE` to `8`; since 0.4.0 they are 10 minutes and `4`. The
+  `dsh_release` tool description that callers see now says `MAX_LIVE=4`, and the
+  docs point to `dsh_start(keep_alive=true)` or `DSH_MCP_IDLE_TTL_MS=0` for
+  conversations that must keep the write lock.
 
 ## [0.6.8] — 2026-11-10
 
@@ -1452,7 +1467,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.8...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...HEAD
+[0.6.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.5...v0.6.6
