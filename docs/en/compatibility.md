@@ -10,7 +10,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
-| 0.6.x | `0.2.1-rc.5` | ⚠️ Partly verified | Offline suites pass as of 2026-11-10 (including the real session start in the smoke suite); the model-backed suites were not re-run for 0.6.x. Other DSH versions were not re-verified for 0.6.x — the 0.5.x rows below are the last full runs |
+| 0.6.x | `0.2.1-rc.5` | ✅ Verified | Full suite run against 0.6.9 on 2026-11-10 (offline + model-backed; DSH via npx, Node 22.19), all passing; `acceptance` skipped because the profile has no IDA MCP. Other DSH versions were not re-verified for 0.6.x — the 0.5.x rows below are their last runs |
 | 0.5.x | `0.1.7-rc.1` or newer | ✅ Verified | ACP and the experimental Agent Teams packages are available; team mode is opt-in via `dsh-any-agent team on` |
 | 0.5.x | `0.1.5-rc.1` | ⚠️ Partial | ACP basics work; no team packages, so team mode stays off |
 | 0.5.x | `0.2.1-rc.5` – `0.2.2-rc.1` | ✅ Verified | Full suites run on 2026-11-06 (0.2.1-rc.5 from npm, 0.2.2-rc.1 on the desktop app's bundled runtime); from 0.2.2 DSH requires Node ≥ 24.9 |
