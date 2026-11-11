@@ -69,7 +69,8 @@ In an MCP client, call `dsh_doctor` and look at:
 - `dsh_version`: the version graded against the table above — `verified` is ok (the note says whether the current release line re-ran the full suite on that version, or its last full run was on the previous line); `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
 - `profile`: exists, drift, route source;
 - `team`: `on` / `off` / `requested but unavailable` (version or profile lacks the team package);
-- `config`: effective permission, idle reaping, shared process, and so on.
+- `config`: effective permission, idle reaping, shared process, and so on;
+- `update`: this server's version against the latest on npm; **warn** when a newer one exists (read at most once a day, 4 s timeout; offline reads as unknown, not a problem; `DSH_MCP_UPDATE_CHECK=0` skips it).
 
 ## Upgrade advice
 

@@ -65,7 +65,8 @@ dsh-any-agent team status        # 团队开关与 profile
 - `dsh_version`：按上表给版本定档 —— `verified` 为 ok（说明里会区分：当前发布线重跑过全量套件的版本，还是最近一次实测停在上一条发布线的版本）；`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
 - `profile`：是否存在、是否漂移、路由来源；
 - `team`：`on` / `off` / `requested but unavailable`（版本或 profile 不含 team 包）；
-- `config`：当前 permission、空闲回收、共享进程等生效值。
+- `config`：当前 permission、空闲回收、共享进程等生效值；
+- `update`：本服务的版本和 npm 上的最新版比；有新版本时 **warn**（一天最多查一次，4 秒超时；离线算未知，不算问题；`DSH_MCP_UPDATE_CHECK=0` 不查）。
 
 ## 升级建议
 

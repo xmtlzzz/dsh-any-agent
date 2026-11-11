@@ -277,6 +277,7 @@ check('不记录工具标题/命令/正文', () => assert.ok(!auditRaw.includes(
 
 console.log('\n[6] dsh_doctor');
 
+process.env.DSH_MCP_UPDATE_CHECK = '0'; // 测试离线：新版本检查不去 npm
 const doc = await handlers.dsh_doctor();
 const ids = doc.structured.checks.map((c) => c.id);
 check('返回 checks 数组', () => assert.ok(Array.isArray(doc.structured.checks)));
@@ -286,6 +287,10 @@ check('包含关键检查项', () => {
   }
 });
 check('verdict 是 ok 或 fail', () => assert.ok(['ok', 'fail'].includes(doc.structured.verdict)));
+check('update 检查在、关掉时如实说没查', () => {
+  const u = doc.structured.checks.find((c) => c.id === 'update');
+  assert.ok(u && u.status === 'ok' && /DSH_MCP_UPDATE_CHECK=0/.test(u.detail), JSON.stringify(u));
+});
 check('text 逐项列出结果', () => assert.match(doc.text, /dsh_bin/));
 // 本机/CI 都可能没有 DSH：dsh_bin 失败时不会产出 dsh_version，这是预期。
 if (doc.structured.checks.find((c) => c.id === 'dsh_bin')?.status !== 'fail') {

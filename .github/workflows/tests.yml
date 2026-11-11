@@ -34,6 +34,7 @@ name: tests
 #     daemon            DSH_MCP_DAEMON=1 resident process  16 checks
 #     run-recovery      interrupted-turn sentinels   18 checks
 #     contract          tool surface + sentinel shape snapshot  13 checks
+#     update-check      dsh_doctor npm version check (fake fetch)  17 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     test-counts       report parser + docs sync     92 checks
@@ -262,6 +263,10 @@ jobs:
       - name: contract (tool surface + sentinel shape snapshot)
         env: { DSH_MCP_LOG: silent }
         run: node test/contract.mjs
+      # dsh_doctor 的新版本检查（假 fetch，不联网）。
+      - name: update-check (dsh_doctor npm version check)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/update-check.mjs
       # Guards the sandbox itself, not the writer. A test suite that points its
       # "sandbox" at the real user profile deletes real data while reporting
       # green; this suite fails instead.

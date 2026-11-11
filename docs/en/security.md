@@ -86,6 +86,9 @@ Silent by default — **not one byte is written**.
 | `<state dir>/daemon-<id>.json`, `daemon-<id>.log` (plus `.sock` on POSIX) | The resident process's PID and random token (readable by the user only); its stderr | The info file goes when the process exits; the log rolls to `.1` at 10 MB | Don't enable `DSH_MCP_DAEMON` |
 | `$DSH_HOME/.dsh-any-agent-forgotten/<conversation_id>.json` | Forget tombstone: conversation id and time | Cleared at startup once the session file is gone | — |
 | The file `DSH_MCP_AUDIT_FILE` points to | Metadata audit: events, ids, decisions, counts; no prompts, answers, reasoning or tool inputs | Rolled to `.1` at 10 MB | Off unless the variable is set |
+| `<state dir>/update-check.json` | The latest version number `dsh_doctor` last read from npm, and when | Re-checked and overwritten after 24 hours | `DSH_MCP_UPDATE_CHECK=0` (also stops the network request) |
 | `.bak-dsh-<stamp>` next to client configs | The config as it was before `dsh-any-agent-setup` wrote to it | Up to 20 per config file (`DSH_MCP_BACKUP_KEEP`) | Delete by hand |
+
+Network: this server itself contacts `registry.npmjs.org` only when `dsh_doctor` is called (to read this package's latest version; the request carries no user data; `DSH_MCP_UPDATE_CHECK=0` turns it off). Model requests are made by DSH, not by this server.
 
 On the DSH side (not under this server's control): the session logs in `~/.dsh/sessions` (with full reasoning, see above); this server also registers each conversation's workspace in DSH's `workspace.json` so the GUI shows it (`DSH_MCP_REGISTER_WORKSPACE=0` turns that off).

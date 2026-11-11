@@ -127,6 +127,8 @@ const OFFLINE = [
   // 对外契约快照：MCP 工具面（名字 / 参数 / 必填 / 枚举）与哨兵字段，对比 test/contract.snapshot.json；
   // 哨兵的破坏性改动必须把 SENTINEL_SCHEMA 加一。假 ACP 进程，不花 token。
   'contract.mjs',
+  // dsh_doctor 的新版本检查：关掉不联网、只请求 npm latest、缓存 24 小时、查不到报未知、超时按时返回。假 fetch。
+  'update-check.mjs',
   // 沙箱守卫先跑：任何把真实 HOME 当沙箱的写法必须立刻失败。
   // 2026-10-29 的事故就是少了这一条，一段临时脚本把 ~ 当沙箱递归删了。
   'sandbox-guard.mjs',

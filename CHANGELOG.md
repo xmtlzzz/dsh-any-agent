@@ -58,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fields with a checked-in snapshot and fails on any difference; `--update`
   rewrites the snapshot, but refuses when sentinels changed incompatibly
   without a `schema` bump.
+- **`dsh_doctor` says when a newer release is on npm.** The new `update`
+  check reads this package's `latest` from the npm registry only when
+  `dsh_doctor` runs (4 s timeout, cached for 24 hours in the state directory)
+  and warns when it is newer than the running version. Offline or a timeout
+  reads as unknown, not as a problem. `DSH_MCP_UPDATE_CHECK=0` turns the
+  request off.
 - **`DSH_MCP_SENTINEL_TOOL_INPUTS=0` keeps tool inputs out of sentinels.**
   Each tool then keeps its name, status and `input_chars`; `dsh_get` from
   memory still has the inputs. The security doc gained a table of everything

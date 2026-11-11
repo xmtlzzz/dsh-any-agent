@@ -41,6 +41,7 @@ import { listOrphans, LOCKS_DIR } from './locks.mjs';
 import { refreshRssMap, rssMb } from './procstat.mjs';
 import { liveSettings } from './live.mjs';
 import { L } from './lang.mjs';
+import { checkForUpdate } from './update-check.mjs';
 
 /** DSH 来源的英文叫法（中文用 dsh-locate 的 SOURCE_LABEL）。 */
 const SOURCE_LABEL_EN = { env: 'DSH_BIN', desktop: 'desktop app', global: 'npm global', npx: 'npx cache' };
@@ -321,6 +322,24 @@ export async function runDoctor(hub) {
         ? L('检查 DSH 版本 / profile，或 dsh-any-agent team off', 'check the DSH version / profile, or run dsh-any-agent team off')
         : null,
   );
+
+  // npm 上有没有新版本：只在这里联网（最多 4 秒、缓存 24 小时）；查不到不算问题。
+  const upd = await checkForUpdate();
+  if (upd.status === 'off') {
+    add('update', 'ok', L(`当前 ${upd.current}；未检查新版本（DSH_MCP_UPDATE_CHECK=0）`, `current ${upd.current}; update check off (DSH_MCP_UPDATE_CHECK=0)`));
+  } else if (upd.status === 'unknown') {
+    add('update', 'ok', L(`当前 ${upd.current}；查不到 npm 上的最新版本（${upd.error}），不影响使用`, `current ${upd.current}; could not read the latest version on npm (${upd.error}), not required`));
+  } else {
+    add(
+      'update',
+      upd.newer ? 'warn' : 'ok',
+      L(`当前 ${upd.current}，npm 最新 ${upd.latest}`, `current ${upd.current}, latest on npm ${upd.latest}`) +
+        (upd.newer ? L(' —— 有新版本', ' -- a newer version is available') : L('（已是最新）', ' (up to date)')),
+      upd.newer
+        ? L('npm i -g dsh-any-agent@latest，然后重启 MCP 客户端（看 CHANGELOG 了解改了什么）', 'npm i -g dsh-any-agent@latest, then restart the MCP client (see the CHANGELOG for what changed)')
+        : null,
+    );
+  }
 
   const ok = !checks.some((c) => c.status === 'fail');
   const lines = checks.map(
