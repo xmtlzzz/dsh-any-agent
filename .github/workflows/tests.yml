@@ -33,6 +33,7 @@ name: tests
 #     worktree          isolation=worktree sessions      25 checks
 #     daemon            DSH_MCP_DAEMON=1 resident process  16 checks
 #     run-recovery      interrupted-turn sentinels   18 checks
+#     contract          tool surface + sentinel shape snapshot  13 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     test-counts       report parser + docs sync     92 checks
@@ -257,6 +258,10 @@ jobs:
       - name: run-recovery (interrupted-turn sentinels)
         env: { DSH_MCP_LOG: silent }
         run: node test/run-recovery.mjs
+      # 对外契约：工具面与哨兵字段对比快照；有意的改动用 --update 重写快照。
+      - name: contract (tool surface + sentinel shape snapshot)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/contract.mjs
       # Guards the sandbox itself, not the writer. A test suite that points its
       # "sandbox" at the real user profile deletes real data while reporting
       # green; this suite fails instead.

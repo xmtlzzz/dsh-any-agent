@@ -11,6 +11,12 @@ import { join } from 'node:path';
 import { SENTINEL_INCLUDE_REASONING, SENTINEL_TOOL_INPUTS } from './config.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
 
+/**
+ * 哨兵 JSON 的格式版本（哨兵顶层的 `schema` 字段）。同一版本内只加字段，不删、不改名、不改类型；
+ * 要做这些就加一，并在 CHANGELOG 里写明。test/contract.mjs 对着快照守这条。
+ */
+export const SENTINEL_SCHEMA = 1;
+
 /** 工具输入的长度（字符串按字符数，其它按 JSON 长度）。 */
 function inputChars(input) {
   try {

@@ -124,6 +124,9 @@ const OFFLINE = [
   // 被中断回合的恢复：回合进行中标记；启动时只认领主人已死 / PID 被复用的；关闭时先写哨兵；
   // 端到端强杀服务进程后由下一个进程补出哨兵。假 ACP 进程，不花 token。
   'run-recovery.mjs',
+  // 对外契约快照：MCP 工具面（名字 / 参数 / 必填 / 枚举）与哨兵字段，对比 test/contract.snapshot.json；
+  // 哨兵的破坏性改动必须把 SENTINEL_SCHEMA 加一。假 ACP 进程，不花 token。
+  'contract.mjs',
   // 沙箱守卫先跑：任何把真实 HOME 当沙箱的写法必须立刻失败。
   // 2026-10-29 的事故就是少了这一条，一段临时脚本把 ~ 当沙箱递归删了。
   'sandbox-guard.mjs',

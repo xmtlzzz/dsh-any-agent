@@ -51,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (forget=true)` deletes a clean worktree and keeps the branch, and keeps a
   dirty one. The repository's own hooks do not run when the worktree is
   created. Off by default: a fresh worktree has no installed dependencies.
+- **Sentinels carry `schema: 1`, and the public contract is written down.**
+  Within one `schema` sentinel fields are only added; a breaking change bumps
+  it. The compatibility doc states the same rules for the MCP tool surface.
+  A new suite, `test/contract.mjs`, compares the tool surface and the sentinel
+  fields with a checked-in snapshot and fails on any difference; `--update`
+  rewrites the snapshot, but refuses when sentinels changed incompatibly
+  without a `schema` bump.
 - **`DSH_MCP_SENTINEL_TOOL_INPUTS=0` keeps tool inputs out of sentinels.**
   Each tool then keeps its name, status and `input_chars`; `dsh_get` from
   memory still has the inputs. The security doc gained a table of everything

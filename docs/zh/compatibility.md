@@ -20,6 +20,14 @@
 > 实验性包（`dsh-experimental-agent-team`、`dsh-experimental-tool-agent-team`）**没有稳定性承诺**。
 > 它们随 DSH 版本发布，不能跨大版本混用。
 
+## 对外契约（调用方可以依赖的东西）
+
+- **哨兵 JSON**：顶层 `schema` 是格式版本，当前为 `1`（更早的版本没有这个字段，形状与 1 相同）。同一个 `schema` 内**只加字段**，不删、不改名、不改类型；调用方要忽略不认识的字段。需要做破坏性改动时 `schema` 加一，并在 CHANGELOG 里写明。
+- **MCP 工具面**：工具名、参数名与类型、哪些必填、枚举值。新增工具、可选参数、枚举值是兼容的；删除、改类型、把参数改成必填、删枚举值是破坏性的，只在次版本号变化时做（1.0 之前），并写进 CHANGELOG。工具描述文本和返回的 `text` 不算契约（给模型读的，随时会改）。
+- **live 事件流**：每条事件的 `v` 是格式版本，字段见 [live-view-design.md](live-view-design.md) §6。
+
+`test/contract.mjs` 把前两项的形状和 `test/contract.snapshot.json` 对比，有任何差异就失败；哨兵有破坏性改动而 `schema` 没加一时，`node test/contract.mjs --update` 拒绝重写快照。
+
 ## 运行时要求
 
 - **Node.js ≥ 22.15**（本服务自身；用到 `node:zlib` 的 `zstdDecompressSync` 读 DSH 会话头）；

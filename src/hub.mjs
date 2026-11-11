@@ -65,7 +65,7 @@ import { SessionHost } from './host.mjs';
 import { refreshRssMap, rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { Conversation } from './conversation.mjs';
-import { pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
+import { SENTINEL_SCHEMA, pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
 import { emitLive, livePreview } from './live.mjs';
 import { homeWorkspaceProblem } from './workspace-guard.mjs';
 import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
@@ -244,6 +244,7 @@ export class Hub {
     try {
       mkdirSync(dirname(file), { recursive: true });
       const payload = {
+        schema: SENTINEL_SCHEMA,
         conversation_id: conversationId,
         run_id: run.run_id,
         client_run_id: run.client_run_id ?? null,
