@@ -165,6 +165,21 @@ try {
     JSON.stringify(result.watchdog));
     check('总耗时不少于放大后的宽限', () => Date.now() - t0 >= 600, `${Date.now() - t0}ms`);
   }
+  {
+    // 两个工具重叠：短的先完成会清掉"当前工具"这个显示字段，但长的还在跑 —— 宽限不能因此缩回去。
+    const { conv, proc } = makeConv('wd-overlap-0000-0000-0000-000000000033');
+    const pending = conv.prompt('并行跑两个命令', { wait: true, timeoutMs: 5000 });
+    await sleep(20);
+    update(conv, { sessionUpdate: 'tool_call', toolCallId: 'long', title: 'pwsh', status: 'in_progress' });
+    update(conv, { sessionUpdate: 'tool_call', toolCallId: 'short', title: 'read', status: 'in_progress' });
+    update(conv, { sessionUpdate: 'tool_call_update', toolCallId: 'short', status: 'completed' });
+    await sleep(450);
+    check(`★ 一个工具完成、另一个还在跑：沉默 450ms（< 200×${TOOL_STALL_FACTOR}）时没被 cancel`, () => proc.cancels === 0, String(proc.cancels));
+    const result = await pending;
+    check('最后按放大后的宽限拦下，记下的是还在跑的那个工具', () =>
+      result.watchdog?.reason === 'stalled' && result.watchdog.tool_running === true && result.watchdog.current_tool === 'pwsh',
+    JSON.stringify(result.watchdog));
+  }
 
   console.log('\n[5] 等调用方裁决审批（on_approval=ask）时不判卡住');
   {

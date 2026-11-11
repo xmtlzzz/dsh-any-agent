@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { DAEMON_IDLE_MS, STATE_FILE } from './config.mjs';
+import { DAEMON_IDLE_MS, STATE_FILE, TEAM_SETTINGS_FILE } from './config.mjs';
 import { SERVER_VERSION } from './mcp.mjs';
 import { serveMcp, startHub } from './boot.mjs';
 
@@ -43,11 +43,23 @@ const MAX_AUTH_LINE = 4096;
 /** 影响服务行为的环境变量：这些不同就不能共用一个常驻进程。 */
 const IDENTITY_ENV = (key) => key.startsWith('DSH_') || key === 'LANG' || key === 'LC_ALL' || key === 'LC_MESSAGES';
 
+/** `dsh-any-agent team on/off` 写的设置文件内容（读不到为空）。 */
+function teamSettingsText() {
+  try {
+    return readFileSync(TEAM_SETTINGS_FILE, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
 /** 常驻进程的地址与信息文件。 */
 export function daemonEndpoint(env = process.env) {
   const h = createHash('sha256');
   h.update(`${SERVER_VERSION}\0${STATE_DIR}`);
   for (const key of Object.keys(env).filter(IDENTITY_ENV).sort()) h.update(`\0${key}=${env[key]}`);
+  // team 开关存在设置文件里，config.mjs 只在进程启动时读一次，常驻进程不会重读：
+  // 文件内容也算身份，切换后重连的客户端会用一个按新设置启动的常驻进程（旧的空闲后自己退出）。
+  h.update(`\0team-settings=${teamSettingsText()}`);
   const id = h.digest('hex').slice(0, 16);
   // Unix socket 路径有长度上限（macOS 104 字节）。状态目录太深时改放系统临时目录
   // （macOS 上是每个用户自己的 /var/folders/…）；有令牌把关，放哪里都派不了活。

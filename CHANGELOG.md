@@ -22,8 +22,8 @@ when a newer release is on npm.
   for 10 minutes (no answer, thinking, tool-status or usage update from DSH) is
   cancelled with `session/cancel`, the same path as `dsh_interrupt`: output so
   far is kept, files are not rolled back, and the turn ends normally with its
-  sentinel. While a tool is running the allowance is 3× (a long `npm install`
-  or test run sends no updates); while an approval waits on the caller it is
+  sentinel. While any tool of the turn is still running the allowance is 3×
+  (a long `npm install` or test run sends no updates); while an approval waits on the caller it is
   not judged at all. A separate 2-hour cap (`DSH_MCP_TURN_MAX_MS`) ignores
   progress, so a turn looping while it keeps producing output still stops. The
   result, the sentinel and the review ticket carry `watchdog: {reason, …}`;
@@ -39,8 +39,8 @@ when a newer release is on npm.
   to a detached resident process that owns the hub, the DSH processes and the
   turns; killing the forwarder leaves a running turn to finish and write its
   sentinel. Clients with the same configuration (state directory, version,
-  `DSH_*` and locale variables) share one resident process; a different
-  configuration gets its own. Connections must present a random token from a
+  `DSH_*` and locale variables, and the `dsh-any-agent team on/off` setting)
+  share one resident process; a different configuration gets its own. Connections must present a random token from a
   user-only info file. With no clients and no turns it exits after
   `DSH_MCP_DAEMON_IDLE_MS` (10 min). If it cannot start, the forwarder falls
   back to the normal stdio server. Live events (`watch` / `dashboard`) name
@@ -140,7 +140,9 @@ when a newer release is on npm.
   for it. The process table is now read asynchronously: snapshots return the
   cached value at once and refresh it in the background, so `rss_mb` can be
   `null` for the first seconds after a process starts. The RSS budget
-  (`DSH_MCP_MAX_RSS_MB`) and `dsh_doctor` await a fresh read.
+  (`DSH_MCP_MAX_RSS_MB`) and `dsh_doctor` await a fresh read; the reaper then
+  re-checks each conversation it picked, so one that started a turn (or was
+  used) during that read is not stopped.
 - **`dsh_doctor` no longer says a DSH version was verified by this release line
   when it was not.** The `dsh_version` note now tells apart the versions the
   current line re-ran the full suite on (0.6.x: DSH 0.2.1) from the rest of the

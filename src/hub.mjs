@@ -912,99 +912,111 @@ export class Hub {
           (MAX_LIVE > 0 ? `；超过保活上限 ${MAX_LIVE} 时回收最久没用过的` : '；未设保活上限，进程会一直留着'),
       );
     }
-    this.#reaper = setInterval(async () => {
-      // ★ 整个回收周期必须自带防护：这里抛出的异常会变成 unhandled rejection，
-      //   在 Node ≥15 上直接**杀掉进程** —— 而那会连带丢掉所有会话的活进程。
-      try {
-        const cutoff = now() - IDLE_TTL_MS;
-        // 哪些会话可以回收：进程活着、不在跑回合
-        const reapable = [];
+    this.#reaper = setInterval(() => this.reapOnce(), REAP_INTERVAL_MS);
+    this.#reaper.unref?.();
+  }
+
+  /**
+   * 一个回收周期（startReaper 定时调用）。永不 reject。
+   * `refreshRss` / `maxRssMb` 只供测试注入：要能复现"读 RSS 期间会话开跑了"的竞态。
+   */
+  async reapOnce({ refreshRss = refreshRssMap, maxRssMb = MAX_RSS_MB } = {}) {
+    // ★ 整个回收周期必须自带防护：这里抛出的异常会变成 unhandled rejection，
+    //   在 Node ≥15 上直接**杀掉进程** —— 而那会连带丢掉所有会话的活进程。
+    try {
+      const cutoff = now() - IDLE_TTL_MS;
+      // 哪些会话可以回收：进程活着、不在跑回合
+      const reapable = [];
+      /** 选中时的 lastUsedAt：停之前对一下，被用过就不再按选中时的判断停它（见下面的循环）。 */
+      const usedAtPick = new Map();
+      for (const c of this.conversations.values()) {
+        if (!c.proc?.alive) continue;
+        // ★ 先续心跳，**包括正在跑回合的**：否则长回合（>90 秒）期间心跳不刷新，
+        //   别的实例会把我们判成失联并抢占，直接把这一轮杀掉。
+        lockHeartbeat(c.id);
+        if (c.busy) continue;
+        reapable.push(c);
+        usedAtPick.set(c, c.lastUsedAt);
+      }
+
+      // 回收哪些：① 空闲超过 TTL；② 超过 MAX_LIVE；③ 超过全局 RSS 预算。
+      // keep_alive 会话不受 ① ② 约束；③ 是系统级硬上限，最后仍可能回收它。
+      const victims = new Set();
+      const reapableNormal = reapable.filter((c) => !c.keepAlive);
+      if (IDLE_TTL_MS > 0) {
+        for (const c of reapableNormal) if (c.lastUsedAt <= cutoff) victims.add(c);
+      }
+      if (MAX_LIVE > 0) {
+        // 保活窗口 = 最近用过的 MAX_LIVE 个；超出的按"最久没用"先回收
+        const byAge = reapableNormal.slice().sort((a, b) => a.lastUsedAt - b.lastUsedAt);
+        const excess = byAge.length - MAX_LIVE;
+        for (let i = 0; i < excess; i++) victims.add(byAge[i]);
+      }
+      if (maxRssMb > 0) {
+        // 按实际 RSS 而不是会话数：上下文大小差异很大，按个数限制经常低估。
+        // 预算判断要用新数字：先异步刷新一次（不阻塞事件循环），下面的 rssMb 读的就是它。
+        await refreshRss();
+        let total = 0;
+        const rss = new Map();
+        const seenPid = new Set();
         for (const c of this.conversations.values()) {
           if (!c.proc?.alive) continue;
-          // ★ 先续心跳，**包括正在跑回合的**：否则长回合（>90 秒）期间心跳不刷新，
-          //   别的实例会把我们判成失联并抢占，直接把这一轮杀掉。
-          lockHeartbeat(c.id);
-          if (c.busy) continue;
-          reapable.push(c);
+          const pid = c.proc.pid;
+          const mb = rssMb(pid) ?? 0;
+          rss.set(c, mb);
+          // 共享进程只算一次
+          if (pid && seenPid.has(pid)) continue;
+          if (pid) seenPid.add(pid);
+          total += mb;
         }
-
-        // 回收哪些：① 空闲超过 TTL；② 超过 MAX_LIVE；③ 超过全局 RSS 预算。
-        // keep_alive 会话不受 ① ② 约束；③ 是系统级硬上限，最后仍可能回收它。
-        const victims = new Set();
-        const reapableNormal = reapable.filter((c) => !c.keepAlive);
-        if (IDLE_TTL_MS > 0) {
-          for (const c of reapableNormal) if (c.lastUsedAt <= cutoff) victims.add(c);
-        }
-        if (MAX_LIVE > 0) {
-          // 保活窗口 = 最近用过的 MAX_LIVE 个；超出的按"最久没用"先回收
-          const byAge = reapableNormal.slice().sort((a, b) => a.lastUsedAt - b.lastUsedAt);
-          const excess = byAge.length - MAX_LIVE;
-          for (let i = 0; i < excess; i++) victims.add(byAge[i]);
-        }
-        if (MAX_RSS_MB > 0) {
-          // 按实际 RSS 而不是会话数：上下文大小差异很大，按个数限制经常低估。
-          // 预算判断要用新数字：先异步刷新一次（不阻塞事件循环），下面的 rssMb 读的就是它。
-          await refreshRssMap();
-          let total = 0;
-          const rss = new Map();
-          const seenPid = new Set();
-          for (const c of this.conversations.values()) {
-            if (!c.proc?.alive) continue;
-            const pid = c.proc.pid;
-            const mb = rssMb(pid) ?? 0;
-            rss.set(c, mb);
-            // 共享进程只算一次
-            if (pid && seenPid.has(pid)) continue;
-            if (pid) seenPid.add(pid);
-            total += mb;
-          }
-          if (total > MAX_RSS_MB) {
-            // 先收非 keep_alive 的最久未用者；仍然超预算才动 keep_alive。
-            const pool = reapable
-              .filter((c) => !victims.has(c))
-              .sort((a, b) =>
-                a.keepAlive === b.keepAlive ? a.lastUsedAt - b.lastUsedAt : a.keepAlive ? 1 : -1,
-              );
-            for (const c of pool) {
-              victims.add(c);
-              total -= rss.get(c) ?? 0;
-              if (total <= MAX_RSS_MB) break;
-            }
+        if (total > maxRssMb) {
+          // 先收非 keep_alive 的最久未用者；仍然超预算才动 keep_alive。
+          const pool = reapable
+            .filter((c) => !victims.has(c))
+            .sort((a, b) =>
+              a.keepAlive === b.keepAlive ? a.lastUsedAt - b.lastUsedAt : a.keepAlive ? 1 : -1,
+            );
+          for (const c of pool) {
+            victims.add(c);
+            total -= rss.get(c) ?? 0;
+            if (total <= maxRssMb) break;
           }
         }
-
-        for (const c of victims) {
-          if (c.recycling) await c.recycling;
-          if (!c.proc?.alive) continue;
-          this.log.info(
-            `[hub] 回收会话 ${c.id} 的进程（${IDLE_TTL_MS > 0 && c.lastUsedAt <= cutoff ? '空闲超时' : `保活上限 ${MAX_LIVE}`}；可 resume 复活）`,
-          );
-          const proc = c.proc;
-          // ★ 先把 stop 登记成 recycling，再 await：stop 可能要几秒，这个窗口里到达的
-          //   dsh_send 会在 ensureAlive 里 await 它，而不是为同一会话再拉一个进程去抢
-          //   **尚未释放**的写锁。proc 也要等 stop 落定后才置空，否则快路径会拿到垂死进程。
-          // 共享进程：detach 只摘掉这个会话（内部 session/close），最后一个离开才停进程。
-          const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
-          c.recycling = stopping
-            .catch(() => false)
-            .then((stopped) => {
-              // ★ 顺序要紧：**先确认子进程真的退出（写锁真的释放），再删登记**。
-              //   反过来的话，一旦它没死透，锁的持有者就变成"无登记的未知进程" ——
-              //   既报不清是谁，连 dsh_takeover 都会拒绝（判成 none）。
-              if (stopped) removeMarker(c.id);
-              return stopped;
-            })
-            .finally(() => {
-              if (c.proc === proc) c.proc = null;
-              c.recycling = null;
-            });
-          await c.recycling;
-        }
-      } catch (e) {
-        this.log.info(`[hub] 回收周期异常（已忽略，下个周期继续）: ${e.message}`);
       }
-    }, REAP_INTERVAL_MS);
-    this.#reaper.unref?.();
+
+      for (const c of victims) {
+        if (c.recycling) await c.recycling;
+        // ★ 选中之后有 await（刷新 RSS、等上一个会话停完）：这期间 dsh_send 可能已经在这个会话上
+        //   开跑（busy），或者跑完了一个短回合（lastUsedAt 变了）。都不能再按选中时的判断停它 ——
+        //   前者会打断正在执行的回合；后者已经不空闲了，下个周期再重新判断。
+        if (!c.proc?.alive || c.busy || c.lastUsedAt !== usedAtPick.get(c)) continue;
+        this.log.info(
+          `[hub] 回收会话 ${c.id} 的进程（${IDLE_TTL_MS > 0 && c.lastUsedAt <= cutoff ? '空闲超时' : `保活上限 ${MAX_LIVE}`}；可 resume 复活）`,
+        );
+        const proc = c.proc;
+        // ★ 先把 stop 登记成 recycling，再 await：stop 可能要几秒，这个窗口里到达的
+        //   dsh_send 会在 ensureAlive 里 await 它，而不是为同一会话再拉一个进程去抢
+        //   **尚未释放**的写锁。proc 也要等 stop 落定后才置空，否则快路径会拿到垂死进程。
+        // 共享进程：detach 只摘掉这个会话（内部 session/close），最后一个离开才停进程。
+        const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
+        c.recycling = stopping
+          .catch(() => false)
+          .then((stopped) => {
+            // ★ 顺序要紧：**先确认子进程真的退出（写锁真的释放），再删登记**。
+            //   反过来的话，一旦它没死透，锁的持有者就变成"无登记的未知进程" ——
+            //   既报不清是谁，连 dsh_takeover 都会拒绝（判成 none）。
+            if (stopped) removeMarker(c.id);
+            return stopped;
+          })
+          .finally(() => {
+            if (c.proc === proc) c.proc = null;
+            c.recycling = null;
+          });
+        await c.recycling;
+      }
+    } catch (e) {
+      this.log.info(`[hub] 回收周期异常（已忽略，下个周期继续）: ${e.message}`);
+    }
   }
 
   /**

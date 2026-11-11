@@ -8,7 +8,7 @@
  *   4. 没带令牌 / 令牌不对的连接被直接断开，拿不到任何应答；
  *   5. 没有客户端、没有回合时，空闲一段时间后常驻进程自己退出并删掉信息文件。
  */
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -134,6 +134,17 @@ try {
   await check('b 在常驻进程里建了会话', () => typeof bConv === 'string');
   await check('★ live 事件按连接记客户端：b 建会话记在 b 名下，后连上来的 d 顶不掉', () => openClients(bConv).at(-1) === 'second-client');
   await check('a 早先建会话记在 a 名下', () => openClients(convId)[0] === 'dsh-any-agent-test');
+  // `dsh-any-agent team on/off` 写的是设置文件，不是环境变量，常驻进程只在启动时读它一次：
+  // 切换之后重连的客户端必须连到按新设置启动的常驻进程，不能接着用旧的。
+  const teamFile = join(baseEnv.DSH_HOME, '.dsh-any-agent', 'settings.json');
+  const beforeTeam = new Set(daemonPids());
+  mkdirSync(dirname(teamFile), { recursive: true });
+  writeFileSync(teamFile, JSON.stringify({ team: true }));
+  const t = track(new McpClient({ env: baseEnv }).start());
+  await t.initialize();
+  await check('★ 切换 team 设置后重连：另起一个常驻进程', () => daemonPids().filter((p) => !beforeTeam.has(p)).length === 1,
+    JSON.stringify({ before: [...beforeTeam], now: daemonPids() }));
+  rmSync(teamFile, { force: true }); // 后面几节照旧用原来那个常驻进程
 
   console.log('\n[4] 认证');
   // 地址按 daemon.mjs 的命名规则从信息文件名推出来（测试进程自己的环境和客户端不同，不能重算）。

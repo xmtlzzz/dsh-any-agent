@@ -277,6 +277,46 @@ console.log('\n[7] ★ 并发握手：第二个调用者必须等到 initialize 
   check('新进程还活着', () => assert.equal(h3.alive, true));
 }
 
+console.log('\n[10] ★ 回收：选中之后会话开跑了新回合，就不能再停它（刷新 RSS 期间的竞态）');
+{
+  // 回收周期选好要停的会话后还会 await（读 RSS 预算前先刷新进程表，Windows 上 1–2 秒）；这期间
+  // dsh_send 可能已经在这个会话上开跑。只看"进程还活着"就停，会把正在执行的回合打断。
+  const reaper = new Hub({ log });
+  const stopped = [];
+  const idleConv = (id) => ({
+    id,
+    busy: false,
+    keepAlive: false,
+    lastUsedAt: 0, // 早就过了空闲回收线
+    recycling: null,
+    proc: { alive: true, pid: 999_001, stop: async () => (stopped.push(id), true) },
+  });
+  const started = idleConv(`reaper-race-started-${process.pid}`);
+  const idle = idleConv(`reaper-race-idle-${process.pid}`);
+  reaper.conversations.set(started.id, started);
+  reaper.conversations.set(idle.id, idle);
+  await reaper.reapOnce({
+    maxRssMb: 1,
+    refreshRss: async () => {
+      // 刷新期间 dsh_send 到了：prompt() 同步置 busy、刷新 lastUsedAt。
+      started.busy = true;
+      started.lastUsedAt = Date.now();
+    },
+  });
+  check('★ 选中之后开跑了回合的会话没有被停', () => assert.ok(!stopped.includes(started.id), JSON.stringify(stopped)));
+  check('对照：一直空闲的会话照常回收', () => assert.ok(stopped.includes(idle.id), JSON.stringify(stopped)));
+  const used = idleConv(`reaper-race-used-${process.pid}`);
+  reaper.conversations.clear();
+  reaper.conversations.set(used.id, used);
+  await reaper.reapOnce({
+    maxRssMb: 1,
+    refreshRss: async () => {
+      used.lastUsedAt = Date.now(); // 刷新期间跑完了一个很短的回合：不再是"空闲超时"
+    },
+  });
+  check('选中之后用过（回合已经跑完）的会话也不停', () => assert.ok(!stopped.includes(used.id), JSON.stringify(stopped)));
+}
+
 // 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
 console.log(`\n===== shared host: passed ${passed}, failed ${failed} =====`);
 console.log(`\n总结果: ${failed === 0 ? '通过 ✅' : `${failed} 项失败 ❌`}`);

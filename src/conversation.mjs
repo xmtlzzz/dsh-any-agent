@@ -1248,10 +1248,14 @@ export class Conversation {
         return;
       }
       const t = now();
+      // 还没结束的工具：不能看 currentTool —— 它是显示用的，工具重叠时短的那个一完成就被清掉，
+      // 长的还在跑，宽限却会缩回不带工具的那档。
+      const open = [...c.tools.values()].filter((x) => x.status !== 'completed' && x.status !== 'failed');
+      const runningTool = open.length ? (open.at(-1).name ?? open.at(-1).title ?? open.at(-1).id) : null;
       const verdict = watchdogVerdict({
         elapsedMs: t - t0,
         sinceProgressMs: t - this.lastProgressAt,
-        toolRunning: !!this.currentTool,
+        toolRunning: open.length > 0,
         waitingOnCaller: this.pendingApprovals.size > 0,
         afterMs: WATCHDOG_AFTER_MS,
         stallMs: STALL_MS,
@@ -1262,7 +1266,7 @@ export class Conversation {
         ...verdict,
         elapsed_ms: t - t0,
         since_progress_ms: t - this.lastProgressAt,
-        current_tool: this.currentTool ?? null,
+        current_tool: runningTool,
         at: new Date(t).toISOString(),
       };
       this.#hub.log.info(
@@ -1273,7 +1277,7 @@ export class Conversation {
         reason: verdict.reason,
         elapsed_ms: c.watchdog.elapsed_ms,
         since_progress_ms: c.watchdog.since_progress_ms,
-        tool: this.currentTool ?? null,
+        tool: runningTool,
       });
       proc.notify?.('session/cancel', { sessionId: this.id });
     }, watchdogTickMs({ stallMs: STALL_MS, maxMs: TURN_MAX_MS }));
