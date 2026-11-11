@@ -19,40 +19,57 @@ const json = (body, maxAge, status = 200) =>
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': `public, max-age=${maxAge}` },
   });
 
-export async function handleStars(request, env, { fetchImpl = fetch, cache = caches.default, now = Date.now } = {}) {
+/**
+ * 页面那边 3 秒就放弃这个请求（release.mjs），所以：
+ *   - 有最近一次成功的值就**立刻**回它，再在后台去 GitHub 刷新（GitHub 卡住时访客也不用等）；
+ *   - 什么都没缓存时才等 GitHub，最多 2 秒，赶在页面放弃之前回 503。
+ */
+export async function handleStars(
+  request,
+  env,
+  { fetchImpl = fetch, cache = caches.default, now = Date.now, waitUntil = () => {}, timeoutMs = 2000 } = {},
+) {
   const origin = new URL(request.url).origin;
   const freshKey = new Request(`${origin}/api/stars`);
   const lastGoodKey = new Request(`${origin}/api/stars?last-good`);
   const hit = await cache.match(freshKey);
   if (hit) return hit;
 
-  let stars = null;
-  try {
-    const headers = { accept: 'application/vnd.github+json', 'user-agent': 'dsh-any-agent-site' };
-    if (env?.GITHUB_TOKEN) headers.authorization = `Bearer ${env.GITHUB_TOKEN}`;
-    const res = await fetchImpl(REPO_API, { headers, signal: AbortSignal.timeout(5000) });
-    if (res.ok) {
-      const data = await res.json();
-      if (typeof data?.stargazers_count === 'number') stars = data.stargazers_count;
+  /** 问一次 GitHub；成功就写两份缓存并返回响应体，失败返回 null。 */
+  const refresh = async () => {
+    let stars = null;
+    try {
+      const headers = { accept: 'application/vnd.github+json', 'user-agent': 'dsh-any-agent-site' };
+      if (env?.GITHUB_TOKEN) headers.authorization = `Bearer ${env.GITHUB_TOKEN}`;
+      const res = await fetchImpl(REPO_API, { headers, signal: AbortSignal.timeout(timeoutMs) });
+      if (res.ok) {
+        const data = await res.json();
+        if (typeof data?.stargazers_count === 'number') stars = data.stargazers_count;
+      }
+    } catch {
+      /* 由调用方决定回什么 */
     }
-  } catch {
-    /* 下面回最近一次成功的值 */
-  }
-
-  if (stars !== null) {
+    if (stars === null) return null;
     const body = JSON.stringify({ stars, fetched_at: new Date(now()).toISOString() });
     await Promise.all([cache.put(freshKey, json(body, FRESH_S)), cache.put(lastGoodKey, json(body, LAST_GOOD_S))]);
-    return json(body, FRESH_S);
-  }
+    return body;
+  };
+
   const lastGood = await cache.match(lastGoodKey);
-  if (lastGood) return json(await lastGood.text(), 60);
-  return json(JSON.stringify({ stars: null }), 60, 503);
+  if (lastGood) {
+    waitUntil(refresh());
+    return json(await lastGood.text(), 60);
+  }
+  const body = await refresh();
+  return body ? json(body, FRESH_S) : json(JSON.stringify({ stars: null }), 60, 503);
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
-    if (pathname === '/api/stars' && request.method === 'GET') return handleStars(request, env);
+    if (pathname === '/api/stars' && request.method === 'GET') {
+      return handleStars(request, env, { waitUntil: (p) => ctx.waitUntil(p) });
+    }
     return env.ASSETS.fetch(request);
   },
 };

@@ -48,6 +48,48 @@ test('stars: when GitHub fails, the last good count is served', async () => {
   assert.equal((await res.json()).stars, 7);
 });
 
+/**
+ * 一个卡住的 GitHub：只有被 abort 才结束。Node 里 AbortSignal.timeout 的定时器不拖住进程，
+ * 这里另挂一个定时器，免得测试在等 abort 时事件循环先空了。
+ */
+const hanging = async (url, init) =>
+  new Promise((_, reject) => {
+    const keepAlive = setTimeout(() => {}, 10_000);
+    init.signal.addEventListener('abort', () => {
+      clearTimeout(keepAlive);
+      reject(new Error('aborted'));
+    });
+  });
+
+test('stars: with a last good value, answers at once even when GitHub hangs, and refreshes in the background', async () => {
+  const cache = fakeCache();
+  await handleStars(req(), {}, { fetchImpl: github(7), cache });
+  cache.store.delete('https://site.example/api/stars'); // the fresh copy expired
+  const pending = [];
+  const t0 = Date.now();
+  const res = await handleStars(req(), {}, { fetchImpl: hanging, cache, waitUntil: (p) => pending.push(p) });
+  assert.ok(Date.now() - t0 < 500, 'the browser gives up after 3 s, so the last good value must not wait for GitHub');
+  assert.equal((await res.json()).stars, 7);
+  assert.equal(pending.length, 1, 'the refresh runs in the background');
+  await Promise.all(pending);
+
+  // A background refresh that succeeds renews the fresh copy for the next visitor.
+  cache.store.delete('https://site.example/api/stars');
+  const later = [];
+  await handleStars(req(), {}, { fetchImpl: github(8), cache, waitUntil: (p) => later.push(p) });
+  await Promise.all(later);
+  const next = await handleStars(req(), {}, { fetchImpl: hanging, cache });
+  assert.equal((await next.json()).stars, 8);
+});
+
+test('stars: with nothing cached, gives up on a hanging GitHub before the browser does (3 s)', async () => {
+  const t0 = Date.now();
+  const res = await handleStars(req(), {}, { fetchImpl: hanging, cache: fakeCache() });
+  const took = Date.now() - t0;
+  assert.equal(res.status, 503);
+  assert.ok(took < 2700, `took ${took} ms`);
+});
+
 test('stars: with nothing cached and GitHub down, answers 503 with stars null', async () => {
   const res = await handleStars(req(), {}, { fetchImpl: async () => { throw new Error('down'); }, cache: fakeCache() });
   assert.equal(res.status, 503);
