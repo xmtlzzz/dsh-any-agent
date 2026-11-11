@@ -58,8 +58,10 @@ when a newer release is on npm.
   start result says when uncommitted changes in the main checkout were left
   behind. Changes stay on the branch for the caller to merge; `dsh_release
   (forget=true)` deletes a clean worktree and keeps the branch, and keeps a
-  dirty one. The repository's own hooks do not run when the worktree is
-  created. Off by default: a fresh worktree has no installed dependencies.
+  dirty one. The git commands that create, check and remove the worktree run
+  none of the repository's hooks or filter drivers (`smudge` / `clean`), so
+  files tracked with Git LFS are pointer files in the worktree. Off by
+  default: a fresh worktree has no installed dependencies.
 - **Sentinels carry `schema: 1`, and the public contract is written down.**
   Within one `schema` sentinel fields are only added; a breaking change bumps
   it. The compatibility doc states the same rules for the MCP tool surface.
@@ -74,8 +76,9 @@ when a newer release is on npm.
   reads as unknown, not as a problem. `DSH_MCP_UPDATE_CHECK=0` turns the
   request off.
 - **`DSH_MCP_SENTINEL_TOOL_INPUTS=0` keeps tool inputs out of sentinels.**
-  Each tool then keeps its name, status and `input_chars`; `dsh_get` from
-  memory still has the inputs. The security doc gained a table of everything
+  Each tool then keeps its name, status and `input_chars`, and auto-approval
+  summaries drop their `command_preview`; `dsh_get` from memory still has the
+  inputs. The security doc gained a table of everything
   this server writes to disk, how long it stays and how to turn it off.
 - **`dsh_doctor`'s report is available in English.** It follows `DSH_MCP_LANG`
   / the system language like every other tool result. The takeover report and

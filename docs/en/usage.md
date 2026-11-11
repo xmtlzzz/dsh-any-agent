@@ -85,7 +85,7 @@ While DSH works in the background you (the caller) are often still editing the s
 - The new worktree has no `node_modules`, virtual environment or build output, so DSH often has to install dependencies first — which is why it is off by default;
 - The changes stay on that branch for **you to review and merge**; the server never merges;
 - `dsh_release(forget=true)` deletes the worktree directory if it is clean (the branch and its commits stay); with uncommitted changes it is kept and the path is reported;
-- For safety the repository's own git hooks **do not run** when the worktree is created (the repository may be untrusted), so hooks such as husky's that install things on checkout do not run either.
+- For safety the repository's own git hooks and filter drivers (`smudge` / `clean`) **do not run** when the worktree is created, checked or removed (the repository may be untrusted), so hooks such as husky's that install things on checkout do not run either, and files tracked with Git LFS are pointer files in the worktree (DSH can run `git lfs pull` there if it needs them).
 ## 👀 Side view: what the dispatched work is doing
 
 The calling agent can `dsh_read`, but you, sitting in front of the client, usually only see one `dsh_send`. The server writes each conversation's activity to a live event stream (`<state dir>/live/<conversation_id>/events.jsonl`), so you can watch the call chain **without going through the agent**:

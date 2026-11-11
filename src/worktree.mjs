@@ -16,6 +16,8 @@
  * 安全：`git worktree add` 会触发仓库的 post-checkout 钩子，而仓库可能不可信（同
  * git-snapshot.mjs 关掉 fsmonitor 的理由）。这里把 core.hooksPath 指到一个空目录，
  * 不跑仓库的任何钩子；代价是像 husky 这类在 checkout 时装东西的钩子也不会跑。
+ * filter 驱动（smudge / clean）同理全部置空；代价是 Git LFS 管理的文件在 worktree 里
+ * 只是指针文件，需要的话由 DSH 在 worktree 里自己 `git lfs pull`。
  */
 
 import { execFile } from 'node:child_process';
@@ -24,6 +26,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { STATE_FILE } from './config.mjs';
+import { filterOverrides } from './git-snapshot.mjs';
 import { L } from './lang.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -42,9 +45,12 @@ function noHooksDir(root) {
 }
 
 async function git(cwd, args, root) {
+  // 仓库配置的 filter 驱动也是仓库能让宿主执行的命令：`worktree add` 检出时跑 smudge，
+  // `status`（含 `worktree remove` 内部的那次）跑 clean。一律置空，同 git-snapshot.mjs。
+  const noFilters = await filterOverrides(cwd);
   const { stdout } = await execFileAsync(
     'git',
-    ['-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${noHooksDir(root)}`, ...args],
+    ['-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${noHooksDir(root)}`, ...noFilters, ...args],
     { cwd, encoding: 'utf8', timeout: 120_000, windowsHide: true, maxBuffer: 16 << 20, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } },
   );
   return stdout.trim();

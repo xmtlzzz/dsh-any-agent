@@ -6,12 +6,12 @@
  *      cwd 是子目录时映射到 worktree 里的同一子目录；
  *   2. 主检出有未提交改动时如实标出（这些改动不会带进 worktree）；
  *   3. 不是 git 仓库、仓库没有提交时明确报错；
- *   4. 不跑仓库自带的钩子（仓库可能不可信）；
+ *   4. 不跑仓库自带的钩子和 filter 驱动（仓库可能不可信）；
  *   5. 收尾：干净才删目录，有未提交改动就保留；分支始终保留；建会话失败时整个撤销；
  *   6. Hub.create(isolation='worktree') 用 worktree 当会话目录，并把它记进注册表。
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -133,6 +133,33 @@ try {
     // 对照：同一个钩子在不屏蔽时确实会执行 —— 否则上一条断言什么也证明不了。
     git(hooked, 'worktree', 'add', '-q', '-b', 'control', join(root, 'hook-control'), 'HEAD');
     await check('对照：不屏蔽时同一个钩子会执行', () => existsSync(marker));
+  }
+
+  console.log('\n[4b] ★ 不跑仓库配置的 filter 驱动（检出时的 smudge、status 时的 clean）');
+  {
+    const filtered = makeRepo('repo-filtered');
+    writeFileSync(join(filtered, '.gitattributes'), '*.txt filter=evil\n');
+    git(filtered, 'add', '.gitattributes');
+    git(filtered, 'commit', '-q', '-m', 'attributes');
+    // 驱动在提交之后才配：上面的提交不经过它。命令照原样输出（cat），只是顺手留下记号。
+    const smudgeMark = join(root, 'smudge-ran.txt').replace(/\\/g, '/');
+    const cleanMark = join(root, 'clean-ran.txt').replace(/\\/g, '/');
+    git(filtered, 'config', 'filter.evil.smudge', `echo ran >> "${smudgeMark}"; cat`);
+    git(filtered, 'config', 'filter.evil.clean', `echo ran >> "${cleanMark}"; cat`);
+    const wtF = await createWorktree(filtered, { root: wtRoot });
+    await check('worktree add 检出时没有跑 smudge', () => !existsSync(smudgeMark));
+    // 文件的 stat 变了而内容没变：git status 要重新比内容，就会对它跑 clean。
+    const later = new Date(Date.now() + 5_000);
+    utimesSync(join(wtF.path, 'pkg', 'sub', 'a.txt'), later, later);
+    const rF = await removeWorktree(wtF, { root: wtRoot });
+    await check('收尾时的 status 没有跑 clean（worktree 照常判为干净并删除）', () => !existsSync(cleanMark) && rF.removed === true, JSON.stringify(rF));
+    // 对照：不屏蔽时两个驱动确实会跑 —— 否则上面两条断言什么也证明不了。
+    const ctl = join(root, 'filter-control');
+    git(filtered, 'worktree', 'add', '-q', '-b', 'filter-control', ctl, 'HEAD');
+    await check('对照：不屏蔽时检出会跑 smudge', () => existsSync(smudgeMark));
+    utimesSync(join(ctl, 'pkg', 'sub', 'a.txt'), later, later);
+    git(ctl, 'status', '--porcelain');
+    await check('对照：不屏蔽时 status 会跑 clean', () => existsSync(cleanMark));
   }
 
   console.log('\n[5] 收尾');

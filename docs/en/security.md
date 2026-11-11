@@ -77,7 +77,7 @@ Silent by default — **not one byte is written**.
 | Path | Contents | Kept for | How to turn off / clean up |
 |---|---|---|---|
 | `<state dir>/conversations.json`, `meta/<conversation_id>.json` | Conversation registry and metadata: id, cwd, permissions, counters, title hint; no message text | Until the conversation is forgotten | `dsh_release(forget=true)` |
-| `<state dir>/runs/<conversation_id>/<run_id>.json` | Completion sentinel: answer, usage, review ticket, tool inputs (all redacted) | 7 days (`DSH_MCP_SENTINEL_TTL_MS`) | `DSH_MCP_SENTINEL_TOOL_INPUTS=0` keeps only each tool input's length; delete it once read |
+| `<state dir>/runs/<conversation_id>/<run_id>.json` | Completion sentinel: answer, usage, review ticket, tool inputs (all redacted) | 7 days (`DSH_MCP_SENTINEL_TTL_MS`) | `DSH_MCP_SENTINEL_TOOL_INPUTS=0` keeps only each tool input's length (and drops auto-approval command previews); delete it once read |
 | `<state dir>/runs/<conversation_id>/<run_id>.running` | Turn-in-progress marker: run_id, task preview (redacted), this server's PID and start time | Removed when the sentinel is written | — |
 | `<state dir>/reviews/<conversation_id>/<run_id>.review.json` | Review record: verdict, notes, checklist, evidence summary (redacted) | Same as sentinels, 7 days | `DSH_MCP_REVIEW=off` stops automatic tickets |
 | `<state dir>/live/<conversation_id>/events.jsonl` | Live event stream: event type, time, tool name, client name; by default also redacted command / path / prompt previews | Same as sentinels, 7 days; rolled at 5 MB | `DSH_MCP_LIVE=meta` drops the previews, `off` writes nothing |

@@ -13,11 +13,11 @@ name: tests
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          40 checks
 #     failure-terminal  terminal state on failure     10 checks
-#     shared-host       shared process host           37 checks
+#     shared-host       shared process host           40 checks
 #     resume-retry      cold-resume timeout retry     65 checks (fake ACP server)
 #     dispatch-tools    dispatch surface              84 checks (79 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
-#     sentinel-redaction sentinel disk hygiene        23 checks
+#     sentinel-redaction sentinel disk hygiene        26 checks
 #     live-events       live event stream, write side  47 checks
 #     live-view         watch / dashboard viewers      69 checks
 #     release-notes     Release notes from CHANGELOG   12 checks
@@ -29,9 +29,9 @@ name: tests
 #     permission-adopt  no silent privilege escalation 22 checks
 #     state-safety      state/sentinel/lock storage   26 checks
 #     workspace-snapshot workspace_changed full fingerprint  27 checks
-#     watchdog          turn watchdog (stall / max duration)  28 checks
-#     worktree          isolation=worktree sessions      25 checks
-#     daemon            DSH_MCP_DAEMON=1 resident process  20 checks
+#     watchdog          turn watchdog (stall / max duration)  30 checks
+#     worktree          isolation=worktree sessions      30 checks
+#     daemon            DSH_MCP_DAEMON=1 resident process  21 checks
 #     run-recovery      interrupted-turn sentinels   18 checks
 #     contract          tool surface + sentinel shape snapshot  13 checks
 #     update-check      dsh_doctor npm version check (fake fetch)  17 checks

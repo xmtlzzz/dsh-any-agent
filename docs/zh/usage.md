@@ -85,7 +85,7 @@ DSH 在后台跑的时候，你（调用方）多半还在同一个仓库里继�
 - 新 worktree 里没有 `node_modules`、虚拟环境、构建产物，DSH 往往要先装依赖 —— 这是默认不开的原因；
 - 改动留在那个分支上，**由你审核后自己合并**，服务从不自动合并；
 - `dsh_release(forget=true)` 时 worktree 干净就删目录（分支保留，提交不会丢）；有未提交的改动就保留并告诉你路径；
-- 出于安全，建 worktree 时**不跑仓库自带的 git 钩子**（仓库可能不可信），所以 husky 这类在 checkout 时装东西的钩子也不会跑。
+- 出于安全，建、查、删 worktree 时**不跑仓库自带的 git 钩子和 filter 驱动**（`smudge` / `clean`；仓库可能不可信），所以 husky 这类在 checkout 时装东西的钩子也不会跑，Git LFS 管理的文件在 worktree 里只是指针文件（需要的话 DSH 可以在 worktree 里自己 `git lfs pull`）。
 ## 👀 旁路查看：派出去的活在干什么
 
 调用方 agent 能 `dsh_read`，但坐在客户端前的你通常只看到一次 `dsh_send`。服务会把每个会话的活动写成 live 事件流（`<状态目录>/live/<会话id>/events.jsonl`），你可以**不经过 agent**直接看调用链：

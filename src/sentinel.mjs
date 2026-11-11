@@ -54,8 +54,13 @@ export function sanitizeResultForSentinel(result) {
     });
   }
   // 自动放行审批摘要记录时已脱敏；落盘前再过一遍，防止将来有人加字段漏掉。
+  // command_preview 是命令原文的开头，也算工具输入：开关关掉时一并不落盘，条数与裁决信息照留。
   if (Array.isArray(rest.auto_approvals)) {
-    rest.auto_approvals = rest.auto_approvals.map((a) => (a && typeof a === 'object' ? sanitizeApprovalContext(a) : a));
+    rest.auto_approvals = rest.auto_approvals.map((a) => {
+      if (!a || typeof a !== 'object') return a;
+      const { command_preview, ...meta } = a;
+      return sanitizeApprovalContext(SENTINEL_TOOL_INPUTS ? a : meta);
+    });
   }
   // 审核单里可能有原任务预览、审核理由与证据摘要；哨兵会保留 7 天，同样要脱敏。
   if (rest.review && typeof rest.review === 'object') {
