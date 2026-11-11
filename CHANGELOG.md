@@ -99,6 +99,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run queued behind the current turn, or queued and then cancelled, took its
   place: `dsh_status` could report `state: running` next to a cancelled run.
   They now return the running turn, or else the last one that started.
+- **`tools_used[].name` is filled in with real DSH.** DSH's `tool_call`
+  carries the tool name in `title` (`pwsh`, `read`) and no `name`, so every
+  entry in results and sentinels had `name: null`, and so did the `tool` of
+  live approval events. An identifier-like title now fills `name`, the same
+  rule the live tool events already used; a descriptive title such as
+  `read src/a.ts` does not, and a `name` sent by DSH still wins.
 - **A turn cut off by the server exiting now gets a sentinel.** When the
   server stopped mid-turn (the client closed, reconnected or crashed), nobody
   wrote the turn's sentinel, so a caller's background waiter ran to its

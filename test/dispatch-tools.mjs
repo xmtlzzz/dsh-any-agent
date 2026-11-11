@@ -239,6 +239,25 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
   check('按 run_id 仍能取到被取消的排队回合', () => assert.equal(c.getRun(queued.run_id).status, 'cancelled'));
   hub.conversations.delete(c.id);
 }
+{
+  // 真实 DSH 的 tool_call 不带 name，工具名在 title 里（"pwsh" / "read"）。结果与哨兵里的
+  // tools_used[].name 曾一律是 null；title 像标识符时补成名字，带空格的描述性 title 不当名字。
+  const { c, proc } = raceConv('tool-names');
+  const pending = c.prompt('用几个工具', { wait: true, timeoutMs: 0 });
+  for (let i = 0; i < 300 && proc.prompts < 1; i++) await tick(10);
+  const up = (u) => c.onUpdate({ sessionId: c.id, update: u });
+  up({ sessionUpdate: 'tool_call', toolCallId: 't1', title: 'pwsh', kind: 'other', status: 'pending', rawInput: { command: 'ls' } });
+  up({ sessionUpdate: 'tool_call_update', toolCallId: 't1', status: 'completed' });
+  up({ sessionUpdate: 'tool_call', toolCallId: 't2', title: 'read src/a.ts', kind: 'read', status: 'completed' });
+  up({ sessionUpdate: 'tool_call', toolCallId: 't3', name: 'grep', title: 'search', status: 'completed' });
+  proc.end();
+  const res = await pending;
+  const byId = Object.fromEntries((res.tools_used ?? []).map((t) => [t.id, t]));
+  check('★ 只有 title "pwsh"：name 补成 pwsh（之前是 null）', () => assert.equal(byId.t1?.name, 'pwsh', JSON.stringify(byId.t1)));
+  check('title 是带空格的描述：不当名字', () => assert.equal(byId.t2?.name ?? null, null, JSON.stringify(byId.t2)));
+  check('DSH 给了 name 就用它，不被 title 覆盖', () => assert.equal(byId.t3?.name, 'grep', JSON.stringify(byId.t3)));
+  check('title 原样保留', () => assert.deepEqual([byId.t1?.title, byId.t2?.title], ['pwsh', 'read src/a.ts']));
+}
 
 console.log('\n[4] dsh_get 正文预算');
 

@@ -66,6 +66,12 @@ const now = () => Date.now();
 /** 记录用户发话时的截断长度（避免一条把缓冲撑爆）。 */
 const MAX_PROMPT_ECHO = 4000;
 
+/**
+ * 真实 DSH 的 tool_call 不带 name，工具名在 title 里（"read" / "pwsh"）。title 是纯标识符时才当名字；
+ * 带空格的描述性 title（可能含命令原文）不算。
+ */
+const toolNameFromTitle = (title) => (typeof title === 'string' && /^[\w.:-]{1,40}$/.test(title) ? title : null);
+
 export class Conversation {
   constructor(state, hub) {
     this.id = state.id;
@@ -676,7 +682,8 @@ export class Conversation {
           title: u.title ?? prev.title,
           status: u.status ?? prev.status,
           kind: u.kind ?? prev.kind,
-          name: u.name ?? prev.name,
+          // 真实 DSH 不带 name：用像标识符的 title 补上，结果与哨兵里的 tools_used[].name 才不是 null。
+          name: u.name ?? prev.name ?? toolNameFromTitle(u.title),
           input: u.rawInput !== undefined ? u.rawInput : prev.input,
         };
         c.tools.set(id, merged);
@@ -715,15 +722,12 @@ export class Conversation {
     const at = seen?.at ?? now();
     this.#liveTools.set(id, { at, status, hasInput });
     const terminal = status === 'completed' || status === 'failed';
-    // 真实 DSH 的 tool_call 不带 name，工具名在 title 里（"read" / "pwsh"）。title 是纯标识符时
-    // 当作名字写进 meta 级字段；带空格等可能含命令原文的 title 只进 detail。
-    const titleAsName =
-      typeof merged.title === 'string' && /^[\w.:-]{1,40}$/.test(merged.title) ? merged.title : null;
+    // 带空格等可能含命令原文的 title 只进 detail；像标识符的才当名字写进 meta 级字段（见 toolNameFromTitle）。
     this.#live(
       'tool',
       {
         tool_call_id: id,
-        name: merged.name ?? titleAsName,
+        name: merged.name ?? toolNameFromTitle(merged.title),
         kind: merged.kind ?? null,
         status,
         elapsed_ms: terminal ? now() - at : undefined,
