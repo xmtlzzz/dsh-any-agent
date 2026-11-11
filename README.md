@@ -112,6 +112,8 @@ Only using Cursor or VS Code? Add it in one click instead (runs `npx -y dsh-any-
 
 > **Before your first task:** read the [Usage Notes](USAGE-NOTES.en.md), especially the model-config and external-MCP permission boundaries. External MCP tools bypass DSH's sandbox. For a fresh machine, follow the [migration guide](USAGE-MIGRATION.en.md).
 
+> **Permissions: this server only dispatches; permissions follow DSH and your configuration.** The default is `workspace-write` (writes limited to the workspace; out-of-workspace requests are auto-allowed and listed in the result). For personal use on your own machine most people just turn on full access: `dsh-any-agent-setup --yes --permission danger-full-access`, after which DSH asks for nothing and everything is allowed. **Anyone who can call these tools can run commands on your machine** (including a caller agent that got prompt-injected); use `read-only` for untrusted content. See [Permissions & privacy](docs/en/security.md).
+
 <details>
 <summary>Full contents</summary>
 

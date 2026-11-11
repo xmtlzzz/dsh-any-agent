@@ -521,10 +521,12 @@ export class Hub {
     //   而本服务可能被任何 MCP 客户端拉起；必须由机器所有者显式放行。
     if (permission === 'danger-full-access' && !ALLOW_FULL_ACCESS) {
       throw new Error(L(
-        'permission=danger-full-access 需要机器侧显式允许：设置 DSH_MCP_ALLOW_FULL_ACCESS=1 后重试。' +
-          ' 默认请用 workspace-write（写入限制在工作区内）或 read-only。',
-        'permission=danger-full-access must be allowed on this machine: set DSH_MCP_ALLOW_FULL_ACCESS=1 and retry.' +
-          ' By default use workspace-write (writes limited to the workspace) or read-only.',
+        'permission=danger-full-access 需要机器侧允许：在客户端配置里把默认档设成它（DSH_MCP_PERMISSION=danger-full-access，' +
+          '即 dsh-any-agent-setup --yes --permission danger-full-access），或设置 DSH_MCP_ALLOW_FULL_ACCESS=1，重连后重试。' +
+          ' 否则请用 workspace-write（写入限制在工作区内）或 read-only。',
+        'permission=danger-full-access must be allowed on this machine: make it the default in the client config ' +
+          '(DSH_MCP_PERMISSION=danger-full-access, which dsh-any-agent-setup --yes --permission danger-full-access writes), ' +
+          'or set DSH_MCP_ALLOW_FULL_ACCESS=1, then reconnect and retry. Otherwise use workspace-write (writes limited to the workspace) or read-only.',
       ));
     }
     const policy = onApproval ?? defaultApprovalPolicy(permission);

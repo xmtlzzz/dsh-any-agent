@@ -5,10 +5,12 @@
 | 档位 | 审批默认 | 用途 |
 |---|---|---|
 | `workspace-write`（服务端裸默认；`setup` 也默认写入它） | `auto-allow` | DSH 沙箱限制可写范围；越界请求默认放行，传 `on_approval=ask` 才挂起审批 |
-| `danger-full-access` | `auto-allow` | 整机写权限；需要机器侧设置 `DSH_MCP_ALLOW_FULL_ACCESS=1` 才能新建或恢复这一档的会话 |
+| `danger-full-access` | `auto-allow` | 整机写权限，DSH 不再发审批。个人使用最省事：`dsh-any-agent-setup --yes --permission danger-full-access` 把它设成默认档，这本身就算机器侧允许；默认档是别的、只想让个别会话用时，另设 `DSH_MCP_ALLOW_FULL_ACCESS=1` |
 | `read-only` | `auto-deny` | 分析不信任样本（恶意软件、来路不明 dump） |
 
 `on_approval` 可选 `auto-allow` / `auto-deny` / `ask`（`ask` 会把审批挂起，交给 `dsh_approval_decide` 裁决）。
+
+**信任模型：本服务只是派发层，权限跟着 DSH 和你自己的配置走。** 它不额外加一层权限判断：你在客户端配置里给了什么档位，DSH 就按什么档位跑；`danger-full-access` 下 DSH 根本不发审批，所以是全放行。这意味着：**谁能调用这些 MCP 工具，谁就能在你的机器上执行命令** —— 包括读了恶意网页或 issue、被提示注入的调用方 agent。个人在自己机器上用，接受这个风险通常没问题；处理不可信内容时用 `read-only`（唯一的硬边界：审批一律拒绝，传 `auto-allow` / `ask` 会被直接拒绝）。
 
 **`auto-allow` 下 `workspace-write` 是软边界。** DSH 碰到沙箱挡住的操作（例如 Windows 上子进程管道被拦）会申请 `sandbox_permissions: danger-full-access`，`auto-allow` 会直接放行。默认值不变，但放行**不再是静默的**：每个回合结果都带 `auto_approvals_total`、`auto_escalations_total` 和最多 20 条脱敏后的 `auto_approvals` 摘要（工具、提权档、理由、命令预览）；审核单的证据与清单会点名"本轮有 N 次自动放行，其中 M 次提权"。要逐次把关，就用 `on_approval=ask` 新建会话。
 

@@ -49,6 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`dsh-any-agent-setup --permission danger-full-access` produces a working
+  config.** It writes `DSH_MCP_PERMISSION=danger-full-access`, but the server
+  also wanted `DSH_MCP_ALLOW_FULL_ACCESS=1`, so every `dsh_start` was refused.
+  A client config whose default tier is `danger-full-access` now counts as
+  allowing it on the machine. `DSH_MCP_ALLOW_FULL_ACCESS=1` is still needed
+  only when the default is another tier and a caller asks for full access
+  per conversation. The README and the permissions doc now state the trust
+  model plainly: the server only dispatches, permissions follow DSH and the
+  owner's configuration, and anyone who can call the tools can run commands.
 - **Reading process memory no longer stalls the server.** `rss_mb` came from a
   synchronous `tasklist` (Windows, about 0.6 s per call) or `ps`, run whenever
   `dsh_status`, `dsh_get`, `dsh_list` or `dsh_start` built a snapshot with a

@@ -496,15 +496,25 @@ export const PERMISSION_TIERS = ['read-only', 'workspace-write', 'danger-full-ac
  * 新建会话的默认权限档。0.5.0 起默认 **workspace-write**（沙箱把写入限制在工作区内），
  * 不再是 danger-full-access；空串/非法值也回落到它。
  *
- * `danger-full-access` 需要机器侧显式允许（`DSH_MCP_ALLOW_FULL_ACCESS=1`），
- * 避免"任何 MCP 客户端都能驱动"的服务默认把整机写权限交出去。
+ * `danger-full-access` 需要机器侧显式允许，见下面的 ALLOW_FULL_ACCESS。
  */
 export const DEFAULT_PERMISSION = PERMISSION_TIERS.includes(process.env.DSH_MCP_PERMISSION)
   ? process.env.DSH_MCP_PERMISSION
   : 'workspace-write';
 
-/** 是否允许 `permission=danger-full-access`（默认关）。 */
-export const ALLOW_FULL_ACCESS = process.env.DSH_MCP_ALLOW_FULL_ACCESS === '1';
+/**
+ * 是否允许 `permission=danger-full-access`。
+ *
+ * 本服务只是派发层，权限跟着机器所有者自己的配置走。两种情况算"机器侧已允许"：
+ *   - 客户端配置里把默认档设成了 danger-full-access（`DSH_MCP_PERMISSION=danger-full-access`，
+ *     也就是 `dsh-any-agent-setup --permission danger-full-access` 写进去的那一项）—— 那就是你的选择；
+ *   - 或者显式 `DSH_MCP_ALLOW_FULL_ACCESS=1`（默认档是别的、只想让个别会话用 full access 时）。
+ *
+ * 两样都没有时，调用方（模型）不能在 dsh_start 里自己把档位要成 danger-full-access。
+ * 以前只认第二种，于是 `setup --permission danger-full-access` 写出来的配置每次 dsh_start 都被拒绝。
+ */
+export const ALLOW_FULL_ACCESS =
+  process.env.DSH_MCP_ALLOW_FULL_ACCESS === '1' || DEFAULT_PERMISSION === 'danger-full-access';
 
 /**
  * 审批处理策略：

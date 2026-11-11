@@ -8,7 +8,7 @@ name: tests
 #     smoke             protocol + instructions length cap, no DSH   40 checks
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     progress          MCP progress notifications     15 checks
-#     guards            env-var edge cases            40 checks
+#     guards            env-var edge cases            43 checks
 #     dsh-locate        DSH auto-discovery (asar)     21 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          40 checks

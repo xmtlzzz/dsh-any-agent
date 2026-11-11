@@ -5,10 +5,12 @@
 | Tier | Approval default | Use for |
 |---|---|---|
 | `workspace-write` (raw server default; also what `setup` writes) | `auto-allow` | Writes are limited to the workspace by DSH's sandbox; out-of-workspace requests are auto-allowed unless you pass `on_approval=ask` |
-| `danger-full-access` | `auto-allow` | Whole-machine write access; creating or resuming a session in this tier requires `DSH_MCP_ALLOW_FULL_ACCESS=1` on the machine |
+| `danger-full-access` | `auto-allow` | Whole-machine write access, and DSH no longer asks for approvals. Simplest for personal use: `dsh-any-agent-setup --yes --permission danger-full-access` makes it the default tier, which by itself counts as allowing it on the machine; if the default is another tier and only some conversations should get it, also set `DSH_MCP_ALLOW_FULL_ACCESS=1` |
 | `read-only` | `auto-deny` | Analyzing untrusted samples (malware, unknown dumps) |
 
 `on_approval` can be `auto-allow`, `auto-deny`, or `ask` (which exposes a pending approval for `dsh_approval_decide` to adjudicate).
+
+**Trust model: this server only dispatches; permissions follow DSH and your own configuration.** It adds no permission layer of its own: DSH runs at whatever tier your client config gives it, and under `danger-full-access` DSH asks for nothing, so everything is allowed. That means **anyone who can call these MCP tools can run commands on your machine** — including a caller agent that read a malicious web page or issue and got prompt-injected. For personal use on your own machine that risk is usually acceptable; for untrusted content use `read-only` (the one hard boundary: every approval is denied, and passing `auto-allow` or `ask` is rejected outright).
 
 **Under `auto-allow`, `workspace-write` is a soft boundary.** When DSH's sandbox blocks something (e.g. child-process pipes on Windows), DSH asks for `sandbox_permissions: danger-full-access` and `auto-allow` grants it. The default is unchanged, but the grant is **no longer silent**: every turn result carries `auto_approvals_total`, `auto_escalations_total` and up to 20 redacted `auto_approvals` summaries (tool, escalation tier, justification, command preview), and the review ticket's evidence and checklist call out "N auto-approved this turn, M of them escalations". To gate each one, start a conversation with `on_approval=ask`.
 

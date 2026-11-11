@@ -101,6 +101,8 @@ dsh-any-agent-setup --yes
 
 > **第一次派活前：** 先读[使用注意事项](USAGE-NOTES.md)，尤其是模型配置与外部 MCP 的权限边界。**外部 MCP 工具的副作用不受 DSH 沙箱约束。** 新机器部署可按[迁移指引](USAGE-MIGRATION.md)逐步操作。
 
+> **权限：本服务只是派发层，权限跟着 DSH 和你的配置走。** 默认是 `workspace-write`（写入限制在工作区，越界请求自动放行，结果里会列出放行了哪些）。个人在自己机器上用，大多直接开 full access：`dsh-any-agent-setup --yes --permission danger-full-access`，此时 DSH 不再发审批、全部放行。**谁能调用这些工具，谁就能在你机器上执行命令**（包括被提示注入的调用方 agent）；处理不可信内容请用 `read-only`。详见[权限与隐私](docs/zh/security.md)。
+
 > **想先看效果？** 先看 [54 秒宣传片](https://dsh-any-agent.xmtlz.dev/#video)（派活、插话、哨兵落地、调用方复核，终端画面回放自一次真实运行）：
 >
 > <a href="https://dsh-any-agent.xmtlz.dev/#video"><img src="https://raw.githubusercontent.com/xmtlzzz/dsh-any-agent/main/website/src/media/promo-poster.jpg" width="560" alt="▶ 播放 dsh-any-agent 宣传片（54 秒）"></a>

@@ -371,8 +371,9 @@ export class Conversation {
     //   danger-full-access 会话照样能被拉起（审计 A02）。
     if (this.permission === 'danger-full-access' && !ALLOW_FULL_ACCESS) {
       throw new Error(
-        `会话 ${this.id} 的权限档是 danger-full-access，而本机未设置 DSH_MCP_ALLOW_FULL_ACCESS=1，拒绝恢复。` +
-          ' 设置该开关后重试，或改用 workspace-write / read-only 新建会话。',
+        `会话 ${this.id} 的权限档是 danger-full-access，而本机没有允许 full access，拒绝恢复。` +
+          ' 在客户端配置里设 DSH_MCP_PERMISSION=danger-full-access（或 DSH_MCP_ALLOW_FULL_ACCESS=1）后重连，' +
+          '或改用 workspace-write / read-only 新建会话。',
       );
     }
     const shared = SHARED_PROCESS;
