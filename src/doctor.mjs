@@ -22,6 +22,10 @@ import {
   TEAM_ACTIVE,
   TEAM_MODE,
   DSH_PROFILE,
+  DAEMON_MODE,
+  STALL_MS,
+  TURN_MAX_MS,
+  WATCHDOG_AFTER_MS,
   dshVersionStatus,
 } from './config.mjs';
 import {
@@ -297,7 +301,8 @@ export async function runDoctor(hub) {
     'config',
     'ok',
     `profile=${DSH_PROFILE} team=${TEAM_ACTIVE ? 'on' : 'off'} permission=${DEFAULT_PERMISSION} ` +
-      `idle_ttl=${IDLE_TTL_MS}ms max_live=${MAX_LIVE} max_rss=${MAX_RSS_MB}MB shared=${SHARED_PROCESS}`,
+      `idle_ttl=${IDLE_TTL_MS}ms max_live=${MAX_LIVE} max_rss=${MAX_RSS_MB}MB shared=${SHARED_PROCESS} ` +
+      `daemon=${DAEMON_MODE ? 'on' : 'off'} watchdog=${WATCHDOG_AFTER_MS}/${STALL_MS}/${TURN_MAX_MS}ms`,
   );
   add(
     'team',

@@ -90,8 +90,15 @@ export function createMcpServer({
   log,
   instructions = LANG === 'en' ? INSTRUCTIONS_EN : INSTRUCTIONS,
   progressIntervalMs = 5000,
+  // 默认就是 stdio；常驻进程模式下每个客户端连接一对 socket 流（见 daemon.mjs）。
+  input = process.stdin,
+  output = process.stdout,
 }) {
-  const write = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
+  const write = (obj) => {
+    // 常驻进程里客户端可能已经断开：往关掉的 socket 写会抛错，丢掉即可。
+    if (output.writable === false || output.destroyed) return;
+    output.write(JSON.stringify(obj) + '\n');
+  };
   const lineDecoder = new LineDecoder();
   let initialized = false;
   let clientCapabilities = {};
@@ -285,8 +292,8 @@ export function createMcpServer({
 
   return {
     start() {
-      process.stdin.on('data', onData);
-      process.stdin.on('end', () => log?.debug('[mcp] stdin 结束'));
+      input.on('data', onData);
+      input.on('end', () => log?.debug('[mcp] 输入结束'));
       return this;
     },
     /** 客户端当前打开的项目目录；不支持 roots 的客户端返回 null。 */

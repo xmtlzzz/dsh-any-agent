@@ -25,12 +25,13 @@ name: tests
 #     forget-tombstone  forget is terminal            25 checks
 #     bootstrap-profile zero-dependency bootstrap     27 checks
 #     workspace-safety  data-loss boundaries          23 checks
-#     residue-purge     test residue cleanup, sandboxed 158 checks
+#     residue-purge     test residue cleanup, sandboxed 159 checks
 #     permission-adopt  no silent privilege escalation 22 checks
 #     state-safety      state/sentinel/lock storage   26 checks
 #     workspace-snapshot workspace_changed full fingerprint  27 checks
 #     watchdog          turn watchdog (stall / max duration)  28 checks
 #     worktree          isolation=worktree sessions      25 checks
+#     daemon            DSH_MCP_DAEMON=1 resident process  16 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     test-counts       report parser + docs sync     92 checks
@@ -247,6 +248,10 @@ jobs:
       - name: worktree (isolation=worktree sessions)
         env: { DSH_MCP_LOG: silent }
         run: node test/worktree.mjs
+      # 常驻进程模式：转发进程被杀后回合照常跑完；同配置共用；令牌认证；空闲退出。
+      - name: daemon (turns survive the client; token auth; idle exit)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/daemon.mjs
       # Guards the sandbox itself, not the writer. A test suite that points its
       # "sandbox" at the real user profile deletes real data while reporting
       # green; this suite fails instead.

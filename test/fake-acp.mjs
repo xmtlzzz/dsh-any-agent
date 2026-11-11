@@ -74,6 +74,23 @@ function handle(msg) {
       return ok(msg.id, { configOptions: [] });
     case 'session/close':
       return ok(msg.id, {});
+    case 'session/prompt': {
+      // FAKE_ACP_PROMPT_MS 设了才应答：推一段正文，过这么久以 end_turn 结束回合。
+      // 没设时保持旧行为（Method not found），已有套件不受影响。
+      const ms = Number(process.env.FAKE_ACP_PROMPT_MS ?? 0);
+      if (!(ms > 0)) return fail(msg.id, -32601, 'Method not found');
+      const sessionId = msg.params?.sessionId;
+      send({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'fake answer' } } },
+      });
+      setTimeout(() => {
+        record({ event: 'prompt-done' });
+        ok(msg.id, { stopReason: 'end_turn' });
+      }, ms);
+      return;
+    }
     default:
       return fail(msg.id, -32601, 'Method not found');
   }

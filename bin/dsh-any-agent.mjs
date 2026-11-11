@@ -130,74 +130,21 @@ if (argv[0] === 'team') {
   process.exit(2);
 }
 
-const { createLogger } = await import('../src/config.mjs');
-const { Hub } = await import('../src/hub.mjs');
-const { createMcpServer } = await import('../src/mcp.mjs');
-const { listOrphans, pruneDeadMarkers } = await import('../src/locks.mjs');
-const { createHandlers } = await import('../src/tools.mjs');
+const { createLogger, DAEMON_MODE } = await import('../src/config.mjs');
+const { keepAliveOnRejection, runStdioServer } = await import('../src/boot.mjs');
 
 const log = createLogger();
+keepAliveOnRejection(log);
 
-const hub = new Hub({ log });
-await hub.load();
-hub.startReaper();
-// 启动时清一次过期哨兵（哨兵内含正文，长期不清理会无声堆积）
-const prunedSentinels = hub.pruneSentinels();
-// live 事件流与哨兵同一 TTL（单独调用，不改 pruneSentinels 的返回形状）
-try {
-  const { pruneLive } = await import('../src/live.mjs');
-  const { SENTINEL_TTL_MS } = await import('../src/config.mjs');
-  const prunedLive = pruneLive(SENTINEL_TTL_MS);
-  if (prunedLive.pruned) log.info(`[dsh-any-agent] 启动清理：删除 ${prunedLive.pruned} 个过期 live 事件文件`);
-} catch {
-  /* 清理失败不影响启动 */
+/**
+ * 三种运行方式（见 src/daemon.mjs）：
+ *   --daemon            常驻进程本体（由转发进程以 detached 方式拉起，不要手动运行）；
+ *   DSH_MCP_DAEMON=1    转发进程：连上（必要时拉起）常驻进程，只搬字节；起不来就退回下面的普通模式；
+ *   默认                本进程就是 MCP stdio 服务端，客户端断开就收尾退出。
+ */
+if (argv[0] === '--daemon') {
+  const { runDaemon } = await import('../src/daemon.mjs');
+  await runDaemon({ log });
+} else if (!(DAEMON_MODE && (await (await import('../src/daemon.mjs')).runProxy({ log })))) {
+  await runStdioServer(log);
 }
-if (prunedSentinels.pruned || prunedSentinels.reviews_pruned) {
-  log.info(
-    `[dsh-any-agent] 启动清理：删除 ${prunedSentinels.pruned} 个过期哨兵、` +
-      `${prunedSentinels.reviews_pruned ?? 0} 条过期审核记录、` +
-      `${prunedSentinels.dirs_removed + (prunedSentinels.review_dirs_removed ?? 0)} 个空目录`,
-  );
-}
-// 写锁登记清理：删掉"MCP 已死 + 子进程也死了"的记录；**保留**子进程还活着的那些 ——
-// 它们是"孤儿持有者"（上一代 MCP 崩了但子进程还握着锁），是 dsh_takeover 要抢占的目标。
-const deadMarkers = pruneDeadMarkers();
-const orphans = listOrphans();
-if (deadMarkers.removed || orphans.length) {
-  log.info(
-    `[dsh-any-agent] 写锁登记：清理 ${deadMarkers.removed} 条失效记录；发现 ${orphans.length} 个孤儿持有者` +
-      (orphans.length ? `（会话 ${orphans.map((o) => o.conversation_id.slice(0, 8)).join(', ')} 可用 dsh_takeover 抢占）` : ''),
-  );
-}
-if (orphans.length) log.info(`[dsh-any-agent] 孤儿持有者会话: ${orphans.map((o) => o.conversation_id).join(', ')}`);
-
-// dsh_start 不传 cwd 时，用客户端当前打开的项目目录（MCP roots）。
-// 这样「客户端里看到哪个项目，DSH 就在哪个项目干活」是默认行为。
-const server = createMcpServer({ hub, log, handlers: createHandlers(hub, { projectDir: () => server.projectDir() }) });
-server.start();
-
-log.info(`[dsh-any-agent] 已启动（注册表载入 ${hub.conversations.size} 个会话，日志级别 ${log.level}）`);
-
-let shuttingDown = false;
-async function shutdown(signal) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  log.info(`[dsh-any-agent] 收到 ${signal}，正在收尾…`);
-  try {
-    await hub.shutdown();
-  } catch (e) {
-    log.info(`[dsh-any-agent] 收尾异常: ${e.message}`);
-  }
-  process.exit(0);
-}
-
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.stdin.on('end', () => shutdown('stdin EOF'));
-
-// 一个后台路径的 Promise 拒绝不该让整个服务死掉（那会连带丢掉所有会话的活进程）。
-// 记一行就继续。**故意不接管 uncaughtException**：同步未捕获异常意味着状态不可知，
-// 让它崩掉更干净 —— 会话本体都在磁盘上，重启后会 resume。
-process.on('unhandledRejection', (e) => {
-  log.info(`[dsh-any-agent] 未处理的 Promise 拒绝（已忽略，服务继续）: ${e?.message ?? e}`);
-});

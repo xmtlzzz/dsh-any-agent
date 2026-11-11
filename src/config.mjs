@@ -377,6 +377,17 @@ export const WATCHDOG_AFTER_MS = positiveOrOff(numEnv('DSH_MCP_WATCHDOG_AFTER_MS
 export const STALL_MS = positiveOrOff(numEnv('DSH_MCP_STALL_MS', 10 * 60 * 1000));
 export const TURN_MAX_MS = positiveOrOff(numEnv('DSH_MCP_TURN_MAX_MS', 2 * 60 * 60 * 1000));
 
+/**
+ * 常驻进程模式（见 daemon.mjs），默认关。
+ *
+ *   DSH_MCP_DAEMON=1          客户端拉起的进程只做转发；会话、DSH 进程和正在跑的回合都在一个
+ *                             detached 的常驻进程里，客户端关掉、重连、崩溃都不会打断回合。
+ *   DSH_MCP_DAEMON_IDLE_MS    没有客户端连着、也没有回合在跑多久后常驻进程自己退出（默认 10 分钟；
+ *                             `<= 0` = 不自动退出）。
+ */
+export const DAEMON_MODE = ['1', 'true', 'on', 'yes'].includes(String(process.env.DSH_MCP_DAEMON ?? '').trim().toLowerCase());
+export const DAEMON_IDLE_MS = positiveOrOff(numEnv('DSH_MCP_DAEMON_IDLE_MS', 10 * 60 * 1000));
+
 /** 普通 ACP 请求的超时（毫秒）。 */
 export const REQUEST_TIMEOUT_MS = numEnv('DSH_MCP_REQUEST_TIMEOUT_MS', 60_000);
 

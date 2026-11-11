@@ -27,7 +27,7 @@ An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Han
 You already have a coding agent in your editor. What you do **not** have is one that can:
 
 - **hand a multi-hour job to another agent and walk away** — then collect the result when it's done;
-- **keep the job alive across restarts** of your editor, your session, your machine's idle reap;
+- **keep the job alive across restarts** of your editor, your session, your machine's idle reap (the conversation always survives; for a turn that is still running to survive the client closing or reconnecting, turn on resident process mode, `DSH_MCP_DAEMON=1`);
 - **cut in mid-flight** when it's going the wrong way, without destroying the work;
 - **run several of them at once** and switch between them;
 - **see what it is doing** without asking the agent — which tools it called, which approvals went through, how many tokens it spent.
