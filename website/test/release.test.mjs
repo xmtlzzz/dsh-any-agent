@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeVersion, fetchLatestVersion, VERSION_SOURCES, formatStars, fetchGitHubStars, GITHUB_REPO_URL } from '../src/release.mjs';
+import { normalizeVersion, fetchLatestVersion, VERSION_SOURCES, formatStars, fetchGitHubStars, GITHUB_REPO_URL, SITE_STARS_URL } from '../src/release.mjs';
 
 test('normalizeVersion accepts v-prefixed semver and prereleases, rejects junk', () => {
   assert.equal(normalizeVersion('0.3.3'), '0.3.3');
@@ -86,6 +86,31 @@ test('fetchGitHubStars queries GitHub API and updates cache when cache missing o
   assert.ok(store.has('dsh_gh_stars_cache'));
   const cached = JSON.parse(store.get('dsh_gh_stars_cache'));
   assert.equal(cached.stars, 88);
+});
+
+test('fetchGitHubStars asks the site\'s own /api/stars first and skips GitHub when it answers', async () => {
+  const store = new Map();
+  const mockStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(url);
+    return { ok: true, json: async () => ({ stars: 31 }) };
+  };
+  const res = await fetchGitHubStars(fetchImpl, mockStorage);
+  assert.deepEqual(res, { stars: 31, source: 'site' });
+  assert.deepEqual(urls, [SITE_STARS_URL]);
+  assert.equal(JSON.parse(store.get('dsh_gh_stars_cache')).stars, 31);
+});
+
+test('fetchGitHubStars falls back to the GitHub API when /api/stars is missing (static host, local preview)', async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(url);
+    return url === SITE_STARS_URL ? { ok: false, status: 404 } : { ok: true, json: async () => ({ stargazers_count: 9 }) };
+  };
+  const res = await fetchGitHubStars(fetchImpl, null);
+  assert.deepEqual(res, { stars: 9, source: 'network' });
+  assert.deepEqual(urls, [SITE_STARS_URL, GITHUB_REPO_URL]);
 });
 
 test('fetchGitHubStars returns unavailable when network fails', async () => {

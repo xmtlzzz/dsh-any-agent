@@ -180,7 +180,7 @@ dsh-any-agent dashboard --open
 
 | 文档 | 内容 |
 |---|---|
-| [安装与配置](docs/zh/install.md) | 前置要求、profile 引导、9 个客户端注册 |
+| [安装与配置](docs/zh/install.md) | 前置要求、profile 引导、10 个客户端注册 |
 | [5 分钟案例](docs/zh/demo.md) | 一条能跑通的端到端路径：派活、插话、自己复核 |
 | [工具与用法](docs/zh/usage.md) | 派活/验收、哨兵、多会话、实时查看、思考内容 |
 | [使用注意事项](docs/zh/caveats.md) | 踩坑合集：模型路由、成本、并发与写锁、权限、隐私、故障速查 |

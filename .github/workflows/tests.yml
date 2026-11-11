@@ -49,7 +49,7 @@ name: tests
 #     lint (selftest)   scripts/lint.mjs regression   22 checks
 #     package job       pack -> install -> --version
 #     docker job        docker build -> --version -> MCP initialize
-#     website job       build + 38 site/a11y tests + bilingual pages
+#     website job       build + 45 site/a11y/worker tests + bilingual pages
 #
 #     These load modules and touch the filesystem: no DSH, no model, no
 #     credentials.
