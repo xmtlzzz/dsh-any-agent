@@ -11,13 +11,15 @@
  *   6. Hub.create(isolation='worktree') 用 worktree 当会话目录，并把它记进注册表。
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-any-agent-worktree-')));
+// .native：把 GitHub Windows runner 临时目录里的 8.3 短名（RUNNER~1）展开成长路径，这样测试里
+// 拼出来的仓库路径和 git 给出的写法一致，能直接比较。别名路径本身由 [2] 里的 junction 用例专门覆盖。
+const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-any-agent-worktree-')));
 const wtRoot = join(root, 'worktrees');
 process.env.DSH_MCP_STATE = join(root, 'state', 'conversations.json');
 process.env.DSH_MCP_WORKTREES_DIR = wtRoot;
@@ -78,8 +80,15 @@ try {
   const wtSub = await createWorktree(join(repo, 'pkg', 'sub'), { root: wtRoot });
   await check('子目录映射到 worktree 里的同一子目录', () => wtSub.cwd === join(wtSub.path, 'pkg', 'sub'), wtSub.cwd);
   await check('★ 主检出有未提交改动时 main_dirty=true', () => wtSub.main_dirty === true);
-  await check('未提交改动不会带进 worktree', () => readFileSync(join(wtSub.path, 'README.md'), 'utf8') === 'hello\n');
+  // 不比行尾：GitHub 的 Windows runner 上 git 默认 core.autocrlf=true，检出的是 CRLF。
+  await check('未提交改动不会带进 worktree', () => readFileSync(join(wtSub.path, 'README.md'), 'utf8').replace(/\r\n/g, '\n') === 'hello\n');
   git(repo, 'checkout', '--', 'README.md');
+  // 同一个目录的另一种写法（junction / 符号链接；GitHub Windows runner 的 8.3 短名 RUNNER~1 同理）：
+  // git 给的仓库根是解析后的路径，子目录不能靠拿它和 cwd 做字符串比较来算。
+  const alias = join(root, 'repo-a-alias');
+  symlinkSync(repo, alias, 'junction');
+  const wtAlias = await createWorktree(join(alias, 'pkg', 'sub'), { root: wtRoot });
+  await check('★ cwd 是别名路径（junction / 符号链接）：仍映射到 worktree 里的同一子目录', () => wtAlias.cwd === join(wtAlias.path, 'pkg', 'sub'), wtAlias.cwd);
   mkdirSync(join(repo, 'untracked-dir'));
   const wtUntracked = await createWorktree(join(repo, 'untracked-dir'), { root: wtRoot });
   await check('子目录在主检出里未跟踪（worktree 里没有）→ 退回 worktree 根', () => wtUntracked.cwd === wtUntracked.path);

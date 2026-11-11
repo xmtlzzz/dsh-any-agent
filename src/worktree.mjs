@@ -21,7 +21,7 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { STATE_FILE } from './config.mjs';
 import { L } from './lang.mjs';
@@ -83,8 +83,12 @@ export async function createWorktree(cwd, { root = WORKTREES_DIR } = {}) {
   const path = join(root, `${safeName(basename(repo))}-${slug}`);
   await git(repo, ['worktree', 'add', '-b', branch, path, base], root);
   const mainDirty = (await git(repo, ['status', '--porcelain'], root).catch(() => '')) !== '';
-  const rel = relative(repo, resolve(cwd));
-  const sub = rel && !rel.startsWith('..') && !isAbsolute(rel) ? join(path, rel) : path;
+  // cwd 在仓库里的子目录由 git 自己给（`pkg/sub/`，根目录为空）。不能拿 cwd 和 show-toplevel 做路径
+  // 比较：git 给的是解析后的路径，cwd 可能是 junction / 符号链接 / 8.3 短名（GitHub 的 Windows runner
+  // 上临时目录就是 RUNNER~1），两边写法不同会被当成"不在仓库里"。
+  const prefix = await git(cwd, ['rev-parse', '--show-prefix'], root).catch(() => '');
+  const parts = prefix.split('/').filter(Boolean);
+  const sub = parts.length ? join(path, ...parts) : path;
   return {
     path,
     branch,
