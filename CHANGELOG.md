@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Turn watchdog.** A turn that has run 15 minutes and then makes no progress
+  for 10 minutes (no answer, thinking, tool-status or usage update from DSH) is
+  cancelled with `session/cancel`, the same path as `dsh_interrupt`: output so
+  far is kept, files are not rolled back, and the turn ends normally with its
+  sentinel. While a tool is running the allowance is 3× (a long `npm install`
+  or test run sends no updates); while an approval waits on the caller it is
+  not judged at all. A separate 2-hour cap (`DSH_MCP_TURN_MAX_MS`) ignores
+  progress, so a turn looping while it keeps producing output still stops. The
+  result, the sentinel and the review ticket carry `watchdog: {reason, …}`;
+  `dsh_status` shows the time since the last progress. Tune with
+  `DSH_MCP_WATCHDOG_AFTER_MS` / `DSH_MCP_STALL_MS` / `DSH_MCP_TURN_MAX_MS`;
+  `0` turns each off.
+- **`dsh_doctor`'s report is available in English.** It follows `DSH_MCP_LANG`
+  / the system language like every other tool result. The takeover report and
+  the "DSH not found" error text are still Chinese only.
+- **CI builds the `Dockerfile`** and checks that the image answers `--version`
+  and an MCP `initialize` over stdio.
+- **Optional release gate.** With the repository variable `MODEL_SUITE_RUNNER`
+  set to a self-hosted runner that has DSH and credentials, a tag push runs the
+  full model-backed suite on the tagged commit before npm publish. Unset, the
+  release workflow behaves as before.
+
+### Changed
+
+- **`conversation.mjs` is split up.** The terminal-result builders, the
+  `dsh_read` output buffer, the run records and busy queue, and the approval
+  rules moved to `run-result.mjs`, `out-buffer.mjs`, `run-ledger.mjs` and
+  `approval-policy.mjs`. No behavior change.
+
 ### Fixed
 
 - **Reading process memory no longer stalls the server.** `rss_mb` came from a
@@ -23,17 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verified range (0.1.7 – 0.2.2), whose last full run was on 0.5.x. Both stay
   `ok`; only the wording changed, to match the compatibility table.
 
-### Added
-
-- **`dsh_doctor`'s report is available in English.** It follows `DSH_MCP_LANG`
-  / the system language like every other tool result. The takeover report and
-  the "DSH not found" error text are still Chinese only.
-- **CI builds the `Dockerfile`** and checks that the image answers `--version`
-  and an MCP `initialize` over stdio.
-- **Optional release gate.** With the repository variable `MODEL_SUITE_RUNNER`
-  set to a self-hosted runner that has DSH and credentials, a tag push runs the
-  full model-backed suite on the tagged commit before npm publish. Unset, the
-  release workflow behaves as before.
 ## [0.6.9] — 2026-11-10
 
 Tool results now come back in English as well, `dsh-any-agent-setup` can

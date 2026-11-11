@@ -360,6 +360,23 @@ export function toPosixPath(p) {
  */
 export const PROMPT_TIMEOUT_MS = numEnv('DSH_MCP_PROMPT_TIMEOUT_MS', 0);
 
+/**
+ * 回合看门狗（判定规则见 watchdog.mjs）。三个值都是毫秒，`<= 0` 或非法值 = 关掉那一项。
+ *
+ *   DSH_MCP_WATCHDOG_AFTER_MS  回合开始多久后才开始判"卡住"（默认 15 分钟）。DSH 的回合本来就常跑
+ *                              十几分钟，这之前一律不打扰。
+ *   DSH_MCP_STALL_MS           多久没有任何进展算卡住（默认 10 分钟；有工具在执行时放大 3 倍）。
+ *   DSH_MCP_TURN_MAX_MS        单个回合的总时长上限（默认 2 小时），不看进展 —— 陷在循环里的回合
+ *                              一直有"进展"，只有它拦得住。
+ *
+ * 触发时发 session/cancel（与 dsh_interrupt 同一条路径：已有输出保留，文件改动不回滚），
+ * 回合照常收尾、写哨兵，结果里带 `watchdog: {reason, …}`。
+ */
+const positiveOrOff = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
+export const WATCHDOG_AFTER_MS = positiveOrOff(numEnv('DSH_MCP_WATCHDOG_AFTER_MS', 15 * 60 * 1000));
+export const STALL_MS = positiveOrOff(numEnv('DSH_MCP_STALL_MS', 10 * 60 * 1000));
+export const TURN_MAX_MS = positiveOrOff(numEnv('DSH_MCP_TURN_MAX_MS', 2 * 60 * 60 * 1000));
+
 /** 普通 ACP 请求的超时（毫秒）。 */
 export const REQUEST_TIMEOUT_MS = numEnv('DSH_MCP_REQUEST_TIMEOUT_MS', 60_000);
 

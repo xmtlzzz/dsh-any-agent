@@ -37,6 +37,9 @@
 | `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | 是否允许 `permission=danger-full-access`。默认拒绝：该档把整机写权限交给调用方 |
 | `DSH_MCP_REASONING_EFFORT` | `max` | 默认思考深度 |
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0`（不设超时） | **仅 `wait=true` 时**的等待上限；到期只转后台，不取消回合 |
+| `DSH_MCP_WATCHDOG_AFTER_MS` | `900000`（15 分钟） | 回合开始多久后看门狗才开始判"卡住"。`0` = 关掉卡住判定 |
+| `DSH_MCP_STALL_MS` | `600000`（10 分钟） | 多久没有任何进展（DSH 推来的正文、思考、工具状态、用量更新）算卡住；有工具在执行时放大 3 倍，等调用方裁决审批时不判。卡住就发 `session/cancel`（同 `dsh_interrupt`），结果带 `watchdog` |
+| `DSH_MCP_TURN_MAX_MS` | `7200000`（2 小时） | 单个回合的总时长上限，**不看进展**（拦得住陷在循环里、一直在输出的回合）。`0` = 不设上限 |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |
 | `DSH_MCP_GIT_STATUS` | 开 | `0` 关闭每回合的 `git status` 摘要。分析不可信仓库时建议关掉（git 可能触发仓库配置的 fsmonitor/filter，且发生在 DSH 沙箱之外） |
 | `DSH_MCP_BACKUP_KEEP` | `20` | 每个客户端配置最多保留多少份 `.bak-dsh-*`（尽力轮转） |

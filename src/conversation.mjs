@@ -23,8 +23,12 @@ import {
   REVIEW_MODES,
   SHARED_PROCESS,
   DSH_HOME,
+  STALL_MS,
+  TURN_MAX_MS,
+  WATCHDOG_AFTER_MS,
   defaultApprovalPolicy,
 } from './config.mjs';
+import { watchdogTickMs, watchdogVerdict } from './watchdog.mjs';
 import {
   REVIEW_VERDICTS,
   buildReviewTicket,
@@ -108,6 +112,8 @@ export class Conversation {
     this.turnOutChars = 0;
     this.currentTurn = 0;
     this.turnStartedAt = 0;
+    /** 本回合最近一次收到 DSH 的 session/update 的时刻（看门狗据此判断"还在推进吗"）。 */
+    this.lastProgressAt = 0;
     this.currentTool = null;
 
     /** 回合记录与忙时队列（仅内存；重启后以哨兵为准），见 run-ledger.mjs。 */
@@ -283,6 +289,8 @@ export class Conversation {
       current_tool: this.currentTool,
       out_chars: this.turnOutChars,
       running_ms: this.busy && this.turnStartedAt ? now() - this.turnStartedAt : 0,
+      /** 距 DSH 上一次推送更新过了多久（只在跑回合时有值）；看门狗用同一个数判断卡住。 */
+      since_progress_ms: this.busy && this.lastProgressAt ? now() - this.lastProgressAt : null,
       turns: this.turnCount,
       created_at: new Date(this.createdAt).toISOString(),
       last_used_at: new Date(this.lastUsedAt).toISOString(),
@@ -629,6 +637,8 @@ export class Conversation {
     if (!c) return;
     const u = params?.update;
     if (!u) return;
+    // 任何一种更新（正文、思考、工具状态、用量）都算"还在推进"。
+    this.lastProgressAt = now();
     switch (u.sessionUpdate) {
       case 'agent_message_chunk': {
         const chunk = u.content?.text ?? '';
@@ -993,7 +1003,9 @@ export class Conversation {
     };
     this.collector = c;
     const t0 = now();
+    this.lastProgressAt = t0;
     let settled = false;
+    let watchdogTimer = null;
 
     /** 把"调用方审核单"挂到回合结果上（见 run-result.mjs）。 */
     const withReview = (result) =>
@@ -1013,6 +1025,7 @@ export class Conversation {
     const finalize = (stopReason, failure) => {
       if (finalizePromise) return finalizePromise;
       settled = true;
+      if (watchdogTimer) clearInterval(watchdogTimer);
       finalizePromise = (async () => {
         // ★ 先启动 after 快照：调用 gitStatus 时子进程立刻 spawn，但**不 await**；
         //   这样 snapshot 的时间点仍贴近回合结束，而 busy 释放/唤醒不必等 git。
@@ -1048,6 +1061,7 @@ export class Conversation {
               tool_count: c.tools.size,
               auto_approvals: c.autoApprovalTotal,
               auto_escalations: c.autoEscalationTotal,
+              watchdog: c.watchdog?.reason,
             },
             { error: livePreview(failure, 300) },
           );
@@ -1085,6 +1099,7 @@ export class Conversation {
             auto_approvals_total: c.autoApprovalTotal,
             auto_escalations_total: c.autoEscalationTotal,
             auto_approvals: c.autoApprovals,
+            ...(c.watchdog ? { watchdog: c.watchdog } : {}),
             workspace_changed: !sameWorkspaceSnapshot(before, after),
             diff_stat: after,
             elapsed_ms: now() - t0,
@@ -1164,6 +1179,8 @@ export class Conversation {
 
     // 关键：第三个参数传 0 = **不设超时**。回合只能由它自己结束，或由 session/cancel 结束。
     const acp = proc.request('session/prompt', { sessionId: this.id, prompt: [{ type: 'text', text }] }, 0);
+    // 看门狗只会发 session/cancel（同 dsh_interrupt），回合仍由 DSH 自己结束、照常走 finalize。
+    watchdogTimer = this.#startWatchdog(runRecord, c, t0, proc);
     // 这个 Promise 在 finalize **真正完成**（含 workspace_changed、审核单、哨兵）后才 settle。
     // 等待方必须等它，而不是只等 acp —— 否则会拿到还没填完的 runRecord.result。
     const finished = acp
@@ -1199,6 +1216,56 @@ export class Conversation {
     // 超时发生在 finalize 完成之前（包括 git 快照还在跑）：给收据，不返回半成品结果。
     if (timedOut) return receipt(timeoutMs);
     return runRecord.result;
+  }
+
+  /**
+   * 回合看门狗：定期看这个回合还在不在推进（判定见 watchdog.mjs），卡住或超过总时长上限
+   * 就发 session/cancel。只发取消、不杀进程：共享进程里还有别的会话，回合也要由 DSH 自己
+   * 结束才会走正常的收尾（结果、审核单、哨兵一个不少）。
+   *
+   * 触发后每个巡检周期补发一次 cancel，直到回合真的结束（DSH 偶尔会吞掉第一次）。
+   * @returns 定时器（finalize 里清掉）；三项阈值都关掉时返回 null。
+   */
+  #startWatchdog(runRecord, c, t0, proc) {
+    if (!(WATCHDOG_AFTER_MS > 0 && STALL_MS > 0) && !(TURN_MAX_MS > 0)) return null;
+    const timer = setInterval(() => {
+      if (this.currentRun !== runRecord) return clearInterval(timer);
+      if (c.watchdog) {
+        proc.notify?.('session/cancel', { sessionId: this.id });
+        return;
+      }
+      const t = now();
+      const verdict = watchdogVerdict({
+        elapsedMs: t - t0,
+        sinceProgressMs: t - this.lastProgressAt,
+        toolRunning: !!this.currentTool,
+        waitingOnCaller: this.pendingApprovals.size > 0,
+        afterMs: WATCHDOG_AFTER_MS,
+        stallMs: STALL_MS,
+        maxMs: TURN_MAX_MS,
+      });
+      if (!verdict) return;
+      c.watchdog = {
+        ...verdict,
+        elapsed_ms: t - t0,
+        since_progress_ms: t - this.lastProgressAt,
+        current_tool: this.currentTool ?? null,
+        at: new Date(t).toISOString(),
+      };
+      this.#hub.log.info(
+        `[conv ${this.id}] 看门狗中断回合 ${runRecord.run_id}：${verdict.reason}` +
+          `（已跑 ${Math.round((t - t0) / 1000)}s，距上次进展 ${Math.round((t - this.lastProgressAt) / 1000)}s）`,
+      );
+      this.#live('watchdog', {
+        reason: verdict.reason,
+        elapsed_ms: c.watchdog.elapsed_ms,
+        since_progress_ms: c.watchdog.since_progress_ms,
+        tool: this.currentTool ?? null,
+      });
+      proc.notify?.('session/cancel', { sessionId: this.id });
+    }, watchdogTickMs({ stallMs: STALL_MS, maxMs: TURN_MAX_MS }));
+    timer.unref?.();
+    return timer;
   }
 
   /** 中断当前回合（ACP 原生，走的就是用户手动停止那条路径）。 */

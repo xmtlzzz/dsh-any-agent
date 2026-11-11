@@ -686,6 +686,10 @@ export function createHandlers(hub, opts = {}) {
         bits.push(L(`已跑=${sec}s`, `running for=${sec}s`));
         if (snap.current_tool) bits.push(L(`当前工具=${snap.current_tool}`, `current tool=${snap.current_tool}`));
         bits.push(L(`本轮输出=${snap.out_chars ?? 0}字`, `output this turn=${snap.out_chars ?? 0} chars`));
+        if (snap.since_progress_ms != null) {
+          const q = (snap.since_progress_ms / 1000).toFixed(0);
+          bits.push(L(`距上次进展=${q}s`, `since last progress=${q}s`));
+        }
       }
       if (run) bits.push(L(`最近回合=${run.run_id}(${run.status})`, `latest run=${run.run_id}(${run.status})`));
       if (review) {
@@ -738,6 +742,7 @@ export function createHandlers(hub, opts = {}) {
           current_tool: snap.current_tool,
           out_chars: snap.out_chars,
           running_ms: snap.running_ms,
+          since_progress_ms: snap.since_progress_ms,
           pending_approvals: snap.pending_approvals,
           pending_approval_details: snap.pending_approval_details,
           turns: snap.turns,

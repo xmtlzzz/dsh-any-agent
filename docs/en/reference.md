@@ -37,6 +37,9 @@
 | `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | Whether `permission=danger-full-access` is allowed. Denied by default: it hands the caller whole-machine write access |
 | `DSH_MCP_REASONING_EFFORT` | `max` | Default reasoning effort |
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0` (no timeout) | Wait bound for **`wait=true` only**; on expiry the turn merely moves to the background |
+| `DSH_MCP_WATCHDOG_AFTER_MS` | `900000` (15 min) | How long into a turn the watchdog starts judging whether it is stuck. `0` = no stall check |
+| `DSH_MCP_STALL_MS` | `600000` (10 min) | How long with no progress at all (answer, thinking, tool status or usage updates from DSH) counts as stuck; 3× while a tool is running, never while waiting on the caller's approval decision. A stuck turn gets `session/cancel` (same as `dsh_interrupt`) and its result carries `watchdog` |
+| `DSH_MCP_TURN_MAX_MS` | `7200000` (2 h) | Total duration cap for one turn, **regardless of progress** (catches a turn looping while it keeps producing output). `0` = no cap |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |
 | `DSH_MCP_GIT_STATUS` | on | `0` disables the per-turn `git status` summary. Useful for untrusted repos (git can run repo-configured fsmonitor/filters outside DSH's sandbox) |
 | `DSH_MCP_BACKUP_KEEP` | `20` | How many `.bak-dsh-*` copies to keep per client config (rotation is best-effort) |

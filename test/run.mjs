@@ -112,6 +112,9 @@ const OFFLINE = [
   // 未跟踪目录内部），且 gitStatus 异步执行不阻塞共享 MCP 事件循环。
   // 纯文件系统 + 临时 git 仓库，不花 token。
   'workspace-snapshot.mjs',
+  // 回合看门狗：卡住才打断（发 cancel）、一直有进展就不打扰、有工具在跑时放宽、
+  // 等审批时不判卡住。假 ACP 进程 + 毫秒级阈值，不花 token。
+  'watchdog.mjs',
   // 沙箱守卫先跑：任何把真实 HOME 当沙箱的写法必须立刻失败。
   // 2026-10-29 的事故就是少了这一条，一段临时脚本把 ~ 当沙箱递归删了。
   'sandbox-guard.mjs',

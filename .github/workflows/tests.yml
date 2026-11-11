@@ -29,6 +29,7 @@ name: tests
 #     permission-adopt  no silent privilege escalation 22 checks
 #     state-safety      state/sentinel/lock storage   26 checks
 #     workspace-snapshot workspace_changed full fingerprint  27 checks
+#     watchdog          turn watchdog (stall / max duration)  28 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     test-counts       report parser + docs sync     92 checks
@@ -235,6 +236,11 @@ jobs:
       - name: workspace-snapshot (full fingerprint, async gitStatus)
         env: { DSH_MCP_LOG: silent }
         run: node test/workspace-snapshot.mjs
+
+      # 回合看门狗：卡住才打断、有进展不打扰、工具在跑时放宽、等审批时不判卡住。
+      - name: watchdog (stalled / long turns are cancelled, active ones are not)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/watchdog.mjs
 
       # Guards the sandbox itself, not the writer. A test suite that points its
       # "sandbox" at the real user profile deletes real data while reporting

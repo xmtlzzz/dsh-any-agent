@@ -100,6 +100,20 @@ export function buildReviewChecklist({ result = {}, permission = null } = {}) {
       }); work out the impact and decide whether to dispatch again.`,
     ));
   }
+  if (result.watchdog && typeof result.watchdog === 'object') {
+    const w = result.watchdog;
+    const min = (ms) => Math.round((Number(ms) || 0) / 60000);
+    items.push(L(
+      (w.reason === 'max_duration'
+        ? `本轮跑满总时长上限（${min(w.limit_ms)} 分钟），被看门狗中断`
+        : `本轮 ${min(w.since_progress_ms)} 分钟没有任何进展${w.current_tool ? `（卡在工具 ${w.current_tool}）` : ''}，被看门狗中断`) +
+        '：正文可能不完整，已改动的文件不会回滚。先看清做到了哪一步，再决定是接着派活还是重来。',
+      (w.reason === 'max_duration'
+        ? `This turn hit the total duration cap (${min(w.limit_ms)} min) and was interrupted by the watchdog`
+        : `This turn made no progress for ${min(w.since_progress_ms)} min${w.current_tool ? ` (stuck in tool ${w.current_tool})` : ''} and was interrupted by the watchdog`) +
+        ': the answer may be incomplete and changed files are not rolled back. Find out how far it got before deciding whether to continue or start over.',
+    ));
+  }
   const autoTotal = Number(result.auto_approvals_total) || 0;
   if (autoTotal > 0) {
     const esc = Number(result.auto_escalations_total) || 0;
