@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Fewer documents in the repository root.** The usage notes moved to
+  `docs/zh/caveats.md` / `docs/en/caveats.md`, the archived design draft to
+  `docs/history/design-v0.2.md` (not shipped), and `CONTRIBUTING.md` /
+  `SECURITY.md` to `.github/` (GitHub still shows them; the package no longer
+  ships `SECURITY.md`). The new-machine guide `USAGE-MIGRATION.md` / `.en.md`
+  duplicated the setup doc and described an offline bundle that no longer
+  exists, so it is gone: its remaining points (problems right after setup, a
+  full uninstall) are now in `docs/*/install.md`. Links in the READMEs, the
+  website, the issue forms and the docs point to the new places.
+
 ## [0.7.0] — 2026-11-11
 
 Running turns hold up better. An optional resident process keeps a turn

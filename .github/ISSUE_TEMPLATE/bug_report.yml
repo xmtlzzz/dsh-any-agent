@@ -8,8 +8,8 @@ body:
         **Security problems: do not file them here** — use [Security → Report a vulnerability](https://github.com/xmtlzzz/dsh-any-agent/security/advisories/new) instead.
         安全问题请不要在这里提，改用上面的私下报告链接。
 
-        Please check the [usage notes](https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.en.md) and [known limitations](https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/limits.md) first — many "bugs" (write lock taken by the GUI, model routing in ACP) are documented there.
-        提交前先看看[使用注意事项](https://github.com/xmtlzzz/dsh-any-agent/blob/main/USAGE-NOTES.md)和[已知限制](https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/limits.md)。
+        Please check the [usage notes](https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/caveats.md) and [known limitations](https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/limits.md) first — many "bugs" (write lock taken by the GUI, model routing in ACP) are documented there.
+        提交前先看看[使用注意事项](https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/caveats.md)和[已知限制](https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/limits.md)。
   - type: input
     id: version
     attributes:

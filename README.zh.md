@@ -12,7 +12,7 @@
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
 [![tests](https://img.shields.io/github/actions/workflow/status/xmtlzzz/dsh-any-agent/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/xmtlzzz/dsh-any-agent/actions/workflows/tests.yml)
 
-[官网](https://dsh-any-agent.xmtlz.dev/) · [快速开始](#快速开始) · [主要优势](#-主要优势) · [工具](#-工具) · [实时查看](#-实时查看派出去的活在干什么) · [使用注意事项](USAGE-NOTES.md) · [更新日志](CHANGELOG.md)
+[官网](https://dsh-any-agent.xmtlz.dev/) · [快速开始](#快速开始) · [主要优势](#-主要优势) · [工具](#-工具) · [实时查看](#-实时查看派出去的活在干什么) · [使用注意事项](docs/zh/caveats.md) · [更新日志](CHANGELOG.md)
 
 </div>
 
@@ -99,7 +99,7 @@ dsh-any-agent-setup --yes
 [![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=dsh-any-agent&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImRzaC1hbnktYWdlbnRAbGF0ZXN0Il19)
 [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_MCP_server-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=dsh-any-agent&config=%7B%22name%22%3A%22dsh-any-agent%22%2C%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22dsh-any-agent%40latest%22%5D%7D)
 
-> **第一次派活前：** 先读[使用注意事项](USAGE-NOTES.md)，尤其是模型配置与外部 MCP 的权限边界。**外部 MCP 工具的副作用不受 DSH 沙箱约束。** 新机器部署可按[迁移指引](USAGE-MIGRATION.md)逐步操作。
+> **第一次派活前：** 先读[使用注意事项](docs/zh/caveats.md)，尤其是模型配置与外部 MCP 的权限边界。**外部 MCP 工具的副作用不受 DSH 沙箱约束。** 新机器部署按[安装与配置](docs/zh/install.md)逐步操作。
 
 > **权限：本服务只是派发层，权限跟着 DSH 和你的配置走。** 默认是 `workspace-write`（写入限制在工作区，越界请求自动放行，结果里会列出放行了哪些）。个人在自己机器上用，大多直接开 full access：`dsh-any-agent-setup --yes --permission danger-full-access`，此时 DSH 不再发审批、全部放行。**谁能调用这些工具，谁就能在你机器上执行命令**（包括被提示注入的调用方 agent）；处理不可信内容请用 `read-only`。详见[权限与隐私](docs/zh/security.md)。
 
@@ -171,7 +171,7 @@ dsh-any-agent dashboard --open
 - **`watch`**：终端里原地刷新的调用链（同 `top`，不刷屏）。`watch <会话id前缀>` 只看一个会话，`--once` 打印一次就退出。
 - **`dashboard`**：本地只读网页，`--open` 直接用默认浏览器打开。左栏按客户端分组列出会话；中间是回合时间线，每次工具调用带一根时间条，审批与提权高亮；右栏是概览、工具分布、涉及文件、审批，以及 **Token 消耗**（输入 / 输出 / 缓存命中、上下文窗口、每回合用量）。
 - **中文 / English**：界面默认跟随系统语言，`--lang zh|en` 可指定；网页右上角也能随时切换。
-- **不打扰正在跑的活**：两者都是独立进程，只读事件文件，不碰写锁、不连 DSH。想看进度就用它们，**别在 DSH GUI 里点开 MCP 驱动的会话**（那会抢走写锁，见[使用注意事项 3.10](USAGE-NOTES.md)）。
+- **不打扰正在跑的活**：两者都是独立进程，只读事件文件，不碰写锁、不连 DSH。想看进度就用它们，**别在 DSH GUI 里点开 MCP 驱动的会话**（那会抢走写锁，见[使用注意事项 3.10](docs/zh/caveats.md)）。
 - **安全与隐私**：dashboard 只监听 `127.0.0.1`，地址带一次性 token 并校验 Host 头，没有任何能改变状态的按钮。事件里的命令、路径、prompt 预览都先脱敏；**思考内容任何级别都不写**。`DSH_MCP_LIVE=meta` 只记工具名与状态，`off` 完全关闭。
 
 > 详细说明见 [工具与用法 · 旁路查看](docs/zh/usage.md)，事件格式与设计取舍见 [实时查看设计](docs/zh/live-view-design.md)。
@@ -183,6 +183,7 @@ dsh-any-agent dashboard --open
 | [安装与配置](docs/zh/install.md) | 前置要求、profile 引导、9 个客户端注册 |
 | [5 分钟案例](docs/zh/demo.md) | 一条能跑通的端到端路径：派活、插话、自己复核 |
 | [工具与用法](docs/zh/usage.md) | 派活/验收、哨兵、多会话、实时查看、思考内容 |
+| [使用注意事项](docs/zh/caveats.md) | 踩坑合集：模型路由、成本、并发与写锁、权限、隐私、故障速查 |
 | [实时查看设计](docs/zh/live-view-design.md) | 事件流格式、`watch` / `dashboard`、token 来源、隐私取舍 |
 | [团队模式](docs/zh/team.md) | 默认行为、关闭步骤（各客户端）、验证与回退 |
 | [权限与隐私](docs/zh/security.md) | 权限档、审批、GUI 可见性、日志 |
@@ -215,7 +216,7 @@ dsh-any-agent dashboard --open
 
 ## 🙏 致谢
 
-dsh-any-agent 基于 [Moer2831/Deepseek-DSH-MCP](https://github.com/Moer2831/Deepseek-DSH-MCP)（MIT）发展而来，本服务在那里叫 `dsh-mcp`。ACP 客户端、会话中枢、写锁处理、哨兵文件、`DESIGN.md` 以及最初的测试套件都来自该项目；客户端安装与恢复、团队模式、实时调用链视图、调用方审核和发布流程是在这里新增的。原项目的版权声明保留在 [LICENSE](LICENSE) 中。
+dsh-any-agent 基于 [Moer2831/Deepseek-DSH-MCP](https://github.com/Moer2831/Deepseek-DSH-MCP)（MIT）发展而来，本服务在那里叫 `dsh-mcp`。ACP 客户端、会话中枢、写锁处理、哨兵文件、[最初的设计稿](docs/history/design-v0.2.md)以及最初的测试套件都来自该项目；客户端安装与恢复、团队模式、实时调用链视图、调用方审核和发布流程是在这里新增的。原项目的版权声明保留在 [LICENSE](LICENSE) 中。
 
 ## Star History
 

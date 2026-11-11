@@ -11,7 +11,7 @@ Thanks for helping. This project is small and opinionated; reading this first sa
 - **Zero runtime dependencies.** `package.json` has no `dependencies`, and `test/package-check.mjs` fails if one appears. Use Node built-ins. (`website/` has none either; `video/` has its own and is not shipped.) · 运行时零依赖，有测试守着。
 - **Privacy red line.** Reasoning text is never written to this server's own files (sentinels, reviews, live events, registry, logs), and anything persisted that may hold commands, paths or prompts goes through `sanitizeApprovalContext` first. · 思考内容不落盘；落盘的命令/路径/prompt 先脱敏。
 - **Never make a run fail for a side feature.** Audit, live events and similar writes swallow their own errors. · 旁路功能写失败绝不影响派活。
-- **Both languages.** User-facing docs live in `docs/zh` and `docs/en` (and `README.zh.md` / `README.md`, `USAGE-NOTES.md` / `USAGE-NOTES.en.md`); change both. · 用户文档中英文同步改。
+- **Both languages.** User-facing docs live in `docs/zh` and `docs/en` (and `README.zh.md` / `README.md`); change both. · 用户文档中英文同步改。
 
 ## Setup · 开发环境
 
@@ -55,7 +55,7 @@ Conventional prefixes are used throughout (`feat`, `fix`, `docs`, `test`, `chore
 
 - One topic per PR. Fill in the checklist in the template. · 一个 PR 一件事，按模板勾选。
 - User-visible changes get a line under `## [Unreleased]` in `CHANGELOG.md` — that section becomes the GitHub Release notes. · 用户可见的改动写进 CHANGELOG 的 Unreleased，它会成为 Release 说明。
-- Releases are cut by the maintainer; the process is in [docs/en/release.md](docs/en/release.md) · [docs/zh/release.md](docs/zh/release.md).
+- Releases are cut by the maintainer; the process is in [docs/en/release.md](../docs/en/release.md) · [docs/zh/release.md](../docs/zh/release.md).
 
 ## Where things are · 代码地图
 

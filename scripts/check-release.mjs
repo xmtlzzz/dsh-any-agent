@@ -78,9 +78,9 @@ if (fs.existsSync(path.join(ROOT, 'server.json'))) {
 const docFiles = [
   'README.zh.md',
   'README.md',
-  'USAGE-NOTES.md',
-  'USAGE-NOTES.en.md',
-  ...(fs.existsSync(path.join(ROOT, 'SECURITY.md')) ? ['SECURITY.md'] : []),
+  '.github/SECURITY.md',
+  '.github/CONTRIBUTING.md',
+  'docs/history/design-v0.2.md',
   ...fs.readdirSync(path.join(ROOT, 'docs/zh')).map((f) => `docs/zh/${f}`),
   ...fs.readdirSync(path.join(ROOT, 'docs/en')).map((f) => `docs/en/${f}`),
 ];

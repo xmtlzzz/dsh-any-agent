@@ -37,12 +37,7 @@
     "profile-example/",
     "README.md",
     "README.zh.md",
-    "USAGE-NOTES.en.md",
-    "USAGE-NOTES.md",
-    "USAGE-MIGRATION.md",
-    "USAGE-MIGRATION.en.md",
     "CHANGELOG.md",
-    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {

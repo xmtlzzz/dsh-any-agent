@@ -1,6 +1,6 @@
 # Usage Notes
 
-**English** | [中文](USAGE-NOTES.md)
+> Back to [README](../../README.md) · [中文](../zh/caveats.md)
 
 Practical gotchas and trade-offs you *will* hit when letting Claude / Codex drive DSH through this MCP server. Each item is **symptom → cause → fix**.
 
@@ -8,7 +8,7 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 
 ## 1. Setup
 
-**1.1 The profile must exist first.** Otherwise every turn fails with `no adapter registered for provider "xxx"`. This server ships no provider config; it drives `~/.dsh/profiles/dsh-mcp/`. Create it with `dsh --profile dsh-mcp --from-default-profile acp` and fill in your own provider per [`profile-example/cordis.patch.yml`](profile-example/cordis.patch.yml). On 0.5.0+ the server bootstraps this profile on first start, so the manual command is normally only needed when `DSH_MCP_BOOTSTRAP=0` or the profile is broken.
+**1.1 The profile must exist first.** Otherwise every turn fails with `no adapter registered for provider "xxx"`. This server ships no provider config; it drives `~/.dsh/profiles/dsh-mcp/`. Create it with `dsh --profile dsh-mcp --from-default-profile acp` and fill in your own provider per [`profile-example/cordis.patch.yml`](../../profile-example/cordis.patch.yml). On 0.5.0+ the server bootstraps this profile on first start, so the manual command is normally only needed when `DSH_MCP_BOOTSTRAP=0` or the profile is broken.
 
 **1.2 ★ The most common trap: ACP's model does NOT come from `agent-default-model`.** You configure your provider there, yet turns fail with `no API key for provider route "deepseek-official"`. ACP reads the `dsh-acp` plugin's own `config.provider` / `config.model`, which the `acp` bundle hard-codes. You must override the `acp` row:
 

@@ -187,6 +187,7 @@ DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `
 | 升级包之后更新配置 | `dsh-any-agent-setup --yes`（幂等，只重写有差异的条目） |
 | 从所有客户端移除 | `dsh-any-agent-setup --remove --yes` |
 | 只从某几个移除 | `dsh-any-agent-setup --remove --yes --only codex` |
+| 彻底卸载 | 先 `dsh-any-agent-setup --remove --yes`，再 `npm uninstall -g dsh-any-agent`；`$DSH_HOME/profiles/dsh-mcp/` 可删可留（留着无害）。你的 DSH 凭据和会话历史本服务从不写入，不受影响 |
 | 撤销某次误写 | 把 `.bak-dsh-<时间戳>` 复制回原文件 |
 
 <details>
@@ -276,3 +277,12 @@ dsh-any-agent --version      # 打印版本，不启动任何东西
 dsh-any-agent --help         # 参数、关键环境变量、文档链接
 node test/smoke.mjs          # 不调用 LLM，验证整条管道
 ```
+
+**装完常见问题**
+
+| 现象 | 原因与解法 |
+|---|---|
+| 客户端的工具列表里没有 `dsh_*` | 客户端没拉起服务。看客户端的 MCP 日志，确认 `command` 指向的路径还在（移动过安装目录就重跑 `setup`） |
+| `codex mcp list` 最后一列是 `Unsupported` | 那是 Auth 列（不支持 OAuth），不是错误；Status 列是 `enabled` 就行 |
+| 第一次调用要十几秒 | 要拉起 DSH 进程、建 profile，属正常；之后就快了 |
+| `no adapter registered for provider "…"`、`DSH CLI 入口未找到`、写锁被占 | 见[使用注意事项 · 故障速查](caveats.md#八故障速查) |

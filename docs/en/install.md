@@ -174,6 +174,7 @@ A restore is itself destructive, so it copies the **current** file aside as `.ba
 | Update after upgrading the package | `dsh-any-agent-setup --yes` (idempotent; only differing entries are rewritten) |
 | Unregister from every client | `dsh-any-agent-setup --remove --yes` |
 | Unregister from just some | `dsh-any-agent-setup --remove --yes --only codex` |
+| Uninstall completely | `dsh-any-agent-setup --remove --yes`, then `npm uninstall -g dsh-any-agent`; `$DSH_HOME/profiles/dsh-mcp/` can stay or go (leaving it is harmless). This server never writes your DSH credentials or session history, so they are untouched |
 | Undo one bad write | copy `.bak-dsh-<stamp>` back over the config |
 
 <details>
@@ -259,3 +260,12 @@ dsh-any-agent --version      # prints the version, starts nothing
 dsh-any-agent --help         # flags, key env vars, docs link
 node test/smoke.mjs          # no LLM calls, verifies the whole plumbing
 ```
+
+**Common problems right after setup**
+
+| Symptom | Cause and fix |
+|---|---|
+| No `dsh_*` tools in the client | The client did not start the server. Check the client's MCP log and that the `command` path still exists (re-run `setup` after moving the install directory) |
+| `codex mcp list` shows `Unsupported` in the last column | That is the Auth column (no OAuth), not an error; `enabled` in the Status column is what counts |
+| The first call takes a dozen seconds or so | It starts the DSH process and builds the profile; later calls are fast |
+| `no adapter registered for provider "…"`, `DSH CLI entry not found`, write lock taken | See [Usage notes · Troubleshooting](caveats.md#8-troubleshooting) |
