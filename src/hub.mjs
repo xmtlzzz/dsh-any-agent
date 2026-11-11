@@ -22,6 +22,7 @@ import {
   cpSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   writeFileSync,
   existsSync,
   renameSync,
@@ -32,6 +33,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import {
   ALLOW_FULL_ACCESS,
   APPROVAL_POLICIES,
+  DAEMON_MODE,
   DEFAULT_PERMISSION,
   DEFAULT_REASONING_EFFORT,
   DEFAULT_REVIEW,
@@ -60,13 +62,14 @@ import { L } from './lang.mjs';
 import { AcpProcess } from './acp.mjs';
 import { applySessionConfig } from './acp-session.mjs';
 import { SessionHost } from './host.mjs';
-import { rssMb } from './procstat.mjs';
+import { refreshRssMap, rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { Conversation } from './conversation.mjs';
-import { pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
+import { SENTINEL_SCHEMA, pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
 import { emitLive, livePreview } from './live.mjs';
 import { homeWorkspaceProblem } from './workspace-guard.mjs';
 import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
+import { ISOLATION_MODES, createWorktree, discardWorktree } from './worktree.mjs';
 import {
   META_DIR,
   NOOP_LOG,
@@ -79,9 +82,12 @@ import {
 import {
   LOCKS_DIR,
   heartbeat as lockHeartbeat,
+  isPidAlive,
+  processStartTime,
   removeMarker,
   writeMarker,
 } from './locks.mjs';
+import { attachReview, terminalResult } from './run-result.mjs';
 
 // 外部（测试、bin）一直从 hub.mjs 取这些函数；拆出去之后导入路径保持不变。
 export { Conversation, formatReasoning } from './conversation.mjs';
@@ -90,6 +96,10 @@ export { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
 export { sanitizeResultForSentinel } from './sentinel.mjs';
 
 const now = () => Date.now();
+/** 本进程的启动时刻：回合标记里记下它，下次启动据此识别"PID 被别的进程复用了"。 */
+const PROCESS_STARTED_AT = Math.round(Date.now() - process.uptime() * 1000);
+/** 标记里的启动时刻与实际进程启动时刻相差多少以内算同一个进程。 */
+const OWNER_START_TOLERANCE_MS = 2 * 60 * 1000;
 
 // ── 注册表 ────────────────────────────────────────────────────────
 
@@ -234,6 +244,7 @@ export class Hub {
     try {
       mkdirSync(dirname(file), { recursive: true });
       const payload = {
+        schema: SENTINEL_SCHEMA,
         conversation_id: conversationId,
         run_id: run.run_id,
         client_run_id: run.client_run_id ?? null,
@@ -245,6 +256,10 @@ export class Hub {
       const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
       writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
       renameSync(tmp, file);
+      // 哨兵落地了，"回合进行中"的标记就没用了（删不掉也无妨：恢复时看到哨兵已在会直接清掉它）。
+      try {
+        rmSync(this.runMarkerPath(conversationId, run.run_id), { force: true });
+      } catch {}
       return file;
     } catch (e) {
       const msg = `写完成哨兵失败（${file}）: ${e.message}`;
@@ -252,6 +267,135 @@ export class Hub {
       this.log.info(`[hub] ${msg}`);
       return null;
     }
+  }
+
+  // ── 回合进行中标记 ──────────────────────────────────────────────
+  //
+  // 回合一开始就写 `<RUNS_DIR>/<会话>/<run_id>.running`（记下本进程 PID 与启动时刻），
+  // 写出哨兵时删掉。服务进程在回合结束前被杀（默认模式下客户端关掉 / 重连 / 崩溃都会这样）
+  // 就没人写哨兵了，调用方只能干等到超时；下次有服务启动时 recoverInterruptedRuns() 据这个
+  // 标记补写一个"已中断"的哨兵。后缀故意不是 .json：等哨兵的脚本不会把它当成结果。
+
+  runMarkerPath(conversationId, runId) {
+    assertSafeId(conversationId, 'conversation_id');
+    assertSafeId(runId, 'run_id');
+    return join(RUNS_DIR, conversationId, `${runId}.running`);
+  }
+
+  /** 回合开始：写标记（失败只记日志 —— 它只是兜底，不能拦住派活）。 */
+  markRunStarted(conversationId, run) {
+    try {
+      const file = this.runMarkerPath(conversationId, run.run_id);
+      mkdirSync(dirname(file), { recursive: true });
+      const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
+      writeFileSync(
+        tmp,
+        JSON.stringify({
+          conversation_id: conversationId,
+          run_id: run.run_id,
+          client_run_id: run.client_run_id ?? null,
+          prompt_preview: sanitizeApprovalContext(run.prompt_preview ?? null, 'prompt_preview'),
+          review_mode: run.review_mode ?? null,
+          started_at: run.started_at ?? now(),
+          owner_pid: process.pid,
+          owner_started_at: PROCESS_STARTED_AT,
+        }),
+        'utf8',
+      );
+      renameSync(tmp, file);
+    } catch (e) {
+      this.log.info(`[hub] 写回合进行中标记失败（不影响派活）: ${e.message}`);
+    }
+  }
+
+  /**
+   * 启动时：给"上一个进程没跑完就死掉"的回合补写哨兵（status=error，stop_reason=interrupted）。
+   *
+   * 只认领主人确实不在了的标记：PID 不存在，或 PID 还在但启动时刻对不上（被别的进程复用了）。
+   * 读不到启动时刻时按"还活着"处理 —— 宁可不补，也不能给另一个实例正在跑的回合写一个假的终态。
+   * @returns 补写了哪些 `[{conversation_id, run_id, sentinel_file}]`
+   */
+  recoverInterruptedRuns({ alive = isPidAlive, startTimeOf = processStartTime } = {}) {
+    const recovered = [];
+    // 读启动时刻要起一个子进程（Windows 上是 PowerShell）：同一个主人的多个标记只查一次。
+    const startTimes = new Map();
+    const startTime = (pid) => {
+      if (!startTimes.has(pid)) startTimes.set(pid, startTimeOf(pid));
+      return startTimes.get(pid);
+    };
+    let convDirs = [];
+    try {
+      convDirs = existsSync(RUNS_DIR) ? readdirSync(RUNS_DIR, { withFileTypes: true }).filter((d) => d.isDirectory()) : [];
+    } catch {
+      return recovered;
+    }
+    for (const dir of convDirs) {
+      let files = [];
+      try {
+        files = readdirSync(join(RUNS_DIR, dir.name)).filter((f) => f.endsWith('.running'));
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        const markerFile = join(RUNS_DIR, dir.name, f);
+        let m;
+        try {
+          m = JSON.parse(readFileSync(markerFile, 'utf8'));
+          assertSafeId(m.conversation_id, 'conversation_id');
+          assertSafeId(m.run_id, 'run_id');
+          if (m.conversation_id !== dir.name || `${m.run_id}.running` !== f) throw new Error('marker path mismatch');
+        } catch {
+          continue; // 看不懂的文件不碰（也不删：不是我们能确认的东西）
+        }
+        if (alive(m.owner_pid)) {
+          const actual = startTime(m.owner_pid);
+          const reused = Number.isFinite(actual) && Number.isFinite(m.owner_started_at) &&
+            Math.abs(actual - m.owner_started_at) > OWNER_START_TOLERANCE_MS;
+          if (!reused) continue; // 主人还在跑这个回合
+        }
+        const sentinel = this.runSentinelPath(m.conversation_id, m.run_id);
+        if (existsSync(sentinel)) {
+          rmSync(markerFile, { force: true }); // 哨兵其实写出来了，只是标记没删掉
+          continue;
+        }
+        const file = this.#writeInterruptedSentinel(m.conversation_id, m);
+        if (file) recovered.push({ conversation_id: m.conversation_id, run_id: m.run_id, sentinel_file: file });
+      }
+    }
+    return recovered;
+  }
+
+  /**
+   * 给一个没跑完的回合写"已中断"哨兵（status=error，stop_reason=interrupted）。
+   * 启动恢复（读回合标记）与本进程关闭（读内存里的 run）共用；`run` 只需 run_id / client_run_id /
+   * prompt_preview / review_mode。
+   */
+  #writeInterruptedSentinel(conversationId, run) {
+    const error = L(
+      '服务进程在回合结束前退出（客户端关闭、重连或崩溃），回合被中断；已改动的文件不会回滚。' +
+        (DAEMON_MODE ? '' : '设 DSH_MCP_DAEMON=1 可让回合扛住客户端重启。'),
+      'The server process exited before the turn ended (the client closed, reconnected or crashed), so the turn was interrupted; changed files are not rolled back.' +
+        (DAEMON_MODE ? '' : ' Set DSH_MCP_DAEMON=1 to keep turns running across client restarts.'),
+    );
+    const record = {
+      run_id: run.run_id,
+      client_run_id: run.client_run_id ?? null,
+      prompt_preview: run.prompt_preview ?? null,
+      review_mode: normalizeReviewMode(run.review_mode, DEFAULT_REVIEW),
+      status: 'error',
+      error,
+      ended_at: now(),
+    };
+    record.result = attachReview(
+      terminalResult({ conversationId, runId: run.run_id, stopReason: 'interrupted', error }),
+      {
+        conversationId,
+        run: record,
+        mode: record.review_mode,
+        permission: this.conversations.get(conversationId)?.permission ?? null,
+      },
+    );
+    return this.writeRunSentinel(conversationId, record);
   }
 
   /**
@@ -392,6 +536,7 @@ export class Hub {
             turnCount: persisted?.turnCount,
             review: REVIEW_MODES.includes(persisted?.review) ? persisted.review : DEFAULT_REVIEW,
             workspace: persisted?.workspace ?? null,
+            worktree: persisted?.worktree ?? null,
           },
           this,
         );
@@ -481,7 +626,7 @@ export class Hub {
   }
 
   /** 新建一个会话：拉起进程 + ACP 初始化 + session/new。 */
-  async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false, review } = {}) {
+  async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false, review, isolation } = {}) {
     if (!cwd) {
       throw new Error(L(
         '没有可用的工作目录。你既没传 cwd，客户端也没有提供当前打开的项目（MCP roots）。\n' +
@@ -519,10 +664,12 @@ export class Hub {
     //   而本服务可能被任何 MCP 客户端拉起；必须由机器所有者显式放行。
     if (permission === 'danger-full-access' && !ALLOW_FULL_ACCESS) {
       throw new Error(L(
-        'permission=danger-full-access 需要机器侧显式允许：设置 DSH_MCP_ALLOW_FULL_ACCESS=1 后重试。' +
-          ' 默认请用 workspace-write（写入限制在工作区内）或 read-only。',
-        'permission=danger-full-access must be allowed on this machine: set DSH_MCP_ALLOW_FULL_ACCESS=1 and retry.' +
-          ' By default use workspace-write (writes limited to the workspace) or read-only.',
+        'permission=danger-full-access 需要机器侧允许：在客户端配置里把默认档设成它（DSH_MCP_PERMISSION=danger-full-access，' +
+          '即 dsh-any-agent-setup --yes --permission danger-full-access），或设置 DSH_MCP_ALLOW_FULL_ACCESS=1，重连后重试。' +
+          ' 否则请用 workspace-write（写入限制在工作区内）或 read-only。',
+        'permission=danger-full-access must be allowed on this machine: make it the default in the client config ' +
+          '(DSH_MCP_PERMISSION=danger-full-access, which dsh-any-agent-setup --yes --permission danger-full-access writes), ' +
+          'or set DSH_MCP_ALLOW_FULL_ACCESS=1, then reconnect and retry. Otherwise use workspace-write (writes limited to the workspace) or read-only.',
       ));
     }
     const policy = onApproval ?? defaultApprovalPolicy(permission);
@@ -557,17 +704,31 @@ export class Hub {
     // 与其让用户以为服务坏了，不如在这里把原因和出路一起说清楚。
     const homeProblem = homeWorkspaceProblem(cwd, permission);
     if (homeProblem) throw new Error(homeProblem);
+    if (isolation !== undefined && isolation !== null && !ISOLATION_MODES.includes(isolation)) {
+      throw new Error(oneOf('isolation', ISOLATION_MODES));
+    }
+    // 会话级 worktree（见 worktree.mjs）：参数都校验完了才建，免得一个坏参数留下一个空分支。
+    // 之后会话的工作目录、沙箱可写根、共享进程分组都按 worktree 走。
+    const worktree = isolation === 'worktree' ? await createWorktree(cwd) : null;
+    if (worktree) cwd = worktree.cwd;
     const shared = SHARED_PROCESS;
-    const proc = shared
-      ? this.acquireHost(cwd, permission)
-      : new AcpProcess({
-          cwd,
-          permission,
-          log: this.log,
-          onNotification: () => {},
-          onPermissionRequest: () => ({ outcome: { outcome: 'cancelled' } }),
-        });
-    if (!shared) proc.start();
+    let proc;
+    try {
+      proc = shared
+        ? this.acquireHost(cwd, permission)
+        : new AcpProcess({
+            cwd,
+            permission,
+            log: this.log,
+            onNotification: () => {},
+            onPermissionRequest: () => ({ outcome: { outcome: 'cancelled' } }),
+          });
+      if (!shared) proc.start();
+    } catch (e) {
+      // 进程都没起来（例如找不到 DSH）：别把刚建的 worktree 留下。
+      if (worktree) await discardWorktree(worktree);
+      throw e;
+    }
     let createdSessionId = null;
     let conv = null;
     try {
@@ -586,6 +747,7 @@ export class Hub {
           provider: provider ?? null,
           model: model ?? null,
           review: reviewMode,
+          worktree,
         },
         this,
       );
@@ -649,6 +811,8 @@ export class Hub {
           : await proc.stop().catch(() => false)
         : await proc.stop().catch(() => false);
       if (createdSessionId && stopped) removeMarker(createdSessionId);
+      // 刚建的 worktree 和分支还没有任何改动，会话没建成就整个撤销。
+      if (worktree) await discardWorktree(worktree);
       throw e;
     }
   }
@@ -748,97 +912,111 @@ export class Hub {
           (MAX_LIVE > 0 ? `；超过保活上限 ${MAX_LIVE} 时回收最久没用过的` : '；未设保活上限，进程会一直留着'),
       );
     }
-    this.#reaper = setInterval(async () => {
-      // ★ 整个回收周期必须自带防护：这里抛出的异常会变成 unhandled rejection，
-      //   在 Node ≥15 上直接**杀掉进程** —— 而那会连带丢掉所有会话的活进程。
-      try {
-        const cutoff = now() - IDLE_TTL_MS;
-        // 哪些会话可以回收：进程活着、不在跑回合
-        const reapable = [];
+    this.#reaper = setInterval(() => this.reapOnce(), REAP_INTERVAL_MS);
+    this.#reaper.unref?.();
+  }
+
+  /**
+   * 一个回收周期（startReaper 定时调用）。永不 reject。
+   * `refreshRss` / `maxRssMb` 只供测试注入：要能复现"读 RSS 期间会话开跑了"的竞态。
+   */
+  async reapOnce({ refreshRss = refreshRssMap, maxRssMb = MAX_RSS_MB } = {}) {
+    // ★ 整个回收周期必须自带防护：这里抛出的异常会变成 unhandled rejection，
+    //   在 Node ≥15 上直接**杀掉进程** —— 而那会连带丢掉所有会话的活进程。
+    try {
+      const cutoff = now() - IDLE_TTL_MS;
+      // 哪些会话可以回收：进程活着、不在跑回合
+      const reapable = [];
+      /** 选中时的 lastUsedAt：停之前对一下，被用过就不再按选中时的判断停它（见下面的循环）。 */
+      const usedAtPick = new Map();
+      for (const c of this.conversations.values()) {
+        if (!c.proc?.alive) continue;
+        // ★ 先续心跳，**包括正在跑回合的**：否则长回合（>90 秒）期间心跳不刷新，
+        //   别的实例会把我们判成失联并抢占，直接把这一轮杀掉。
+        lockHeartbeat(c.id);
+        if (c.busy) continue;
+        reapable.push(c);
+        usedAtPick.set(c, c.lastUsedAt);
+      }
+
+      // 回收哪些：① 空闲超过 TTL；② 超过 MAX_LIVE；③ 超过全局 RSS 预算。
+      // keep_alive 会话不受 ① ② 约束；③ 是系统级硬上限，最后仍可能回收它。
+      const victims = new Set();
+      const reapableNormal = reapable.filter((c) => !c.keepAlive);
+      if (IDLE_TTL_MS > 0) {
+        for (const c of reapableNormal) if (c.lastUsedAt <= cutoff) victims.add(c);
+      }
+      if (MAX_LIVE > 0) {
+        // 保活窗口 = 最近用过的 MAX_LIVE 个；超出的按"最久没用"先回收
+        const byAge = reapableNormal.slice().sort((a, b) => a.lastUsedAt - b.lastUsedAt);
+        const excess = byAge.length - MAX_LIVE;
+        for (let i = 0; i < excess; i++) victims.add(byAge[i]);
+      }
+      if (maxRssMb > 0) {
+        // 按实际 RSS 而不是会话数：上下文大小差异很大，按个数限制经常低估。
+        // 预算判断要用新数字：先异步刷新一次（不阻塞事件循环），下面的 rssMb 读的就是它。
+        await refreshRss();
+        let total = 0;
+        const rss = new Map();
+        const seenPid = new Set();
         for (const c of this.conversations.values()) {
           if (!c.proc?.alive) continue;
-          // ★ 先续心跳，**包括正在跑回合的**：否则长回合（>90 秒）期间心跳不刷新，
-          //   别的实例会把我们判成失联并抢占，直接把这一轮杀掉。
-          lockHeartbeat(c.id);
-          if (c.busy) continue;
-          reapable.push(c);
+          const pid = c.proc.pid;
+          const mb = rssMb(pid) ?? 0;
+          rss.set(c, mb);
+          // 共享进程只算一次
+          if (pid && seenPid.has(pid)) continue;
+          if (pid) seenPid.add(pid);
+          total += mb;
         }
-
-        // 回收哪些：① 空闲超过 TTL；② 超过 MAX_LIVE；③ 超过全局 RSS 预算。
-        // keep_alive 会话不受 ① ② 约束；③ 是系统级硬上限，最后仍可能回收它。
-        const victims = new Set();
-        const reapableNormal = reapable.filter((c) => !c.keepAlive);
-        if (IDLE_TTL_MS > 0) {
-          for (const c of reapableNormal) if (c.lastUsedAt <= cutoff) victims.add(c);
-        }
-        if (MAX_LIVE > 0) {
-          // 保活窗口 = 最近用过的 MAX_LIVE 个；超出的按"最久没用"先回收
-          const byAge = reapableNormal.slice().sort((a, b) => a.lastUsedAt - b.lastUsedAt);
-          const excess = byAge.length - MAX_LIVE;
-          for (let i = 0; i < excess; i++) victims.add(byAge[i]);
-        }
-        if (MAX_RSS_MB > 0) {
-          // 按实际 RSS 而不是会话数：上下文大小差异很大，按个数限制经常低估。
-          let total = 0;
-          const rss = new Map();
-          const seenPid = new Set();
-          for (const c of this.conversations.values()) {
-            if (!c.proc?.alive) continue;
-            const pid = c.proc.pid;
-            const mb = rssMb(pid) ?? 0;
-            rss.set(c, mb);
-            // 共享进程只算一次
-            if (pid && seenPid.has(pid)) continue;
-            if (pid) seenPid.add(pid);
-            total += mb;
-          }
-          if (total > MAX_RSS_MB) {
-            // 先收非 keep_alive 的最久未用者；仍然超预算才动 keep_alive。
-            const pool = reapable
-              .filter((c) => !victims.has(c))
-              .sort((a, b) =>
-                a.keepAlive === b.keepAlive ? a.lastUsedAt - b.lastUsedAt : a.keepAlive ? 1 : -1,
-              );
-            for (const c of pool) {
-              victims.add(c);
-              total -= rss.get(c) ?? 0;
-              if (total <= MAX_RSS_MB) break;
-            }
+        if (total > maxRssMb) {
+          // 先收非 keep_alive 的最久未用者；仍然超预算才动 keep_alive。
+          const pool = reapable
+            .filter((c) => !victims.has(c))
+            .sort((a, b) =>
+              a.keepAlive === b.keepAlive ? a.lastUsedAt - b.lastUsedAt : a.keepAlive ? 1 : -1,
+            );
+          for (const c of pool) {
+            victims.add(c);
+            total -= rss.get(c) ?? 0;
+            if (total <= maxRssMb) break;
           }
         }
-
-        for (const c of victims) {
-          if (c.recycling) await c.recycling;
-          if (!c.proc?.alive) continue;
-          this.log.info(
-            `[hub] 回收会话 ${c.id} 的进程（${IDLE_TTL_MS > 0 && c.lastUsedAt <= cutoff ? '空闲超时' : `保活上限 ${MAX_LIVE}`}；可 resume 复活）`,
-          );
-          const proc = c.proc;
-          // ★ 先把 stop 登记成 recycling，再 await：stop 可能要几秒，这个窗口里到达的
-          //   dsh_send 会在 ensureAlive 里 await 它，而不是为同一会话再拉一个进程去抢
-          //   **尚未释放**的写锁。proc 也要等 stop 落定后才置空，否则快路径会拿到垂死进程。
-          // 共享进程：detach 只摘掉这个会话（内部 session/close），最后一个离开才停进程。
-          const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
-          c.recycling = stopping
-            .catch(() => false)
-            .then((stopped) => {
-              // ★ 顺序要紧：**先确认子进程真的退出（写锁真的释放），再删登记**。
-              //   反过来的话，一旦它没死透，锁的持有者就变成"无登记的未知进程" ——
-              //   既报不清是谁，连 dsh_takeover 都会拒绝（判成 none）。
-              if (stopped) removeMarker(c.id);
-              return stopped;
-            })
-            .finally(() => {
-              if (c.proc === proc) c.proc = null;
-              c.recycling = null;
-            });
-          await c.recycling;
-        }
-      } catch (e) {
-        this.log.info(`[hub] 回收周期异常（已忽略，下个周期继续）: ${e.message}`);
       }
-    }, REAP_INTERVAL_MS);
-    this.#reaper.unref?.();
+
+      for (const c of victims) {
+        if (c.recycling) await c.recycling;
+        // ★ 选中之后有 await（刷新 RSS、等上一个会话停完）：这期间 dsh_send 可能已经在这个会话上
+        //   开跑（busy），或者跑完了一个短回合（lastUsedAt 变了）。都不能再按选中时的判断停它 ——
+        //   前者会打断正在执行的回合；后者已经不空闲了，下个周期再重新判断。
+        if (!c.proc?.alive || c.busy || c.lastUsedAt !== usedAtPick.get(c)) continue;
+        this.log.info(
+          `[hub] 回收会话 ${c.id} 的进程（${IDLE_TTL_MS > 0 && c.lastUsedAt <= cutoff ? '空闲超时' : `保活上限 ${MAX_LIVE}`}；可 resume 复活）`,
+        );
+        const proc = c.proc;
+        // ★ 先把 stop 登记成 recycling，再 await：stop 可能要几秒，这个窗口里到达的
+        //   dsh_send 会在 ensureAlive 里 await 它，而不是为同一会话再拉一个进程去抢
+        //   **尚未释放**的写锁。proc 也要等 stop 落定后才置空，否则快路径会拿到垂死进程。
+        // 共享进程：detach 只摘掉这个会话（内部 session/close），最后一个离开才停进程。
+        const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
+        c.recycling = stopping
+          .catch(() => false)
+          .then((stopped) => {
+            // ★ 顺序要紧：**先确认子进程真的退出（写锁真的释放），再删登记**。
+            //   反过来的话，一旦它没死透，锁的持有者就变成"无登记的未知进程" ——
+            //   既报不清是谁，连 dsh_takeover 都会拒绝（判成 none）。
+            if (stopped) removeMarker(c.id);
+            return stopped;
+          })
+          .finally(() => {
+            if (c.proc === proc) c.proc = null;
+            c.recycling = null;
+          });
+        await c.recycling;
+      }
+    } catch (e) {
+      this.log.info(`[hub] 回收周期异常（已忽略，下个周期继续）: ${e.message}`);
+    }
   }
 
   /**
@@ -886,6 +1064,13 @@ export class Hub {
   async shutdown() {
     if (this.#reaper) clearInterval(this.#reaper);
     this.#reaper = null;
+    // 还在跑的回合随本进程一起结束：先同步写"已中断"哨兵。不能等下一个实例的启动恢复 ——
+    // 客户端重连时新实例往往在本进程还没退完时就起来了，那时它会把这些标记当成"主人还活着"。
+    for (const c of this.conversations.values()) {
+      const run = c.busy ? c.currentRun : null;
+      if (!run?.run_id || existsSync(this.runSentinelPath(c.id, run.run_id))) continue;
+      this.#writeInterruptedSentinel(c.id, run);
+    }
     for (const c of this.conversations.values()) {
       if (c.recycling) await c.recycling;
       const proc = c.proc;

@@ -112,6 +112,15 @@ export const TOOL_DEFS = [
             '默认 false：空闲 10 分钟后进程会被回收、内存释放，下次派活自动 resume（对话不丢）。' +
             '设 true 时请记得用完 `dsh_release`，否则它会一直占着一个 DSH 进程（约 300–480MB）。',
         },
+        isolation: {
+          type: 'string',
+          enum: ['none', 'worktree'],
+          description:
+            '工作区隔离，默认 none（直接在 cwd 里干活）。worktree = 为 cwd 所在的 git 仓库新建一个 worktree 和分支 `dsh/<时间>`，' +
+            '会话在里面干活，主检出不受影响 —— 你（调用方）可以同时在原目录继续改文件。' +
+            '基于当前 HEAD：主检出里未提交的改动不会带过去；新 worktree 里没有 node_modules 等依赖，DSH 可能要重装。' +
+            '改动留在那个分支上，审核后由你自己合并；dsh_release(forget=true) 时 worktree 干净就删目录（分支保留）。',
+        },
       },
       // cwd 不再是必填：有 MCP roots 的客户端会自动带上当前项目目录。
       [],

@@ -35,7 +35,7 @@ Besides `run_id`, `wait=false` returns a **`sentinel_file`** path plus **`sentin
 ```bash
 # sent="$sentinel_file_posix"   ← copy it straight from the tool result
 sent='/c/Users/you/.dsh/.dsh-any-agent/runs/<conversation_id>/<run_id>.json'
-dl=$(( $(date +%s) + 2100 ))          # 35min safety net so a dead service can't hang you forever
+dl=$(( $(date +%s) + 7500 ))          # the turn's maximum duration (2h by default) + 5 min; the receipt's command uses the actual limit
 until [ -f "$sent" ]; do
   [ "$(date +%s)" -ge "$dl" ] && { echo "TIMEOUT"; exit 1; }
   sleep 2
@@ -47,7 +47,7 @@ On a Windows host where Git Bash is unavailable (or hangs), wait on the native `
 
 ```powershell
 $f='C:\Users\you\.dsh\.dsh-any-agent\runs\<conversation_id>\<run_id>.json'   # write ' as '' inside the path
-$dl=(Get-Date).AddSeconds(2100)
+$dl=(Get-Date).AddSeconds(7500)
 while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit 1 }; Start-Sleep -Seconds 2 }
 'DONE'
 ```
@@ -76,6 +76,16 @@ Design notes (especially under **concurrent multi-session** use):
 4. dsh_read(id,  cursor=<prev>) # switch back; entries that grew since <prev> reappear (match by seq)
 ```
 
+## 🌿 Workflow: editing the same repository as the caller (worktree isolation)
+
+While DSH works in the background you (the caller) are often still editing the same repository. Both sides touching the same files overwrite each other, and `workspace_changed` and the review evidence pick up the other side's changes. Use `dsh_start(isolation="worktree")`:
+
+- The server creates a worktree for the git repository `cwd` is in (under this server's state directory, not inside the repository) and a branch `dsh/<time>-<random>`, and the conversation works there; a `cwd` in a subdirectory maps to the same subdirectory in the worktree;
+- It starts from the main checkout's current **HEAD**: **uncommitted** changes there are not carried over (the start result says so);
+- The new worktree has no `node_modules`, virtual environment or build output, so DSH often has to install dependencies first — which is why it is off by default;
+- The changes stay on that branch for **you to review and merge**; the server never merges;
+- `dsh_release(forget=true)` deletes the worktree directory if it is clean (the branch and its commits stay); with uncommitted changes it is kept and the path is reported;
+- For safety the repository's own git hooks and filter drivers (`smudge` / `clean`) **do not run** when the worktree is created, checked or removed (the repository may be untrusted), so hooks such as husky's that install things on checkout do not run either, and files tracked with Git LFS are pointer files in the worktree (DSH can run `git lfs pull` there if it needs them).
 ## 👀 Side view: what the dispatched work is doing
 
 The calling agent can `dsh_read`, but you, sitting in front of the client, usually only see one `dsh_send`. The server writes each conversation's activity to a live event stream (`<state dir>/live/<conversation_id>/events.jsonl`), so you can watch the call chain **without going through the agent**:

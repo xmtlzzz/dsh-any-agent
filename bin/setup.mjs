@@ -6,6 +6,7 @@
  *   dsh-any-agent-setup --yes                 真正写入（先备份）
  *   dsh-any-agent-setup --yes --only cursor,zed
  *   dsh-any-agent-setup --yes --permission read-only
+ *   dsh-any-agent-setup --yes --daemon        回合跑在常驻进程里（写 DSH_MCP_DAEMON=1）
  *   dsh-any-agent-setup --json                机器可读的计划
  *   dsh-any-agent-setup --remove --yes        只把自己那一条摘掉
  *
@@ -73,6 +74,8 @@ if (has('--help') || has('-h')) {
     '  dsh-any-agent-setup --yes               apply\n' +
     '  dsh-any-agent-setup --yes --only a,b    only these clients\n' +
     '  dsh-any-agent-setup --yes --permission read-only\n' +
+    '  dsh-any-agent-setup --yes --daemon      run turns in a resident process that\n' +
+    '                                          outlives the client (DSH_MCP_DAEMON=1)\n' +
     '  dsh-any-agent-setup --remove --yes      unregister\n' +
     '  dsh-any-agent-setup --json              machine-readable result on stdout\n' +
     '  dsh-any-agent-setup --home <dir>        use another home (sandbox/testing)\n' +
@@ -105,6 +108,8 @@ const ONLY = (val('--only', '') || val('--clients', '') || '').split(',').map((s
 const PERMISSION = val('--permission', 'workspace-write');
 const HOME_OVERRIDE = val('--home');
 const FORCE = has('--force');
+/** 写 DSH_MCP_DAEMON=1。和 --permission 一样，每次都按这次的参数整条重写：不带它重跑就去掉。 */
+const DAEMON = has('--daemon');
 const ALL = has('--all');
 const STAMP = new Date().toISOString().replace(/[:.]/g, '-');
 
@@ -142,7 +147,7 @@ if (unknown.length) {
 }
 
 const launch = defaultLaunch();
-const env = desiredEnv(PERMISSION);
+const env = desiredEnv(PERMISSION, DAEMON ? { DSH_MCP_DAEMON: '1' } : {});
 const ctx = { dirs, remove: REMOVE, write: WRITE, launch, env, byId, force: FORCE };
 
 if (!JSON_OUT) {
@@ -152,6 +157,7 @@ if (!JSON_OUT) {
     : 'Preview only -- nothing is written. Re-run with --yes to apply.');
   log('  home       : ' + dirs.home);
   log('  permission : ' + PERMISSION);
+  log('  daemon     : ' + (DAEMON ? 'on (DSH_MCP_DAEMON=1)' : 'off'));
   log('  launch     : ' + launch.command + (launch.args.length ? ' ' + launch.args.join(' ') : '') + '   (' + launch.style + ')');
   log('  DSH_BIN    : ' + (process.env.DSH_BIN || '(unset -- auto-detect at runtime)'));
   log('');

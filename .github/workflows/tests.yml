@@ -5,36 +5,42 @@ name: tests
 # This project's suite has two halves, and only one of them can run here.
 #
 #   OFFLINE (runs in CI)
-#     smoke             protocol + instructions length cap, no DSH   38 checks
+#     smoke             protocol + instructions length cap, no DSH   40 checks
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     progress          MCP progress notifications     15 checks
-#     guards            env-var edge cases            40 checks
+#     guards            env-var edge cases            43 checks
 #     dsh-locate        DSH auto-discovery (asar)     21 checks
 #     prune             sentinel retention            11 checks
-#     approval-details  credential redaction          37 checks
+#     approval-details  credential redaction          40 checks
 #     failure-terminal  terminal state on failure     10 checks
-#     shared-host       shared process host           34 checks
+#     shared-host       shared process host           40 checks
 #     resume-retry      cold-resume timeout retry     65 checks (fake ACP server)
-#     dispatch-tools    dispatch surface              69 checks (64 off Windows)
+#     dispatch-tools    dispatch surface              84 checks (79 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
-#     sentinel-redaction sentinel disk hygiene        19 checks
-#     live-events       live event stream, write side  43 checks
+#     sentinel-redaction sentinel disk hygiene        26 checks
+#     live-events       live event stream, write side  47 checks
 #     live-view         watch / dashboard viewers      69 checks
 #     release-notes     Release notes from CHANGELOG   12 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            25 checks
 #     bootstrap-profile zero-dependency bootstrap     27 checks
 #     workspace-safety  data-loss boundaries          23 checks
-#     residue-purge     test residue cleanup, sandboxed 158 checks
+#     residue-purge     test residue cleanup, sandboxed 160 checks
 #     permission-adopt  no silent privilege escalation 22 checks
 #     state-safety      state/sentinel/lock storage   26 checks
 #     workspace-snapshot workspace_changed full fingerprint  27 checks
+#     watchdog          turn watchdog (stall / max duration)  30 checks
+#     worktree          isolation=worktree sessions      30 checks
+#     daemon            DSH_MCP_DAEMON=1 resident process  23 checks
+#     run-recovery      interrupted-turn sentinels   18 checks
+#     contract          tool surface + sentinel shape snapshot  13 checks
+#     update-check      dsh_doctor npm version check (fake fetch)  17 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     test-counts       report parser + docs sync     92 checks
 #     roots             cwd from MCP roots            18 checks
 #     workspace-titles  home/root cwd guard, title_hint 19 checks (17 off Windows)
-#     setup             client config writer          45 checks
+#     setup             client config writer          49 checks
 #     removal-scope     --remove only touches its own   61 checks
 #     config-safety     in-place edits, format        449 checks
 #     real-configs      real config round-trip        skips without client fixtures
@@ -42,6 +48,7 @@ name: tests
 #     lint              static checks (npm run lint)  syntax, imports, exports, unused
 #     lint (selftest)   scripts/lint.mjs regression   22 checks
 #     package job       pack -> install -> --version
+#     docker job        docker build -> --version -> MCP initialize
 #     website job       build + 38 site/a11y tests + bilingual pages
 #
 #     These load modules and touch the filesystem: no DSH, no model, no
@@ -235,6 +242,31 @@ jobs:
         env: { DSH_MCP_LOG: silent }
         run: node test/workspace-snapshot.mjs
 
+      # 回合看门狗：卡住才打断、有进展不打扰、工具在跑时放宽、等审批时不判卡住。
+      - name: watchdog (stalled / long turns are cancelled, active ones are not)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/watchdog.mjs
+
+      # 会话级 worktree：建在状态目录、不跑仓库钩子、干净才删、失败整个撤销。
+      - name: worktree (isolation=worktree sessions)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/worktree.mjs
+      # 常驻进程模式：转发进程被杀后回合照常跑完；同配置共用；令牌认证；空闲退出。
+      - name: daemon (turns survive the client; token auth; idle exit)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/daemon.mjs
+      # 服务进程在回合中途死掉：下一个进程启动时补出"已中断"哨兵；关闭时先写哨兵。
+      - name: run-recovery (interrupted-turn sentinels)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/run-recovery.mjs
+      # 对外契约：工具面与哨兵字段对比快照；有意的改动用 --update 重写快照。
+      - name: contract (tool surface + sentinel shape snapshot)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/contract.mjs
+      # dsh_doctor 的新版本检查（假 fetch，不联网）。
+      - name: update-check (dsh_doctor npm version check)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/update-check.mjs
       # Guards the sandbox itself, not the writer. A test suite that points its
       # "sandbox" at the real user profile deletes real data while reporting
       # green; this suite fails instead.
@@ -357,6 +389,35 @@ jobs:
           fi
           echo 'tarball contents ok'
 
+  # The Dockerfile shipped in 0.6.8 without ever being built in CI. Build it and make
+  # sure the image answers --version and an MCP initialize over stdio (no DSH inside:
+  # the handshake must work without one).
+  docker:
+    name: Dockerfile builds and answers MCP initialize
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: build
+        run: docker build -t dsh-any-agent:ci .
+
+      - name: --version matches package.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          want=$(node -p "require('./package.json').version")
+          got=$(docker run --rm dsh-any-agent:ci --version)
+          echo "image: $got / package.json: $want"
+          echo "$got" | grep -qF "$want"
+
+      - name: MCP initialize over stdio
+        shell: bash
+        run: |
+          set -euo pipefail
+          req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}'
+          out=$(printf '%s\n' "$req" | timeout 60 docker run -i --rm -e DSH_MCP_LOG=silent dsh-any-agent:ci)
+          echo "$out" | head -c 400
+          echo "$out" | grep -q '"name":"dsh-any-agent"'
   website:
     name: website build + tests
     runs-on: ubuntu-latest

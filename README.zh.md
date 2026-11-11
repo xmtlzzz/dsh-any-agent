@@ -27,7 +27,7 @@
 你的编辑器里已经有一个编码 agent 了。你**没有**的是这样一个 agent：
 
 - **把几小时的长活交给它，然后走开** —— 回头再来收结果；
-- **跨重启不丢** —— 编辑器重启、会话断开、机器空闲回收，任务都还在；
+- **跨重启不丢** —— 编辑器重启、会话断开、机器空闲回收，对话都还在；连正在跑的回合也要扛住客户端关掉 / 重连，就开常驻进程模式（`DSH_MCP_DAEMON=1`）；
 - **跑偏时能中途插话** —— 改口、打断，而不毁掉已经做的工作；
 - **同时跑好几个**，像切窗口一样轮流盯；
 - **看得见它在干什么** —— 不用问 agent，自己就能看到它调了哪些工具、批了哪些审批、花了多少 token。
@@ -100,6 +100,8 @@ dsh-any-agent-setup --yes
 [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_MCP_server-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=dsh-any-agent&config=%7B%22name%22%3A%22dsh-any-agent%22%2C%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22dsh-any-agent%40latest%22%5D%7D)
 
 > **第一次派活前：** 先读[使用注意事项](USAGE-NOTES.md)，尤其是模型配置与外部 MCP 的权限边界。**外部 MCP 工具的副作用不受 DSH 沙箱约束。** 新机器部署可按[迁移指引](USAGE-MIGRATION.md)逐步操作。
+
+> **权限：本服务只是派发层，权限跟着 DSH 和你的配置走。** 默认是 `workspace-write`（写入限制在工作区，越界请求自动放行，结果里会列出放行了哪些）。个人在自己机器上用，大多直接开 full access：`dsh-any-agent-setup --yes --permission danger-full-access`，此时 DSH 不再发审批、全部放行。**谁能调用这些工具，谁就能在你机器上执行命令**（包括被提示注入的调用方 agent）；处理不可信内容请用 `read-only`。详见[权限与隐私](docs/zh/security.md)。
 
 > **想先看效果？** 先看 [54 秒宣传片](https://dsh-any-agent.xmtlz.dev/#video)（派活、插话、哨兵落地、调用方复核，终端画面回放自一次真实运行）：
 >

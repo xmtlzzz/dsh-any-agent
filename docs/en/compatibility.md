@@ -10,6 +10,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
+| 0.7.x | `0.2.2-rc.1` (desktop app) | ✅ Verified (offline) | Offline suite run against 0.7.0 on 2026-11-11 (41 suites, 1892 checks), all passing, plus a real-client check of resident process mode: the Claude desktop app was quit mid-turn and reopened, and the turn finished with a `done` sentinel. **The model-backed suites were not re-run for 0.7.x**; their last run is the 0.6.x row below |
 | 0.6.x | `0.2.1-rc.5` | ✅ Verified | Full suite run against 0.6.9 on 2026-11-10 (offline + model-backed; DSH via npx, Node 22.19), all passing; `acceptance` skipped because the profile has no IDA MCP. Other DSH versions were not re-verified for 0.6.x — the 0.5.x rows below are their last runs |
 | 0.5.x | `0.1.7-rc.1` or newer | ✅ Verified | ACP and the experimental Agent Teams packages are available; team mode is opt-in via `dsh-any-agent team on` |
 | 0.5.x | `0.1.5-rc.1` | ⚠️ Partial | ACP basics work; no team packages, so team mode stays off |
@@ -21,6 +22,14 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 > The experimental packages (`dsh-experimental-agent-team`,
 > `dsh-experimental-tool-agent-team`) carry **no stability promise**. They ship with
 > a DSH version and must not be mixed across major versions.
+
+## Public contract (what callers can rely on)
+
+- **Sentinel JSON**: the top-level `schema` is the format version, currently `1` (older releases omit the field; their shape is the same as 1). Within one `schema`, fields are **only added**, never removed, renamed or retyped; callers should ignore fields they do not know. A breaking change bumps `schema` and is called out in the CHANGELOG.
+- **MCP tool surface**: tool names, parameter names and types, which parameters are required, enum values. New tools, optional parameters and enum values are compatible; removing anything, changing a type, making a parameter required or dropping an enum value is breaking, happens only with a minor version change (before 1.0), and is called out in the CHANGELOG. Tool descriptions and the returned `text` are not part of the contract (they are written for the model and change freely).
+- **Live event stream**: each event's `v` is its format version; fields are listed in [live-view-design.md](live-view-design.md) §6.
+
+`test/contract.mjs` compares the shape of the first two with `test/contract.snapshot.json` and fails on any difference; `node test/contract.mjs --update` refuses to rewrite the snapshot when sentinels changed incompatibly without a `schema` bump.
 
 ## Runtime requirements
 
@@ -58,10 +67,11 @@ In an MCP client, call `dsh_doctor` and look at:
 - `dsh_runtime`: whether the launching runtime's Node satisfies DSH's `engines.node`; **warn** if not;
 - `dsh_desktop`: the desktop app's version; **warn** when it differs from the DSH this server uses (both share the `~/.dsh` session store);
 - `dsh_candidates`: every DSH found and which one was picked;
-- `dsh_version`: the version graded against the table above — `verified` is ok; `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
+- `dsh_version`: the version graded against the table above — `verified` is ok (the note says whether the current release line re-ran the full suite on that version, or its last full run was on the previous line); `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
 - `profile`: exists, drift, route source;
 - `team`: `on` / `off` / `requested but unavailable` (version or profile lacks the team package);
-- `config`: effective permission, idle reaping, shared process, and so on.
+- `config`: effective permission, idle reaping, shared process, and so on;
+- `update`: this server's version against the latest on npm; **warn** when a newer one exists (read at most once a day, 4 s timeout; offline reads as unknown, not a problem; `DSH_MCP_UPDATE_CHECK=0` skips it).
 
 ## Upgrade advice
 

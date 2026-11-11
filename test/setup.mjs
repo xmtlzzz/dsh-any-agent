@@ -112,6 +112,23 @@ console.log('\n[3] re-running is idempotent');
   removeSandbox(home);
 }
 
+// ── 3b. --daemon ─────────────────────────────────────────────────────
+
+console.log('\n[3b] --daemon adds DSH_MCP_DAEMON=1; re-running without it takes it out');
+{
+  const home = sandbox({ '.cursor/mcp.json': '{"mcpServers":{}}' });
+  const file = join(home, '.cursor', 'mcp.json');
+  const envOf = () => readJson(file).mcpServers['dsh-any-agent']?.env ?? {};
+  check('default install has no DSH_MCP_DAEMON', runSetup(home, ['--yes', '--only', 'cursor']).code === 0 && !('DSH_MCP_DAEMON' in envOf()));
+  const r = runSetup(home, ['--yes', '--only', 'cursor', '--daemon']);
+  check('--daemon writes DSH_MCP_DAEMON=1 next to the permission', envOf().DSH_MCP_DAEMON === '1' && envOf().DSH_MCP_PERMISSION === 'workspace-write', JSON.stringify(envOf()));
+  check('--daemon is shown in the header', /daemon\s*:\s*on/i.test(r.out), r.out.split('\n').slice(0, 8).join(' | '));
+  runSetup(home, ['--yes', '--only', 'cursor']);
+  check('re-running without --daemon removes it', !('DSH_MCP_DAEMON' in envOf()), JSON.stringify(envOf()));
+
+  removeSandbox(home);
+}
+
 // ── 4. --remove 只移除自己 ───────────────────────────────────────────
 
 console.log('\n[4] --remove takes out only our entry');

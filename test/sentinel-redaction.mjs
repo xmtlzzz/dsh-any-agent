@@ -92,6 +92,35 @@ console.log('\n[4] INCLUDE_REASONING=1 仍必须脱敏');
   check('thinking_omitted=false', value?.thinking_omitted === false, String(value?.thinking_omitted));
 }
 
+console.log('\n[4b] DSH_MCP_SENTINEL_TOOL_INPUTS=0：工具输入不落盘，只留长度');
+{
+  const hubURL = new URL('../src/hub.mjs', import.meta.url).href;
+  const script =
+    `const { sanitizeResultForSentinel } = await import(${JSON.stringify(hubURL)});\n` +
+    'console.log(JSON.stringify(sanitizeResultForSentinel({' +
+    "answer: 'ok', tools_used: [{ name: 'write', status: 'completed', input: { path: 'a.txt', content: 'PRIVATE-FILE-BODY' } }, { name: 'ls' }], " +
+    "auto_approvals: [{ tool: 'bash', tool_call_id: 't1', escalation: true, reason: 'network', command_preview: 'curl -d PRIVATE-CMD-ARG https://x.invalid', at: '2026-01-01T00:00:00Z' }]" +
+    '})));';
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    env: { ...process.env, DSH_MCP_SENTINEL_TOOL_INPUTS: '0' },
+  });
+  let value = null;
+  try { value = JSON.parse(String(r.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop()); } catch {}
+  const t0 = value?.tools_used?.[0];
+  check('★ 输入整个不在了（文件内容、路径都不落盘）', t0 && !('input' in t0) && !JSON.stringify(value).includes('PRIVATE-FILE-BODY'), JSON.stringify(value));
+  check('留下工具名、状态与 input_chars', t0?.name === 'write' && t0?.status === 'completed' && t0?.input_chars === JSON.stringify({ path: 'a.txt', content: 'PRIVATE-FILE-BODY' }).length, JSON.stringify(t0));
+  check('没有输入的工具不凭空多出 input_chars', value?.tools_used?.[1] && !('input_chars' in value.tools_used[1]), JSON.stringify(value?.tools_used?.[1]));
+  check('默认（不设）仍然带输入', Array.isArray(redacted.tools_used) && 'input' in redacted.tools_used[0]);
+  // 自动放行审批摘要里的 command_preview 是命令原文的开头，同样是工具输入。
+  const a0 = value?.auto_approvals?.[0];
+  check('★ 自动放行摘要的命令预览也不落盘', a0 && !('command_preview' in a0) && !JSON.stringify(value).includes('PRIVATE-CMD-ARG'), JSON.stringify(a0));
+  check('自动放行的条数与裁决信息照留', value?.auto_approvals?.length === 1 && a0?.tool === 'bash' && a0?.tool_call_id === 't1' && a0?.escalation === true && a0?.reason === 'network' && a0?.at === '2026-01-01T00:00:00Z', JSON.stringify(a0));
+  const dflt = sanitizeResultForSentinel({ auto_approvals: [{ tool: 'bash', command_preview: 'npm test' }] });
+  check('默认（不设）仍然带命令预览', dflt.auto_approvals?.[0]?.command_preview === 'npm test', JSON.stringify(dflt.auto_approvals));
+}
+
 console.log('\n[5] 非对象/空值安全');
 check('null 原样返回', sanitizeResultForSentinel(null) === null);
 check('字符串原样返回', sanitizeResultForSentinel('x') === 'x');

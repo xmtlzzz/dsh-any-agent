@@ -9,6 +9,7 @@
 
 | dsh-any-agent | DSH | 状态 | 说明 |
 |---|---|---|---|
+| 0.7.x | `0.2.2-rc.1`（桌面版） | ✅ 已验证（离线） | 2026-11-11 用 0.7.0 跑了离线套件（41 个、1892 项）全过，并用真实客户端验证了常驻进程模式：Claude 桌面版在回合中途完全退出再打开，回合照常跑完、写出 `done` 哨兵。**需要模型的套件没有针对 0.7.x 重跑**，最近一次是下面的 0.6.x 行 |
 | 0.6.x | `0.2.1-rc.5` | ✅ 已验证 | 2026-11-10 用 0.6.9 全量套件实测（离线 + 需要模型，DSH 走 npx、Node 22.19）全过；`acceptance` 因 profile 未配 IDA MCP 跳过。其它 DSH 版本未针对 0.6.x 重新验证，最近一次实测见下面的 0.5.x 行 |
 | 0.5.x | `0.1.7-rc.1` 及以上 | ✅ 已验证 | ACP + 实验性 Agent Teams 包均可用；团队模式需 `dsh-any-agent team on` |
 | 0.5.x | `0.1.5-rc.1` | ⚠️ 部分可用 | ACP 基本路径可用；缺 team 包，团队模式会自动保持关闭 |
@@ -19,6 +20,14 @@
 
 > 实验性包（`dsh-experimental-agent-team`、`dsh-experimental-tool-agent-team`）**没有稳定性承诺**。
 > 它们随 DSH 版本发布，不能跨大版本混用。
+
+## 对外契约（调用方可以依赖的东西）
+
+- **哨兵 JSON**：顶层 `schema` 是格式版本，当前为 `1`（更早的版本没有这个字段，形状与 1 相同）。同一个 `schema` 内**只加字段**，不删、不改名、不改类型；调用方要忽略不认识的字段。需要做破坏性改动时 `schema` 加一，并在 CHANGELOG 里写明。
+- **MCP 工具面**：工具名、参数名与类型、哪些必填、枚举值。新增工具、可选参数、枚举值是兼容的；删除、改类型、把参数改成必填、删枚举值是破坏性的，只在次版本号变化时做（1.0 之前），并写进 CHANGELOG。工具描述文本和返回的 `text` 不算契约（给模型读的，随时会改）。
+- **live 事件流**：每条事件的 `v` 是格式版本，字段见 [live-view-design.md](live-view-design.md) §6。
+
+`test/contract.mjs` 把前两项的形状和 `test/contract.snapshot.json` 对比，有任何差异就失败；哨兵有破坏性改动而 `schema` 没加一时，`node test/contract.mjs --update` 拒绝重写快照。
 
 ## 运行时要求
 
@@ -54,10 +63,11 @@ dsh-any-agent team status        # 团队开关与 profile
 - `dsh_runtime`：拉起 DSH 的运行时的 Node 版本是否满足 DSH 的 `engines.node`，不满足时 **warn**；
 - `dsh_desktop`：桌面版版本，与本服务所用 DSH 不一致时 **warn**（两边共用 `~/.dsh` 会话存储）；
 - `dsh_candidates`：发现的全部 DSH 来源，以及自动选中了哪一个；
-- `dsh_version`：按上表给版本定档 —— `verified` 为 ok；`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
+- `dsh_version`：按上表给版本定档 —— `verified` 为 ok（说明里会区分：当前发布线重跑过全量套件的版本，还是最近一次实测停在上一条发布线的版本）；`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
 - `profile`：是否存在、是否漂移、路由来源；
 - `team`：`on` / `off` / `requested but unavailable`（版本或 profile 不含 team 包）；
-- `config`：当前 permission、空闲回收、共享进程等生效值。
+- `config`：当前 permission、空闲回收、共享进程等生效值；
+- `update`：本服务的版本和 npm 上的最新版比；有新版本时 **warn**（一天最多查一次，4 秒超时；离线算未知，不算问题；`DSH_MCP_UPDATE_CHECK=0` 不查）。
 
 ## 升级建议
 

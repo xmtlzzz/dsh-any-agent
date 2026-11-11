@@ -14,7 +14,7 @@ import { INSTRUCTIONS_EN } from './tool-defs.en.mjs';
 import { L, LANG } from './lang.mjs';
 import { DEFAULT_PERMISSION } from './config.mjs';
 import { LineDecoder } from './line-decoder.mjs';
-import { setLiveClient } from './live.mjs';
+import { withLiveClient } from './live.mjs';
 
 const SERVER_NAME = 'dsh-any-agent';
 /**
@@ -90,11 +90,20 @@ export function createMcpServer({
   log,
   instructions = LANG === 'en' ? INSTRUCTIONS_EN : INSTRUCTIONS,
   progressIntervalMs = 5000,
+  // 默认就是 stdio；常驻进程模式下每个客户端连接一对 socket 流（见 daemon.mjs）。
+  input = process.stdin,
+  output = process.stdout,
 }) {
-  const write = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
+  const write = (obj) => {
+    // 常驻进程里客户端可能已经断开：往关掉的 socket 写会抛错，丢掉即可。
+    if (output.writable === false || output.destroyed) return;
+    output.write(JSON.stringify(obj) + '\n');
+  };
   const lineDecoder = new LineDecoder();
   let initialized = false;
   let clientCapabilities = {};
+  /** 这个连接的 clientInfo：live 事件流用它把会话挂到"谁派的"下面（仅名字/版本）。 */
+  let clientInfo = null;
   let rootsSeq = 0;
   const pendingRoots = new Map();
   /**
@@ -205,8 +214,8 @@ export function createMcpServer({
         // 默认 cwd —— 用户在客户端里看到哪个项目，就在这里干活。
         const caps = params?.capabilities;
         clientCapabilities = caps && typeof caps === 'object' ? caps : {};
-        // live 事件流用客户端名把会话挂到"谁派的"下面（仅名字/版本，不含其它字段）。
-        setLiveClient(params?.clientInfo);
+        // 按连接记，不是按进程：常驻进程模式下一个进程同时服务好几个客户端（见 tools/call）。
+        clientInfo = params?.clientInfo ?? null;
         ok(id, {
           protocolVersion: typeof requested === 'string' ? requested : FALLBACK_PROTOCOL,
           capabilities: { tools: { listChanged: false } },
@@ -248,7 +257,8 @@ export function createMcpServer({
         const stopProgress = startProgress(params?._meta?.progressToken, args);
         try {
           // 进度通知必须在响应之前停下：协议不允许对已结束的请求再发进度。
-          const out = await Promise.resolve().then(() => fn(args)).finally(stopProgress);
+          // 工具调用的整条异步链上写出的 live 事件都记在这个连接的客户端名下。
+          const out = await Promise.resolve().then(() => withLiveClient(clientInfo, () => fn(args))).finally(stopProgress);
           const result = { content: [{ type: 'text', text: out.text ?? '' }] };
           if (out.structured !== undefined) result.structuredContent = out.structured;
           ok(id, result);
@@ -285,8 +295,8 @@ export function createMcpServer({
 
   return {
     start() {
-      process.stdin.on('data', onData);
-      process.stdin.on('end', () => log?.debug('[mcp] stdin 结束'));
+      input.on('data', onData);
+      input.on('end', () => log?.debug('[mcp] 输入结束'));
       return this;
     },
     /** 客户端当前打开的项目目录；不支持 roots 的客户端返回 null。 */

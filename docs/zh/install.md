@@ -59,6 +59,7 @@ dsh --profile dsh-mcp --from-default-profile acp
 ```bash
 dsh-any-agent-setup --yes --only cursor,zed     # 只装这几个
 dsh-any-agent-setup --yes --permission read-only
+dsh-any-agent-setup --yes --daemon               # 回合跑在常驻进程里，客户端关掉/重连也不中断
 dsh-any-agent-setup --remove --yes               # 全部移除，只摘自己那条
 ```
 
@@ -182,6 +183,7 @@ DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `
 | 注册到所有检测到的客户端 | `dsh-any-agent-setup --yes` |
 | 只注册某几个 | `dsh-any-agent-setup --yes --only cursor,zed` |
 | 就地改权限档 | `dsh-any-agent-setup --yes --permission read-only` |
+| 开常驻进程模式（`DSH_MCP_DAEMON=1`） | `dsh-any-agent-setup --yes --daemon`（和 `--permission` 一样按本次参数整条重写，不带它重跑就关掉） |
 | 升级包之后更新配置 | `dsh-any-agent-setup --yes`（幂等，只重写有差异的条目） |
 | 从所有客户端移除 | `dsh-any-agent-setup --remove --yes` |
 | 只从某几个移除 | `dsh-any-agent-setup --remove --yes --only codex` |

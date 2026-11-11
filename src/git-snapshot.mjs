@@ -67,8 +67,9 @@ async function gitOutput(cwd, args) {
  *   本地配置就能借此执行任意命令（审计 A01）。命令行 `-c` 优先级最高，空值即不跑，
  *   `required=false` 让 git 不因“没有 filter”而报错。
  *   驱动名含 `=` 时 `-c` 无法无歧义地表达，直接拒绝快照（fail closed）。
+ *   worktree.mjs 的 git 调用同样用它（`worktree add` 检出时跑 smudge）。
  */
-async function filterOverrides(cwd) {
+export async function filterOverrides(cwd) {
   let out;
   try {
     out = await gitOutput(cwd, [...GIT_SAFE, 'config', '-z', '--get-regexp', '^filter\\.']);

@@ -7,7 +7,7 @@
  * `compactResultForBudget` / `psWaitCommand` / `psReadCommand`，外部的导入路径不变。
  */
 
-import { toPosixPath } from './config.mjs';
+import { TURN_MAX_MS, toPosixPath } from './config.mjs';
 import { L } from './lang.mjs';
 
 /**
@@ -89,11 +89,18 @@ export function compactResultForBudget(result, cap) {
 }
 
 /**
+ * 等哨兵的后台命令多久放弃（秒）：回合总时长上限 + 5 分钟。到上限看门狗会取消回合、照常写哨兵；
+ * 服务进程半路退出也会写"已中断"哨兵（被直接杀掉时由下一个启动的进程补写）。所以正常情况下
+ * 哨兵一定先到，等到 TIMEOUT 只说明服务退出后一直没再起来。上限关掉（0）时用 35 分钟兜底。
+ */
+export const SENTINEL_WAIT_SEC = TURN_MAX_MS > 0 ? Math.ceil(TURN_MAX_MS / 1000) + 300 : 2100;
+
+/**
  * PowerShell 版的哨兵等待命令（Windows 宿主上 Git Bash 可能不可用或挂住）。
  * 路径放进单引号字面量：PowerShell 单引号里只有 `'` 需要转义（写成 `''`），
  * `$`、反引号都不展开，所以不会被路径内容注入。
  */
-export function psWaitCommand(sentinelPath, timeoutSec = 2100) {
+export function psWaitCommand(sentinelPath, timeoutSec = SENTINEL_WAIT_SEC) {
   const lit = `'${String(sentinelPath).replace(/'/g, "''")}'`;
   return (
     `$f=${lit}; $dl=(Get-Date).AddSeconds(${Math.max(1, Math.floor(timeoutSec))}); ` +
@@ -189,7 +196,7 @@ export function backgroundReceipt(hub, conv, res) {
     : L('已在后台执行（**回合没有被取消**）。', 'Running in the background (**the turn was not cancelled**).');
   const bashWait =
     `  Bash(run_in_background): sent="${sentinelPosix}"; \\\n` +
-    `    dl=$(( $(date +%s)+2100 )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE\n`;
+    `    dl=$(( $(date +%s)+${SENTINEL_WAIT_SEC} )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE\n`;
   return {
     structured: {
       conversation_id: conv.id,
@@ -235,6 +242,15 @@ export function backgroundReceipt(hub, conv, res) {
           ) +
           `  ${psReadCommand(sentinel)}\n`
         : '') +
+      (TURN_MAX_MS > 0
+        ? L(
+            `等待上限是回合总时长上限 + 5 分钟，哨兵一定先到；真等到 TIMEOUT 说明本服务被杀后没再起来 —— 重连本服务，哨兵会补出来。\n`,
+            `The wait limit is the turn's maximum duration plus 5 minutes, so the sentinel arrives first; an actual TIMEOUT means this server was killed and never came back. Reconnect it and the sentinel is written.\n`,
+          )
+        : L(
+            `回合没有总时长上限（DSH_MCP_TURN_MAX_MS=0），等待 35 分钟兜底；TIMEOUT 不代表回合失败，先 dsh_status 看一眼，还在跑就重新等。\n`,
+            `Turns have no maximum duration (DSH_MCP_TURN_MAX_MS=0), so the wait gives up after 35 minutes; a TIMEOUT does not mean the turn failed. Check dsh_status and wait again if it is still running.\n`,
+          )) +
       L(
         `文件出现后：直接读它拿结果（推荐——不受内存窗口限制、还扛服务重启），或 dsh_get(conversation_id, run_id) 验收。\n` +
           `消费完可以 rm 掉它。其它随时可用：dsh_status（是否在跑）、dsh_read（增量看输出）。`,

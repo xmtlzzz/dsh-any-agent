@@ -28,6 +28,8 @@
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | `dsh_list` 磁盘探测结果的缓存时长（探测要 spawn 一个 DSH 进程，实测约 1 秒） |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000`（7 天） | 启动时清理超过此时长的哨兵**与审核记录**；`0` 关闭清理 |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | 未设置 | `1` 会把 `result.thinking` 一并写进哨兵（**打破"思考不落盘"的保证**）；answer/error/title/工具输入仍会脱敏 |
+| `DSH_MCP_UPDATE_CHECK` | `1` | `dsh_doctor` 是否去 npm 查新版本（只在调用 doctor 时、只请求本包的 latest、最多 4 秒、缓存 24 小时）。`0` = 不联网 |
+| `DSH_MCP_SENTINEL_TOOL_INPUTS` | `1` | `0` = 哨兵里不写工具输入（命令、路径、写入的文件内容），每个工具只留名字、状态与 `input_chars`，自动放行审批摘要也去掉 `command_preview`。内存里的 `dsh_get` 不受影响 |
 | `DSH_MCP_REVIEW` | `advisory` | 调用方审核策略。`advisory`（默认）给每个结果/哨兵附审核单（清单 + 证据 + `dsh_review` 入口），**但不阻塞**后续派活；`off` 关闭自动审核单。单会话/单次派活可用 `review` 参数覆盖 |
 | `DSH_MCP_REVIEWS_DIR` | `<状态文件同目录>/reviews` | 审核裁决的落盘目录（`<此目录>/<会话id>/<run_id>.review.json`）。不可写会让服务启动时明确失败 |
 | `DSH_MCP_LIVE` | `detail` | live 事件流级别（`watch` / `dashboard` 的数据源）。`detail` 带脱敏后的 prompt / 命令 / 路径预览；`meta` 只有工具名、状态、计时、审批类型；`off` 不写。思考内容任何级别都不写 |
@@ -37,6 +39,12 @@
 | `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | 是否允许 `permission=danger-full-access`。默认拒绝：该档把整机写权限交给调用方 |
 | `DSH_MCP_REASONING_EFFORT` | `max` | 默认思考深度 |
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0`（不设超时） | **仅 `wait=true` 时**的等待上限；到期只转后台，不取消回合 |
+| `DSH_MCP_WATCHDOG_AFTER_MS` | `900000`（15 分钟） | 回合开始多久后看门狗才开始判"卡住"。`0` = 关掉卡住判定 |
+| `DSH_MCP_STALL_MS` | `600000`（10 分钟） | 多久没有任何进展（DSH 推来的正文、思考、工具状态、用量更新）算卡住；有工具在执行时放大 3 倍，等调用方裁决审批时不判。卡住就发 `session/cancel`（同 `dsh_interrupt`），结果带 `watchdog` |
+| `DSH_MCP_TURN_MAX_MS` | `7200000`（2 小时） | 单个回合的总时长上限，**不看进展**（拦得住陷在循环里、一直在输出的回合）。`0` = 不设上限 |
+| `DSH_MCP_DAEMON` | 关 | `1` = 常驻进程模式：客户端拉起的进程只做转发，会话、DSH 进程和正在跑的回合都在一个 detached 的常驻进程里，客户端关掉、重连或崩溃都不会打断回合。同一配置（`DSH_*` 与语言变量、名字以 `_KEY` 结尾的凭据变量如 `DEEPSEEK_API_KEY` 或 profile 里 `apiKeyEnv` 指的变量、`*_PROXY`，以及 `dsh-any-agent team on/off` 的设置）的客户端共用一个常驻进程，DSH 继承的是它的环境；凭据放在别的名字的变量里不在此列，请改名或别开这个模式。`dsh-any-agent-setup --yes --daemon` 会把它写进客户端配置 |
+| `DSH_MCP_DAEMON_IDLE_MS` | `600000`（10 分钟） | 常驻进程在没有客户端连着、也没有回合在跑时，空闲多久后自己退出。`0` = 不自动退出 |
+| `DSH_MCP_WORKTREES_DIR` | `<状态目录>/worktrees` | `dsh_start(isolation="worktree")` 建的 worktree 放在哪里 |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |
 | `DSH_MCP_GIT_STATUS` | 开 | `0` 关闭每回合的 `git status` 摘要。分析不可信仓库时建议关掉（git 可能触发仓库配置的 fsmonitor/filter，且发生在 DSH 沙箱之外） |
 | `DSH_MCP_BACKUP_KEEP` | `20` | 每个客户端配置最多保留多少份 `.bak-dsh-*`（尽力轮转） |

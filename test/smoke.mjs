@@ -106,6 +106,15 @@ try {
         for (const [key, p] of Object.entries(t.inputSchema.properties)) if (p.description && cjk.test(p.description)) leftover.push(`${t.name}.${key}`);
       }
       check('英文工具清单里没有中文', leftover.length === 0, leftover.join(','));
+      // 体检报告是英文用户排查问题最先看的东西。路径可能含中文（用户名），所以只查
+      // 我们自己写的文字：标题行 + 每条检查去掉路径/异常原文之后不该剩中文标点或"体检"字样。
+      const enDoc = await en.callTool('dsh_doctor', {});
+      const enDocText = String(enDoc?.content?.[0]?.text ?? '');
+      check('★ 英文 dsh_doctor：标题行是英文', /^(All checks passed|Some checks failed)/.test(enDocText), enDocText.slice(0, 80));
+      const zhOnly = /体检|会话|孤儿|级别|运行时|来源|桌面版|目录|检查权限|首次启动|[，；（）：]/;
+      // dsh_bin 找不到 DSH 时 detail 是 resolveDsh 的原始报错（另一处的文字，不在本次范围）。
+      const enDocLeft = enDocText.split('\n').filter((l) => zhOnly.test(l) && !/^✗ dsh_bin:/.test(l));
+      check('★ 英文 dsh_doctor：各检查项没有残留中文文案', enDocLeft.length === 0, enDocLeft.join(' | ').slice(0, 300));
       // 中文那份有描述的参数，英文那份也必须有：新加的参数不能悄悄漏翻。
       const untranslated = [];
       for (const t of tools) {
@@ -203,6 +212,8 @@ try {
     const allowed = [
       'id', 'cwd', 'permission', 'onApproval', 'createdAt', 'lastUsedAt',
       'turnCount', 'titleHint', 'keepAlive', 'reasoningEffort', 'provider', 'model', 'review', 'workspace',
+      // isolation=worktree 的位置信息（路径 / 分支名 / 基准提交），不含对话内容；没开时是 null。
+      'worktree',
     ];
     const keys = Object.keys(parsed.conversations?.[0] ?? {});
     check('注册表条目字段仅元数据', keys.every((k) => allowed.includes(k)), keys.join(','));

@@ -81,6 +81,15 @@ check('★ 默认 permission = workspace-write', def.permission === 'workspace-w
 check('★★ 默认不允许 danger-full-access', def.allowFull === false, String(def.allowFull));
 check('默认 TEAM_MODE = false（opt-in）', def.team === false, String(def.team));
 check('默认 profile 跟随团队是否可用', def.profile === (def.active ? 'dsh-team' : 'dsh-mcp'), def.profile);
+const fullDefault = read({ DSH_MCP_PERMISSION: 'danger-full-access', DSH_MCP_ALLOW_FULL_ACCESS: '' });
+check(
+  '★ 客户端配置把默认档设成 danger-full-access 本身就算机器侧允许（setup --permission danger-full-access 写出的配置能用）',
+  fullDefault.permission === 'danger-full-access' && fullDefault.allowFull === true,
+  JSON.stringify(fullDefault),
+);
+const writeDefault = read({ DSH_MCP_PERMISSION: 'workspace-write', DSH_MCP_ALLOW_FULL_ACCESS: '' });
+check('★ 默认档是 workspace-write 时，调用方不能自己要 full access', writeDefault.allowFull === false, String(writeDefault.allowFull));
+check('DSH_MCP_ALLOW_FULL_ACCESS=1 仍然单独生效', read({ DSH_MCP_ALLOW_FULL_ACCESS: '1' }).allowFull === true);
 const teamOn = read({ DSH_MCP_TEAM: '1' });
 check('DSH_MCP_TEAM=1 → 团队开', teamOn.team === true, String(teamOn.team));
 check('DSH_MCP_TEAM=1 时 profile 跟随可用性', teamOn.profile === (teamOn.active ? 'dsh-team' : 'dsh-mcp'), teamOn.profile);

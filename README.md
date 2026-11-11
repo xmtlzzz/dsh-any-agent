@@ -27,7 +27,7 @@ An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Han
 You already have a coding agent in your editor. What you do **not** have is one that can:
 
 - **hand a multi-hour job to another agent and walk away** — then collect the result when it's done;
-- **keep the job alive across restarts** of your editor, your session, your machine's idle reap;
+- **keep the job alive across restarts** of your editor, your session, your machine's idle reap (the conversation always survives; for a turn that is still running to survive the client closing or reconnecting, turn on resident process mode, `DSH_MCP_DAEMON=1`);
 - **cut in mid-flight** when it's going the wrong way, without destroying the work;
 - **run several of them at once** and switch between them;
 - **see what it is doing** without asking the agent — which tools it called, which approvals went through, how many tokens it spent.
@@ -111,6 +111,8 @@ Only using Cursor or VS Code? Add it in one click instead (runs `npx -y dsh-any-
 > <a href="https://dsh-any-agent.xmtlz.dev/en/#video"><img src="https://raw.githubusercontent.com/xmtlzzz/dsh-any-agent/main/website/src/media/promo-poster.jpg" width="560" alt="▶ Play the dsh-any-agent promo (54 seconds)"></a>
 
 > **Before your first task:** read the [Usage Notes](USAGE-NOTES.en.md), especially the model-config and external-MCP permission boundaries. External MCP tools bypass DSH's sandbox. For a fresh machine, follow the [migration guide](USAGE-MIGRATION.en.md).
+
+> **Permissions: this server only dispatches; permissions follow DSH and your configuration.** The default is `workspace-write` (writes limited to the workspace; out-of-workspace requests are auto-allowed and listed in the result). For personal use on your own machine most people just turn on full access: `dsh-any-agent-setup --yes --permission danger-full-access`, after which DSH asks for nothing and everything is allowed. **Anyone who can call these tools can run commands on your machine** (including a caller agent that got prompt-injected); use `read-only` for untrusted content. See [Permissions & privacy](docs/en/security.md).
 
 <details>
 <summary>Full contents</summary>

@@ -7,6 +7,156 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-11
+
+Running turns hold up better. An optional resident process keeps a turn
+going when the client closes or reconnects (checked by quitting the Claude
+desktop app mid-turn), a watchdog stops turns that stall or run past a cap,
+and a turn cut off by the server exiting still gets a sentinel. Sentinels
+gain a format version backed by a contract test, and `dsh_doctor` reports
+when a newer release is on npm.
+
+### Added
+
+- **Turn watchdog.** A turn that has run 15 minutes and then makes no progress
+  for 10 minutes (no answer, thinking, tool-status or usage update from DSH) is
+  cancelled with `session/cancel`, the same path as `dsh_interrupt`: output so
+  far is kept, files are not rolled back, and the turn ends normally with its
+  sentinel. While any tool of the turn is still running the allowance is 3×
+  (a long `npm install` or test run sends no updates); while an approval waits on the caller it is
+  not judged at all. A separate 2-hour cap (`DSH_MCP_TURN_MAX_MS`) ignores
+  progress, so a turn looping while it keeps producing output still stops. The
+  result, the sentinel and the review ticket carry `watchdog: {reason, …}`;
+  `dsh_status` shows the time since the last progress. Tune with
+  `DSH_MCP_WATCHDOG_AFTER_MS` / `DSH_MCP_STALL_MS` / `DSH_MCP_TURN_MAX_MS`;
+  `0` turns each off.
+- **Resident process mode: turns survive the client (`DSH_MCP_DAEMON=1`).**
+  MCP clients shut a server down by closing stdin and then killing it, and on
+  Windows the client's job object kills the whole process tree (measured with
+  a Node/libuv client, both on a crash and on a spec shutdown), so closing or
+  reconnecting the client used to interrupt a running turn with no sentinel.
+  With `DSH_MCP_DAEMON=1` the process the client launches only forwards bytes
+  to a detached resident process that owns the hub, the DSH processes and the
+  turns; killing the forwarder leaves a running turn to finish and write its
+  sentinel. Clients with the same configuration (state directory, version,
+  `DSH_*` and locale variables, credential variables whose names end in
+  `_KEY` such as `DEEPSEEK_API_KEY` or a profile's `apiKeyEnv`, `*_PROXY`, and
+  the `dsh-any-agent team on/off` setting) share one resident process; a
+  different configuration gets its own, so a client with another API key (or
+  one reconnecting after a key rotation) does not run on the old key. A
+  credential kept in a variable with another name is not covered: rename it
+  or leave resident mode off. Connections must present a random token from a
+  user-only info file. With no clients and no turns it exits after
+  `DSH_MCP_DAEMON_IDLE_MS` (10 min). If it cannot start, the forwarder falls
+  back to the normal stdio server. Live events (`watch` / `dashboard`) name
+  the client of the connection that dispatched each conversation and run, not
+  whichever client connected last. Off by default for now;
+  `dsh-any-agent-setup --yes --daemon` writes `DSH_MCP_DAEMON=1` into the
+  client configs (re-running setup without `--daemon` takes it out again).
+  The resident process's stderr log rolls over to `.1` past 10 MB. The resident
+  process costs one extra Node process (about 75 MB idle, measured); DSH
+  processes are unchanged.
+- **Optional worktree isolation: `dsh_start(isolation="worktree")`.** The
+  conversation works in a new git worktree and branch `dsh/<time>-<random>`
+  (under the state directory, not inside the repository), based on the main
+  checkout's HEAD, so the caller can keep editing the original directory. The
+  start result says when uncommitted changes in the main checkout were left
+  behind. Changes stay on the branch for the caller to merge; `dsh_release
+  (forget=true)` deletes a clean worktree and keeps the branch, and keeps a
+  dirty one. The git commands that create, check and remove the worktree run
+  none of the repository's hooks or filter drivers (`smudge` / `clean`), so
+  files tracked with Git LFS are pointer files in the worktree. Off by
+  default: a fresh worktree has no installed dependencies.
+- **Sentinels carry `schema: 1`, and the public contract is written down.**
+  Within one `schema` sentinel fields are only added; a breaking change bumps
+  it. The compatibility doc states the same rules for the MCP tool surface.
+  A new suite, `test/contract.mjs`, compares the tool surface and the sentinel
+  fields with a checked-in snapshot and fails on any difference; `--update`
+  rewrites the snapshot, but refuses when sentinels changed incompatibly
+  without a `schema` bump.
+- **`dsh_doctor` says when a newer release is on npm.** The new `update`
+  check reads this package's `latest` from the npm registry only when
+  `dsh_doctor` runs (4 s timeout, cached for 24 hours in the state directory)
+  and warns when it is newer than the running version. Offline or a timeout
+  reads as unknown, not as a problem. `DSH_MCP_UPDATE_CHECK=0` turns the
+  request off.
+- **`DSH_MCP_SENTINEL_TOOL_INPUTS=0` keeps tool inputs out of sentinels.**
+  Each tool then keeps its name, status and `input_chars`, and auto-approval
+  summaries drop their `command_preview`; `dsh_get` from memory still has the
+  inputs. The security doc gained a table of everything
+  this server writes to disk, how long it stays and how to turn it off.
+- **`dsh_doctor`'s report is available in English.** It follows `DSH_MCP_LANG`
+  / the system language like every other tool result. The takeover report and
+  the "DSH not found" error text are still Chinese only.
+- **CI builds the `Dockerfile`** and checks that the image answers `--version`
+  and an MCP `initialize` over stdio.
+- **Optional release gate.** With the repository variable `MODEL_SUITE_RUNNER`
+  set to a self-hosted runner that has DSH and credentials, a tag push runs the
+  full model-backed suite on the tagged commit before npm publish. Unset, the
+  release workflow behaves as before.
+
+### Changed
+
+- **The sentinel waiter's deadline follows the turn cap.** The ready-made
+  Bash and PowerShell wait commands in a background receipt gave up after 35
+  minutes, so a turn longer than that woke the caller with `TIMEOUT` while it
+  was still running. They now wait the turn's maximum duration plus 5 minutes
+  (2 h 5 min by default; 35 minutes when `DSH_MCP_TURN_MAX_MS=0`). The
+  watchdog ends a turn at the cap with a sentinel and an exiting server writes
+  one too, so a `TIMEOUT` now means the server was killed and never restarted.
+- **`conversation.mjs` is split up.** The terminal-result builders, the
+  `dsh_read` output buffer, the run records and busy queue, and the approval
+  rules moved to `run-result.mjs`, `out-buffer.mjs`, `run-ledger.mjs` and
+  `approval-policy.mjs`. No behavior change.
+
+### Fixed
+
+- **`dsh_status` and `dsh_get` without `run_id` show the turn that is
+  actually running.** They returned the most recently created run record, so a
+  run queued behind the current turn, or queued and then cancelled, took its
+  place: `dsh_status` could report `state: running` next to a cancelled run.
+  They now return the running turn, or else the last one that started.
+- **`tools_used[].name` is filled in with real DSH.** DSH's `tool_call`
+  carries the tool name in `title` (`pwsh`, `read`) and no `name`, so every
+  entry in results and sentinels had `name: null`, and so did the `tool` of
+  live approval events. An identifier-like title now fills `name`, the same
+  rule the live tool events already used; a descriptive title such as
+  `read src/a.ts` does not, and a `name` sent by DSH still wins.
+- **A turn cut off by the server exiting now gets a sentinel.** When the
+  server stopped mid-turn (the client closed, reconnected or crashed), nobody
+  wrote the turn's sentinel, so a caller's background waiter ran to its
+  timeout and `dsh_get` answered "unknown run_id". The server now writes a
+  `status: "error"`, `stop_reason: "interrupted"` sentinel for running turns
+  as the first step of shutting down. If it was killed outright, each turn
+  leaves a `<run_id>.running` marker naming the server's PID and start time,
+  and the next server to start writes the sentinel for markers whose owner is
+  gone (a reused PID with a different start time counts as gone; an unknown
+  start time does not). Files the turn changed are not rolled back.
+- **`dsh-any-agent-setup --permission danger-full-access` produces a working
+  config.** It writes `DSH_MCP_PERMISSION=danger-full-access`, but the server
+  also wanted `DSH_MCP_ALLOW_FULL_ACCESS=1`, so every `dsh_start` was refused.
+  A client config whose default tier is `danger-full-access` now counts as
+  allowing it on the machine. `DSH_MCP_ALLOW_FULL_ACCESS=1` is still needed
+  only when the default is another tier and a caller asks for full access
+  per conversation. The README and the permissions doc now state the trust
+  model plainly: the server only dispatches, permissions follow DSH and the
+  owner's configuration, and anyone who can call the tools can run commands.
+- **Reading process memory no longer stalls the server.** `rss_mb` came from a
+  synchronous `tasklist` (Windows, about 0.6 s per call) or `ps`, run whenever
+  `dsh_status`, `dsh_get`, `dsh_list` or `dsh_start` built a snapshot with a
+  cache older than 5 s; ACP messages and approvals of every conversation waited
+  for it. The process table is now read asynchronously: snapshots return the
+  cached value at once and refresh it in the background, so `rss_mb` can be
+  `null` for the first seconds after a process starts. The RSS budget
+  (`DSH_MCP_MAX_RSS_MB`) and `dsh_doctor` await a fresh read; the reaper then
+  re-checks each conversation it picked, so one that started a turn (or was
+  used) during that read is not stopped.
+- **`dsh_doctor` no longer says a DSH version was verified by this release line
+  when it was not.** The `dsh_version` note now tells apart the versions the
+  current line re-ran the full suite on (0.6.x: DSH 0.2.1) from the rest of the
+  verified range (0.1.7 – 0.2.2), whose last full run was on 0.5.x. Both stay
+  `ok`; only the wording changed, to match the compatibility table.
+
 ## [0.6.9] — 2026-11-10
 
 Tool results now come back in English as well, `dsh-any-agent-setup` can
@@ -1467,7 +1617,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.6...v0.6.7

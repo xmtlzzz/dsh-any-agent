@@ -18,8 +18,10 @@ export class McpClient {
    */
   createdIds = new Set();
 
-  constructor({ env = {} } = {}) {
+  constructor({ env = {}, clientInfo = { name: 'dsh-any-agent-test', version: '0.1.0' } } = {}) {
     this.env = env;
+    /** initialize 里报给服务端的客户端名（常驻进程测试要区分同一进程上的几个连接）。 */
+    this.clientInfo = clientInfo;
   }
 
   /** 这个客户端拉起的服务用的注册表文件（DSH_MCP_STATE；per-run 数据按它的同级目录推导）。 */
@@ -32,7 +34,8 @@ export class McpClient {
       // 集成测试会显式请求 danger-full-access；0.5.0 起它需要机器侧放行。
       // 只给测试拉起的子进程放行，测试进程自身的默认值仍会被 guards 钉住。
       // 工具描述与服务说明跟系统语言走；测试断言的是中文那一份，所以钉成 zh（要测英文的套件自己传 en）。
-      env: { DSH_MCP_ALLOW_FULL_ACCESS: '1', DSH_MCP_LANG: 'zh', ...process.env, ...this.env },
+      // 测试一律离线：dsh_doctor 的新版本检查不去 npm（test/update-check.mjs 用假 fetch 单测它）。
+      env: { DSH_MCP_ALLOW_FULL_ACCESS: '1', DSH_MCP_LANG: 'zh', DSH_MCP_UPDATE_CHECK: '0', ...process.env, ...this.env },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.#child.stdout.on('data', (d) => this.#onData(d));
@@ -98,7 +101,7 @@ export class McpClient {
     const r = await this.request('initialize', {
       protocolVersion: '2025-06-18',
       capabilities: {},
-      clientInfo: { name: 'dsh-any-agent-test', version: '0.1.0' },
+      clientInfo: this.clientInfo,
     });
     this.notify('notifications/initialized', {});
     return r;

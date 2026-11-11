@@ -42,35 +42,74 @@ export function resolveDshBin() {
  * 改矩阵时同步改这里：`[verifiedMin, verifiedBelow)` 是“已验证”区间。
  * 用 `-0` 后缀是为了把同号的 rc 版本也算进去（semver 里 `0.1.7-rc.1 < 0.1.7`）。
  * 0.2.x：2026-11-06 用 0.2.1-rc.5（npm）与 0.2.2-rc.1（桌面版自带运行时）跑过全量套件。
+ *
+ * `[rerunMin, rerunBelow)` 是**当前这条发布线**（rerunLine）重新跑过全量套件的 DSH 版本；
+ * 已验证区间里的其它版本，最近一次实测停在 earlierLine。体检要把这两种情况说清楚，
+ * 不能把"上一条线验证过"说成"本版本验证过"。
  */
 export const DSH_COMPAT = Object.freeze({
   partialMin: '0.1.5-0',
   verifiedMin: '0.1.7-0',
   verifiedBelow: '0.2.3-0',
   verifiedLabel: '0.1.7 ~ 0.2.2',
+  rerunMin: '0.2.1-0',
+  rerunBelow: '0.2.2-0',
+  rerunLine: '0.6.x',
+  earlierLine: '0.5.x',
 });
 
 /**
  * 给一个 DSH 版本打兼容性档位：ok（已验证）/ warn（部分可用、未验证或读不到）。
  * 只是体检提示，不拦启动 —— 未验证不等于不能用。
+ *
+ * `note` 是中文、`noteEn` 是英文：config 不能 import lang.mjs（lang → live-view → live → config
+ * 会成环），所以两种文字都给，由调用方按语言挑。
  */
 export function dshVersionStatus(version) {
+  const C = DSH_COMPAT;
   if (!version) {
-    return { status: 'warn', level: 'unknown', note: '读不到 DSH 版本（package.json 缺失或不可读）' };
+    return {
+      status: 'warn',
+      level: 'unknown',
+      note: '读不到 DSH 版本（package.json 缺失或不可读）',
+      noteEn: 'could not read the DSH version (package.json missing or unreadable)',
+    };
   }
-  if (cmpVersion(version, DSH_COMPAT.partialMin) < 0) {
-    return { status: 'warn', level: 'unsupported', note: `DSH ${version} 低于已知可用的最低版本 0.1.5` };
+  if (cmpVersion(version, C.partialMin) < 0) {
+    return {
+      status: 'warn',
+      level: 'unsupported',
+      note: `DSH ${version} 低于已知可用的最低版本 0.1.5`,
+      noteEn: `DSH ${version} is older than 0.1.5, the lowest version known to work`,
+    };
   }
-  if (cmpVersion(version, DSH_COMPAT.verifiedMin) < 0) {
-    return { status: 'warn', level: 'partial', note: `DSH ${version} 部分可用：ACP 基本路径可用，缺 team 包` };
+  if (cmpVersion(version, C.verifiedMin) < 0) {
+    return {
+      status: 'warn',
+      level: 'partial',
+      note: `DSH ${version} 部分可用：ACP 基本路径可用，缺 team 包`,
+      noteEn: `DSH ${version} partly works: the ACP basics do, the team packages are missing`,
+    };
   }
-  if (cmpVersion(version, DSH_COMPAT.verifiedBelow) < 0) {
-    return { status: 'ok', level: 'verified', note: `DSH ${version} 在已验证区间（${DSH_COMPAT.verifiedLabel}）` };
+  if (cmpVersion(version, C.verifiedBelow) < 0) {
+    const rerun = cmpVersion(version, C.rerunMin) >= 0 && cmpVersion(version, C.rerunBelow) < 0;
+    return {
+      status: 'ok',
+      level: 'verified',
+      rerun,
+      note: rerun
+        ? `DSH ${version} 已用 ${C.rerunLine} 跑过全量套件`
+        : `DSH ${version} 在已验证区间（${C.verifiedLabel}），但最近一次全量实测是 ${C.earlierLine}；${C.rerunLine} 没有对它重跑`,
+      noteEn: rerun
+        ? `DSH ${version} passed the full suite on ${C.rerunLine}`
+        : `DSH ${version} is in the verified range (${C.verifiedLabel}), but its last full run was on ${C.earlierLine}; ${C.rerunLine} did not re-run it`,
+    };
   }
   return {
     status: 'warn',
     level: 'unverified',
-    note: `DSH ${version} 未经本版本验证（兼容性矩阵覆盖 ${DSH_COMPAT.verifiedLabel}），ACP session/* 面可能有变化`,
+    note: `DSH ${version} 未经本版本验证（兼容性矩阵覆盖 ${C.verifiedLabel}），ACP session/* 面可能有变化`,
+    noteEn: `DSH ${version} is not verified with this version (the compatibility matrix covers ${C.verifiedLabel}); the ACP session/* surface may have changed`,
   };
 }
 
@@ -287,6 +326,12 @@ export const DEFAULT_REVIEW = (() => {
 export const SENTINEL_INCLUDE_REASONING = process.env.DSH_MCP_SENTINEL_INCLUDE_REASONING === '1';
 
 /**
+ * 哨兵里是否带工具输入（完整命令、路径、写入的文件内容；已脱敏）。默认带 —— 调用方离线审核要看。
+ * 设 DSH_MCP_SENTINEL_TOOL_INPUTS=0 只留工具名/状态与 `input_chars`（输入长度），内存里的 dsh_get 不受影响。
+ */
+export const SENTINEL_TOOL_INPUTS = process.env.DSH_MCP_SENTINEL_TOOL_INPUTS !== '0';
+
+/**
  * 哨兵文件的保留时长（毫秒）。服务**启动时**清理超过此时长的哨兵与残留 tmp。
  * 默认 7 天；设为 0 关闭清理（哨兵将永久保留）。
  *
@@ -320,6 +365,34 @@ export function toPosixPath(p) {
  * 另注：`dsh_send` **默认 `wait=false`**，压根不走等待路径，这个值通常用不上。
  */
 export const PROMPT_TIMEOUT_MS = numEnv('DSH_MCP_PROMPT_TIMEOUT_MS', 0);
+
+/**
+ * 回合看门狗（判定规则见 watchdog.mjs）。三个值都是毫秒，`<= 0` 或非法值 = 关掉那一项。
+ *
+ *   DSH_MCP_WATCHDOG_AFTER_MS  回合开始多久后才开始判"卡住"（默认 15 分钟）。DSH 的回合本来就常跑
+ *                              十几分钟，这之前一律不打扰。
+ *   DSH_MCP_STALL_MS           多久没有任何进展算卡住（默认 10 分钟；有工具在执行时放大 3 倍）。
+ *   DSH_MCP_TURN_MAX_MS        单个回合的总时长上限（默认 2 小时），不看进展 —— 陷在循环里的回合
+ *                              一直有"进展"，只有它拦得住。
+ *
+ * 触发时发 session/cancel（与 dsh_interrupt 同一条路径：已有输出保留，文件改动不回滚），
+ * 回合照常收尾、写哨兵，结果里带 `watchdog: {reason, …}`。
+ */
+const positiveOrOff = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
+export const WATCHDOG_AFTER_MS = positiveOrOff(numEnv('DSH_MCP_WATCHDOG_AFTER_MS', 15 * 60 * 1000));
+export const STALL_MS = positiveOrOff(numEnv('DSH_MCP_STALL_MS', 10 * 60 * 1000));
+export const TURN_MAX_MS = positiveOrOff(numEnv('DSH_MCP_TURN_MAX_MS', 2 * 60 * 60 * 1000));
+
+/**
+ * 常驻进程模式（见 daemon.mjs），默认关。
+ *
+ *   DSH_MCP_DAEMON=1          客户端拉起的进程只做转发；会话、DSH 进程和正在跑的回合都在一个
+ *                             detached 的常驻进程里，客户端关掉、重连、崩溃都不会打断回合。
+ *   DSH_MCP_DAEMON_IDLE_MS    没有客户端连着、也没有回合在跑多久后常驻进程自己退出（默认 10 分钟；
+ *                             `<= 0` = 不自动退出）。
+ */
+export const DAEMON_MODE = ['1', 'true', 'on', 'yes'].includes(String(process.env.DSH_MCP_DAEMON ?? '').trim().toLowerCase());
+export const DAEMON_IDLE_MS = positiveOrOff(numEnv('DSH_MCP_DAEMON_IDLE_MS', 10 * 60 * 1000));
 
 /** 普通 ACP 请求的超时（毫秒）。 */
 export const REQUEST_TIMEOUT_MS = numEnv('DSH_MCP_REQUEST_TIMEOUT_MS', 60_000);
@@ -440,15 +513,25 @@ export const PERMISSION_TIERS = ['read-only', 'workspace-write', 'danger-full-ac
  * 新建会话的默认权限档。0.5.0 起默认 **workspace-write**（沙箱把写入限制在工作区内），
  * 不再是 danger-full-access；空串/非法值也回落到它。
  *
- * `danger-full-access` 需要机器侧显式允许（`DSH_MCP_ALLOW_FULL_ACCESS=1`），
- * 避免"任何 MCP 客户端都能驱动"的服务默认把整机写权限交出去。
+ * `danger-full-access` 需要机器侧显式允许，见下面的 ALLOW_FULL_ACCESS。
  */
 export const DEFAULT_PERMISSION = PERMISSION_TIERS.includes(process.env.DSH_MCP_PERMISSION)
   ? process.env.DSH_MCP_PERMISSION
   : 'workspace-write';
 
-/** 是否允许 `permission=danger-full-access`（默认关）。 */
-export const ALLOW_FULL_ACCESS = process.env.DSH_MCP_ALLOW_FULL_ACCESS === '1';
+/**
+ * 是否允许 `permission=danger-full-access`。
+ *
+ * 本服务只是派发层，权限跟着机器所有者自己的配置走。两种情况算"机器侧已允许"：
+ *   - 客户端配置里把默认档设成了 danger-full-access（`DSH_MCP_PERMISSION=danger-full-access`，
+ *     也就是 `dsh-any-agent-setup --permission danger-full-access` 写进去的那一项）—— 那就是你的选择；
+ *   - 或者显式 `DSH_MCP_ALLOW_FULL_ACCESS=1`（默认档是别的、只想让个别会话用 full access 时）。
+ *
+ * 两样都没有时，调用方（模型）不能在 dsh_start 里自己把档位要成 danger-full-access。
+ * 以前只认第二种，于是 `setup --permission danger-full-access` 写出来的配置每次 dsh_start 都被拒绝。
+ */
+export const ALLOW_FULL_ACCESS =
+  process.env.DSH_MCP_ALLOW_FULL_ACCESS === '1' || DEFAULT_PERMISSION === 'danger-full-access';
 
 /**
  * 审批处理策略：

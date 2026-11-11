@@ -5,10 +5,12 @@
 | Tier | Approval default | Use for |
 |---|---|---|
 | `workspace-write` (raw server default; also what `setup` writes) | `auto-allow` | Writes are limited to the workspace by DSH's sandbox; out-of-workspace requests are auto-allowed unless you pass `on_approval=ask` |
-| `danger-full-access` | `auto-allow` | Whole-machine write access; creating or resuming a session in this tier requires `DSH_MCP_ALLOW_FULL_ACCESS=1` on the machine |
+| `danger-full-access` | `auto-allow` | Whole-machine write access, and DSH no longer asks for approvals. Simplest for personal use: `dsh-any-agent-setup --yes --permission danger-full-access` makes it the default tier, which by itself counts as allowing it on the machine; if the default is another tier and only some conversations should get it, also set `DSH_MCP_ALLOW_FULL_ACCESS=1` |
 | `read-only` | `auto-deny` | Analyzing untrusted samples (malware, unknown dumps) |
 
 `on_approval` can be `auto-allow`, `auto-deny`, or `ask` (which exposes a pending approval for `dsh_approval_decide` to adjudicate).
+
+**Trust model: this server only dispatches; permissions follow DSH and your own configuration.** It adds no permission layer of its own: DSH runs at whatever tier your client config gives it, and under `danger-full-access` DSH asks for nothing, so everything is allowed. That means **anyone who can call these MCP tools can run commands on your machine** — including a caller agent that read a malicious web page or issue and got prompt-injected. For personal use on your own machine that risk is usually acceptable; for untrusted content use `read-only` (the one hard boundary: every approval is denied, and passing `auto-allow` or `ask` is rejected outright).
 
 **Under `auto-allow`, `workspace-write` is a soft boundary.** When DSH's sandbox blocks something (e.g. child-process pipes on Windows), DSH asks for `sandbox_permissions: danger-full-access` and `auto-allow` grants it. The default is unchanged, but the grant is **no longer silent**: every turn result carries `auto_approvals_total`, `auto_escalations_total` and up to 20 redacted `auto_approvals` summaries (tool, escalation tier, justification, command preview), and the review ticket's evidence and checklist call out "N auto-approved this turn, M of them escalations". To gate each one, start a conversation with `on_approval=ask`.
 
@@ -67,3 +69,26 @@ Silent by default — **not one byte is written**.
 - The live event stream (`<state dir>/live/`, read by `watch` / `dashboard`) carries **redacted** command, path and prompt previews by default — no more than the sentinels already hold — never reasoning, and is pruned on the same 7-day TTL. Set `DSH_MCP_LIVE=meta` to drop the previews or `off` to write nothing. `dashboard` binds `127.0.0.1` only, requires a one-time token, checks the Host header, and is read-only.
 
 > ⚠️ **DSH writes its own session log under `~/.dsh/sessions` and that log contains the full reasoning text** (even with `reasoning=hide`). It is what makes resume possible and is outside this server's control. The absolute "reasoning never reaches disk" claim applies to *this server's* artifacts only.
+
+### 📁 What this server writes to disk
+
+`<state dir>` is `~/.dsh/.dsh-any-agent/` by default (it follows `DSH_MCP_STATE`). None of these holds reasoning text.
+
+| Path | Contents | Kept for | How to turn off / clean up |
+|---|---|---|---|
+| `<state dir>/conversations.json`, `meta/<conversation_id>.json` | Conversation registry and metadata: id, cwd, permissions, counters, title hint; no message text | Until the conversation is forgotten | `dsh_release(forget=true)` |
+| `<state dir>/runs/<conversation_id>/<run_id>.json` | Completion sentinel: answer, usage, review ticket, tool inputs (all redacted) | 7 days (`DSH_MCP_SENTINEL_TTL_MS`) | `DSH_MCP_SENTINEL_TOOL_INPUTS=0` keeps only each tool input's length (and drops auto-approval command previews); delete it once read |
+| `<state dir>/runs/<conversation_id>/<run_id>.running` | Turn-in-progress marker: run_id, task preview (redacted), this server's PID and start time | Removed when the sentinel is written | — |
+| `<state dir>/reviews/<conversation_id>/<run_id>.review.json` | Review record: verdict, notes, checklist, evidence summary (redacted) | Same as sentinels, 7 days | `DSH_MCP_REVIEW=off` stops automatic tickets |
+| `<state dir>/live/<conversation_id>/events.jsonl` | Live event stream: event type, time, tool name, client name; by default also redacted command / path / prompt previews | Same as sentinels, 7 days; rolled at 5 MB | `DSH_MCP_LIVE=meta` drops the previews, `off` writes nothing |
+| `<state dir>/locks/<conversation_id>.json` | Write-lock holder record: PIDs of this server and the DSH child, cwd | Cleared on release or once the processes exit | — |
+| `<state dir>/worktrees/` | Conversation directories for `isolation=worktree` (a checkout plus DSH's changes) | A clean one is deleted on forget; one with uncommitted changes is kept; the branch is always kept | Don't use `isolation=worktree`; move it with `DSH_MCP_WORKTREES_DIR` |
+| `<state dir>/daemon-<id>.json`, `daemon-<id>.log` (plus `.sock` on POSIX) | The resident process's PID and random token (readable by the user only); its stderr | The info file goes when the process exits; the log rolls to `.1` at 10 MB | Don't enable `DSH_MCP_DAEMON` |
+| `$DSH_HOME/.dsh-any-agent-forgotten/<conversation_id>.json` | Forget tombstone: conversation id and time | Cleared at startup once the session file is gone | — |
+| The file `DSH_MCP_AUDIT_FILE` points to | Metadata audit: events, ids, decisions, counts; no prompts, answers, reasoning or tool inputs | Rolled to `.1` at 10 MB | Off unless the variable is set |
+| `<state dir>/update-check.json` | The latest version number `dsh_doctor` last read from npm, and when | Re-checked and overwritten after 24 hours | `DSH_MCP_UPDATE_CHECK=0` (also stops the network request) |
+| `.bak-dsh-<stamp>` next to client configs | The config as it was before `dsh-any-agent-setup` wrote to it | Up to 20 per config file (`DSH_MCP_BACKUP_KEEP`) | Delete by hand |
+
+Network: this server itself contacts `registry.npmjs.org` only when `dsh_doctor` is called (to read this package's latest version; the request carries no user data; `DSH_MCP_UPDATE_CHECK=0` turns it off). Model requests are made by DSH, not by this server.
+
+On the DSH side (not under this server's control): the session logs in `~/.dsh/sessions` (with full reasoning, see above); this server also registers each conversation's workspace in DSH's `workspace.json` so the GUI shows it (`DSH_MCP_REGISTER_WORKSPACE=0` turns that off).

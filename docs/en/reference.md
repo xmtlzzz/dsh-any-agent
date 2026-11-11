@@ -28,6 +28,8 @@
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | Cache lifetime for `dsh_list`'s on-disk probe (the probe spawns a DSH process and takes ~1 s) |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels **and review records**; `0` disables pruning |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**); answer/error/title/tool inputs are still credential-redacted |
+| `DSH_MCP_UPDATE_CHECK` | `1` | Whether `dsh_doctor` asks npm for a newer version (only when doctor is called; requests this package's latest only; 4 s at most; cached 24 hours). `0` = no network |
+| `DSH_MCP_SENTINEL_TOOL_INPUTS` | `1` | `0` = sentinels carry no tool inputs (commands, paths, written file contents); each tool keeps its name, status and `input_chars`, and auto-approval summaries drop `command_preview`. `dsh_get` from memory is unaffected |
 | `DSH_MCP_REVIEW` | `advisory` | Caller-review policy. `advisory` (default) attaches a review ticket (checklist + evidence + `dsh_review` entry) to every result and sentinel **without blocking later sends**; `off` disables automatic tickets. Per-conversation/per-send overrides use the `review` argument |
 | `DSH_MCP_REVIEWS_DIR` | `<state file dir>/reviews` | Where review verdicts are written (`<this>/<conversation_id>/<run_id>.review.json`). Must be writable, or startup fails loudly |
 | `DSH_MCP_LIVE` | `detail` | Live event stream level (the data behind `watch` / `dashboard`). `detail` adds redacted prompt / command / path previews; `meta` keeps tool names, status, timing and approval kinds only; `off` writes nothing. Reasoning is never written at any level |
@@ -37,6 +39,12 @@
 | `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | Whether `permission=danger-full-access` is allowed. Denied by default: it hands the caller whole-machine write access |
 | `DSH_MCP_REASONING_EFFORT` | `max` | Default reasoning effort |
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0` (no timeout) | Wait bound for **`wait=true` only**; on expiry the turn merely moves to the background |
+| `DSH_MCP_WATCHDOG_AFTER_MS` | `900000` (15 min) | How long into a turn the watchdog starts judging whether it is stuck. `0` = no stall check |
+| `DSH_MCP_STALL_MS` | `600000` (10 min) | How long with no progress at all (answer, thinking, tool status or usage updates from DSH) counts as stuck; 3× while a tool is running, never while waiting on the caller's approval decision. A stuck turn gets `session/cancel` (same as `dsh_interrupt`) and its result carries `watchdog` |
+| `DSH_MCP_TURN_MAX_MS` | `7200000` (2 h) | Total duration cap for one turn, **regardless of progress** (catches a turn looping while it keeps producing output). `0` = no cap |
+| `DSH_MCP_DAEMON` | off | `1` = resident process mode: the process the client launches only forwards, and conversations, DSH processes and running turns live in one detached resident process, so closing, reconnecting or crashing the client no longer interrupts a turn. Clients with the same configuration (`DSH_*` and locale variables, credential variables ending in `_KEY` such as `DEEPSEEK_API_KEY` or a profile's `apiKeyEnv`, `*_PROXY`, and the `dsh-any-agent team on/off` setting) share one resident process, whose environment DSH inherits; a credential in a variable with another name is not covered, so rename it or leave this off. `dsh-any-agent-setup --yes --daemon` writes it into the client configs |
+| `DSH_MCP_DAEMON_IDLE_MS` | `600000` (10 min) | How long the resident process waits with no clients connected and no turn running before it exits. `0` = never exits on its own |
+| `DSH_MCP_WORKTREES_DIR` | `<state dir>/worktrees` | Where `dsh_start(isolation="worktree")` puts its worktrees |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |
 | `DSH_MCP_GIT_STATUS` | on | `0` disables the per-turn `git status` summary. Useful for untrusted repos (git can run repo-configured fsmonitor/filters outside DSH's sandbox) |
 | `DSH_MCP_BACKUP_KEEP` | `20` | How many `.bak-dsh-*` copies to keep per client config (rotation is best-effort) |

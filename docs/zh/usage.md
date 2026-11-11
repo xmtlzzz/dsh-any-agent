@@ -35,7 +35,7 @@ MCP 工具调用是**阻塞**的，所以 `dsh_send` **默认就不阻塞**（`w
 ```bash
 # sent="$sentinel_file_posix"   ← 直接用工具返回里那个字段
 sent='/c/Users/you/.dsh/.dsh-any-agent/runs/<conversation_id>/<run_id>.json'
-dl=$(( $(date +%s) + 2100 ))          # 35min 兜底，防服务中途死掉时无限挂
+dl=$(( $(date +%s) + 7500 ))          # 回合总时长上限（默认 2h）+ 5min；收据里的命令已按实际上限算好
 until [ -f "$sent" ]; do
   [ "$(date +%s)" -ge "$dl" ] && { echo "TIMEOUT"; exit 1; }
   sleep 2
@@ -47,7 +47,7 @@ Windows 宿主上 Git Bash 不可用（或会挂住）时，用 PowerShell 等�
 
 ```powershell
 $f='C:\Users\you\.dsh\.dsh-any-agent\runs\<conversation_id>\<run_id>.json'   # 路径里的 ' 写成 ''
-$dl=(Get-Date).AddSeconds(2100)
+$dl=(Get-Date).AddSeconds(7500)
 while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit 1 }; Start-Sleep -Seconds 2 }
 'DONE'
 ```
@@ -76,6 +76,16 @@ while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit
 4. dsh_read(id,  cursor=<上次>) # 切回来；上次之后被追加过的条目会再次出现（按 seq 替换全文）
 ```
 
+## 🌿 用法：和调用方同时改同一个仓库（worktree 隔离）
+
+DSH 在后台跑的时候，你（调用方）多半还在同一个仓库里继续改文件。两边改同一批文件会互相覆盖，`workspace_changed` 和审核单的证据里也会混进对方的改动。这时用 `dsh_start(isolation="worktree")`：
+
+- 服务为 `cwd` 所在的 git 仓库新建一个 worktree（放在本服务的状态目录下，不在仓库里）和分支 `dsh/<时间>-<随机>`，会话在里面干活；`cwd` 是子目录时映射到 worktree 里的同一子目录；
+- 基于主检出当前的 **HEAD**：主检出里**未提交**的改动不会带过去（建会话的返回里会提示）；
+- 新 worktree 里没有 `node_modules`、虚拟环境、构建产物，DSH 往往要先装依赖 —— 这是默认不开的原因；
+- 改动留在那个分支上，**由你审核后自己合并**，服务从不自动合并；
+- `dsh_release(forget=true)` 时 worktree 干净就删目录（分支保留，提交不会丢）；有未提交的改动就保留并告诉你路径；
+- 出于安全，建、查、删 worktree 时**不跑仓库自带的 git 钩子和 filter 驱动**（`smudge` / `clean`；仓库可能不可信），所以 husky 这类在 checkout 时装东西的钩子也不会跑，Git LFS 管理的文件在 worktree 里只是指针文件（需要的话 DSH 可以在 worktree 里自己 `git lfs pull`）。
 ## 👀 旁路查看：派出去的活在干什么
 
 调用方 agent 能 `dsh_read`，但坐在客户端前的你通常只看到一次 `dsh_send`。服务会把每个会话的活动写成 live 事件流（`<状态目录>/live/<会话id>/events.jsonl`），你可以**不经过 agent**直接看调用链：

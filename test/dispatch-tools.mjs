@@ -130,7 +130,7 @@ check('remove 写了 cancelled 哨兵', () => assert.equal(sentinels.length, bef
 check('remove 后队列只剩一条', () => assert.equal(conv.queueList().length, 1));
 
 conv.busy = false;
-conv.queue = [];
+conv.queue.length = 0;
 
 console.log('\n[3b] 派发竞态（假 ACP 进程，不拉 DSH）');
 
@@ -214,6 +214,50 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
   proc.end();
   await tick();
 }
+{
+  // "最近回合"必须是正在跑的那个：排队的回合记录建得更晚，排队后被取消也一样，都不能顶替它
+  // （真机测试时 dsh_status 显示 state=running，run 却是一个刚取消的排队回合）。
+  const { c, proc } = raceConv('race-latest-run');
+  hub.conversations.set(c.id, c);
+  const running = await c.prompt('长任务', { wait: false });
+  for (let i = 0; i < 300 && proc.prompts < 1; i++) await tick(10);
+  const queued = c.enqueue('排队的').run;
+  const st1 = await handlers.dsh_status({ conversation_id: c.id });
+  check('★ 有回合在排队时，dsh_status 的 run 是正在跑的那个', () => assert.equal(st1.structured.run?.run_id, running.run_id));
+  c.queueRemove(queued.run_id);
+  const st2 = await handlers.dsh_status({ conversation_id: c.id });
+  check('★ 排队的回合被取消后，dsh_status 的 run 仍是正在跑的那个', () =>
+    assert.deepEqual([st2.structured.run?.run_id, st2.structured.run?.status], [running.run_id, 'running']));
+  const got = await handlers.dsh_get({ conversation_id: c.id });
+  check('不带 run_id 的 dsh_get 取的也是正在跑的那个', () => assert.equal(got.structured.run?.run_id, running.run_id));
+  proc.end();
+  // 收尾先放开 busy、等 git 快照之后才把状态改成 done（见 conversation.mjs 的 finalize）：等到状态落定。
+  for (let i = 0; i < 500 && c.getRun(running.run_id).status === 'running'; i++) await tick(10);
+  const st3 = await handlers.dsh_status({ conversation_id: c.id });
+  check('跑完以后：run 是刚跑完的那个，不是更晚建、没开跑就取消的排队回合', () =>
+    assert.deepEqual([st3.structured.run?.run_id, st3.structured.run?.status], [running.run_id, 'done']));
+  check('按 run_id 仍能取到被取消的排队回合', () => assert.equal(c.getRun(queued.run_id).status, 'cancelled'));
+  hub.conversations.delete(c.id);
+}
+{
+  // 真实 DSH 的 tool_call 不带 name，工具名在 title 里（"pwsh" / "read"）。结果与哨兵里的
+  // tools_used[].name 曾一律是 null；title 像标识符时补成名字，带空格的描述性 title 不当名字。
+  const { c, proc } = raceConv('tool-names');
+  const pending = c.prompt('用几个工具', { wait: true, timeoutMs: 0 });
+  for (let i = 0; i < 300 && proc.prompts < 1; i++) await tick(10);
+  const up = (u) => c.onUpdate({ sessionId: c.id, update: u });
+  up({ sessionUpdate: 'tool_call', toolCallId: 't1', title: 'pwsh', kind: 'other', status: 'pending', rawInput: { command: 'ls' } });
+  up({ sessionUpdate: 'tool_call_update', toolCallId: 't1', status: 'completed' });
+  up({ sessionUpdate: 'tool_call', toolCallId: 't2', title: 'read src/a.ts', kind: 'read', status: 'completed' });
+  up({ sessionUpdate: 'tool_call', toolCallId: 't3', name: 'grep', title: 'search', status: 'completed' });
+  proc.end();
+  const res = await pending;
+  const byId = Object.fromEntries((res.tools_used ?? []).map((t) => [t.id, t]));
+  check('★ 只有 title "pwsh"：name 补成 pwsh（之前是 null）', () => assert.equal(byId.t1?.name, 'pwsh', JSON.stringify(byId.t1)));
+  check('title 是带空格的描述：不当名字', () => assert.equal(byId.t2?.name ?? null, null, JSON.stringify(byId.t2)));
+  check('DSH 给了 name 就用它，不被 title 覆盖', () => assert.equal(byId.t3?.name, 'grep', JSON.stringify(byId.t3)));
+  check('title 原样保留', () => assert.deepEqual([byId.t1?.title, byId.t2?.title], ['pwsh', 'read src/a.ts']));
+}
 
 console.log('\n[4] dsh_get 正文预算');
 
@@ -277,6 +321,7 @@ check('不记录工具标题/命令/正文', () => assert.ok(!auditRaw.includes(
 
 console.log('\n[6] dsh_doctor');
 
+process.env.DSH_MCP_UPDATE_CHECK = '0'; // 测试离线：新版本检查不去 npm
 const doc = await handlers.dsh_doctor();
 const ids = doc.structured.checks.map((c) => c.id);
 check('返回 checks 数组', () => assert.ok(Array.isArray(doc.structured.checks)));
@@ -286,6 +331,10 @@ check('包含关键检查项', () => {
   }
 });
 check('verdict 是 ok 或 fail', () => assert.ok(['ok', 'fail'].includes(doc.structured.verdict)));
+check('update 检查在、关掉时如实说没查', () => {
+  const u = doc.structured.checks.find((c) => c.id === 'update');
+  assert.ok(u && u.status === 'ok' && /DSH_MCP_UPDATE_CHECK=0/.test(u.detail), JSON.stringify(u));
+});
 check('text 逐项列出结果', () => assert.match(doc.text, /dsh_bin/));
 // 本机/CI 都可能没有 DSH：dsh_bin 失败时不会产出 dsh_version，这是预期。
 if (doc.structured.checks.find((c) => c.id === 'dsh_bin')?.status !== 'fail') {
@@ -308,6 +357,26 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
     assert.equal(lvl('0.2.1-rc.5'), 'verified');
     assert.equal(lvl('0.2.2-rc.1'), 'verified');
     assert.equal(dshVersionStatus('0.2.2-rc.1').status, 'ok');
+  });
+  check('★ 只有本发布线重跑过的版本（0.2.1）才说"跑过全量套件"', () => {
+    const s = dshVersionStatus('0.2.1-rc.5');
+    assert.equal(s.rerun, true);
+    assert.match(s.note, /已用 0\.6\.x 跑过全量套件/);
+    assert.match(s.noteEn, /passed the full suite on 0\.6\.x/);
+  });
+  check('★ 区间内但本发布线没重跑的版本（0.1.7 / 0.2.2）如实说明，仍是 ok', () => {
+    for (const v of ['0.1.7-rc.1', '0.2.2-rc.1']) {
+      const s = dshVersionStatus(v);
+      assert.equal(s.status, 'ok');
+      assert.equal(s.rerun, false);
+      assert.match(s.note, /最近一次全量实测是 0\.5\.x/);
+      assert.match(s.noteEn, /last full run was on 0\.5\.x/);
+    }
+  });
+  check('每个档位都带英文说明', () => {
+    for (const v of [null, '0.1.4', '0.1.5-rc.1', '0.2.1-rc.5', '0.3.0']) {
+      assert.ok(dshVersionStatus(v).noteEn, String(v));
+    }
   });
   check('★ 0.2.3-rc.1 → unverified/warn（rc 也算进 0.2.3）', () => {
     assert.equal(lvl('0.2.3-rc.1'), 'unverified');
@@ -335,6 +404,26 @@ console.log('\n[6c] PowerShell 哨兵等待命令');
     assert.match(cmd, /^\$f='C:\\Users\\o''neil\\runs\\a \$b `c\.json';/));
   check('用 -LiteralPath，不按通配符解释路径', () => assert.match(cmd, /Test-Path -LiteralPath \$f/));
   check('超时秒数写进命令', () => assert.match(cmd, /AddSeconds\(30\)/));
+  {
+    // 默认等待上限跟着回合总时长上限走：上限 + 5 分钟（看门狗到点取消回合也会写哨兵，哨兵一定先到）。
+    const { SENTINEL_WAIT_SEC } = await import('../src/tool-render.mjs');
+    const { TURN_MAX_MS, PKG_ROOT } = await import('../src/config.mjs');
+    check('★ 默认等待上限 = 回合总时长上限 + 300 秒', () => {
+      assert.equal(SENTINEL_WAIT_SEC, Math.ceil(TURN_MAX_MS / 1000) + 300);
+      assert.match(psWaitCommand('x.json'), new RegExp(`AddSeconds\\(${SENTINEL_WAIT_SEC}\\)`));
+    });
+    const { spawnSync } = await import('node:child_process');
+    const probe = (max) =>
+      spawnSync(process.execPath, ['--input-type=module', '-e', "import('./src/tool-render.mjs').then((m) => console.log(m.SENTINEL_WAIT_SEC))"], {
+        cwd: PKG_ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, DSH_MCP_TURN_MAX_MS: max },
+      }).stdout.trim();
+    check('上限设成 1 小时 → 3900 秒；关掉（0）→ 35 分钟兜底', () => {
+      assert.equal(probe('3600000'), '3900');
+      assert.equal(probe('0'), '2100');
+    });
+  }
 
   // 真跑一遍：只在 Windows 且有 powershell.exe 时执行（CI 的 windows-latest 会覆盖到）。
   if (process.platform === 'win32') {

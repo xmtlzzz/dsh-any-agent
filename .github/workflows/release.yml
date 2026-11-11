@@ -18,6 +18,12 @@ name: release
 # auth error and no GitHub Release is created; publish manually, then re-run (npm is
 # skipped and the Release is created).
 #
+# Optional gate: when the repository variable MODEL_SUITE_RUNNER names a runner that has
+# DSH, a provider and credentials (a self-hosted label), the full model-backed suite
+# (`node test/run.mjs --all`) runs on the tagged commit first and npm publish waits for
+# it. A failure there stops the release before anything is published. Without the
+# variable the job is skipped and the release proceeds as before.
+#
 # Both jobs are idempotent: re-running (or workflow_dispatch with an existing tag)
 # refreshes the Release notes and skips npm if that version is already published.
 on:
@@ -34,9 +40,48 @@ permissions:
   contents: read
 
 jobs:
+  model-suites:
+    name: model suites on the tagged commit (only with MODEL_SUITE_RUNNER)
+    # Tag pushes only: re-running an old tag by hand (to refresh Release notes) must not re-run the suites.
+    if: ${{ vars.MODEL_SUITE_RUNNER != '' && github.event_name == 'push' }}
+    runs-on: ${{ vars.MODEL_SUITE_RUNNER }}
+    # Live DSH suites must never overlap: cleanup.mjs deletes every test session.
+    concurrency:
+      group: dsh-model-suites
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: detect DSH (same discovery the server uses)
+        id: dsh
+        env:
+          DSH_BIN: ${{ secrets.DSH_BIN }}
+        run: node scripts/detect-dsh.mjs
+
+      # The runner was named explicitly as "has DSH", so not finding it is a failure
+      # here (in model-suites.yml it is only a skip).
+      - name: DSH must be present on this runner
+        if: steps.dsh.outputs.ok != '1'
+        run: node -e "console.error('MODEL_SUITE_RUNNER is set but DSH was not found on it'); process.exit(1)"
+
+      - name: run offline + model suites
+        env:
+          DSH_BIN: ${{ secrets.DSH_BIN }}
+          DSH_MCP_LOG: silent
+        run: node test/run.mjs --all
+
+  # `needs` + a skipped ancestor: the default `success()` is false for every job downstream
+  # of a skipped one, so the three jobs below spell their condition out.
   github-release:
     name: GitHub Release (notes from CHANGELOG)
     needs: npm-publish
+    if: ${{ !cancelled() && needs.npm-publish.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -79,6 +124,8 @@ jobs:
 
   npm-publish:
     name: npm publish (provenance)
+    needs: model-suites
+    if: ${{ !cancelled() && (needs.model-suites.result == 'success' || needs.model-suites.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -174,6 +221,7 @@ jobs:
   mcp-registry:
     name: MCP Registry
     needs: npm-publish
+    if: ${{ !cancelled() && needs.npm-publish.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -62,6 +62,13 @@ export const TOOL_TEXT_EN = {
         'must keep holding the write lock). Default false: after 10 idle minutes the process is reaped and its memory freed, and ' +
         'the next dispatch resumes it with nothing lost. With true, remember to dsh_release when done, or it keeps a DSH ' +
         'process (about 300-480 MB) forever.',
+      isolation:
+        'Workspace isolation, default none (work directly in cwd). worktree = create a new worktree and branch `dsh/<time>` for ' +
+        "the git repository cwd is in and work there, leaving the main checkout alone, so you (the caller) can keep editing " +
+        'the original directory at the same time. It starts from the current HEAD: uncommitted changes in the main checkout are ' +
+        'not carried over, and the new worktree has no node_modules or other dependencies, so DSH may reinstall them. The changes ' +
+        'stay on that branch for you to review and merge yourself; dsh_release(forget=true) deletes the worktree directory if it ' +
+        'is clean (the branch is kept).',
     },
   },
   dsh_send: {

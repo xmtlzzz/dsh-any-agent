@@ -23,8 +23,13 @@ import {
   REVIEW_MODES,
   SHARED_PROCESS,
   DSH_HOME,
+  STALL_MS,
+  TURN_MAX_MS,
+  WATCHDOG_AFTER_MS,
   defaultApprovalPolicy,
 } from './config.mjs';
+import { watchdogTickMs, watchdogVerdict } from './watchdog.mjs';
+import { removeWorktree } from './worktree.mjs';
 import {
   REVIEW_VERDICTS,
   buildReviewTicket,
@@ -41,7 +46,7 @@ import { rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
 import { forgottenPath, isForgotten, writeTombstone } from './hub-store.mjs';
-import { emitLive, livePreview, liveSettings, removeLive, summarizeToolInput } from './live.mjs';
+import { emitLive, liveClient, livePreview, liveSettings, removeLive, summarizeToolInput, withLiveClient } from './live.mjs';
 import {
   classifyHolder,
   describeLeaseConflict,
@@ -51,23 +56,21 @@ import {
   removeMarker,
   writeMarker,
 } from './locks.mjs';
+import { attachReview, terminalResult } from './run-result.mjs';
+import { MAX_AUTO_APPROVALS_KEPT, approvalDecision, autoApprovalSummary, escalationOf } from './approval-policy.mjs';
+import { OutBuffer } from './out-buffer.mjs';
+import { MAX_RUNS, RunLedger } from './run-ledger.mjs';
 
 const now = () => Date.now();
 
-/** 运行期输出环形缓冲的条目上限（仅内存，超出丢最旧的）。 */
-const MAX_OUT_ENTRIES = 500;
-/** 单条输出正文的字符上限；超出保留尾部，避免一条超长输出把内存撑爆。 */
-const MAX_OUT_TEXT = 200_000;
 /** 记录用户发话时的截断长度（避免一条把缓冲撑爆）。 */
 const MAX_PROMPT_ECHO = 4000;
-/** 保留的回合记录条数（run 结果含正文，所以只留最近若干条，仅内存）。 */
-const MAX_RUNS = 20;
-/** 回合记录里 prompt 预览的长度。 */
-const MAX_RUN_PREVIEW = 200;
-/** 每个回合最多保留多少条"自动放行审批"摘要（总数另计，不受此限）。 */
-const MAX_AUTO_APPROVALS_KEPT = 20;
-/** 自动放行审批里命令预览的长度。 */
-const MAX_AUTO_APPROVAL_PREVIEW = 200;
+
+/**
+ * 真实 DSH 的 tool_call 不带 name，工具名在 title 里（"read" / "pwsh"）。title 是纯标识符时才当名字；
+ * 带空格的描述性 title（可能含命令原文）不算。
+ */
+const toolNameFromTitle = (title) => (typeof title === 'string' && /^[\w.:-]{1,40}$/.test(title) ? title : null);
 
 export class Conversation {
   constructor(state, hub) {
@@ -95,6 +98,8 @@ export class Conversation {
     this.permissionVerified = null;
     /** 工作区登记结果（决定你的 DSH GUI 里能不能看到这个会话）。 */
     this.workspace = state.workspace ?? null;
+    /** isolation=worktree 时：{path, branch, base, repo, cwd, main_dirty, created_at}（见 worktree.mjs）。 */
+    this.worktree = state.worktree ?? null;
     this.#hub = hub;
 
     this.proc = null;
@@ -111,37 +116,37 @@ export class Conversation {
     /** 等待"当前回合结束"的回调队列，供插话排队使用。 */
     this.idleWaiters = [];
 
-    /**
-     * 运行期输出环形缓冲（**仅内存、有界、不落盘**），供"查看正在跑的会话输出"用。
-     * 只记三类：用户发的话、agent 的正文、工具调用状态；**思考内容一律不进这里**。
-     */
-    this.out = [];
-    this.outSeq = 0;
-    /** 输出缓冲的**修订号**：每次追加（含合并进已有条目）都 +1，供游标式增量读使用。 */
-    this.outRev = 0;
-    /** 被环形缓冲挤掉的条目里最大的修订号：游标落在它之下就说明有内容没读到（gap）。 */
-    this.outDroppedRev = 0;
+    /** 运行期输出环形缓冲（仅内存、有界；思考内容不进去），见 out-buffer.mjs。 */
+    this.outBuf = new OutBuffer();
     this.turnOutChars = 0;
     this.currentTurn = 0;
     this.turnStartedAt = 0;
+    /** 本回合最近一次收到 DSH 的 session/update 的时刻（看门狗据此判断"还在推进吗"）。 */
+    this.lastProgressAt = 0;
     this.currentTool = null;
 
-    /**
-     * 回合记录（run）：让"先派活、回头再验收"成为一等公民。
-     * 每条含 {run_id, status, 时间, prompt 预览, result}——**仅内存**，只留最近 MAX_RUNS 条。
-     */
-    this.runs = [];
-    this.runSeq = 0;
-    /** 调用方提供的幂等键 → run_id（与 runs 同步淘汰）。 */
-    this.clientRuns = new Map();
-    /** 忙时入队的待执行任务（仅内存；重启丢失）。 */
-    this.queue = [];
+    /** 回合记录与忙时队列（仅内存；重启后以哨兵为准），见 run-ledger.mjs。 */
+    this.ledger = new RunLedger();
     this.draining = false;
     /** 最近一次回合结果，仅内存（进程退出即消失），不落盘。 */
     this.lastResult = null;
   }
 
   #hub;
+
+  // 只读视图（测试与快照在用）。`?.` 兜住用 Object.create(Conversation.prototype) 做的替身。
+  /** 输出缓冲里的条目。 */
+  get out() {
+    return this.outBuf?.entries ?? [];
+  }
+  /** 内存里的回合记录。 */
+  get runs() {
+    return this.ledger?.runs ?? [];
+  }
+  /** 忙时排队的任务。 */
+  get queue() {
+    return this.ledger?.queue ?? [];
+  }
 
   /** 已置 busy、但 session/prompt 还没发出的回合（冷启动窗口）。 */
   #undispatched = null;
@@ -248,6 +253,7 @@ export class Conversation {
       model: this.cfg.model,
       review: this.review,
       workspace: this.workspace,
+      worktree: this.worktree,
     };
   }
 
@@ -293,6 +299,8 @@ export class Conversation {
       current_tool: this.currentTool,
       out_chars: this.turnOutChars,
       running_ms: this.busy && this.turnStartedAt ? now() - this.turnStartedAt : 0,
+      /** 距 DSH 上一次推送更新过了多久（只在跑回合时有值）；看门狗用同一个数判断卡住。 */
+      since_progress_ms: this.busy && this.lastProgressAt ? now() - this.lastProgressAt : null,
       turns: this.turnCount,
       created_at: new Date(this.createdAt).toISOString(),
       last_used_at: new Date(this.lastUsedAt).toISOString(),
@@ -302,6 +310,8 @@ export class Conversation {
       config_applied: this.lastConfigApplied?.applied ?? null,
       config_failed: this.lastConfigApplied?.failed?.length ? this.lastConfigApplied.failed : null,
       workspace_registered: this.workspace?.registered ?? null,
+      /** isolation=worktree 时的隔离信息：改动在 branch 上，由调用方审核后自己合并。 */
+      worktree: this.worktree ?? null,
       usage: meta?.usage?.totals ?? null,
       context_pressure: meta?.pressure ?? null,
       pending_approvals: [...this.pendingApprovals.keys()],
@@ -367,8 +377,9 @@ export class Conversation {
     //   danger-full-access 会话照样能被拉起（审计 A02）。
     if (this.permission === 'danger-full-access' && !ALLOW_FULL_ACCESS) {
       throw new Error(
-        `会话 ${this.id} 的权限档是 danger-full-access，而本机未设置 DSH_MCP_ALLOW_FULL_ACCESS=1，拒绝恢复。` +
-          ' 设置该开关后重试，或改用 workspace-write / read-only 新建会话。',
+        `会话 ${this.id} 的权限档是 danger-full-access，而本机没有允许 full access，拒绝恢复。` +
+          ' 在客户端配置里设 DSH_MCP_PERMISSION=danger-full-access（或 DSH_MCP_ALLOW_FULL_ACCESS=1）后重连，' +
+          '或改用 workspace-write / read-only 新建会话。',
       );
     }
     const shared = SHARED_PROCESS;
@@ -639,6 +650,8 @@ export class Conversation {
     if (!c) return;
     const u = params?.update;
     if (!u) return;
+    // 任何一种更新（正文、思考、工具状态、用量）都算"还在推进"。
+    this.lastProgressAt = now();
     switch (u.sessionUpdate) {
       case 'agent_message_chunk': {
         const chunk = u.content?.text ?? '';
@@ -669,7 +682,8 @@ export class Conversation {
           title: u.title ?? prev.title,
           status: u.status ?? prev.status,
           kind: u.kind ?? prev.kind,
-          name: u.name ?? prev.name,
+          // 真实 DSH 不带 name：用像标识符的 title 补上，结果与哨兵里的 tools_used[].name 才不是 null。
+          name: u.name ?? prev.name ?? toolNameFromTitle(u.title),
           input: u.rawInput !== undefined ? u.rawInput : prev.input,
         };
         c.tools.set(id, merged);
@@ -708,15 +722,12 @@ export class Conversation {
     const at = seen?.at ?? now();
     this.#liveTools.set(id, { at, status, hasInput });
     const terminal = status === 'completed' || status === 'failed';
-    // 真实 DSH 的 tool_call 不带 name，工具名在 title 里（"read" / "pwsh"）。title 是纯标识符时
-    // 当作名字写进 meta 级字段；带空格等可能含命令原文的 title 只进 detail。
-    const titleAsName =
-      typeof merged.title === 'string' && /^[\w.:-]{1,40}$/.test(merged.title) ? merged.title : null;
+    // 带空格等可能含命令原文的 title 只进 detail；像标识符的才当名字写进 meta 级字段（见 toolNameFromTitle）。
     this.#live(
       'tool',
       {
         tool_call_id: id,
-        name: merged.name ?? titleAsName,
+        name: merged.name ?? toolNameFromTitle(merged.title),
         kind: merged.kind ?? null,
         status,
         elapsed_ms: terminal ? now() - at : undefined,
@@ -748,27 +759,24 @@ export class Conversation {
     const rejectId = pickOption(options, 'reject');
     const liveApproval = (mode, extra = {}) => {
       const input = toolCall.rawInput ?? toolCall.input ?? null;
-      const escalation =
-        input && typeof input === 'object' && typeof input.sandbox_permissions === 'string'
-          ? input.sandbox_permissions
-          : null;
       this.#live(
         'approval',
-        { tool_call_id: toolCall.toolCallId ?? null, tool: toolCall.name ?? null, mode, escalation, ...extra },
+        { tool_call_id: toolCall.toolCallId ?? null, tool: toolCall.name ?? null, mode, escalation: escalationOf(input), ...extra },
         { title: livePreview(desc, 200), command_preview: summarizeToolInput(input) },
       );
     };
+    const reject = () =>
+      rejectId ? { outcome: { outcome: 'selected', optionId: rejectId } } : { outcome: { outcome: 'cancelled' } };
 
-    // ★ read-only 是硬边界：即使会话被旧版本/显式参数配成 auto-allow，
-    //   这里也绝不放行任何审批 —— DSH 会借审批把 sandbox 提权到可写。
-    if (this.permission === 'read-only') {
-      this.#hub.log.info(`[conv ${this.id}] read-only 强制拒绝审批: ${desc}`);
-      liveApproval('read-only-deny');
-      return rejectId
-        ? { outcome: { outcome: 'selected', optionId: rejectId } }
-        : { outcome: { outcome: 'cancelled' } };
+    // 规则见 approval-policy.mjs（read-only 永远拒绝；其余按 on_approval）。
+    const decision = approvalDecision({ permission: this.permission, onApproval: this.onApproval });
+    if (decision === 'deny') {
+      const readOnly = this.permission === 'read-only';
+      this.#hub.log.info(`[conv ${this.id}] ${readOnly ? 'read-only 强制拒绝审批' : '审批拒绝'}: ${desc}`);
+      liveApproval(readOnly ? 'read-only-deny' : 'auto-deny');
+      return reject();
     }
-    if (this.onApproval === 'auto-allow') {
+    if (decision === 'allow') {
       this.#hub.log.info(`[conv ${this.id}] 审批放行: ${desc}`);
       // ★ 自动放行必须对调用方可见：DSH 会借审批把沙箱提升到 danger-full-access，
       //   不记下来的话 workspace-write 会话事后看起来像从未越界（实测一轮 6 次提权无人知晓）。
@@ -776,13 +784,6 @@ export class Conversation {
       liveApproval('auto-allow');
       return allowId
         ? { outcome: { outcome: 'selected', optionId: allowId } }
-        : { outcome: { outcome: 'cancelled' } };
-    }
-    if (this.onApproval === 'auto-deny') {
-      this.#hub.log.info(`[conv ${this.id}] 审批拒绝: ${desc}`);
-      liveApproval('auto-deny');
-      return rejectId
-        ? { outcome: { outcome: 'selected', optionId: rejectId } }
         : { outcome: { outcome: 'cancelled' } };
     }
     const approvalId = `ap-${Math.random().toString(36).slice(2, 10)}`;
@@ -817,25 +818,10 @@ export class Conversation {
     const c = this.collector;
     if (!c) return;
     c.autoApprovalTotal = (c.autoApprovalTotal ?? 0) + 1;
-    const input = toolCall.rawInput ?? toolCall.input ?? null;
-    const escalation =
-      input && typeof input === 'object' && typeof input.sandbox_permissions === 'string'
-        ? input.sandbox_permissions
-        : null;
-    if (escalation) c.autoEscalationTotal = (c.autoEscalationTotal ?? 0) + 1;
+    if (escalationOf(toolCall.rawInput ?? toolCall.input ?? null)) c.autoEscalationTotal = (c.autoEscalationTotal ?? 0) + 1;
     if (!Array.isArray(c.autoApprovals)) c.autoApprovals = [];
     if (c.autoApprovals.length >= MAX_AUTO_APPROVALS_KEPT) return;
-    const ctx = approvalContext(params, toolCall, desc, options);
-    const cmd = input && typeof input === 'object' ? input.command ?? input.cmd ?? null : null;
-    c.autoApprovals.push({
-      tool: ctx.tool ?? desc,
-      tool_call_id: ctx.tool_call_id ?? null,
-      escalation,
-      reason: typeof ctx.reason === 'string' ? ctx.reason.slice(0, 300) : null,
-      command_preview:
-        typeof cmd === 'string' ? sanitizeApprovalContext(cmd, 'command').slice(0, MAX_AUTO_APPROVAL_PREVIEW) : null,
-      at: new Date().toISOString(),
-    });
+    c.autoApprovals.push(autoApprovalSummary(params, toolCall, desc, options));
   }
 
   /** 调用方裁决一个待决审批。 */
@@ -886,28 +872,10 @@ export class Conversation {
       { run: runRecord.run_id, turn: this.currentTurn, status: stopReason, stop_reason: stopReason },
       { error: livePreview(runRecord.error, 300) },
     );
-    runRecord.result = {
-      conversation_id: this.id,
-      run_id: runRecord.run_id,
-      stop_reason: stopReason,
-      error: runRecord.error,
-      answer: '',
-      thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
-      tools_used: [],
-      workspace_changed: false,
-      elapsed_ms: 0,
-    };
-    const reviewMode = runRecord.review_mode ?? this.review;
-    if (reviewMode !== 'off') {
-      runRecord.result.review = buildReviewTicket({
-        conversationId: this.id,
-        runId: runRecord.run_id,
-        promptPreview: runRecord.prompt_preview,
-        result: runRecord.result,
-        mode: reviewMode,
-        permission: this.permission,
-      });
-    }
+    runRecord.result = attachReview(
+      terminalResult({ conversationId: this.id, runId: runRecord.run_id, stopReason, error: runRecord.error }),
+      { conversationId: this.id, run: runRecord, mode: runRecord.review_mode ?? this.review, permission: this.permission },
+    );
     try {
       if (typeof this.#hub.writeRunSentinel === 'function') {
         const file = this.#hub.writeRunSentinel(this.id, runRecord);
@@ -978,6 +946,8 @@ export class Conversation {
     //   ★ 同理，git 快照的 await 也必须放在 busy 置位**之后**（见下面的 Promise.all）。
     this.busy = true;
     this.lastUsedAt = now();
+    // 服务进程在回合结束前被杀时，下次启动据这个标记补写"已中断"哨兵（见 Hub.recoverInterruptedRuns）。
+    this.#hub.markRunStarted?.(this.id, runRecord);
     // 冷启动窗口（拉进程 + resume）里 dsh_interrupt 只能记一笔，session/prompt 发出前再看。
     this.#undispatched = runRecord;
     this.#cancelBeforeDispatch = false;
@@ -1046,27 +1016,13 @@ export class Conversation {
     };
     this.collector = c;
     const t0 = now();
+    this.lastProgressAt = t0;
     let settled = false;
+    let watchdogTimer = null;
 
-    /**
-     * 把"调用方审核单"挂到回合结果上。
-     *
-     * 审核单必须随结果一起返回（正文、structuredContent、哨兵都是同一份 result），
-     * 否则调用方在异步收活时只会看到一段自述，很容易直接把它当成完成事实。
-     */
-    const attachReview = (result) => {
-      if (reviewMode !== 'off') {
-        result.review = buildReviewTicket({
-          conversationId: this.id,
-          runId: runRecord.run_id,
-          promptPreview: runRecord.prompt_preview,
-          result,
-          mode: reviewMode,
-          permission: this.permission,
-        });
-      }
-      return result;
-    };
+    /** 把"调用方审核单"挂到回合结果上（见 run-result.mjs）。 */
+    const withReview = (result) =>
+      attachReview(result, { conversationId: this.id, run: runRecord, mode: reviewMode, permission: this.permission });
 
     /**
      * 回合真正结束时收尾。无论有没有人在等，都**只执行一次**。
@@ -1082,6 +1038,7 @@ export class Conversation {
     const finalize = (stopReason, failure) => {
       if (finalizePromise) return finalizePromise;
       settled = true;
+      if (watchdogTimer) clearInterval(watchdogTimer);
       finalizePromise = (async () => {
         // ★ 先启动 after 快照：调用 gitStatus 时子进程立刻 spawn，但**不 await**；
         //   这样 snapshot 的时间点仍贴近回合结束，而 busy 释放/唤醒不必等 git。
@@ -1117,6 +1074,7 @@ export class Conversation {
               tool_count: c.tools.size,
               auto_approvals: c.autoApprovalTotal,
               auto_escalations: c.autoEscalationTotal,
+              watchdog: c.watchdog?.reason,
             },
             { error: livePreview(failure, 300) },
           );
@@ -1154,11 +1112,12 @@ export class Conversation {
             auto_approvals_total: c.autoApprovalTotal,
             auto_escalations_total: c.autoEscalationTotal,
             auto_approvals: c.autoApprovals,
+            ...(c.watchdog ? { watchdog: c.watchdog } : {}),
             workspace_changed: !sameWorkspaceSnapshot(before, after),
             diff_stat: after,
             elapsed_ms: now() - t0,
           };
-          attachReview(result);
+          withReview(result);
           runRecord.ended_at = now();
           runRecord.elapsed_ms = result.elapsed_ms;
           runRecord.status = failure ? 'error' : stopReason === 'cancelled' ? 'cancelled' : 'done';
@@ -1180,18 +1139,17 @@ export class Conversation {
           this.idleWaiters = [];
           for (const w of waiters) w();
           this.#scheduleDrain();
-          const fallback = {
-            conversation_id: this.id,
-            run_id: runRecord.run_id,
-            stop_reason: 'error',
-            error: `回合收尾异常: ${e.message}`,
-            answer: c.answer ?? '',
-            thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
-            tools_used: [...(c.tools?.values?.() ?? [])],
-            workspace_changed: false,
-            elapsed_ms: now() - t0,
-          };
-          attachReview(fallback);
+          const fallback = withReview(
+            terminalResult({
+              conversationId: this.id,
+              runId: runRecord.run_id,
+              stopReason: 'error',
+              error: `回合收尾异常: ${e.message}`,
+              answer: c.answer ?? '',
+              toolsUsed: [...(c.tools?.values?.() ?? [])],
+              elapsedMs: now() - t0,
+            }),
+          );
           runRecord.ended_at = now();
           runRecord.status = 'error';
           runRecord.error = fallback.error;
@@ -1205,17 +1163,14 @@ export class Conversation {
         // 最后一层保险：收尾连兜底都失败时也绝不把 rejection 丢给事件循环。
         this.#hub.log.info(`[conv ${this.id}] 回合收尾二次异常（已忽略）: ${e.message}`);
         if (!runRecord.result) {
-          runRecord.result = {
-            conversation_id: this.id,
-            run_id: runRecord.run_id,
-            stop_reason: 'error',
+          runRecord.result = terminalResult({
+            conversationId: this.id,
+            runId: runRecord.run_id,
+            stopReason: 'error',
             error: `回合收尾异常: ${e.message}`,
             answer: c.answer ?? '',
-            thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
-            tools_used: [],
-            workspace_changed: false,
-            elapsed_ms: now() - t0,
-          };
+            elapsedMs: now() - t0,
+          });
           runRecord.status = 'error';
         }
         return runRecord.result;
@@ -1237,6 +1192,8 @@ export class Conversation {
 
     // 关键：第三个参数传 0 = **不设超时**。回合只能由它自己结束，或由 session/cancel 结束。
     const acp = proc.request('session/prompt', { sessionId: this.id, prompt: [{ type: 'text', text }] }, 0);
+    // 看门狗只会发 session/cancel（同 dsh_interrupt），回合仍由 DSH 自己结束、照常走 finalize。
+    watchdogTimer = this.#startWatchdog(runRecord, c, t0, proc);
     // 这个 Promise 在 finalize **真正完成**（含 workspace_changed、审核单、哨兵）后才 settle。
     // 等待方必须等它，而不是只等 acp —— 否则会拿到还没填完的 runRecord.result。
     const finished = acp
@@ -1274,6 +1231,60 @@ export class Conversation {
     return runRecord.result;
   }
 
+  /**
+   * 回合看门狗：定期看这个回合还在不在推进（判定见 watchdog.mjs），卡住或超过总时长上限
+   * 就发 session/cancel。只发取消、不杀进程：共享进程里还有别的会话，回合也要由 DSH 自己
+   * 结束才会走正常的收尾（结果、审核单、哨兵一个不少）。
+   *
+   * 触发后每个巡检周期补发一次 cancel，直到回合真的结束（DSH 偶尔会吞掉第一次）。
+   * @returns 定时器（finalize 里清掉）；三项阈值都关掉时返回 null。
+   */
+  #startWatchdog(runRecord, c, t0, proc) {
+    if (!(WATCHDOG_AFTER_MS > 0 && STALL_MS > 0) && !(TURN_MAX_MS > 0)) return null;
+    const timer = setInterval(() => {
+      if (this.currentRun !== runRecord) return clearInterval(timer);
+      if (c.watchdog) {
+        proc.notify?.('session/cancel', { sessionId: this.id });
+        return;
+      }
+      const t = now();
+      // 还没结束的工具：不能看 currentTool —— 它是显示用的，工具重叠时短的那个一完成就被清掉，
+      // 长的还在跑，宽限却会缩回不带工具的那档。
+      const open = [...c.tools.values()].filter((x) => x.status !== 'completed' && x.status !== 'failed');
+      const runningTool = open.length ? (open.at(-1).name ?? open.at(-1).title ?? open.at(-1).id) : null;
+      const verdict = watchdogVerdict({
+        elapsedMs: t - t0,
+        sinceProgressMs: t - this.lastProgressAt,
+        toolRunning: open.length > 0,
+        waitingOnCaller: this.pendingApprovals.size > 0,
+        afterMs: WATCHDOG_AFTER_MS,
+        stallMs: STALL_MS,
+        maxMs: TURN_MAX_MS,
+      });
+      if (!verdict) return;
+      c.watchdog = {
+        ...verdict,
+        elapsed_ms: t - t0,
+        since_progress_ms: t - this.lastProgressAt,
+        current_tool: runningTool,
+        at: new Date(t).toISOString(),
+      };
+      this.#hub.log.info(
+        `[conv ${this.id}] 看门狗中断回合 ${runRecord.run_id}：${verdict.reason}` +
+          `（已跑 ${Math.round((t - t0) / 1000)}s，距上次进展 ${Math.round((t - this.lastProgressAt) / 1000)}s）`,
+      );
+      this.#live('watchdog', {
+        reason: verdict.reason,
+        elapsed_ms: c.watchdog.elapsed_ms,
+        since_progress_ms: c.watchdog.since_progress_ms,
+        tool: runningTool,
+      });
+      proc.notify?.('session/cancel', { sessionId: this.id });
+    }, watchdogTickMs({ stallMs: STALL_MS, maxMs: TURN_MAX_MS }));
+    timer.unref?.();
+    return timer;
+  }
+
   /** 中断当前回合（ACP 原生，走的就是用户手动停止那条路径）。 */
   async interrupt() {
     // ★ 冷启动窗口：回合已占住会话但 session/prompt 还没发。此时发 session/cancel 没有可取消的东西，
@@ -1298,76 +1309,21 @@ export class Conversation {
     return this.proc?.alive ? 'idle' : 'detached';
   }
 
-  /** 追加一条输出记录；同类相邻文本会合并，避免每个 token 一条。 */
+  /** 追加一条输出记录（规则见 out-buffer.mjs）；正文同时计入本轮输出字数。 */
   pushOut(kind, text, extra = {}) {
-    const last = this.out[this.out.length - 1];
-    const cap = (s) => (s.length > MAX_OUT_TEXT ? `…[已截断，保留尾部 ${MAX_OUT_TEXT} 字]…\n${s.slice(-MAX_OUT_TEXT)}` : s);
-    // 工具更新是**快照**（`read [completed]`），不是增量：同一个 tool_call_id 原地替换，
-    // 不同的工具调用各占一条。旧实现按 kind 拼接，三个工具会挤成
-    // `read [in_progress]read [completed]pwsh …` 一条，且只剩第一个工具的 id。
-    if (kind === 'tool' && extra.tool_call_id) {
-      const same = this.#findToolEntry(extra.tool_call_id);
-      if (same) {
-        same.text = cap(text ?? '');
-        same.at = now();
-        same.rev = ++this.outRev;
-        return;
-      }
-    }
-    // 只有正文是流式增量，才需要合并；user/turn/tool 都是独立事件，合并会把
-    // “第 N 轮开始”与“第 N 轮结束”拼成一条（空回合时）。
-    if (kind === 'text' && last && last.kind === kind && last.turn === this.currentTurn && text) {
-      last.text = cap(last.text + text);
-      last.at = now();
-      // ★ 合并进已有条目也必须推进修订号。否则游标已经读过这条的调用方
-      //   会永远看不到后续追加的正文（旧实现用 seq 当游标，seq 不变 = 漏读）。
-      last.rev = ++this.outRev;
-    } else {
-      this.out.push({ seq: ++this.outSeq, rev: ++this.outRev, kind, turn: this.currentTurn, text: cap(text ?? ''), at: now(), ...extra });
-      if (this.out.length > MAX_OUT_ENTRIES) {
-        const dropped = this.out.shift();
-        const droppedRev = typeof dropped.rev === 'number' ? dropped.rev : dropped.seq;
-        if (droppedRev > this.outDroppedRev) this.outDroppedRev = droppedRev;
-      }
-    }
+    this.outBuf.push(kind, text, extra, this.currentTurn);
     if (kind === 'text') this.turnOutChars += text?.length ?? 0;
-  }
-
-  /** 本轮里同一 tool_call_id 的工具条目（从尾部往回找，跨轮不复用）。 */
-  #findToolEntry(toolCallId) {
-    for (let i = this.out.length - 1; i >= 0; i--) {
-      const e = this.out[i];
-      if (e.turn !== this.currentTurn) return null;
-      if (e.kind === 'tool' && e.tool_call_id === toolCallId) return e;
-    }
-    return null;
   }
 
   /** 读输出：**按修订号**的游标式增量。条目被追加时会再次返回（按 seq 替换全文）。 */
   readOut({ cursor = 0, includeReasoning = false, limit = 200 } = {}) {
-    const cur = Number.isFinite(cursor) ? cursor : 0;
-    // limit 必须清洗：负数会被 slice 解释成“从头到尾少一条”，0 会让调用方原地空转。
-    const n = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), MAX_OUT_ENTRIES)) : 200;
-    const revOf = (e) => (typeof e.rev === 'number' ? e.rev : e.seq);
-    // ★ 分页必须按**修订号**取，不能按数组顺序：工具条目的状态更新是原地替换并推进修订号，
-    //   数组里靠前的条目可能比靠后的修订号更大（追加工具 A → 追加正文 → 更新 A）。按数组顺序
-    //   切 limit 条、再拿最后一条的修订号当游标，就会越过没读到的正文，之后永远读不到它。
-    //   按修订号升序取前 n 条，游标 = 本页最大修订号，于是"修订号 ≤ 游标"的条目一定都已返回。
-    const eligible = this.out.filter((e) => revOf(e) > cur).sort((a, b) => revOf(a) - revOf(b));
-    const page = eligible.slice(0, n);
-    const next = page.length ? revOf(page[page.length - 1]) : cur;
-    // 本页内部再按 seq 排回时间顺序，方便调用方直接展示。
-    const entries = page.slice().sort((a, b) => a.seq - b.seq);
+    const page = this.outBuf.read({ cursor, limit });
     const res = {
       conversation_id: this.id,
       state: this.state(),
       busy: this.busy,
       current_tool: this.currentTool,
-      entries,
-      cursor: next,
-      has_more: eligible.length > page.length,
-      /** 缓冲被环形覆盖、且被挤掉的条目里有游标之后的内容时为 true：你错过了中间一段。 */
-      gap: this.outDroppedRev > cur,
+      ...page,
     };
     // 思考内容只在显式要求时、且只针对"当前正在跑的回合"返回；不保留、不进缓冲
     if (includeReasoning && this.collector?.reasoning) {
@@ -1378,31 +1334,7 @@ export class Conversation {
 
   /** 建一条回合记录。派活时先建，好让调用方立刻拿到 run_id（异步模式的关键）。 */
   createRun(text, { clientRunId = null, review = this.review } = {}) {
-    const run = {
-      run_id: `run-${Date.now().toString(36)}-${++this.runSeq}`,
-      conversation_id: this.id,
-      client_run_id: clientRunId ?? null,
-      prompt_preview: text.length > MAX_RUN_PREVIEW ? `${text.slice(0, MAX_RUN_PREVIEW)}…` : text,
-      status: 'queued',
-      /** 本回合的审核策略（off / advisory）；由 dsh_send / dsh_interject 或会话默认决定。 */
-      review_mode: normalizeReviewMode(review, this.review),
-      started_at: null,
-      ended_at: null,
-      elapsed_ms: null,
-      result: null,
-    };
-    this.runs.push(run);
-    if (clientRunId) this.clientRuns.set(clientRunId, run.run_id);
-    if (this.runs.length > MAX_RUNS) {
-      // ★ 只淘汰已结束的 run：还在跑/在排队的 run 一旦被挤掉，它的 client_run_id 也随之失效，
-      //   调用方用同一幂等键重试就会再派一次（审计 C04）。未结束的 run 数量本身有上限（1 个在跑 + 队列）。
-      const i = this.runs.findIndex((r) => r.status !== 'running' && r.status !== 'queued');
-      const [evicted] = i >= 0 ? this.runs.splice(i, 1) : [];
-      // 幂等键必须跟着 run 记录一起淘汰，否则会指向一个已经查不到的 run。
-      for (const [k, v] of this.clientRuns) {
-        if (v === evicted?.run_id) this.clientRuns.delete(k);
-      }
-    }
+    const run = this.ledger.create(text, { conversationId: this.id, clientRunId, review, sessionReview: this.review });
     // 防御性清残留：正常情况下该 run_id 从未用过，但确保等待方不会被历史哨兵误触发。
     this.#hub.clearRunSentinel(this.id, run.run_id);
     return run;
@@ -1410,100 +1342,73 @@ export class Conversation {
 
   /** 按调用方幂等键取 run（不存在/已淘汰返回 null）。 */
   getRunByClientId(clientRunId) {
-    if (!clientRunId) return null;
-    const runId = this.clientRuns.get(clientRunId);
-    if (!runId) return null;
-    return this.runs.find((r) => r.run_id === runId) ?? null;
+    return this.ledger.byClientId(clientRunId);
+  }
+
+  /**
+   * 一个还没发出就被取消的 run（队列里被移除、插话等不到上一轮结束）的终态：
+   * 结果 + 审核单 + live 事件 + 哨兵。取消也是终态，必须写哨兵，否则等待方永远空等。
+   */
+  #cancelUnstartedRun(run, message) {
+    run.status = 'cancelled';
+    run.ended_at = now();
+    run.elapsed_ms = 0;
+    // 取消同样是一次终态结果：审核单照挂，调用方仍可记录"这次没跑成"。
+    run.result = attachReview(
+      terminalResult({ conversationId: this.id, runId: run.run_id, stopReason: 'cancelled', error: message }),
+      { conversationId: this.id, run, mode: run.review_mode, permission: this.permission },
+    );
+    emitLive(
+      this.id,
+      'run.end',
+      { run: run.run_id, turn: this.currentTurn, status: 'cancelled', stop_reason: 'cancelled' },
+      { error: livePreview(message, 300) },
+    );
+    const file = this.#hub.writeRunSentinel?.(this.id, run);
+    run.result.sentinel_file = file ?? this.#hub.runSentinelPath?.(this.id, run.run_id) ?? null;
   }
 
   // ── 会话级队列（忙时非阻塞入队）────────────────────────────────
 
   /** 入队；返回 run 记录与 1-based 位置。队列只在内存，重启丢失。 */
   enqueue(text, { reasoning = 'hide', clientRunId = null, preview = null, review = this.review } = {}) {
-    const MAX_QUEUE = 8;
     if (clientRunId) {
       const existing = this.getRunByClientId(clientRunId);
       if (existing) return { run: existing, position: 0, deduped: true };
     }
-    if (this.queue.length >= MAX_QUEUE) {
-      throw new Error(`队列已满（最多 ${MAX_QUEUE} 条）；先用 dsh_queue list 清理，或等当前回合结束`);
-    }
+    this.ledger.assertRoom();
     // 预览用调用方原文，执行用可能已注入团队前缀的 text。
     const run = this.createRun(preview ?? text, { clientRunId, review });
     run.status = 'queued';
-    this.queue.push({ run, text, reasoning, clientRunId, enqueued_at: now() });
+    // client：排队的客户端。出队时可能是另一个客户端的回合刚结束，run.start 要记回排队的那个。
+    const position = this.ledger.enqueue({ run, text, reasoning, clientRunId, enqueued_at: now(), client: liveClient() });
     emitLive(
       this.id,
       'run.queued',
-      { run: run.run_id, turn: this.currentTurn, position: this.queue.length, cwd: this.cwd },
+      { run: run.run_id, turn: this.currentTurn, position, cwd: this.cwd },
       { prompt_preview: livePreview(run.prompt_preview, 200) },
     );
-    return { run, position: this.queue.length, deduped: false };
+    return { run, position, deduped: false };
   }
 
   queueList() {
-    // 防御：snapshot 可能被测试用 prototype 替身调用（没有构造器初始化 queue）。
-    return (this.queue ?? []).map((item, i) => ({
-      position: i + 1,
-      run_id: item.run.run_id,
-      preview: item.run.prompt_preview,
-      enqueued_at: item.enqueued_at,
-      client_run_id: item.clientRunId ?? null,
-    }));
+    // 防御：snapshot 可能被测试用 prototype 替身调用（没有构造器初始化 ledger）。
+    return this.ledger?.list() ?? [];
   }
 
   queueRemove(runId, { cancel = true } = {}) {
-    const i = this.queue.findIndex((x) => x.run.run_id === runId);
-    if (i < 0) throw new Error(`队列里没有 ${runId}`);
-    const [item] = this.queue.splice(i, 1);
-    if (cancel) {
-      const run = item.run;
-      run.status = 'cancelled';
-      run.ended_at = now();
-      run.elapsed_ms = 0;
-      run.result = {
-        conversation_id: this.id,
-        run_id: run.run_id,
-        stop_reason: 'cancelled',
-        error: 'queued run cancelled before it started',
-        answer: '',
-        thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
-        tools_used: [],
-        workspace_changed: false,
-        elapsed_ms: 0,
-      };
-      if (run.review_mode !== 'off') {
-        run.result.review = buildReviewTicket({
-          conversationId: this.id,
-          runId: run.run_id,
-          promptPreview: run.prompt_preview,
-          result: run.result,
-          mode: run.review_mode,
-          permission: this.permission,
-        });
-      }
-      emitLive(this.id, 'run.end', { run: run.run_id, turn: this.currentTurn, status: 'cancelled', stop_reason: 'cancelled' });
-      // 取消也是终态 → 写哨兵，避免等待方永远空等。
-      const file = this.#hub.writeRunSentinel(this.id, run);
-      run.result.sentinel_file = file ?? this.#hub.runSentinelPath(this.id, run.run_id);
-    }
+    const item = this.ledger.take(runId);
+    if (cancel) this.#cancelUnstartedRun(item.run, 'queued run cancelled before it started');
     return { removed: true, run_id: runId };
   }
 
   queueUpdate(runId, text) {
-    const item = this.queue.find((x) => x.run.run_id === runId);
-    if (!item) throw new Error(`队列里没有 ${runId}`);
-    item.text = text;
-    item.run.prompt_preview =
-      text.length > MAX_RUN_PREVIEW ? `${text.slice(0, MAX_RUN_PREVIEW)}…` : text;
+    this.ledger.update(runId, text);
     return { updated: true, run_id: runId };
   }
 
   queuePromote(runId) {
-    const i = this.queue.findIndex((x) => x.run.run_id === runId);
-    if (i < 0) throw new Error(`队列里没有 ${runId}`);
-    const [item] = this.queue.splice(i, 1);
-    this.queue.unshift(item);
+    this.ledger.promote(runId);
     return { promoted: true, run_id: runId, position: 1 };
   }
 
@@ -1514,26 +1419,29 @@ export class Conversation {
     const timer = setTimeout(() => {
       this.draining = false;
       if (this.busy || this.queue.length === 0) return;
-      const item = this.queue.shift();
+      const item = this.ledger.shift();
       const run = item.run;
       run.status = 'running';
-      this.prompt(item.text, { reasoning: item.reasoning, run, wait: false, via: 'queue' })
+      withLiveClient(item.client, () => this.prompt(item.text, { reasoning: item.reasoning, run, wait: false, via: 'queue' }))
         .catch(() => {})
         .finally(() => this.#scheduleDrain());
     }, 0);
     timer.unref?.();
   }
 
-  /** 取回合记录；不传 run_id 就是最近一条。 */
+  /**
+   * 取回合记录。不传 run_id 就是最近一次回合：正在跑的那个，否则最后一个开跑过的
+   * （排队中 / 排队后被取消的记录建得更晚，不能顶替它）。
+   */
   getRun(runId) {
     if (runId) {
-      const r = this.runs.find((x) => x.run_id === runId);
+      const r = this.ledger.find(runId);
       if (!r) {
         throw new Error(`未知 run_id: ${runId}（回合记录只在内存、只留最近 ${MAX_RUNS} 条；也可用 dsh_read 读输出缓冲）`);
       }
       return r;
     }
-    return this.runs.length ? this.runs[this.runs.length - 1] : null;
+    return this.currentRun ?? this.ledger.latestStarted();
   }
 
   /**
@@ -1541,7 +1449,7 @@ export class Conversation {
    * 告诉调用方"拿到哨兵结果后先审核，再当完成"。
    */
   pendingReviewTicket(runId) {
-    const run = this.runs.find((x) => x.run_id === runId) ?? null;
+    const run = this.ledger.find(runId);
     const mode = run?.review_mode ?? this.review;
     if (mode === 'off') return null;
     return buildReviewTicket({
@@ -1582,7 +1490,7 @@ export class Conversation {
       throw new Error('verdict=fail/partial 时必须提供 notes（或 findings）说明理由');
     }
 
-    const run = this.runs.find((x) => x.run_id === runId) ?? null;
+    const run = this.ledger.find(runId);
     let result = run?.result ?? null;
     let promptPreview = run?.prompt_preview ?? null;
     let mode = run?.review_mode ?? this.review;
@@ -1736,34 +1644,7 @@ export class Conversation {
     if (!idle) {
       const err = new Error('等待当前回合结束超时，插话未发送');
       err.runId = run.run_id;
-      run.status = 'cancelled';
-      run.ended_at = now();
-      run.elapsed_ms = 0;
-      run.result = {
-        conversation_id: this.id,
-        run_id: run.run_id,
-        stop_reason: 'cancelled',
-        error: err.message,
-        answer: '',
-        thinking_stats: { hidden: true, chars: 0, chunks: 0, ms: 0 },
-        tools_used: [],
-        workspace_changed: false,
-        elapsed_ms: 0,
-      };
-      // 取消同样是一次终态结果：审核单照挂，调用方仍可记录"这次没跑成"。
-      if (run.review_mode !== 'off') {
-        run.result.review = buildReviewTicket({
-          conversationId: this.id,
-          runId: run.run_id,
-          promptPreview: run.prompt_preview,
-          result: run.result,
-          mode: run.review_mode,
-          permission: this.permission,
-        });
-      }
-      emitLive(this.id, 'run.end', { run: run.run_id, turn: this.currentTurn, status: 'cancelled', stop_reason: 'cancelled' }, { error: livePreview(err.message, 300) });
-      const file = this.#hub.writeRunSentinel?.(this.id, run);
-      run.result.sentinel_file = file ?? this.#hub.runSentinelPath?.(this.id, run.run_id) ?? null;
+      this.#cancelUnstartedRun(run, err.message);
       throw err;
     }
     const r = await this.prompt(message, { reasoning, timeoutMs, run, via: mode === 'queue' ? 'queue' : 'interject' });
@@ -1845,6 +1726,11 @@ export class Conversation {
       this.#hub.remove(this.id);
       // forget 是"永久移除"：事件流也一并删掉，查看器里不再出现这个会话。
       removeLive(this.id);
+      // 会话自己的 worktree：干净就删目录（分支保留），有未提交改动就留着并说明。
+      if (this.worktree) {
+        const worktree = await removeWorktree(this.worktree);
+        return { closed: stopped, forgotten: true, worktree };
+      }
     } else {
       this.#hub.save();
       this.#live('conv.close', { stopped });

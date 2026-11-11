@@ -8,8 +8,23 @@
 
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { SENTINEL_INCLUDE_REASONING } from './config.mjs';
+import { SENTINEL_INCLUDE_REASONING, SENTINEL_TOOL_INPUTS } from './config.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
+
+/**
+ * 哨兵 JSON 的格式版本（哨兵顶层的 `schema` 字段）。同一版本内只加字段，不删、不改名、不改类型；
+ * 要做这些就加一，并在 CHANGELOG 里写明。test/contract.mjs 对着快照守这条。
+ */
+export const SENTINEL_SCHEMA = 1;
+
+/** 工具输入的长度（字符串按字符数，其它按 JSON 长度）。 */
+function inputChars(input) {
+  try {
+    return typeof input === 'string' ? input.length : (JSON.stringify(input)?.length ?? 0);
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * 哨兵文件里的 result 是否要剥离思考内容。
@@ -32,12 +47,20 @@ export function sanitizeResultForSentinel(result) {
       if (!t || typeof t !== 'object') return t;
       const { input, ...meta } = t;
       const safeMeta = sanitizeApprovalContext(meta);
-      return input === undefined ? safeMeta : { ...safeMeta, input: sanitizeApprovalContext(input) };
+      if (input === undefined) return safeMeta;
+      // DSH_MCP_SENTINEL_TOOL_INPUTS=0：输入一个字都不落盘，只留长度（同 dsh_get 的 max_chars 预算）。
+      if (!SENTINEL_TOOL_INPUTS) return { ...safeMeta, input_chars: inputChars(input) };
+      return { ...safeMeta, input: sanitizeApprovalContext(input) };
     });
   }
   // 自动放行审批摘要记录时已脱敏；落盘前再过一遍，防止将来有人加字段漏掉。
+  // command_preview 是命令原文的开头，也算工具输入：开关关掉时一并不落盘，条数与裁决信息照留。
   if (Array.isArray(rest.auto_approvals)) {
-    rest.auto_approvals = rest.auto_approvals.map((a) => (a && typeof a === 'object' ? sanitizeApprovalContext(a) : a));
+    rest.auto_approvals = rest.auto_approvals.map((a) => {
+      if (!a || typeof a !== 'object') return a;
+      const { command_preview, ...meta } = a;
+      return sanitizeApprovalContext(SENTINEL_TOOL_INPUTS ? a : meta);
+    });
   }
   // 审核单里可能有原任务预览、审核理由与证据摘要；哨兵会保留 7 天，同样要脱敏。
   if (rest.review && typeof rest.review === 'object') {

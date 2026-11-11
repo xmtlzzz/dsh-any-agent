@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SessionHost } from '../src/host.mjs';
 import { Hub } from '../src/hub.mjs';
 import { SHARED_PROCESS } from '../src/config.mjs';
-import { rssMb, readRssMap } from '../src/procstat.mjs';
+import { rssMb, refreshRssMap } from '../src/procstat.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -141,9 +141,28 @@ check('最后一个 detach 后停进程', () => assert.equal(proc2.stopped, true
 check('停进程后 host 为空', () => assert.equal(host2.size, 0));
 
 console.log('\n[4] 子进程 RSS 读取');
-check('能读到本进程的 RSS', () => assert.ok(rssMb(process.pid) > 0, String(rssMb(process.pid))));
+check('★ 缓存还没填时 rssMb 立刻返回 null，不等进程表', () => {
+  const t0 = performance.now();
+  assert.equal(rssMb(process.pid), null);
+  // 同步的 tasklist 在 Windows 上约 600ms。首次调用会顺带发起一次异步刷新，光是 spawn 子进程
+  // 就要十几到几十毫秒（满载跑整套测试时实测 21.8ms），所以门槛放在 200ms：
+  // 足以区分"等了进程表"和"没等"，又不会因为机器忙而误报。
+  assert.ok(performance.now() - t0 < 200, `${performance.now() - t0}ms`);
+});
+{
+  let ticks = 0;
+  const timer = setInterval(() => { ticks += 1; }, 1);
+  const t0 = performance.now();
+  const [m1, m2] = await Promise.all([refreshRssMap({ force: true }), refreshRssMap({ force: true })]);
+  const elapsed = performance.now() - t0;
+  clearInterval(timer);
+  check('RSS 表是 Map', () => assert.ok(m1 instanceof Map));
+  check('并发刷新共用同一次读取', () => assert.equal(m1, m2));
+  // 读得太快（<25ms）时不强求定时器已经触发过。
+  check('★ 刷新进程表期间事件循环照常转', () => assert.ok(elapsed < 25 || ticks > 0, `elapsed=${elapsed}ms ticks=${ticks}`));
+}
+check('刷新后能读到本进程的 RSS', () => assert.ok(rssMb(process.pid) > 0, String(rssMb(process.pid))));
 check('读不到返回 null（不是 0）', () => assert.equal(rssMb(99999999), null));
-check('RSS 表是 Map', () => assert.ok(readRssMap() instanceof Map));
 
 console.log('\n[5] 共享进程默认开启（0.5.0）');
 
@@ -256,6 +275,46 @@ console.log('\n[7] ★ 并发握手：第二个调用者必须等到 initialize 
   check('★ 旧进程停完后宿主仍在进程池里', () => assert.equal(pool.hosts.get('k'), h3));
   check('★ 抢占检查仍能查到新进程上的其它会话', () => assert.deepEqual(pool.hostVictimsOf(newPid, 'session-n1'), ['session-n2']));
   check('新进程还活着', () => assert.equal(h3.alive, true));
+}
+
+console.log('\n[10] ★ 回收：选中之后会话开跑了新回合，就不能再停它（刷新 RSS 期间的竞态）');
+{
+  // 回收周期选好要停的会话后还会 await（读 RSS 预算前先刷新进程表，Windows 上 1–2 秒）；这期间
+  // dsh_send 可能已经在这个会话上开跑。只看"进程还活着"就停，会把正在执行的回合打断。
+  const reaper = new Hub({ log });
+  const stopped = [];
+  const idleConv = (id) => ({
+    id,
+    busy: false,
+    keepAlive: false,
+    lastUsedAt: 0, // 早就过了空闲回收线
+    recycling: null,
+    proc: { alive: true, pid: 999_001, stop: async () => (stopped.push(id), true) },
+  });
+  const started = idleConv(`reaper-race-started-${process.pid}`);
+  const idle = idleConv(`reaper-race-idle-${process.pid}`);
+  reaper.conversations.set(started.id, started);
+  reaper.conversations.set(idle.id, idle);
+  await reaper.reapOnce({
+    maxRssMb: 1,
+    refreshRss: async () => {
+      // 刷新期间 dsh_send 到了：prompt() 同步置 busy、刷新 lastUsedAt。
+      started.busy = true;
+      started.lastUsedAt = Date.now();
+    },
+  });
+  check('★ 选中之后开跑了回合的会话没有被停', () => assert.ok(!stopped.includes(started.id), JSON.stringify(stopped)));
+  check('对照：一直空闲的会话照常回收', () => assert.ok(stopped.includes(idle.id), JSON.stringify(stopped)));
+  const used = idleConv(`reaper-race-used-${process.pid}`);
+  reaper.conversations.clear();
+  reaper.conversations.set(used.id, used);
+  await reaper.reapOnce({
+    maxRssMb: 1,
+    refreshRss: async () => {
+      used.lastUsedAt = Date.now(); // 刷新期间跑完了一个很短的回合：不再是"空闲超时"
+    },
+  });
+  check('选中之后用过（回合已经跑完）的会话也不停', () => assert.ok(!stopped.includes(used.id), JSON.stringify(stopped)));
 }
 
 // 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。

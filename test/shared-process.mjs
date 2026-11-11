@@ -34,7 +34,7 @@ if (!hasDsh) {
 }
 
 const { Hub } = await import('../src/hub.mjs');
-const { readRssMap } = await import('../src/procstat.mjs');
+const { refreshRssMap } = await import('../src/procstat.mjs');
 
 let passed = 0;
 let failed = 0;
@@ -88,7 +88,8 @@ await Promise.all([c.close(), d.close()]);
 check('全部关闭后宿主被清掉', () => assert.equal(hub.hosts.size, 0));
 // 给进程一点退出时间，再确认 PID 从进程表里消失。
 await new Promise((r) => setTimeout(r, 500));
-check('PID 已退出（RSS 读不到）', () => assert.equal(readRssMap({ force: true }).has(pid), false));
+const rssAfterExit = await refreshRssMap({ force: true });
+check('PID 已退出（RSS 读不到）', () => assert.equal(rssAfterExit.has(pid), false));
 } finally {
   try { await hub.shutdown(); } catch {}
   // 动态 import：本文件在加载 config.mjs 之前要先设好 DSH_MCP_STATE 等环境变量
