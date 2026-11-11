@@ -55,7 +55,7 @@ for (const never of ['test/', 'state/', '.state/', '.birdview', '.npmrc', '.env'
 ok('no test/state/secret paths in the whitelist');
 // Repo-only material: maintainer scripts, the site, the video, images and the archived design draft.
 // None of it is used by the installed server, and together it more than doubled the tarball.
-const repoOnly = ['scripts/', 'website/', 'video/', 'docs/', 'docs/brand/', 'docs/images/', 'DESIGN.md'];
+const repoOnly = ['scripts/', 'website/', 'video/', 'docs/', 'docs/brand/', 'docs/images/', 'docs/history/'];
 const shippedRepoOnly = files.filter((f) => repoOnly.includes(f));
 if (shippedRepoOnly.length) bad('repo-only paths in the whitelist: ' + shippedRepoOnly.join(', '));
 else ok('no repo-only paths (scripts, site, video, images, archived design) in the whitelist');

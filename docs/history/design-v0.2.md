@@ -2,7 +2,7 @@
 > **历史文档 · Archived.** 这是项目早期（v0.2 前后）的设计草案，保留它是为了记录"为什么选 ACP、为什么这样设计"的推理过程。文中的工具数量、版本号、默认值与路线图**都已过时**，不要按它理解当前行为。
 > This is the early (v0.2-era) design draft, kept for the reasoning behind choosing ACP. Tool counts, versions, defaults and the roadmap below are **out of date**.
 >
-> 当前文档 · Current docs: [README](README.zh.md) · [架构 / Architecture](docs/zh/architecture.md) ([en](docs/en/architecture.md)) · [工具与用法 / Usage](docs/zh/usage.md) ([en](docs/en/usage.md)) · [实时查看设计 / Live view design](docs/zh/live-view-design.md) ([en](docs/en/live-view-design.md)) · [CHANGELOG](CHANGELOG.md)
+> 当前文档 · Current docs: [README](../../README.zh.md) · [架构 / Architecture](../zh/architecture.md) ([en](../en/architecture.md)) · [工具与用法 / Usage](../zh/usage.md) ([en](../en/usage.md)) · [实时查看设计 / Live view design](../zh/live-view-design.md) ([en](../en/live-view-design.md)) · [CHANGELOG](../../CHANGELOG.md)
 
 # dsh-any-agent 功能设计（v0.2 草案，历史文档）
 
@@ -16,7 +16,7 @@
 
 `dsh_start`、`dsh_send`、`dsh_list`、`dsh_read`、`dsh_get`、`dsh_interject`、`dsh_interrupt`、`dsh_release`、`dsh_takeover`、`dsh_approval_decide`、`dsh_status`
 
-本文后续出现的 `dsh_resume`、`dsh_rename`、`dsh_delete`、`dsh_transcript`、`dsh_diff`、`dsh_doctor` 等属于 M2/M3 路线图，**不是当前版本的缺失**。当前版本的能力边界以 README 的 Known limitations 与 USAGE-NOTES 为准。
+本文后续出现的 `dsh_resume`、`dsh_rename`、`dsh_delete`、`dsh_transcript`、`dsh_diff`、`dsh_doctor` 等属于 M2/M3 路线图，**不是当前版本的缺失**。当前版本的能力边界以 README 的 Known limitations 与[使用注意事项](../zh/caveats.md)为准。
 
 ---
 
@@ -482,9 +482,9 @@ MCP 服务器增删查（F2）、插件与技能管理、`dsh_doctor`、分叉/�
 
 | 位置 | 内容 |
 |---|---|
-| [`src/`](src) | 实现：ACP 客户端、会话池与注册表、工具层、MCP 服务端、工作区登记 |
-| [`test/`](test) | 可复跑的测试套件；当前基线见 README（0.3.9：离线 843 项、官网 29 项，模型套件另计）。本文件是历史设计稿，不再重复抄写计数 |
-| [`README.md`](README.md) / [`README.zh.md`](README.zh.md) | 使用文档（英文 / 中文） |
-| [`profile-example/cordis.patch.yml`](profile-example/cordis.patch.yml) | DSH profile 补丁层模板（含两个必踩的坑的说明） |
+| [`src/`](../../src) | 实现：ACP 客户端、会话池与注册表、工具层、MCP 服务端、工作区登记 |
+| [`test/`](../../test) | 可复跑的测试套件；当前基线见 README（0.3.9：离线 843 项、官网 29 项，模型套件另计）。本文件是历史设计稿，不再重复抄写计数 |
+| [`README.md`](../../README.md) / [`README.zh.md`](../../README.zh.md) | 使用文档（英文 / 中文） |
+| [`profile-example/cordis.patch.yml`](../../profile-example/cordis.patch.yml) | DSH profile 补丁层模板（含两个必踩的坑的说明） |
 
 设计期间用于取证的一次性探针（解码多帧 zstd 会话日志、对 `--profile sdk` 做零成本握手、对 IDA broker 做完整 MCP 握手、A/B 对照验证连接失败会报错等）在实现定型后已删除；其结论已固化进本文与测试断言。

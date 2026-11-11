@@ -21,4 +21,4 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 
 > **Two measured footnotes.** ① **A crash leaves no orphan lock** — `SIGKILL` the MCP and its children exit with it (their stdio pipe closes), releasing the lock automatically ✓; so `stale-mcp` really means "**alive but wedged**". ② **Several instances**: the registry is last-writer-wins (a later save drops conversations it never saw), but the **session store is authoritative** — any session on disk is recoverable **by id alone**; if you give instances different `DSH_MCP_STATE` files, **point `DSH_MCP_LOCKS_DIR` at one shared directory**, or they cannot see each other's holder registrations.
 >
-> The full measurements (the A/B probe method, the evidence that the GUI opens read-only, why even archiving does not release the lock, and crash-vs-wedge) are in [Usage Notes §3.5–3.12](../../USAGE-NOTES.en.md).
+> The full measurements (the A/B probe method, the evidence that the GUI opens read-only, why even archiving does not release the lock, and crash-vs-wedge) are in [Usage Notes §3.5–3.12](caveats.md).

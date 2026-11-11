@@ -12,7 +12,7 @@
  * 准备一个可用的测试会话（不碰真实会话）：
  *   用临时 DSH_MCP_STATE 起一个 MCP 实例 → dsh_start(cwd=桌面某文件夹) → 发一条短消息
  *   （**必须有内容**：空白会话在 GUI 里会被特殊处理）→ dsh_release → 得到会话 id 与 cwd，
- *   填到下面的 ID / CWD。然后把结论写进 README / USAGE-NOTES。
+ *   填到下面的 ID / CWD。然后把结论写进 README / docs/zh/caveats.md。
  *
  * 实测结论（2026-09，两个阶段，A/B）：
  *   ① 未在 GUI 打开        → 【空】（连测两次）

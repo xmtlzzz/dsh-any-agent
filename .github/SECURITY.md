@@ -43,4 +43,4 @@ dsh-any-agent sits between an MCP client and DeepSeek Harness. Issues in what *t
 
 ## More · 更多
 
-How permissions, approvals, logging and the live view behave: [docs/en/security.md](docs/en/security.md) · [docs/zh/security.md](docs/zh/security.md).
+How permissions, approvals, logging and the live view behave: [docs/en/security.md](../docs/en/security.md) · [docs/zh/security.md](../docs/zh/security.md).
