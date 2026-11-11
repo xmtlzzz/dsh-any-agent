@@ -214,6 +214,31 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
   proc.end();
   await tick();
 }
+{
+  // "最近回合"必须是正在跑的那个：排队的回合记录建得更晚，排队后被取消也一样，都不能顶替它
+  // （真机测试时 dsh_status 显示 state=running，run 却是一个刚取消的排队回合）。
+  const { c, proc } = raceConv('race-latest-run');
+  hub.conversations.set(c.id, c);
+  const running = await c.prompt('长任务', { wait: false });
+  for (let i = 0; i < 300 && proc.prompts < 1; i++) await tick(10);
+  const queued = c.enqueue('排队的').run;
+  const st1 = await handlers.dsh_status({ conversation_id: c.id });
+  check('★ 有回合在排队时，dsh_status 的 run 是正在跑的那个', () => assert.equal(st1.structured.run?.run_id, running.run_id));
+  c.queueRemove(queued.run_id);
+  const st2 = await handlers.dsh_status({ conversation_id: c.id });
+  check('★ 排队的回合被取消后，dsh_status 的 run 仍是正在跑的那个', () =>
+    assert.deepEqual([st2.structured.run?.run_id, st2.structured.run?.status], [running.run_id, 'running']));
+  const got = await handlers.dsh_get({ conversation_id: c.id });
+  check('不带 run_id 的 dsh_get 取的也是正在跑的那个', () => assert.equal(got.structured.run?.run_id, running.run_id));
+  proc.end();
+  // 收尾先放开 busy、等 git 快照之后才把状态改成 done（见 conversation.mjs 的 finalize）：等到状态落定。
+  for (let i = 0; i < 500 && c.getRun(running.run_id).status === 'running'; i++) await tick(10);
+  const st3 = await handlers.dsh_status({ conversation_id: c.id });
+  check('跑完以后：run 是刚跑完的那个，不是更晚建、没开跑就取消的排队回合', () =>
+    assert.deepEqual([st3.structured.run?.run_id, st3.structured.run?.status], [running.run_id, 'done']));
+  check('按 run_id 仍能取到被取消的排队回合', () => assert.equal(c.getRun(queued.run_id).status, 'cancelled'));
+  hub.conversations.delete(c.id);
+}
 
 console.log('\n[4] dsh_get 正文预算');
 

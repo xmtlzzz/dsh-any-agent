@@ -78,6 +78,15 @@ export class RunLedger {
     return this.runs.length ? this.runs[this.runs.length - 1] : null;
   }
 
+  /**
+   * 最近一条真正开跑过的回合。排队中、没开跑就取消的回合记录建得更晚，但不算"最近一次回合"；
+   * 一条都没开跑过时退回 latest()。
+   */
+  latestStarted() {
+    for (let i = this.runs.length - 1; i >= 0; i--) if (this.runs[i].started_at) return this.runs[i];
+    return this.latest();
+  }
+
   // ── 队列 ────────────────────────────────────────────────────────
 
   /** 队列满了就抛错。要在建 run 记录**之前**调用，否则满队列会留下一条永远 queued 的 run。 */

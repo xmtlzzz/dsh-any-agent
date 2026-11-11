@@ -1421,7 +1421,10 @@ export class Conversation {
     timer.unref?.();
   }
 
-  /** 取回合记录；不传 run_id 就是最近一条。 */
+  /**
+   * 取回合记录。不传 run_id 就是最近一次回合：正在跑的那个，否则最后一个开跑过的
+   * （排队中 / 排队后被取消的记录建得更晚，不能顶替它）。
+   */
   getRun(runId) {
     if (runId) {
       const r = this.ledger.find(runId);
@@ -1430,7 +1433,7 @@ export class Conversation {
       }
       return r;
     }
-    return this.ledger.latest();
+    return this.currentRun ?? this.ledger.latestStarted();
   }
 
   /**
