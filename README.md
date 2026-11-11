@@ -11,7 +11,6 @@
 [![license](https://img.shields.io/npm/l/dsh-any-agent.svg?style=flat-square)](LICENSE)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
 [![tests](https://img.shields.io/github/actions/workflow/status/xmtlzzz/dsh-any-agent/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/xmtlzzz/dsh-any-agent/actions/workflows/tests.yml)
-[![M8ven Score](https://m8ven.ai/badge/mcp/xmtlzzz-dsh-any-agent-ypgfnj?v=7c88b6fc8313c05af27cf83f262b9ac1)](https://m8ven.ai/mcp/xmtlzzz-dsh-any-agent-ypgfnj?s=readme)
 
 [Website](https://dsh-any-agent.xmtlz.dev/) · [Quick start](#quick-start) · [Features](#-why-its-different) · [Tools](#-tools) · [Live view](#-live-view-see-what-the-dispatched-work-is-doing) · [Usage notes](USAGE-NOTES.en.md) · [Changelog](CHANGELOG.md)
 
@@ -201,6 +200,16 @@ tasks are not forced into a team. Turn it off with `dsh-any-agent team off`, or
 for one call with `dsh_send(team=false)`.
 
 > Full steps (commands, verification, rollback) are in [Team mode](docs/en/team.md).
+
+## 📇 Listed on
+
+<!-- Directory and registry badges live here, not in the header (which keeps only the package's own status).
+     One 20px badge per line, alphabetical; prefer a site's small badge over its large card. -->
+
+<p align="center">
+  <a href="https://mcprush.com/to/dsh-any-agent-mcp?ref=badge"><img src="https://mcprush.com/badge/dsh-any-agent-mcp/score.svg" height="20" alt="DSH Any Agent MCP on mcprush"></a>
+  <a href="https://m8ven.ai/mcp/xmtlzzz-dsh-any-agent-ypgfnj?s=readme"><img src="https://m8ven.ai/badge/mcp/xmtlzzz-dsh-any-agent-ypgfnj?v=7c88b6fc8313c05af27cf83f262b9ac1" height="20" alt="M8ven Score"></a>
+</p>
 
 ## 🙏 Acknowledgements
 

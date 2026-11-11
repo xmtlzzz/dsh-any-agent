@@ -11,7 +11,6 @@
 [![license](https://img.shields.io/npm/l/dsh-any-agent.svg?style=flat-square)](LICENSE)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
 [![tests](https://img.shields.io/github/actions/workflow/status/xmtlzzz/dsh-any-agent/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/xmtlzzz/dsh-any-agent/actions/workflows/tests.yml)
-[![M8ven Score](https://m8ven.ai/badge/mcp/xmtlzzz-dsh-any-agent-ypgfnj?v=7c88b6fc8313c05af27cf83f262b9ac1)](https://m8ven.ai/mcp/xmtlzzz-dsh-any-agent-ypgfnj?s=readme)
 
 [官网](https://dsh-any-agent.xmtlz.dev/) · [快速开始](#快速开始) · [主要优势](#-主要优势) · [工具](#-工具) · [实时查看](#-实时查看派出去的活在干什么) · [使用注意事项](USAGE-NOTES.md) · [更新日志](CHANGELOG.md)
 
@@ -195,6 +194,16 @@ dsh-any-agent dashboard --open
 关闭：`dsh-any-agent team off`；单次关闭：`dsh_send(team=false)`。
 
 > 完整步骤（命令、验证、回退）见 [团队模式](docs/zh/team.md)。
+
+## 📇 收录与评分
+
+<!-- 目录站 / 注册表的徽章统一放这里，不放页首（页首只留包本身的状态）。
+     每行一个 20px 小徽章，按字母序；同一站点有大卡片和小徽章时用小徽章。 -->
+
+<p align="center">
+  <a href="https://mcprush.com/to/dsh-any-agent-mcp?ref=badge"><img src="https://mcprush.com/badge/dsh-any-agent-mcp/score.svg" height="20" alt="DSH Any Agent MCP on mcprush"></a>
+  <a href="https://m8ven.ai/mcp/xmtlzzz-dsh-any-agent-ypgfnj?s=readme"><img src="https://m8ven.ai/badge/mcp/xmtlzzz-dsh-any-agent-ypgfnj?v=7c88b6fc8313c05af27cf83f262b9ac1" height="20" alt="M8ven Score"></a>
+</p>
 
 ## 🙏 致谢
 
