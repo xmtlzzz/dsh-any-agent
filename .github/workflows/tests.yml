@@ -32,6 +32,7 @@ name: tests
 #     watchdog          turn watchdog (stall / max duration)  28 checks
 #     worktree          isolation=worktree sessions      25 checks
 #     daemon            DSH_MCP_DAEMON=1 resident process  16 checks
+#     run-recovery      interrupted-turn sentinels   18 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
 #     commit-script     commit via stdin, no temp    26 checks
 #     test-counts       report parser + docs sync     92 checks
@@ -252,6 +253,10 @@ jobs:
       - name: daemon (turns survive the client; token auth; idle exit)
         env: { DSH_MCP_LOG: silent }
         run: node test/daemon.mjs
+      # 服务进程在回合中途死掉：下一个进程启动时补出"已中断"哨兵；关闭时先写哨兵。
+      - name: run-recovery (interrupted-turn sentinels)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/run-recovery.mjs
       # Guards the sandbox itself, not the writer. A test suite that points its
       # "sandbox" at the real user profile deletes real data while reporting
       # green; this suite fails instead.

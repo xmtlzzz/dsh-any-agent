@@ -22,6 +22,7 @@ import {
   cpSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   writeFileSync,
   existsSync,
   renameSync,
@@ -32,6 +33,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import {
   ALLOW_FULL_ACCESS,
   APPROVAL_POLICIES,
+  DAEMON_MODE,
   DEFAULT_PERMISSION,
   DEFAULT_REASONING_EFFORT,
   DEFAULT_REVIEW,
@@ -80,9 +82,12 @@ import {
 import {
   LOCKS_DIR,
   heartbeat as lockHeartbeat,
+  isPidAlive,
+  processStartTime,
   removeMarker,
   writeMarker,
 } from './locks.mjs';
+import { attachReview, terminalResult } from './run-result.mjs';
 
 // 外部（测试、bin）一直从 hub.mjs 取这些函数；拆出去之后导入路径保持不变。
 export { Conversation, formatReasoning } from './conversation.mjs';
@@ -91,6 +96,10 @@ export { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
 export { sanitizeResultForSentinel } from './sentinel.mjs';
 
 const now = () => Date.now();
+/** 本进程的启动时刻：回合标记里记下它，下次启动据此识别"PID 被别的进程复用了"。 */
+const PROCESS_STARTED_AT = Math.round(Date.now() - process.uptime() * 1000);
+/** 标记里的启动时刻与实际进程启动时刻相差多少以内算同一个进程。 */
+const OWNER_START_TOLERANCE_MS = 2 * 60 * 1000;
 
 // ── 注册表 ────────────────────────────────────────────────────────
 
@@ -246,6 +255,10 @@ export class Hub {
       const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
       writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
       renameSync(tmp, file);
+      // 哨兵落地了，"回合进行中"的标记就没用了（删不掉也无妨：恢复时看到哨兵已在会直接清掉它）。
+      try {
+        rmSync(this.runMarkerPath(conversationId, run.run_id), { force: true });
+      } catch {}
       return file;
     } catch (e) {
       const msg = `写完成哨兵失败（${file}）: ${e.message}`;
@@ -253,6 +266,135 @@ export class Hub {
       this.log.info(`[hub] ${msg}`);
       return null;
     }
+  }
+
+  // ── 回合进行中标记 ──────────────────────────────────────────────
+  //
+  // 回合一开始就写 `<RUNS_DIR>/<会话>/<run_id>.running`（记下本进程 PID 与启动时刻），
+  // 写出哨兵时删掉。服务进程在回合结束前被杀（默认模式下客户端关掉 / 重连 / 崩溃都会这样）
+  // 就没人写哨兵了，调用方只能干等到超时；下次有服务启动时 recoverInterruptedRuns() 据这个
+  // 标记补写一个"已中断"的哨兵。后缀故意不是 .json：等哨兵的脚本不会把它当成结果。
+
+  runMarkerPath(conversationId, runId) {
+    assertSafeId(conversationId, 'conversation_id');
+    assertSafeId(runId, 'run_id');
+    return join(RUNS_DIR, conversationId, `${runId}.running`);
+  }
+
+  /** 回合开始：写标记（失败只记日志 —— 它只是兜底，不能拦住派活）。 */
+  markRunStarted(conversationId, run) {
+    try {
+      const file = this.runMarkerPath(conversationId, run.run_id);
+      mkdirSync(dirname(file), { recursive: true });
+      const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
+      writeFileSync(
+        tmp,
+        JSON.stringify({
+          conversation_id: conversationId,
+          run_id: run.run_id,
+          client_run_id: run.client_run_id ?? null,
+          prompt_preview: sanitizeApprovalContext(run.prompt_preview ?? null, 'prompt_preview'),
+          review_mode: run.review_mode ?? null,
+          started_at: run.started_at ?? now(),
+          owner_pid: process.pid,
+          owner_started_at: PROCESS_STARTED_AT,
+        }),
+        'utf8',
+      );
+      renameSync(tmp, file);
+    } catch (e) {
+      this.log.info(`[hub] 写回合进行中标记失败（不影响派活）: ${e.message}`);
+    }
+  }
+
+  /**
+   * 启动时：给"上一个进程没跑完就死掉"的回合补写哨兵（status=error，stop_reason=interrupted）。
+   *
+   * 只认领主人确实不在了的标记：PID 不存在，或 PID 还在但启动时刻对不上（被别的进程复用了）。
+   * 读不到启动时刻时按"还活着"处理 —— 宁可不补，也不能给另一个实例正在跑的回合写一个假的终态。
+   * @returns 补写了哪些 `[{conversation_id, run_id, sentinel_file}]`
+   */
+  recoverInterruptedRuns({ alive = isPidAlive, startTimeOf = processStartTime } = {}) {
+    const recovered = [];
+    // 读启动时刻要起一个子进程（Windows 上是 PowerShell）：同一个主人的多个标记只查一次。
+    const startTimes = new Map();
+    const startTime = (pid) => {
+      if (!startTimes.has(pid)) startTimes.set(pid, startTimeOf(pid));
+      return startTimes.get(pid);
+    };
+    let convDirs = [];
+    try {
+      convDirs = existsSync(RUNS_DIR) ? readdirSync(RUNS_DIR, { withFileTypes: true }).filter((d) => d.isDirectory()) : [];
+    } catch {
+      return recovered;
+    }
+    for (const dir of convDirs) {
+      let files = [];
+      try {
+        files = readdirSync(join(RUNS_DIR, dir.name)).filter((f) => f.endsWith('.running'));
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        const markerFile = join(RUNS_DIR, dir.name, f);
+        let m;
+        try {
+          m = JSON.parse(readFileSync(markerFile, 'utf8'));
+          assertSafeId(m.conversation_id, 'conversation_id');
+          assertSafeId(m.run_id, 'run_id');
+          if (m.conversation_id !== dir.name || `${m.run_id}.running` !== f) throw new Error('marker path mismatch');
+        } catch {
+          continue; // 看不懂的文件不碰（也不删：不是我们能确认的东西）
+        }
+        if (alive(m.owner_pid)) {
+          const actual = startTime(m.owner_pid);
+          const reused = Number.isFinite(actual) && Number.isFinite(m.owner_started_at) &&
+            Math.abs(actual - m.owner_started_at) > OWNER_START_TOLERANCE_MS;
+          if (!reused) continue; // 主人还在跑这个回合
+        }
+        const sentinel = this.runSentinelPath(m.conversation_id, m.run_id);
+        if (existsSync(sentinel)) {
+          rmSync(markerFile, { force: true }); // 哨兵其实写出来了，只是标记没删掉
+          continue;
+        }
+        const file = this.#writeInterruptedSentinel(m.conversation_id, m);
+        if (file) recovered.push({ conversation_id: m.conversation_id, run_id: m.run_id, sentinel_file: file });
+      }
+    }
+    return recovered;
+  }
+
+  /**
+   * 给一个没跑完的回合写"已中断"哨兵（status=error，stop_reason=interrupted）。
+   * 启动恢复（读回合标记）与本进程关闭（读内存里的 run）共用；`run` 只需 run_id / client_run_id /
+   * prompt_preview / review_mode。
+   */
+  #writeInterruptedSentinel(conversationId, run) {
+    const error = L(
+      '服务进程在回合结束前退出（客户端关闭、重连或崩溃），回合被中断；已改动的文件不会回滚。' +
+        (DAEMON_MODE ? '' : '设 DSH_MCP_DAEMON=1 可让回合扛住客户端重启。'),
+      'The server process exited before the turn ended (the client closed, reconnected or crashed), so the turn was interrupted; changed files are not rolled back.' +
+        (DAEMON_MODE ? '' : ' Set DSH_MCP_DAEMON=1 to keep turns running across client restarts.'),
+    );
+    const record = {
+      run_id: run.run_id,
+      client_run_id: run.client_run_id ?? null,
+      prompt_preview: run.prompt_preview ?? null,
+      review_mode: normalizeReviewMode(run.review_mode, DEFAULT_REVIEW),
+      status: 'error',
+      error,
+      ended_at: now(),
+    };
+    record.result = attachReview(
+      terminalResult({ conversationId, runId: run.run_id, stopReason: 'interrupted', error }),
+      {
+        conversationId,
+        run: record,
+        mode: record.review_mode,
+        permission: this.conversations.get(conversationId)?.permission ?? null,
+      },
+    );
+    return this.writeRunSentinel(conversationId, record);
   }
 
   /**
@@ -909,6 +1051,13 @@ export class Hub {
   async shutdown() {
     if (this.#reaper) clearInterval(this.#reaper);
     this.#reaper = null;
+    // 还在跑的回合随本进程一起结束：先同步写"已中断"哨兵。不能等下一个实例的启动恢复 ——
+    // 客户端重连时新实例往往在本进程还没退完时就起来了，那时它会把这些标记当成"主人还活着"。
+    for (const c of this.conversations.values()) {
+      const run = c.busy ? c.currentRun : null;
+      if (!run?.run_id || existsSync(this.runSentinelPath(c.id, run.run_id))) continue;
+      this.#writeInterruptedSentinel(c.id, run);
+    }
     for (const c of this.conversations.values()) {
       if (c.recycling) await c.recycling;
       const proc = c.proc;

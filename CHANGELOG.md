@@ -65,6 +65,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A turn cut off by the server exiting now gets a sentinel.** When the
+  server stopped mid-turn (the client closed, reconnected or crashed), nobody
+  wrote the turn's sentinel, so a caller's background waiter ran to its
+  timeout and `dsh_get` answered "unknown run_id". The server now writes a
+  `status: "error"`, `stop_reason: "interrupted"` sentinel for running turns
+  as the first step of shutting down. If it was killed outright, each turn
+  leaves a `<run_id>.running` marker naming the server's PID and start time,
+  and the next server to start writes the sentinel for markers whose owner is
+  gone (a reused PID with a different start time counts as gone; an unknown
+  start time does not). Files the turn changed are not rolled back.
 - **`dsh-any-agent-setup --permission danger-full-access` produces a working
   config.** It writes `DSH_MCP_PERMISSION=danger-full-access`, but the server
   also wanted `DSH_MCP_ALLOW_FULL_ACCESS=1`, so every `dsh_start` was refused.

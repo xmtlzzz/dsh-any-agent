@@ -942,6 +942,8 @@ export class Conversation {
     //   ★ 同理，git 快照的 await 也必须放在 busy 置位**之后**（见下面的 Promise.all）。
     this.busy = true;
     this.lastUsedAt = now();
+    // 服务进程在回合结束前被杀时，下次启动据这个标记补写"已中断"哨兵（见 Hub.recoverInterruptedRuns）。
+    this.#hub.markRunStarted?.(this.id, runRecord);
     // 冷启动窗口（拉进程 + resume）里 dsh_interrupt 只能记一笔，session/prompt 发出前再看。
     this.#undispatched = runRecord;
     this.#cancelBeforeDispatch = false;
