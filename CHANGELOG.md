@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-11
+
+Running turns hold up better. An optional resident process keeps a turn
+going when the client closes or reconnects (checked by quitting the Claude
+desktop app mid-turn), a watchdog stops turns that stall or run past a cap,
+and a turn cut off by the server exiting still gets a sentinel. Sentinels
+gain a format version backed by a contract test, and `dsh_doctor` reports
+when a newer release is on npm.
+
 ### Added
 
 - **Turn watchdog.** A turn that has run 15 minutes and then makes no progress
@@ -1598,7 +1607,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.6...v0.6.7

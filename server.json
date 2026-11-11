@@ -6,12 +6,12 @@
     "url": "https://github.com/xmtlzzz/dsh-any-agent",
     "source": "github"
   },
-  "version": "0.6.9",
+  "version": "0.7.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "dsh-any-agent",
-      "version": "0.6.9",
+      "version": "0.7.0",
       "transport": {
         "type": "stdio"
       },
@@ -25,7 +25,7 @@
         },
         {
           "name": "DSH_MCP_PERMISSION",
-          "description": "Default permission tier for dsh_start: read-only, workspace-write, or danger-full-access (the last one also needs DSH_MCP_ALLOW_FULL_ACCESS=1).",
+          "description": "Default permission tier for dsh_start: read-only, workspace-write, or danger-full-access (setting it as the default allows full access on this machine; asking for it per conversation under another default also needs DSH_MCP_ALLOW_FULL_ACCESS=1).",
           "format": "string",
           "isRequired": false,
           "isSecret": false,
