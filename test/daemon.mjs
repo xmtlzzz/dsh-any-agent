@@ -4,11 +4,12 @@
  * 守的不变量：
  *   1. 客户端拉起的是转发进程，MCP 握手经它转到常驻进程，照常能用；
  *   2. ★ 转发进程被强杀（客户端关掉 / 重连 / 崩溃）后，常驻进程里正在跑的回合照常跑完、写出哨兵；
- *   3. 第二个客户端连到同一个常驻进程；配置不同的客户端不会共用一个常驻进程；
+ *   3. 第二个客户端连到同一个常驻进程；配置（含 API 钥匙）不同的客户端不会共用一个常驻进程；
  *   4. 没带令牌 / 令牌不对的连接被直接断开，拿不到任何应答；
  *   5. 没有客户端、没有回合时，空闲一段时间后常驻进程自己退出并删掉信息文件。
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -145,6 +146,21 @@ try {
   await check('★ 切换 team 设置后重连：另起一个常驻进程', () => daemonPids().filter((p) => !beforeTeam.has(p)).length === 1,
     JSON.stringify({ before: [...beforeTeam], now: daemonPids() }));
   rmSync(teamFile, { force: true }); // 后面几节照旧用原来那个常驻进程
+  // 常驻进程的环境原样传给 DSH 子进程：API 钥匙（profile 里 apiKeyEnv 指的变量，如 MY_API_KEY）不同的
+  // 客户端不能共用一个常驻进程，否则后来的客户端用的是先来那个的钥匙；换了钥匙重连同理。
+  const beforeKey = new Set(daemonPids());
+  const newSince = () => daemonPids().filter((p) => !beforeKey.has(p));
+  const k1 = track(new McpClient({ env: { ...baseEnv, MY_API_KEY: 'key-one' } }).start());
+  await k1.initialize();
+  const afterK1 = newSince();
+  const k2 = track(new McpClient({ env: { ...baseEnv, MY_API_KEY: 'key-two' } }).start());
+  await k2.initialize();
+  await check('★ API 钥匙不同的客户端各用各的常驻进程', () => afterK1.length === 1 && newSince().length === 2,
+    JSON.stringify({ afterK1, now: newSince() }));
+  // 对照：客户端环境里每个会话都不同的变量（会话 id、管道名）不算身份，否则每次重连都另起一个常驻进程。
+  const v = track(new McpClient({ env: { ...baseEnv, MY_API_KEY: 'key-two', SOME_CLIENT_SESSION_ID: randomUUID() } }).start());
+  await v.initialize();
+  await check('对照：只是会话级变量不同，仍连同一个常驻进程', () => newSince().length === 2, JSON.stringify(newSince()));
 
   console.log('\n[4] 认证');
   // 地址按 daemon.mjs 的命名规则从信息文件名推出来（测试进程自己的环境和客户端不同，不能重算）。

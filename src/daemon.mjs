@@ -13,7 +13,7 @@
  *   - 转发进程只搬字节：客户端关掉它，常驻进程里的回合照常跑完、照常写哨兵；
  *   - 没有客户端连着、也没有回合在跑，空闲 DSH_MCP_DAEMON_IDLE_MS（默认 10 分钟）后自己退出。
  *
- * 身份：同一个状态目录 + 同一版本 + 同一组 DSH_* / 语言环境变量 → 同一个常驻进程。
+ * 身份：同一个状态目录 + 同一版本 + 同一组 DSH_* / 语言 / 凭据（`*_KEY`）/ 代理环境变量 → 同一个常驻进程。
  * 配置不同的两个客户端（例如一个 full access、一个 read-only）不会共用一个常驻进程；
  * 升级后的新版本也会起一个新的，旧的空闲后自己退出。
  *
@@ -40,8 +40,15 @@ const LOG_MAX_BYTES = 10 * 1024 * 1024;
 /** 认证行最长多少字节（防止一个不发换行的连接把内存撑大）。 */
 const MAX_AUTH_LINE = 4096;
 
-/** 影响服务行为的环境变量：这些不同就不能共用一个常驻进程。 */
-const IDENTITY_ENV = (key) => key.startsWith('DSH_') || key === 'LANG' || key === 'LC_ALL' || key === 'LC_MESSAGES';
+/**
+ * 影响服务行为的环境变量：这些不同就不能共用一个常驻进程。
+ * 常驻进程的环境原样传给 DSH 子进程（acp.mjs），所以除了 DSH_* / 语言，还要算上 DSH 会用到的
+ * 凭据与代理：名字以 `_KEY` 结尾的（`DEEPSEEK_API_KEY`、profile 里 `apiKeyEnv` 指的变量）和
+ * `*_PROXY`。不能整个环境都算：客户端环境里有每个会话都不同的变量（会话 id、管道名），
+ * 那样每次重连都会另起一个常驻进程。钥匙是高熵随机串，截断的哈希反推不出来。
+ */
+const IDENTITY_ENV = (key) =>
+  key.startsWith('DSH_') || key === 'LANG' || key === 'LC_ALL' || key === 'LC_MESSAGES' || /(^|_)(API_?KEY|KEY|PROXY)$/i.test(key);
 
 /** `dsh-any-agent team on/off` 写的设置文件内容（读不到为空）。 */
 function teamSettingsText() {

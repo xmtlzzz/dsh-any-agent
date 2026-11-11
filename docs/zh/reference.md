@@ -42,7 +42,7 @@
 | `DSH_MCP_WATCHDOG_AFTER_MS` | `900000`（15 分钟） | 回合开始多久后看门狗才开始判"卡住"。`0` = 关掉卡住判定 |
 | `DSH_MCP_STALL_MS` | `600000`（10 分钟） | 多久没有任何进展（DSH 推来的正文、思考、工具状态、用量更新）算卡住；有工具在执行时放大 3 倍，等调用方裁决审批时不判。卡住就发 `session/cancel`（同 `dsh_interrupt`），结果带 `watchdog` |
 | `DSH_MCP_TURN_MAX_MS` | `7200000`（2 小时） | 单个回合的总时长上限，**不看进展**（拦得住陷在循环里、一直在输出的回合）。`0` = 不设上限 |
-| `DSH_MCP_DAEMON` | 关 | `1` = 常驻进程模式：客户端拉起的进程只做转发，会话、DSH 进程和正在跑的回合都在一个 detached 的常驻进程里，客户端关掉、重连或崩溃都不会打断回合。同一配置（含 `dsh-any-agent team on/off` 的设置）的客户端共用一个常驻进程。`dsh-any-agent-setup --yes --daemon` 会把它写进客户端配置 |
+| `DSH_MCP_DAEMON` | 关 | `1` = 常驻进程模式：客户端拉起的进程只做转发，会话、DSH 进程和正在跑的回合都在一个 detached 的常驻进程里，客户端关掉、重连或崩溃都不会打断回合。同一配置（`DSH_*` 与语言变量、名字以 `_KEY` 结尾的凭据变量如 `DEEPSEEK_API_KEY` 或 profile 里 `apiKeyEnv` 指的变量、`*_PROXY`，以及 `dsh-any-agent team on/off` 的设置）的客户端共用一个常驻进程，DSH 继承的是它的环境；凭据放在别的名字的变量里不在此列，请改名或别开这个模式。`dsh-any-agent-setup --yes --daemon` 会把它写进客户端配置 |
 | `DSH_MCP_DAEMON_IDLE_MS` | `600000`（10 分钟） | 常驻进程在没有客户端连着、也没有回合在跑时，空闲多久后自己退出。`0` = 不自动退出 |
 | `DSH_MCP_WORKTREES_DIR` | `<状态目录>/worktrees` | `dsh_start(isolation="worktree")` 建的 worktree 放在哪里 |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |

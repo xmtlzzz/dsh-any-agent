@@ -39,8 +39,13 @@ when a newer release is on npm.
   to a detached resident process that owns the hub, the DSH processes and the
   turns; killing the forwarder leaves a running turn to finish and write its
   sentinel. Clients with the same configuration (state directory, version,
-  `DSH_*` and locale variables, and the `dsh-any-agent team on/off` setting)
-  share one resident process; a different configuration gets its own. Connections must present a random token from a
+  `DSH_*` and locale variables, credential variables whose names end in
+  `_KEY` such as `DEEPSEEK_API_KEY` or a profile's `apiKeyEnv`, `*_PROXY`, and
+  the `dsh-any-agent team on/off` setting) share one resident process; a
+  different configuration gets its own, so a client with another API key (or
+  one reconnecting after a key rotation) does not run on the old key. A
+  credential kept in a variable with another name is not covered: rename it
+  or leave resident mode off. Connections must present a random token from a
   user-only info file. With no clients and no turns it exits after
   `DSH_MCP_DAEMON_IDLE_MS` (10 min). If it cannot start, the forwarder falls
   back to the normal stdio server. Live events (`watch` / `dashboard`) name
