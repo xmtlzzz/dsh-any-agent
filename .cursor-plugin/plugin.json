@@ -1,0 +1,13 @@
+{
+  "name": "dsh-any-agent",
+  "description": "Drive DeepSeek Harness (DSH) as a long-lived coding agent from Cursor: non-blocking dispatch with sentinel-file completion, mid-turn interject/queue/interrupt, resume after restarts, approval handling and caller review. Requires DSH installed locally.",
+  "author": {
+    "name": "xmtlzzz",
+    "url": "https://github.com/xmtlzzz"
+  },
+  "homepage": "https://dsh-any-agent.xmtlz.dev/",
+  "repository": "https://github.com/xmtlzzz/dsh-any-agent",
+  "license": "MIT",
+  "keywords": ["mcp", "deepseek", "deepseek-harness", "coding-agent", "long-running", "resume"],
+  "logo": "website/src/favicon.svg"
+}

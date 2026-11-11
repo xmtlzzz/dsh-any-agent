@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dsh-any-agent": {
+      "command": "npx",
+      "args": ["-y", "dsh-any-agent@latest"]
+    }
+  }
+}
