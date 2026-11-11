@@ -88,6 +88,7 @@ export function createHandlers(hub, opts = {}) {
         provider: args.provider,
         model: args.model,
         keepAlive: args.keep_alive === true,
+        isolation: args.isolation,
       });
       if (args.title_hint) conv.titleHint = args.title_hint;
       audit('start', {
@@ -132,6 +133,19 @@ export function createHandlers(hub, opts = {}) {
             ? L('已写入 DSH 工作区注册表（GUI 里能看到）', "written to DSH's workspace registry (visible in the GUI)")
             : L('未登记', 'not registered')),
       ];
+      if (snap.worktree) {
+        const w = snap.worktree;
+        lines.push(L(
+          `隔离 worktree: ${w.path}（分支 ${w.branch}，基于 ${String(w.base).slice(0, 7)}）。改动留在这个分支上，审核后由你合并。`,
+          `Isolated worktree: ${w.path} (branch ${w.branch}, based on ${String(w.base).slice(0, 7)}). Changes stay on that branch for you to review and merge.`,
+        ));
+        if (w.main_dirty) {
+          lines.push(L(
+            '⚠️ 主检出里有未提交的改动，它们不在这个 worktree 里；需要的话先提交再建会话。',
+            '⚠️ The main checkout has uncommitted changes that are not in this worktree; commit them first if DSH needs them.',
+          ));
+        }
+      }
       if (snap.config_failed?.length) {
         lines.push(L(
           `⚠️ 配置未完全套用: ${snap.config_failed.join('; ')}`,
@@ -635,7 +649,17 @@ export function createHandlers(hub, opts = {}) {
       return {
         structured: { conversation_id: args.conversation_id, ...r },
         text: r.forgotten
-          ? L('已释放进程并从注册表移除。会话日志仍在磁盘上。', 'Process released and the conversation removed from the registry. The session log is still on disk.')
+          ? L('已释放进程并从注册表移除。会话日志仍在磁盘上。', 'Process released and the conversation removed from the registry. The session log is still on disk.') +
+            (r.worktree?.removed
+              ? L(`\nworktree 已删除（${r.worktree.path}）；分支 ${r.worktree.branch} 保留。`, `\nWorktree deleted (${r.worktree.path}); branch ${r.worktree.branch} kept.`)
+              : r.worktree?.reason === 'dirty'
+                ? L(
+                    `\n⚠️ worktree 里有未提交的改动，已保留：${r.worktree.path}（分支 ${r.worktree.branch}）。处理完后可用 git worktree remove 删除。`,
+                    `\n⚠️ The worktree has uncommitted changes and was kept: ${r.worktree.path} (branch ${r.worktree.branch}). Remove it with git worktree remove when done.`,
+                  )
+                : r.worktree && r.worktree.reason !== 'missing'
+                  ? L(`\n⚠️ worktree 未删除（${r.worktree.reason}）：${r.worktree.path}`, `\n⚠️ Worktree not deleted (${r.worktree.reason}): ${r.worktree.path}`)
+                  : '')
           : args.forget === true
             ? L(`⚠️ forget 未完成：${r.error ?? '原因未知'}`, `⚠️ forget did not complete: ${r.error ?? 'unknown reason'}`)
             : L(

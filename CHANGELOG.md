@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dsh_status` shows the time since the last progress. Tune with
   `DSH_MCP_WATCHDOG_AFTER_MS` / `DSH_MCP_STALL_MS` / `DSH_MCP_TURN_MAX_MS`;
   `0` turns each off.
+- **Optional worktree isolation: `dsh_start(isolation="worktree")`.** The
+  conversation works in a new git worktree and branch `dsh/<time>-<random>`
+  (under the state directory, not inside the repository), based on the main
+  checkout's HEAD, so the caller can keep editing the original directory. The
+  start result says when uncommitted changes in the main checkout were left
+  behind. Changes stay on the branch for the caller to merge; `dsh_release
+  (forget=true)` deletes a clean worktree and keeps the branch, and keeps a
+  dirty one. The repository's own hooks do not run when the worktree is
+  created. Off by default: a fresh worktree has no installed dependencies.
 - **`dsh_doctor`'s report is available in English.** It follows `DSH_MCP_LANG`
   / the system language like every other tool result. The takeover report and
   the "DSH not found" error text are still Chinese only.

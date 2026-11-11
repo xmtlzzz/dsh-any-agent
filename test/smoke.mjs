@@ -212,6 +212,8 @@ try {
     const allowed = [
       'id', 'cwd', 'permission', 'onApproval', 'createdAt', 'lastUsedAt',
       'turnCount', 'titleHint', 'keepAlive', 'reasoningEffort', 'provider', 'model', 'review', 'workspace',
+      // isolation=worktree 的位置信息（路径 / 分支名 / 基准提交），不含对话内容；没开时是 null。
+      'worktree',
     ];
     const keys = Object.keys(parsed.conversations?.[0] ?? {});
     check('注册表条目字段仅元数据', keys.every((k) => allowed.includes(k)), keys.join(','));

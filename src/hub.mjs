@@ -67,6 +67,7 @@ import { pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
 import { emitLive, livePreview } from './live.mjs';
 import { homeWorkspaceProblem } from './workspace-guard.mjs';
 import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
+import { ISOLATION_MODES, createWorktree, discardWorktree } from './worktree.mjs';
 import {
   META_DIR,
   NOOP_LOG,
@@ -392,6 +393,7 @@ export class Hub {
             turnCount: persisted?.turnCount,
             review: REVIEW_MODES.includes(persisted?.review) ? persisted.review : DEFAULT_REVIEW,
             workspace: persisted?.workspace ?? null,
+            worktree: persisted?.worktree ?? null,
           },
           this,
         );
@@ -481,7 +483,7 @@ export class Hub {
   }
 
   /** 新建一个会话：拉起进程 + ACP 初始化 + session/new。 */
-  async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false, review } = {}) {
+  async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false, review, isolation } = {}) {
     if (!cwd) {
       throw new Error(L(
         '没有可用的工作目录。你既没传 cwd，客户端也没有提供当前打开的项目（MCP roots）。\n' +
@@ -557,17 +559,31 @@ export class Hub {
     // 与其让用户以为服务坏了，不如在这里把原因和出路一起说清楚。
     const homeProblem = homeWorkspaceProblem(cwd, permission);
     if (homeProblem) throw new Error(homeProblem);
+    if (isolation !== undefined && isolation !== null && !ISOLATION_MODES.includes(isolation)) {
+      throw new Error(oneOf('isolation', ISOLATION_MODES));
+    }
+    // 会话级 worktree（见 worktree.mjs）：参数都校验完了才建，免得一个坏参数留下一个空分支。
+    // 之后会话的工作目录、沙箱可写根、共享进程分组都按 worktree 走。
+    const worktree = isolation === 'worktree' ? await createWorktree(cwd) : null;
+    if (worktree) cwd = worktree.cwd;
     const shared = SHARED_PROCESS;
-    const proc = shared
-      ? this.acquireHost(cwd, permission)
-      : new AcpProcess({
-          cwd,
-          permission,
-          log: this.log,
-          onNotification: () => {},
-          onPermissionRequest: () => ({ outcome: { outcome: 'cancelled' } }),
-        });
-    if (!shared) proc.start();
+    let proc;
+    try {
+      proc = shared
+        ? this.acquireHost(cwd, permission)
+        : new AcpProcess({
+            cwd,
+            permission,
+            log: this.log,
+            onNotification: () => {},
+            onPermissionRequest: () => ({ outcome: { outcome: 'cancelled' } }),
+          });
+      if (!shared) proc.start();
+    } catch (e) {
+      // 进程都没起来（例如找不到 DSH）：别把刚建的 worktree 留下。
+      if (worktree) await discardWorktree(worktree);
+      throw e;
+    }
     let createdSessionId = null;
     let conv = null;
     try {
@@ -586,6 +602,7 @@ export class Hub {
           provider: provider ?? null,
           model: model ?? null,
           review: reviewMode,
+          worktree,
         },
         this,
       );
@@ -649,6 +666,8 @@ export class Hub {
           : await proc.stop().catch(() => false)
         : await proc.stop().catch(() => false);
       if (createdSessionId && stopped) removeMarker(createdSessionId);
+      // 刚建的 worktree 和分支还没有任何改动，会话没建成就整个撤销。
+      if (worktree) await discardWorktree(worktree);
       throw e;
     }
   }

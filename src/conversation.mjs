@@ -29,6 +29,7 @@ import {
   defaultApprovalPolicy,
 } from './config.mjs';
 import { watchdogTickMs, watchdogVerdict } from './watchdog.mjs';
+import { removeWorktree } from './worktree.mjs';
 import {
   REVIEW_VERDICTS,
   buildReviewTicket,
@@ -91,6 +92,8 @@ export class Conversation {
     this.permissionVerified = null;
     /** 工作区登记结果（决定你的 DSH GUI 里能不能看到这个会话）。 */
     this.workspace = state.workspace ?? null;
+    /** isolation=worktree 时：{path, branch, base, repo, cwd, main_dirty, created_at}（见 worktree.mjs）。 */
+    this.worktree = state.worktree ?? null;
     this.#hub = hub;
 
     this.proc = null;
@@ -244,6 +247,7 @@ export class Conversation {
       model: this.cfg.model,
       review: this.review,
       workspace: this.workspace,
+      worktree: this.worktree,
     };
   }
 
@@ -300,6 +304,8 @@ export class Conversation {
       config_applied: this.lastConfigApplied?.applied ?? null,
       config_failed: this.lastConfigApplied?.failed?.length ? this.lastConfigApplied.failed : null,
       workspace_registered: this.workspace?.registered ?? null,
+      /** isolation=worktree 时的隔离信息：改动在 branch 上，由调用方审核后自己合并。 */
+      worktree: this.worktree ?? null,
       usage: meta?.usage?.totals ?? null,
       context_pressure: meta?.pressure ?? null,
       pending_approvals: [...this.pendingApprovals.keys()],
@@ -1705,6 +1711,11 @@ export class Conversation {
       this.#hub.remove(this.id);
       // forget 是"永久移除"：事件流也一并删掉，查看器里不再出现这个会话。
       removeLive(this.id);
+      // 会话自己的 worktree：干净就删目录（分支保留），有未提交改动就留着并说明。
+      if (this.worktree) {
+        const worktree = await removeWorktree(this.worktree);
+        return { closed: stopped, forgotten: true, worktree };
+      }
     } else {
       this.#hub.save();
       this.#live('conv.close', { stopped });
