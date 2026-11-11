@@ -46,6 +46,7 @@ Run the three commands in [Quick start](../../README.md#quick-start), then recon
 ```bash
 dsh-any-agent-setup --yes --only cursor,zed     # just these
 dsh-any-agent-setup --yes --permission read-only
+dsh-any-agent-setup --yes --daemon               # turns run in a resident process; closing/reconnecting the client doesn't stop them
 dsh-any-agent-setup --remove --yes               # take it back out; only its own entry is removed
 ```
 
@@ -169,6 +170,7 @@ A restore is itself destructive, so it copies the **current** file aside as `.ba
 | Register with every client found | `dsh-any-agent-setup --yes` |
 | Register with just some | `dsh-any-agent-setup --yes --only cursor,zed` |
 | Change the permission tier in place | `dsh-any-agent-setup --yes --permission read-only` |
+| Turn on resident process mode (`DSH_MCP_DAEMON=1`) | `dsh-any-agent-setup --yes --daemon` (rewritten from this run's flags like `--permission`; re-running without it turns it off) |
 | Update after upgrading the package | `dsh-any-agent-setup --yes` (idempotent; only differing entries are rewritten) |
 | Unregister from every client | `dsh-any-agent-setup --remove --yes` |
 | Unregister from just some | `dsh-any-agent-setup --remove --yes --only codex` |

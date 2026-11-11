@@ -8,7 +8,7 @@
  *   4. 没带令牌 / 令牌不对的连接被直接断开，拿不到任何应答；
  *   5. 没有客户端、没有回合时，空闲一段时间后常驻进程自己退出并删掉信息文件。
  */
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -157,6 +157,16 @@ try {
   for (let i = 0; i < 100 && pids.some(alive); i++) await sleep(100);
   await check('没有客户端、没有回合：空闲后常驻进程退出', () => !pids.some(alive), JSON.stringify(pids.filter(alive)));
   await check('信息文件随之删除', () => infoFiles().length === 0, JSON.stringify(infoFiles()));
+
+  console.log('\n[6] 日志滚动');
+  // 常驻进程的 stderr 每次启动都追加到 daemon-<id>.log：超过 10 MB 时下次启动先滚动成 .1。
+  const logFile = join(stateDir, `daemon-${id}.log`);
+  writeFileSync(logFile, Buffer.alloc(10 * 1024 * 1024 + 1, 0x41));
+  const f = track(new McpClient({ env: baseEnv }).start());
+  await f.initialize();
+  await check('超过 10 MB 的旧日志滚动成 .1，新日志从头开始', () =>
+    statSync(`${logFile}.1`).size > 10 * 1024 * 1024 && (!existsSync(logFile) || statSync(logFile).size < 1024 * 1024),
+  );
 } catch (e) {
   failed += 1;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

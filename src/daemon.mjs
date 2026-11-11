@@ -23,7 +23,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -35,6 +35,8 @@ import { serveMcp, startHub } from './boot.mjs';
 
 const STATE_DIR = dirname(STATE_FILE);
 const BIN = fileURLToPath(new URL('../bin/dsh-any-agent.mjs', import.meta.url));
+/** 常驻进程日志（它的 stderr）的滚动阈值。 */
+const LOG_MAX_BYTES = 10 * 1024 * 1024;
 /** 认证行最长多少字节（防止一个不发换行的连接把内存撑大）。 */
 const MAX_AUTH_LINE = 4096;
 
@@ -98,6 +100,12 @@ function tryConnect(ep, timeoutMs = 2000) {
 /** 以 detached 方式拉起常驻进程：它不属于客户端的进程树，客户端退出时不会被连带杀掉。 */
 function spawnDaemon(ep) {
   mkdirSync(STATE_DIR, { recursive: true });
+  // 日志每次启动都追加：超过 10 MB 先滚动成 .1（只留一份旧档，同 audit.mjs）。
+  try {
+    if (statSync(ep.logFile).size > LOG_MAX_BYTES) renameSync(ep.logFile, `${ep.logFile}.1`);
+  } catch {
+    /* 没有旧日志，或滚不动：照旧追加 */
+  }
   let err = 'ignore';
   try {
     err = openSync(ep.logFile, 'a');

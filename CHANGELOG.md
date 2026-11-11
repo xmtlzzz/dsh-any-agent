@@ -36,7 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DSH_MCP_DAEMON_IDLE_MS` (10 min). If it cannot start, the forwarder falls
   back to the normal stdio server. Live events (`watch` / `dashboard`) name
   the client of the connection that dispatched each conversation and run, not
-  whichever client connected last. Off by default for now. The resident
+  whichever client connected last. Off by default for now;
+  `dsh-any-agent-setup --yes --daemon` writes `DSH_MCP_DAEMON=1` into the
+  client configs (re-running setup without `--daemon` takes it out again).
+  The resident process's stderr log rolls over to `.1` past 10 MB. The resident
   process costs one extra Node process (about 75 MB idle, measured); DSH
   processes are unchanged.
 - **Optional worktree isolation: `dsh_start(isolation="worktree")`.** The
