@@ -109,7 +109,7 @@ try {
   await check('常驻进程还活着', () => alive(daemonPid));
 
   console.log('\n[3] 第二个客户端连到同一个常驻进程；配置不同则各用各的');
-  const b = track(new McpClient({ env: baseEnv }).start());
+  const b = track(new McpClient({ env: baseEnv, clientInfo: { name: 'second-client', version: '1' } }).start());
   await b.initialize();
   await check('同一配置：没有起第二个常驻进程', () => daemonPids().length === 1 && daemonPids()[0] === daemonPid, JSON.stringify(daemonPids()));
   const got = await b.callTool('dsh_get', { conversation_id: convId });
@@ -117,6 +117,23 @@ try {
   const c = track(new McpClient({ env: { ...baseEnv, DSH_MCP_REVIEW: 'off' } }).start());
   await c.initialize();
   await check('配置不同（DSH_MCP_REVIEW=off）：另起一个常驻进程', () => new Set(daemonPids()).size === 2, JSON.stringify(daemonPids()));
+  // 同配置的第三个客户端后连上来。客户端名以前是进程级的一个值，会被它顶掉，b 派的活就记到它名下了。
+  const d = track(new McpClient({ env: baseEnv, clientInfo: { name: 'third-client', version: '1' } }).start());
+  await d.initialize();
+  const bStarted = await b.callTool('dsh_start', { cwd: root });
+  const bConv = bStarted?.structuredContent?.conversation_id;
+  // 假 ACP 的会话 id 固定是 fake-session，a、b 的会话写进同一个事件文件：按先后取各自那条 conv.open。
+  const openClients = (conv) => {
+    try {
+      const lines = readFileSync(join(baseEnv.DSH_MCP_LIVE_DIR, conv, 'events.jsonl'), 'utf8').split('\n').filter(Boolean);
+      return lines.map((l) => JSON.parse(l)).filter((e) => e.type === 'conv.open').map((e) => e.client ?? null);
+    } catch {
+      return [];
+    }
+  };
+  await check('b 在常驻进程里建了会话', () => typeof bConv === 'string');
+  await check('★ live 事件按连接记客户端：b 建会话记在 b 名下，后连上来的 d 顶不掉', () => openClients(bConv).at(-1) === 'second-client');
+  await check('a 早先建会话记在 a 名下', () => openClients(convId)[0] === 'dsh-any-agent-test');
 
   console.log('\n[4] 认证');
   // 地址按 daemon.mjs 的命名规则从信息文件名推出来（测试进程自己的环境和客户端不同，不能重算）。

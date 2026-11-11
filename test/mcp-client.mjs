@@ -18,8 +18,10 @@ export class McpClient {
    */
   createdIds = new Set();
 
-  constructor({ env = {} } = {}) {
+  constructor({ env = {}, clientInfo = { name: 'dsh-any-agent-test', version: '0.1.0' } } = {}) {
     this.env = env;
+    /** initialize 里报给服务端的客户端名（常驻进程测试要区分同一进程上的几个连接）。 */
+    this.clientInfo = clientInfo;
   }
 
   /** 这个客户端拉起的服务用的注册表文件（DSH_MCP_STATE；per-run 数据按它的同级目录推导）。 */
@@ -98,7 +100,7 @@ export class McpClient {
     const r = await this.request('initialize', {
       protocolVersion: '2025-06-18',
       capabilities: {},
-      clientInfo: { name: 'dsh-any-agent-test', version: '0.1.0' },
+      clientInfo: this.clientInfo,
     });
     this.notify('notifications/initialized', {});
     return r;

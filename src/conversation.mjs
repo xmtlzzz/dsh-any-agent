@@ -46,7 +46,7 @@ import { rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
 import { forgottenPath, isForgotten, writeTombstone } from './hub-store.mjs';
-import { emitLive, livePreview, liveSettings, removeLive, summarizeToolInput } from './live.mjs';
+import { emitLive, liveClient, livePreview, liveSettings, removeLive, summarizeToolInput, withLiveClient } from './live.mjs';
 import {
   classifyHolder,
   describeLeaseConflict,
@@ -1372,7 +1372,8 @@ export class Conversation {
     // 预览用调用方原文，执行用可能已注入团队前缀的 text。
     const run = this.createRun(preview ?? text, { clientRunId, review });
     run.status = 'queued';
-    const position = this.ledger.enqueue({ run, text, reasoning, clientRunId, enqueued_at: now() });
+    // client：排队的客户端。出队时可能是另一个客户端的回合刚结束，run.start 要记回排队的那个。
+    const position = this.ledger.enqueue({ run, text, reasoning, clientRunId, enqueued_at: now(), client: liveClient() });
     emitLive(
       this.id,
       'run.queued',
@@ -1413,7 +1414,7 @@ export class Conversation {
       const item = this.ledger.shift();
       const run = item.run;
       run.status = 'running';
-      this.prompt(item.text, { reasoning: item.reasoning, run, wait: false, via: 'queue' })
+      withLiveClient(item.client, () => this.prompt(item.text, { reasoning: item.reasoning, run, wait: false, via: 'queue' }))
         .catch(() => {})
         .finally(() => this.#scheduleDrain());
     }, 0);

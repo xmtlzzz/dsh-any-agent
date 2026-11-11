@@ -16,6 +16,7 @@
  * 数据契约见 docs/zh/live-view-design.md §6。
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { appendFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
@@ -38,7 +39,14 @@ const CLIENT_TYPES = new Set(['conv.open', 'run.queued', 'run.start']);
 export const WRITER = `${process.pid}:${randomBytes(4).toString('hex')}`;
 
 const settings = { dir: LIVE_DIR, level: LIVE_LEVEL };
+/** 进程级的客户端（setLiveClient）：只在没有调用链级客户端时用（测试、单客户端的旧调用方）。 */
 let client = null;
+/**
+ * 调用链级的客户端：常驻进程模式下一个进程同时服务好几个客户端，进程级的一个值会把所有
+ * 事件都记到最后连上来的那个名下。mcp.mjs 把每个 tools/call 包在 withLiveClient 里，
+ * 这条异步调用链上写出的事件就记在发起它的客户端名下。
+ */
+const clientScope = new AsyncLocalStorage();
 let seq = 0;
 /** 本进程已知的文件大小（首次写时 stat 一次，之后自己累加），用于滚动判断。 */
 const sizes = new Map();
@@ -55,16 +63,32 @@ export function liveSettings() {
   return { ...settings };
 }
 
-/** MCP initialize 里的 clientInfo（Claude Code / Codex / …）。 */
-export function setLiveClient(info) {
-  if (!info || typeof info !== 'object') return;
+/** MCP initialize 里的 clientInfo（Claude Code / Codex / …）→ `{name, version}`；无效返回 null。 */
+function normalizeClient(info) {
+  if (!info || typeof info !== 'object') return null;
   const name = typeof info.name === 'string' ? info.name.slice(0, 80) : null;
   const version = typeof info.version === 'string' ? info.version.slice(0, 40) : null;
-  if (name) client = { name, version };
+  return name ? { name, version } : null;
+}
+
+export function setLiveClient(info) {
+  const c = normalizeClient(info);
+  if (c) client = c;
+}
+
+/** 在 fn 的整条异步调用链上把客户端记成 info（不影响别的调用链；info 无效时这条链上就是没有客户端）。 */
+export function withLiveClient(info, fn) {
+  return clientScope.run({ client: normalizeClient(info) }, fn);
+}
+
+function currentClient() {
+  const scoped = clientScope.getStore();
+  return scoped ? scoped.client : client;
 }
 
 export function liveClient() {
-  return client ? { ...client } : null;
+  const c = currentClient();
+  return c ? { ...c } : null;
 }
 
 export function liveConvDir(convId, dir = settings.dir) {
@@ -126,7 +150,8 @@ export function emitLive(convId, type, fields = {}, detail = null) {
   if (typeof convId !== 'string' || !SAFE_ID.test(convId)) return false;
   try {
     const ev = { v: LIVE_SCHEMA, ts: new Date().toISOString(), conv: convId, w: WRITER, n: ++seq, type };
-    if (CLIENT_TYPES.has(type) && client) ev.client = client.name;
+    const c = CLIENT_TYPES.has(type) ? currentClient() : null;
+    if (c) ev.client = c.name;
     for (const [k, v] of Object.entries(fields ?? {})) if (v !== undefined) ev[k] = v;
     let line = JSON.stringify(ev);
     if (settings.level === 'detail' && detail) {

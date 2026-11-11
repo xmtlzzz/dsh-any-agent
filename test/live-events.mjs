@@ -252,6 +252,30 @@ try {
   await g.conv.close({ forget: true });
   check('forget 删除事件目录', () => !existsSync(live.liveConvDir('live-events-forget', liveDir)));
 
+  console.log('\n[7a] 一个进程服务几个客户端：事件记在发起调用的客户端名下');
+  {
+    // 就像常驻进程里两个连接各自的 tools/call（mcp.mjs 把每个调用包在 withLiveClient 里）。
+    const x = makeConv('live-events-clients');
+    const pa = live.withLiveClient({ name: 'client-a', version: '1' }, () => x.conv.prompt('first', { wait: true, timeoutMs: 0 }));
+    await x.proc.ready();
+    const { run: qb } = live.withLiveClient({ name: 'client-b', version: '1' }, () => x.conv.enqueue('second'));
+    x.proc.end('end_turn'); // client-a 的回合结束触发出队
+    await pa;
+    await x.proc.ready();
+    live.emitLive('live-events-clients', 'conv.open', { cwd: root }); // 任何调用链之外
+    const xev = events('live-events-clients');
+    const startOf = (pred) => xev.find((e) => e.type === 'run.start' && pred(e));
+    check('client-a 发的回合：run.start 记 client-a', () => startOf((e) => e.via === 'send')?.client === 'client-a');
+    check('client-b 排的队：run.queued 记 client-b', () => xev.find((e) => e.type === 'run.queued' && e.run === qb.run_id)?.client === 'client-b');
+    check('★ client-b 排的回合由 client-a 的回合结束带起来，run.start 仍记 client-b', () =>
+      startOf((e) => e.run === qb.run_id)?.client === 'client-b',
+      JSON.stringify(startOf((e) => e.run === qb.run_id)),
+    );
+    check('调用链之外仍用进程级的客户端', () => xev.filter((e) => e.type === 'conv.open').at(-1)?.client === 'claude-code');
+    x.proc.end('end_turn');
+    await x.conv.waitIdle(5000);
+  }
+
   console.log('\n[7b] token 用量：回合内增量 + 最终值');
   {
     const projDir = join(root, 'dsh-home', 'storages', 'session_projcache', 'sessions');

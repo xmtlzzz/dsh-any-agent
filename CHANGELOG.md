@@ -34,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration gets its own. Connections must present a random token from a
   user-only info file. With no clients and no turns it exits after
   `DSH_MCP_DAEMON_IDLE_MS` (10 min). If it cannot start, the forwarder falls
-  back to the normal stdio server. Off by default for now. The resident
+  back to the normal stdio server. Live events (`watch` / `dashboard`) name
+  the client of the connection that dispatched each conversation and run, not
+  whichever client connected last. Off by default for now. The resident
   process costs one extra Node process (about 75 MB idle, measured); DSH
   processes are unchanged.
 - **Optional worktree isolation: `dsh_start(isolation="worktree")`.** The
