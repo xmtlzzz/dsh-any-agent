@@ -144,8 +144,10 @@ console.log('\n[4] 子进程 RSS 读取');
 check('★ 缓存还没填时 rssMb 立刻返回 null，不等进程表', () => {
   const t0 = performance.now();
   assert.equal(rssMb(process.pid), null);
-  // 同步的 tasklist / ps 至少要几十毫秒（Windows 上约 600ms）；只读缓存远低于这个数。
-  assert.ok(performance.now() - t0 < 20, `${performance.now() - t0}ms`);
+  // 同步的 tasklist 在 Windows 上约 600ms。首次调用会顺带发起一次异步刷新，光是 spawn 子进程
+  // 就要十几到几十毫秒（满载跑整套测试时实测 21.8ms），所以门槛放在 200ms：
+  // 足以区分"等了进程表"和"没等"，又不会因为机器忙而误报。
+  assert.ok(performance.now() - t0 < 200, `${performance.now() - t0}ms`);
 });
 {
   let ticks = 0;

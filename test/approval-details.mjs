@@ -210,6 +210,25 @@ try {
     });
   }
 
+  console.log('\n[3e] approval rules as a pure function (approval-policy.mjs)');
+  {
+    const { approvalDecision, escalationOf } = await import('../src/approval-policy.mjs');
+    check('read-only denies even when configured auto-allow or ask', () => {
+      assert.equal(approvalDecision({ permission: 'read-only', onApproval: 'auto-allow' }), 'deny');
+      assert.equal(approvalDecision({ permission: 'read-only', onApproval: 'ask' }), 'deny');
+    });
+    check('writable tiers follow on_approval', () => {
+      assert.equal(approvalDecision({ permission: 'workspace-write', onApproval: 'auto-allow' }), 'allow');
+      assert.equal(approvalDecision({ permission: 'workspace-write', onApproval: 'auto-deny' }), 'deny');
+      assert.equal(approvalDecision({ permission: 'danger-full-access', onApproval: 'ask' }), 'ask');
+    });
+    check('escalationOf reads sandbox_permissions only when it is a string', () => {
+      assert.equal(escalationOf({ sandbox_permissions: 'danger-full-access' }), 'danger-full-access');
+      assert.equal(escalationOf({ sandbox_permissions: 1 }), null);
+      assert.equal(escalationOf(null), null);
+    });
+  }
+
   console.log('\n[4] actual stdio MCP structuredContent preserves review context');
   const harness = `
     import { Hub, Conversation } from ${JSON.stringify(new URL('../src/hub.mjs', import.meta.url).href)};

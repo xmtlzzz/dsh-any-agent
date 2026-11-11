@@ -11,7 +11,7 @@ name: tests
 #     guards            env-var edge cases            40 checks
 #     dsh-locate        DSH auto-discovery (asar)     21 checks
 #     prune             sentinel retention            11 checks
-#     approval-details  credential redaction          37 checks
+#     approval-details  credential redaction          40 checks
 #     failure-terminal  terminal state on failure     10 checks
 #     shared-host       shared process host           37 checks
 #     resume-retry      cold-resume timeout retry     65 checks (fake ACP server)

@@ -130,7 +130,7 @@ check('remove 写了 cancelled 哨兵', () => assert.equal(sentinels.length, bef
 check('remove 后队列只剩一条', () => assert.equal(conv.queueList().length, 1));
 
 conv.busy = false;
-conv.queue = [];
+conv.queue.length = 0;
 
 console.log('\n[3b] 派发竞态（假 ACP 进程，不拉 DSH）');
 
