@@ -94,6 +94,11 @@ dsh-any-agent-setup --yes
 
 第二条命令只预览，加 `--yes` 才会写入配置。重新连接客户端的 MCP 服务，然后让你的 agent 在当前项目中开启 DSH 会话、派活、收结果。[先派活，回头验收](docs/zh/usage.md)展示了完整的工具调用顺序。
 
+只用 Cursor 或 VS Code？也可以一键添加（运行的是 `npx -y dsh-any-agent@latest`；DSH 仍需先装好）：
+
+[![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=dsh-any-agent&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImRzaC1hbnktYWdlbnRAbGF0ZXN0Il19)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_MCP_server-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=dsh-any-agent&config=%7B%22name%22%3A%22dsh-any-agent%22%2C%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22dsh-any-agent%40latest%22%5D%7D)
+
 > **第一次派活前：** 先读[使用注意事项](USAGE-NOTES.md)，尤其是模型配置与外部 MCP 的权限边界。**外部 MCP 工具的副作用不受 DSH 沙箱约束。** 新机器部署可按[迁移指引](USAGE-MIGRATION.md)逐步操作。
 
 > **想先看效果？** 先看 [54 秒宣传片](https://dsh-any-agent.xmtlz.dev/#video)（派活、插话、哨兵落地、调用方复核，终端画面回放自一次真实运行）：
@@ -201,8 +206,9 @@ dsh-any-agent dashboard --open
      每行一个 20px 小徽章，按字母序；同一站点有大卡片和小徽章时用小徽章。 -->
 
 <p align="center">
-  <a href="https://mcprush.com/to/dsh-any-agent-mcp?ref=badge"><img src="https://mcprush.com/badge/dsh-any-agent-mcp/score.svg" height="20" alt="DSH Any Agent MCP on mcprush"></a>
+  <a href="https://glama.ai/mcp/servers/xmtlzzz/dsh-any-agent"><img src="https://glama.ai/mcp/servers/xmtlzzz/dsh-any-agent/badges/score.svg" height="20" alt="dsh-any-agent MCP server on Glama"></a>
   <a href="https://m8ven.ai/mcp/xmtlzzz-dsh-any-agent-ypgfnj?s=readme"><img src="https://m8ven.ai/badge/mcp/xmtlzzz-dsh-any-agent-ypgfnj?v=7c88b6fc8313c05af27cf83f262b9ac1" height="20" alt="M8ven Score"></a>
+  <a href="https://mcprush.com/to/dsh-any-agent-mcp?ref=badge"><img src="https://mcprush.com/badge/dsh-any-agent-mcp/score.svg" height="20" alt="DSH Any Agent MCP on mcprush"></a>
 </p>
 
 ## 🙏 致谢

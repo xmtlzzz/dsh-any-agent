@@ -101,6 +101,11 @@ dsh-any-agent-setup --yes
 
 The second command previews the changes; `--yes` applies them. Reconnect your client's MCP server, then ask your agent to start a DSH conversation in your project, dispatch a task, and collect the result. The [dispatch workflow](docs/en/usage.md) shows the tool sequence.
 
+Only using Cursor or VS Code? Add it in one click instead (runs `npx -y dsh-any-agent@latest`; DSH still has to be installed):
+
+[![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=dsh-any-agent&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImRzaC1hbnktYWdlbnRAbGF0ZXN0Il19)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_MCP_server-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=dsh-any-agent&config=%7B%22name%22%3A%22dsh-any-agent%22%2C%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22dsh-any-agent%40latest%22%5D%7D)
+
 > **Want to see it first?** Watch the [54-second promo](https://dsh-any-agent.xmtlz.dev/en/#video) — dispatch, interject, the sentinel landing and the caller's review, with the terminal replayed from a real run:
 >
 > <a href="https://dsh-any-agent.xmtlz.dev/en/#video"><img src="https://raw.githubusercontent.com/xmtlzzz/dsh-any-agent/main/website/src/media/promo-poster.jpg" width="560" alt="▶ Play the dsh-any-agent promo (54 seconds)"></a>
@@ -207,8 +212,9 @@ for one call with `dsh_send(team=false)`.
      One 20px badge per line, alphabetical; prefer a site's small badge over its large card. -->
 
 <p align="center">
-  <a href="https://mcprush.com/to/dsh-any-agent-mcp?ref=badge"><img src="https://mcprush.com/badge/dsh-any-agent-mcp/score.svg" height="20" alt="DSH Any Agent MCP on mcprush"></a>
+  <a href="https://glama.ai/mcp/servers/xmtlzzz/dsh-any-agent"><img src="https://glama.ai/mcp/servers/xmtlzzz/dsh-any-agent/badges/score.svg" height="20" alt="dsh-any-agent MCP server on Glama"></a>
   <a href="https://m8ven.ai/mcp/xmtlzzz-dsh-any-agent-ypgfnj?s=readme"><img src="https://m8ven.ai/badge/mcp/xmtlzzz-dsh-any-agent-ypgfnj?v=7c88b6fc8313c05af27cf83f262b9ac1" height="20" alt="M8ven Score"></a>
+  <a href="https://mcprush.com/to/dsh-any-agent-mcp?ref=badge"><img src="https://mcprush.com/badge/dsh-any-agent-mcp/score.svg" height="20" alt="DSH Any Agent MCP on mcprush"></a>
 </p>
 
 ## 🙏 Acknowledgements
