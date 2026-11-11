@@ -35,7 +35,7 @@ MCP 工具调用是**阻塞**的，所以 `dsh_send` **默认就不阻塞**（`w
 ```bash
 # sent="$sentinel_file_posix"   ← 直接用工具返回里那个字段
 sent='/c/Users/you/.dsh/.dsh-any-agent/runs/<conversation_id>/<run_id>.json'
-dl=$(( $(date +%s) + 2100 ))          # 35min 兜底，防服务中途死掉时无限挂
+dl=$(( $(date +%s) + 7500 ))          # 回合总时长上限（默认 2h）+ 5min；收据里的命令已按实际上限算好
 until [ -f "$sent" ]; do
   [ "$(date +%s)" -ge "$dl" ] && { echo "TIMEOUT"; exit 1; }
   sleep 2
@@ -47,7 +47,7 @@ Windows 宿主上 Git Bash 不可用（或会挂住）时，用 PowerShell 等�
 
 ```powershell
 $f='C:\Users\you\.dsh\.dsh-any-agent\runs\<conversation_id>\<run_id>.json'   # 路径里的 ' 写成 ''
-$dl=(Get-Date).AddSeconds(2100)
+$dl=(Get-Date).AddSeconds(7500)
 while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit 1 }; Start-Sleep -Seconds 2 }
 'DONE'
 ```

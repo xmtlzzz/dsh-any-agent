@@ -35,7 +35,7 @@ Besides `run_id`, `wait=false` returns a **`sentinel_file`** path plus **`sentin
 ```bash
 # sent="$sentinel_file_posix"   ← copy it straight from the tool result
 sent='/c/Users/you/.dsh/.dsh-any-agent/runs/<conversation_id>/<run_id>.json'
-dl=$(( $(date +%s) + 2100 ))          # 35min safety net so a dead service can't hang you forever
+dl=$(( $(date +%s) + 7500 ))          # the turn's maximum duration (2h by default) + 5 min; the receipt's command uses the actual limit
 until [ -f "$sent" ]; do
   [ "$(date +%s)" -ge "$dl" ] && { echo "TIMEOUT"; exit 1; }
   sleep 2
@@ -47,7 +47,7 @@ On a Windows host where Git Bash is unavailable (or hangs), wait on the native `
 
 ```powershell
 $f='C:\Users\you\.dsh\.dsh-any-agent\runs\<conversation_id>\<run_id>.json'   # write ' as '' inside the path
-$dl=(Get-Date).AddSeconds(2100)
+$dl=(Get-Date).AddSeconds(7500)
 while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit 1 }; Start-Sleep -Seconds 2 }
 'DONE'
 ```

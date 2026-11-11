@@ -355,6 +355,26 @@ console.log('\n[6c] PowerShell 哨兵等待命令');
     assert.match(cmd, /^\$f='C:\\Users\\o''neil\\runs\\a \$b `c\.json';/));
   check('用 -LiteralPath，不按通配符解释路径', () => assert.match(cmd, /Test-Path -LiteralPath \$f/));
   check('超时秒数写进命令', () => assert.match(cmd, /AddSeconds\(30\)/));
+  {
+    // 默认等待上限跟着回合总时长上限走：上限 + 5 分钟（看门狗到点取消回合也会写哨兵，哨兵一定先到）。
+    const { SENTINEL_WAIT_SEC } = await import('../src/tool-render.mjs');
+    const { TURN_MAX_MS, PKG_ROOT } = await import('../src/config.mjs');
+    check('★ 默认等待上限 = 回合总时长上限 + 300 秒', () => {
+      assert.equal(SENTINEL_WAIT_SEC, Math.ceil(TURN_MAX_MS / 1000) + 300);
+      assert.match(psWaitCommand('x.json'), new RegExp(`AddSeconds\\(${SENTINEL_WAIT_SEC}\\)`));
+    });
+    const { spawnSync } = await import('node:child_process');
+    const probe = (max) =>
+      spawnSync(process.execPath, ['--input-type=module', '-e', "import('./src/tool-render.mjs').then((m) => console.log(m.SENTINEL_WAIT_SEC))"], {
+        cwd: PKG_ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, DSH_MCP_TURN_MAX_MS: max },
+      }).stdout.trim();
+    check('上限设成 1 小时 → 3900 秒；关掉（0）→ 35 分钟兜底', () => {
+      assert.equal(probe('3600000'), '3900');
+      assert.equal(probe('0'), '2100');
+    });
+  }
 
   // 真跑一遍：只在 Windows 且有 powershell.exe 时执行（CI 的 windows-latest 会覆盖到）。
   if (process.platform === 'win32') {

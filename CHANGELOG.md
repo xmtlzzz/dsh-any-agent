@@ -60,6 +60,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The sentinel waiter's deadline follows the turn cap.** The ready-made
+  Bash and PowerShell wait commands in a background receipt gave up after 35
+  minutes, so a turn longer than that woke the caller with `TIMEOUT` while it
+  was still running. They now wait the turn's maximum duration plus 5 minutes
+  (2 h 5 min by default; 35 minutes when `DSH_MCP_TURN_MAX_MS=0`). The
+  watchdog ends a turn at the cap with a sentinel and an exiting server writes
+  one too, so a `TIMEOUT` now means the server was killed and never restarted.
 - **`conversation.mjs` is split up.** The terminal-result builders, the
   `dsh_read` output buffer, the run records and busy queue, and the approval
   rules moved to `run-result.mjs`, `out-buffer.mjs`, `run-ledger.mjs` and
