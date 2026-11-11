@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Reading process memory no longer stalls the server.** `rss_mb` came from a
+  synchronous `tasklist` (Windows, about 0.6 s per call) or `ps`, run whenever
+  `dsh_status`, `dsh_get`, `dsh_list` or `dsh_start` built a snapshot with a
+  cache older than 5 s; ACP messages and approvals of every conversation waited
+  for it. The process table is now read asynchronously: snapshots return the
+  cached value at once and refresh it in the background, so `rss_mb` can be
+  `null` for the first seconds after a process starts. The RSS budget
+  (`DSH_MCP_MAX_RSS_MB`) and `dsh_doctor` await a fresh read.
+- **`dsh_doctor` no longer says a DSH version was verified by this release line
+  when it was not.** The `dsh_version` note now tells apart the versions the
+  current line re-ran the full suite on (0.6.x: DSH 0.2.1) from the rest of the
+  verified range (0.1.7 – 0.2.2), whose last full run was on 0.5.x. Both stay
+  `ok`; only the wording changed, to match the compatibility table.
+
+### Added
+
+- **`dsh_doctor`'s report is available in English.** It follows `DSH_MCP_LANG`
+  / the system language like every other tool result. The takeover report and
+  the "DSH not found" error text are still Chinese only.
+- **CI builds the `Dockerfile`** and checks that the image answers `--version`
+  and an MCP `initialize` over stdio.
+- **Optional release gate.** With the repository variable `MODEL_SUITE_RUNNER`
+  set to a self-hosted runner that has DSH and credentials, a tag push runs the
+  full model-backed suite on the tagged commit before npm publish. Unset, the
+  release workflow behaves as before.
 ## [0.6.9] — 2026-11-10
 
 Tool results now come back in English as well, `dsh-any-agent-setup` can

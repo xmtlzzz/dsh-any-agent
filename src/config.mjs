@@ -42,35 +42,74 @@ export function resolveDshBin() {
  * 改矩阵时同步改这里：`[verifiedMin, verifiedBelow)` 是“已验证”区间。
  * 用 `-0` 后缀是为了把同号的 rc 版本也算进去（semver 里 `0.1.7-rc.1 < 0.1.7`）。
  * 0.2.x：2026-11-06 用 0.2.1-rc.5（npm）与 0.2.2-rc.1（桌面版自带运行时）跑过全量套件。
+ *
+ * `[rerunMin, rerunBelow)` 是**当前这条发布线**（rerunLine）重新跑过全量套件的 DSH 版本；
+ * 已验证区间里的其它版本，最近一次实测停在 earlierLine。体检要把这两种情况说清楚，
+ * 不能把"上一条线验证过"说成"本版本验证过"。
  */
 export const DSH_COMPAT = Object.freeze({
   partialMin: '0.1.5-0',
   verifiedMin: '0.1.7-0',
   verifiedBelow: '0.2.3-0',
   verifiedLabel: '0.1.7 ~ 0.2.2',
+  rerunMin: '0.2.1-0',
+  rerunBelow: '0.2.2-0',
+  rerunLine: '0.6.x',
+  earlierLine: '0.5.x',
 });
 
 /**
  * 给一个 DSH 版本打兼容性档位：ok（已验证）/ warn（部分可用、未验证或读不到）。
  * 只是体检提示，不拦启动 —— 未验证不等于不能用。
+ *
+ * `note` 是中文、`noteEn` 是英文：config 不能 import lang.mjs（lang → live-view → live → config
+ * 会成环），所以两种文字都给，由调用方按语言挑。
  */
 export function dshVersionStatus(version) {
+  const C = DSH_COMPAT;
   if (!version) {
-    return { status: 'warn', level: 'unknown', note: '读不到 DSH 版本（package.json 缺失或不可读）' };
+    return {
+      status: 'warn',
+      level: 'unknown',
+      note: '读不到 DSH 版本（package.json 缺失或不可读）',
+      noteEn: 'could not read the DSH version (package.json missing or unreadable)',
+    };
   }
-  if (cmpVersion(version, DSH_COMPAT.partialMin) < 0) {
-    return { status: 'warn', level: 'unsupported', note: `DSH ${version} 低于已知可用的最低版本 0.1.5` };
+  if (cmpVersion(version, C.partialMin) < 0) {
+    return {
+      status: 'warn',
+      level: 'unsupported',
+      note: `DSH ${version} 低于已知可用的最低版本 0.1.5`,
+      noteEn: `DSH ${version} is older than 0.1.5, the lowest version known to work`,
+    };
   }
-  if (cmpVersion(version, DSH_COMPAT.verifiedMin) < 0) {
-    return { status: 'warn', level: 'partial', note: `DSH ${version} 部分可用：ACP 基本路径可用，缺 team 包` };
+  if (cmpVersion(version, C.verifiedMin) < 0) {
+    return {
+      status: 'warn',
+      level: 'partial',
+      note: `DSH ${version} 部分可用：ACP 基本路径可用，缺 team 包`,
+      noteEn: `DSH ${version} partly works: the ACP basics do, the team packages are missing`,
+    };
   }
-  if (cmpVersion(version, DSH_COMPAT.verifiedBelow) < 0) {
-    return { status: 'ok', level: 'verified', note: `DSH ${version} 在已验证区间（${DSH_COMPAT.verifiedLabel}）` };
+  if (cmpVersion(version, C.verifiedBelow) < 0) {
+    const rerun = cmpVersion(version, C.rerunMin) >= 0 && cmpVersion(version, C.rerunBelow) < 0;
+    return {
+      status: 'ok',
+      level: 'verified',
+      rerun,
+      note: rerun
+        ? `DSH ${version} 已用 ${C.rerunLine} 跑过全量套件`
+        : `DSH ${version} 在已验证区间（${C.verifiedLabel}），但最近一次全量实测是 ${C.earlierLine}；${C.rerunLine} 没有对它重跑`,
+      noteEn: rerun
+        ? `DSH ${version} passed the full suite on ${C.rerunLine}`
+        : `DSH ${version} is in the verified range (${C.verifiedLabel}), but its last full run was on ${C.earlierLine}; ${C.rerunLine} did not re-run it`,
+    };
   }
   return {
     status: 'warn',
     level: 'unverified',
-    note: `DSH ${version} 未经本版本验证（兼容性矩阵覆盖 ${DSH_COMPAT.verifiedLabel}），ACP session/* 面可能有变化`,
+    note: `DSH ${version} 未经本版本验证（兼容性矩阵覆盖 ${C.verifiedLabel}），ACP session/* 面可能有变化`,
+    noteEn: `DSH ${version} is not verified with this version (the compatibility matrix covers ${C.verifiedLabel}); the ACP session/* surface may have changed`,
   };
 }
 

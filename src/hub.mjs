@@ -60,7 +60,7 @@ import { L } from './lang.mjs';
 import { AcpProcess } from './acp.mjs';
 import { applySessionConfig } from './acp-session.mjs';
 import { SessionHost } from './host.mjs';
-import { rssMb } from './procstat.mjs';
+import { refreshRssMap, rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { Conversation } from './conversation.mjs';
 import { pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
@@ -779,6 +779,8 @@ export class Hub {
         }
         if (MAX_RSS_MB > 0) {
           // 按实际 RSS 而不是会话数：上下文大小差异很大，按个数限制经常低估。
+          // 预算判断要用新数字：先异步刷新一次（不阻塞事件循环），下面的 rssMb 读的就是它。
+          await refreshRssMap();
           let total = 0;
           const rss = new Map();
           const seenPid = new Set();

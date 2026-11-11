@@ -5,7 +5,7 @@ name: tests
 # This project's suite has two halves, and only one of them can run here.
 #
 #   OFFLINE (runs in CI)
-#     smoke             protocol + instructions length cap, no DSH   38 checks
+#     smoke             protocol + instructions length cap, no DSH   40 checks
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     progress          MCP progress notifications     15 checks
 #     guards            env-var edge cases            40 checks
@@ -13,9 +13,9 @@ name: tests
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          37 checks
 #     failure-terminal  terminal state on failure     10 checks
-#     shared-host       shared process host           34 checks
+#     shared-host       shared process host           37 checks
 #     resume-retry      cold-resume timeout retry     65 checks (fake ACP server)
-#     dispatch-tools    dispatch surface              69 checks (64 off Windows)
+#     dispatch-tools    dispatch surface              72 checks (67 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        19 checks
 #     live-events       live event stream, write side  43 checks
@@ -42,6 +42,7 @@ name: tests
 #     lint              static checks (npm run lint)  syntax, imports, exports, unused
 #     lint (selftest)   scripts/lint.mjs regression   22 checks
 #     package job       pack -> install -> --version
+#     docker job        docker build -> --version -> MCP initialize
 #     website job       build + 38 site/a11y tests + bilingual pages
 #
 #     These load modules and touch the filesystem: no DSH, no model, no
@@ -357,6 +358,35 @@ jobs:
           fi
           echo 'tarball contents ok'
 
+  # The Dockerfile shipped in 0.6.8 without ever being built in CI. Build it and make
+  # sure the image answers --version and an MCP initialize over stdio (no DSH inside:
+  # the handshake must work without one).
+  docker:
+    name: Dockerfile builds and answers MCP initialize
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: build
+        run: docker build -t dsh-any-agent:ci .
+
+      - name: --version matches package.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          want=$(node -p "require('./package.json').version")
+          got=$(docker run --rm dsh-any-agent:ci --version)
+          echo "image: $got / package.json: $want"
+          echo "$got" | grep -qF "$want"
+
+      - name: MCP initialize over stdio
+        shell: bash
+        run: |
+          set -euo pipefail
+          req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}'
+          out=$(printf '%s\n' "$req" | timeout 60 docker run -i --rm -e DSH_MCP_LOG=silent dsh-any-agent:ci)
+          echo "$out" | head -c 400
+          echo "$out" | grep -q '"name":"dsh-any-agent"'
   website:
     name: website build + tests
     runs-on: ubuntu-latest

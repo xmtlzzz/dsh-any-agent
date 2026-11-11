@@ -58,7 +58,7 @@ In an MCP client, call `dsh_doctor` and look at:
 - `dsh_runtime`: whether the launching runtime's Node satisfies DSH's `engines.node`; **warn** if not;
 - `dsh_desktop`: the desktop app's version; **warn** when it differs from the DSH this server uses (both share the `~/.dsh` session store);
 - `dsh_candidates`: every DSH found and which one was picked;
-- `dsh_version`: the version graded against the table above — `verified` is ok; `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
+- `dsh_version`: the version graded against the table above — `verified` is ok (the note says whether the current release line re-ran the full suite on that version, or its last full run was on the previous line); `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
 - `profile`: exists, drift, route source;
 - `team`: `on` / `off` / `requested but unavailable` (version or profile lacks the team package);
 - `config`: effective permission, idle reaping, shared process, and so on.

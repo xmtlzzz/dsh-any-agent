@@ -54,7 +54,7 @@ dsh-any-agent team status        # 团队开关与 profile
 - `dsh_runtime`：拉起 DSH 的运行时的 Node 版本是否满足 DSH 的 `engines.node`，不满足时 **warn**；
 - `dsh_desktop`：桌面版版本，与本服务所用 DSH 不一致时 **warn**（两边共用 `~/.dsh` 会话存储）；
 - `dsh_candidates`：发现的全部 DSH 来源，以及自动选中了哪一个；
-- `dsh_version`：按上表给版本定档 —— `verified` 为 ok；`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
+- `dsh_version`：按上表给版本定档 —— `verified` 为 ok（说明里会区分：当前发布线重跑过全量套件的版本，还是最近一次实测停在上一条发布线的版本）；`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
 - `profile`：是否存在、是否漂移、路由来源；
 - `team`：`on` / `off` / `requested but unavailable`（版本或 profile 不含 team 包）；
 - `config`：当前 permission、空闲回收、共享进程等生效值。

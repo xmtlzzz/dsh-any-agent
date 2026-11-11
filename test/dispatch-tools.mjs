@@ -309,6 +309,26 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
     assert.equal(lvl('0.2.2-rc.1'), 'verified');
     assert.equal(dshVersionStatus('0.2.2-rc.1').status, 'ok');
   });
+  check('★ 只有本发布线重跑过的版本（0.2.1）才说"跑过全量套件"', () => {
+    const s = dshVersionStatus('0.2.1-rc.5');
+    assert.equal(s.rerun, true);
+    assert.match(s.note, /已用 0\.6\.x 跑过全量套件/);
+    assert.match(s.noteEn, /passed the full suite on 0\.6\.x/);
+  });
+  check('★ 区间内但本发布线没重跑的版本（0.1.7 / 0.2.2）如实说明，仍是 ok', () => {
+    for (const v of ['0.1.7-rc.1', '0.2.2-rc.1']) {
+      const s = dshVersionStatus(v);
+      assert.equal(s.status, 'ok');
+      assert.equal(s.rerun, false);
+      assert.match(s.note, /最近一次全量实测是 0\.5\.x/);
+      assert.match(s.noteEn, /last full run was on 0\.5\.x/);
+    }
+  });
+  check('每个档位都带英文说明', () => {
+    for (const v of [null, '0.1.4', '0.1.5-rc.1', '0.2.1-rc.5', '0.3.0']) {
+      assert.ok(dshVersionStatus(v).noteEn, String(v));
+    }
+  });
   check('★ 0.2.3-rc.1 → unverified/warn（rc 也算进 0.2.3）', () => {
     assert.equal(lvl('0.2.3-rc.1'), 'unverified');
     assert.equal(dshVersionStatus('0.2.3-rc.1').status, 'warn');
