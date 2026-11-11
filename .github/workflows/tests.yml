@@ -15,23 +15,23 @@ name: tests
 #     failure-terminal  terminal state on failure     10 checks
 #     shared-host       shared process host           37 checks
 #     resume-retry      cold-resume timeout retry     65 checks (fake ACP server)
-#     dispatch-tools    dispatch surface              72 checks (67 off Windows)
+#     dispatch-tools    dispatch surface              75 checks (70 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
-#     sentinel-redaction sentinel disk hygiene        19 checks
-#     live-events       live event stream, write side  43 checks
+#     sentinel-redaction sentinel disk hygiene        23 checks
+#     live-events       live event stream, write side  47 checks
 #     live-view         watch / dashboard viewers      69 checks
 #     release-notes     Release notes from CHANGELOG   12 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            25 checks
 #     bootstrap-profile zero-dependency bootstrap     27 checks
 #     workspace-safety  data-loss boundaries          23 checks
-#     residue-purge     test residue cleanup, sandboxed 159 checks
+#     residue-purge     test residue cleanup, sandboxed 160 checks
 #     permission-adopt  no silent privilege escalation 22 checks
 #     state-safety      state/sentinel/lock storage   26 checks
 #     workspace-snapshot workspace_changed full fingerprint  27 checks
 #     watchdog          turn watchdog (stall / max duration)  28 checks
 #     worktree          isolation=worktree sessions      25 checks
-#     daemon            DSH_MCP_DAEMON=1 resident process  16 checks
+#     daemon            DSH_MCP_DAEMON=1 resident process  20 checks
 #     run-recovery      interrupted-turn sentinels   18 checks
 #     contract          tool surface + sentinel shape snapshot  13 checks
 #     update-check      dsh_doctor npm version check (fake fetch)  17 checks
@@ -40,7 +40,7 @@ name: tests
 #     test-counts       report parser + docs sync     92 checks
 #     roots             cwd from MCP roots            18 checks
 #     workspace-titles  home/root cwd guard, title_hint 19 checks (17 off Windows)
-#     setup             client config writer          45 checks
+#     setup             client config writer          49 checks
 #     removal-scope     --remove only touches its own   61 checks
 #     config-safety     in-place edits, format        449 checks
 #     real-configs      real config round-trip        skips without client fixtures
