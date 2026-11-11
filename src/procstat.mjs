@@ -41,13 +41,19 @@ function parsePs(out) {
   return map;
 }
 
+/**
+ * 读进程表的超时。异步读取不占事件循环，所以宽一点没有代价；太紧反而会在机器忙时
+ * 把整张表读成空的（实测 tasklist 平时 1.4–2.1 秒，原先的 3 秒在负载下会超）。
+ */
+const READ_TIMEOUT_MS = 15_000;
+
 function readProcessTable() {
   const win = process.platform === 'win32';
   return new Promise((resolve) => {
     execFile(
       win ? 'tasklist' : 'ps',
       win ? ['/FO', 'CSV', '/NH'] : ['-axo', 'pid=,rss='],
-      { encoding: 'utf8', timeout: 3000, windowsHide: true, maxBuffer: 8 << 20 },
+      { encoding: 'utf8', timeout: READ_TIMEOUT_MS, windowsHide: true, maxBuffer: 8 << 20 },
       // 读不到就当作未知
       (err, stdout) => resolve(err || !stdout ? new Map() : win ? parseTasklist(stdout) : parsePs(stdout)),
     );
