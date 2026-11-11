@@ -51,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (forget=true)` deletes a clean worktree and keeps the branch, and keeps a
   dirty one. The repository's own hooks do not run when the worktree is
   created. Off by default: a fresh worktree has no installed dependencies.
+- **`DSH_MCP_SENTINEL_TOOL_INPUTS=0` keeps tool inputs out of sentinels.**
+  Each tool then keeps its name, status and `input_chars`; `dsh_get` from
+  memory still has the inputs. The security doc gained a table of everything
+  this server writes to disk, how long it stays and how to turn it off.
 - **`dsh_doctor`'s report is available in English.** It follows `DSH_MCP_LANG`
   / the system language like every other tool result. The takeover report and
   the "DSH not found" error text are still Chinese only.

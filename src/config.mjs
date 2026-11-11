@@ -326,6 +326,12 @@ export const DEFAULT_REVIEW = (() => {
 export const SENTINEL_INCLUDE_REASONING = process.env.DSH_MCP_SENTINEL_INCLUDE_REASONING === '1';
 
 /**
+ * 哨兵里是否带工具输入（完整命令、路径、写入的文件内容；已脱敏）。默认带 —— 调用方离线审核要看。
+ * 设 DSH_MCP_SENTINEL_TOOL_INPUTS=0 只留工具名/状态与 `input_chars`（输入长度），内存里的 dsh_get 不受影响。
+ */
+export const SENTINEL_TOOL_INPUTS = process.env.DSH_MCP_SENTINEL_TOOL_INPUTS !== '0';
+
+/**
  * 哨兵文件的保留时长（毫秒）。服务**启动时**清理超过此时长的哨兵与残留 tmp。
  * 默认 7 天；设为 0 关闭清理（哨兵将永久保留）。
  *

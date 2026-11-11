@@ -92,6 +92,28 @@ console.log('\n[4] INCLUDE_REASONING=1 仍必须脱敏');
   check('thinking_omitted=false', value?.thinking_omitted === false, String(value?.thinking_omitted));
 }
 
+console.log('\n[4b] DSH_MCP_SENTINEL_TOOL_INPUTS=0：工具输入不落盘，只留长度');
+{
+  const hubURL = new URL('../src/hub.mjs', import.meta.url).href;
+  const script =
+    `const { sanitizeResultForSentinel } = await import(${JSON.stringify(hubURL)});\n` +
+    'console.log(JSON.stringify(sanitizeResultForSentinel({' +
+    "answer: 'ok', tools_used: [{ name: 'write', status: 'completed', input: { path: 'a.txt', content: 'PRIVATE-FILE-BODY' } }, { name: 'ls' }]" +
+    '})));';
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    env: { ...process.env, DSH_MCP_SENTINEL_TOOL_INPUTS: '0' },
+  });
+  let value = null;
+  try { value = JSON.parse(String(r.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop()); } catch {}
+  const t0 = value?.tools_used?.[0];
+  check('★ 输入整个不在了（文件内容、路径都不落盘）', t0 && !('input' in t0) && !JSON.stringify(value).includes('PRIVATE-FILE-BODY'), JSON.stringify(value));
+  check('留下工具名、状态与 input_chars', t0?.name === 'write' && t0?.status === 'completed' && t0?.input_chars === JSON.stringify({ path: 'a.txt', content: 'PRIVATE-FILE-BODY' }).length, JSON.stringify(t0));
+  check('没有输入的工具不凭空多出 input_chars', value?.tools_used?.[1] && !('input_chars' in value.tools_used[1]), JSON.stringify(value?.tools_used?.[1]));
+  check('默认（不设）仍然带输入', Array.isArray(redacted.tools_used) && 'input' in redacted.tools_used[0]);
+}
+
 console.log('\n[5] 非对象/空值安全');
 check('null 原样返回', sanitizeResultForSentinel(null) === null);
 check('字符串原样返回', sanitizeResultForSentinel('x') === 'x');

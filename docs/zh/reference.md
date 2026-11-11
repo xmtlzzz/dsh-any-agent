@@ -28,6 +28,7 @@
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | `dsh_list` 磁盘探测结果的缓存时长（探测要 spawn 一个 DSH 进程，实测约 1 秒） |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000`（7 天） | 启动时清理超过此时长的哨兵**与审核记录**；`0` 关闭清理 |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | 未设置 | `1` 会把 `result.thinking` 一并写进哨兵（**打破"思考不落盘"的保证**）；answer/error/title/工具输入仍会脱敏 |
+| `DSH_MCP_SENTINEL_TOOL_INPUTS` | `1` | `0` = 哨兵里不写工具输入（命令、路径、写入的文件内容），每个工具只留名字、状态与 `input_chars`。内存里的 `dsh_get` 不受影响 |
 | `DSH_MCP_REVIEW` | `advisory` | 调用方审核策略。`advisory`（默认）给每个结果/哨兵附审核单（清单 + 证据 + `dsh_review` 入口），**但不阻塞**后续派活；`off` 关闭自动审核单。单会话/单次派活可用 `review` 参数覆盖 |
 | `DSH_MCP_REVIEWS_DIR` | `<状态文件同目录>/reviews` | 审核裁决的落盘目录（`<此目录>/<会话id>/<run_id>.review.json`）。不可写会让服务启动时明确失败 |
 | `DSH_MCP_LIVE` | `detail` | live 事件流级别（`watch` / `dashboard` 的数据源）。`detail` 带脱敏后的 prompt / 命令 / 路径预览；`meta` 只有工具名、状态、计时、审批类型；`off` 不写。思考内容任何级别都不写 |

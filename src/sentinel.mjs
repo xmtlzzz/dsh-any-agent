@@ -8,8 +8,17 @@
 
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { SENTINEL_INCLUDE_REASONING } from './config.mjs';
+import { SENTINEL_INCLUDE_REASONING, SENTINEL_TOOL_INPUTS } from './config.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
+
+/** 工具输入的长度（字符串按字符数，其它按 JSON 长度）。 */
+function inputChars(input) {
+  try {
+    return typeof input === 'string' ? input.length : (JSON.stringify(input)?.length ?? 0);
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * 哨兵文件里的 result 是否要剥离思考内容。
@@ -32,7 +41,10 @@ export function sanitizeResultForSentinel(result) {
       if (!t || typeof t !== 'object') return t;
       const { input, ...meta } = t;
       const safeMeta = sanitizeApprovalContext(meta);
-      return input === undefined ? safeMeta : { ...safeMeta, input: sanitizeApprovalContext(input) };
+      if (input === undefined) return safeMeta;
+      // DSH_MCP_SENTINEL_TOOL_INPUTS=0：输入一个字都不落盘，只留长度（同 dsh_get 的 max_chars 预算）。
+      if (!SENTINEL_TOOL_INPUTS) return { ...safeMeta, input_chars: inputChars(input) };
+      return { ...safeMeta, input: sanitizeApprovalContext(input) };
     });
   }
   // 自动放行审批摘要记录时已脱敏；落盘前再过一遍，防止将来有人加字段漏掉。

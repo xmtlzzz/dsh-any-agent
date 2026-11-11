@@ -69,3 +69,23 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 - live 事件流（`<状态目录>/live/`，供 `watch` / `dashboard` 查看）默认带**脱敏后的**命令、路径与 prompt 预览，暴露面不超过哨兵；不含思考内容，同样按 7 天清理。不想落这些预览就设 `DSH_MCP_LIVE=meta`，完全不要就设 `off`。`dashboard` 只监听 `127.0.0.1`，要求一次性 token 并校验 Host 头，且是只读的。
 
 > ⚠️ **DSH 自己会在 `~/.dsh/sessions` 写会话日志，而且其中包含完整 reasoning 文本**（即使 `reasoning=hide` 也照存）。那是 resume 的依据，不在本服务控制范围内；“思考不落盘”的绝对表述只适用于**本服务自己的**日志/哨兵/注册表。
+
+### 📁 本服务写到磁盘上的东西
+
+`<状态目录>` 默认是 `~/.dsh/.dsh-any-agent/`（跟着 `DSH_MCP_STATE` 走）。下面没有一处保存思考正文。
+
+| 路径 | 内容 | 保留多久 | 怎么关 / 清 |
+|---|---|---|---|
+| `<状态目录>/conversations.json`、`meta/<会话id>.json` | 会话注册表与元数据：id、cwd、权限、计数、标题提示；不含正文 | 到会话被 forget | `dsh_release(forget=true)` |
+| `<状态目录>/runs/<会话id>/<run_id>.json` | 完成哨兵：正文、用量、审核单、工具输入（均已脱敏） | 7 天（`DSH_MCP_SENTINEL_TTL_MS`） | `DSH_MCP_SENTINEL_TOOL_INPUTS=0` 只留工具输入的长度；读完可以直接删 |
+| `<状态目录>/runs/<会话id>/<run_id>.running` | 回合进行中标记：run_id、任务预览（已脱敏）、本服务进程的 PID 与启动时刻 | 写出哨兵时删 | — |
+| `<状态目录>/reviews/<会话id>/<run_id>.review.json` | 审核记录：裁决、理由、清单、证据摘要（已脱敏） | 同哨兵，7 天 | `DSH_MCP_REVIEW=off` 不自动出审核单 |
+| `<状态目录>/live/<会话id>/events.jsonl` | live 事件流：事件类型、时间、工具名、客户端名；默认还带脱敏后的命令 / 路径 / prompt 预览 | 同哨兵，7 天；5 MB 滚动 | `DSH_MCP_LIVE=meta` 去掉预览，`off` 不写 |
+| `<状态目录>/locks/<会话id>.json` | 写锁持有者登记：本服务与 DSH 子进程的 PID、cwd | 释放会话或进程退出后清 | — |
+| `<状态目录>/worktrees/` | `isolation=worktree` 的会话目录（仓库检出 + DSH 的改动） | 干净的随 forget 删；有未提交改动的保留；分支始终保留 | 不用 `isolation=worktree`；`DSH_MCP_WORKTREES_DIR` 换位置 |
+| `<状态目录>/daemon-<id>.json`、`daemon-<id>.log`（POSIX 上还有 `.sock`） | 常驻进程的 PID 与随机令牌（仅本用户可读）；它的 stderr | 信息文件随进程退出删；日志 10 MB 滚动成 `.1` | 不开 `DSH_MCP_DAEMON` |
+| `$DSH_HOME/.dsh-any-agent-forgotten/<会话id>.json` | forget 墓碑：会话 id 与时间 | 会话文件不在了就在启动时清 | — |
+| `DSH_MCP_AUDIT_FILE` 指向的文件 | 元数据审计：事件、id、裁决、计数；不含 prompt、正文、思考、工具输入 | 10 MB 滚动成 `.1` | 默认不写（不设该变量） |
+| 客户端配置旁的 `.bak-dsh-<时间戳>` | `dsh-any-agent-setup` 写入前的原配置 | 每个配置文件最多 20 份（`DSH_MCP_BACKUP_KEEP`） | 手动删 |
+
+DSH 那一侧（不归本服务管）：`~/.dsh/sessions` 里的会话日志（含完整思考，见上）；本服务还会把会话的工作区登记进 DSH 的 `workspace.json`，GUI 才看得到这些会话（`DSH_MCP_REGISTER_WORKSPACE=0` 关闭）。
