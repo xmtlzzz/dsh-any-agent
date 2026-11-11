@@ -134,7 +134,7 @@
 command = "dsh-any-agent"
 args = []
 startup_timeout_sec = 20.0
-tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-note"><span>↳</span><div>setup --yes 实际写入绝对 node 路径、入口文件与 DSH_MCP_PERMISSION/DSH_MCP_LOG（可加 <code>--only</code> 或 <code>--permission</code> 定制）；上面的手工示例要求 dsh-any-agent 已在 PATH 中，已完整包含 VS Code（<code>servers</code> + <code>type: "stdio"</code>）、Zed（<code>context_servers</code> + <code>command</code> 对象）与 opencode（<code>mcp</code> + <code>command</code> 数组）的正确结构。</div></div></div></details>
+tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-note"><span>↳</span><div>setup --yes 实际写入绝对 node 路径、入口文件与 DSH_MCP_PERMISSION/DSH_MCP_LOG（可加 <code>--only</code>、<code>--permission</code> 定制，加 <code>--daemon</code> 开常驻进程模式）；上面的手工示例要求 dsh-any-agent 已在 PATH 中，已完整包含 VS Code（<code>servers</code> + <code>type: "stdio"</code>）、Zed（<code>context_servers</code> + <code>command</code> 对象）与 opencode（<code>mcp</code> + <code>command</code> 数组）的正确结构。</div></div></div></details>
 </div></section>
 
 <section class="faq-section wrap" id="faq">
@@ -150,7 +150,7 @@ tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-
     </article>
     <article class="faq-row">
       <h3 class="faq-q">编辑器关闭，或者进程崩溃，任务会怎样？</h3>
-      <div class="faq-a"><p>已经落盘的会话可在下次调用时恢复；进行中的回合会随服务或子进程退出而中断，未完成的哨兵也可能不会写入。恢复后应先核对工作区，再重新派活。正常完成的回合由原子哨兵文件唤醒（Windows 自动附带 PowerShell 原生等待命令），无需轮询。首次成功回合之前的会话可能尚未落盘。</p></div>
+      <div class="faq-a"><p>已经落盘的会话可在下次调用时恢复。默认模式下，客户端关闭、重连或崩溃会打断进行中的回合，但 0.7.0 起服务退出前（被强杀则在下次启动时）都会为它写出 <code>stop_reason: "interrupted"</code> 的哨兵，等待方不会空等；文件改动不回滚，恢复后先核对工作区再重新派活。想让回合不受客户端影响，可用 <code>dsh-any-agent-setup --yes --daemon</code> 开启常驻进程模式：客户端关掉、重连或崩溃，回合都照常跑完并写出哨兵。卡住的回合交给看门狗：开跑 15 分钟后连续 10 分钟没有任何进展（有工具在跑时宽限放大 3 倍）就取消，另有 2 小时总时长上限。正常完成的回合由原子哨兵文件唤醒（Windows 自动附带 PowerShell 原生等待命令），无需轮询。首次成功回合之前的会话可能尚未落盘。</p></div>
     </article>
     <article class="faq-row">
       <h3 class="faq-q">需要指定的编辑器、模型或 API 服务吗？</h3>
@@ -158,7 +158,7 @@ tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-
     </article>
     <article class="faq-row">
       <h3 class="faq-q">如何控制写入权限、沙箱边界与审批？</h3>
-      <div class="faq-a"><p>可选 <code>read-only</code>（强制 <code>auto-deny</code> 且基于真实沙箱校验 fail-closed）、<code>workspace-write</code>（服务端与 setup 默认值）和 <code>danger-full-access</code>（建会话与恢复均须机器侧设 <code>DSH_MCP_ALLOW_FULL_ACCESS=1</code>）。工作区快照会禁用仓库 <code>.git/config</code> 中的 filter/fsmonitor 并拦截跨盘符软链接与家/根目录越界。越界审批默认 <code>auto-allow</code>，每次放行均记入审核单；传 <code>on_approval=ask</code> 可挂起并用 <code>dsh_inbox</code> / <code>dsh_approval_decide</code> 逐条裁决。外部 MCP 副作用不受 DSH 沙箱约束，请阅读<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/caveats.md" target="_blank" rel="noopener noreferrer">使用注意事项</a>与<a href="https://github.com/xmtlzzz/dsh-any-agent/security/policy" target="_blank" rel="noopener noreferrer">安全策略</a>。</p></div>
+      <div class="faq-a"><p>可选 <code>read-only</code>（强制 <code>auto-deny</code> 且基于真实沙箱校验 fail-closed）、<code>workspace-write</code>（服务端与 setup 默认值）和 <code>danger-full-access</code>（客户端配置的默认档就是它时直接可用；默认档是别的档、又要按会话单独开完全权限时，才需机器侧设 <code>DSH_MCP_ALLOW_FULL_ACCESS=1</code>）。工作区快照会禁用仓库 <code>.git/config</code> 中的 filter/fsmonitor 并拦截跨盘符软链接与家/根目录越界。调用方和 DSH 要同时改同一个仓库时，可用 <code>dsh_start(isolation="worktree")</code> 让会话在独立的 git worktree 和分支里干活。越界审批默认 <code>auto-allow</code>，每次放行均记入审核单；传 <code>on_approval=ask</code> 可挂起并用 <code>dsh_inbox</code> / <code>dsh_approval_decide</code> 逐条裁决。外部 MCP 副作用不受 DSH 沙箱约束，请阅读<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/caveats.md" target="_blank" rel="noopener noreferrer">使用注意事项</a>与<a href="https://github.com/xmtlzzz/dsh-any-agent/security/policy" target="_blank" rel="noopener noreferrer">安全策略</a>。</p></div>
     </article>
     <article class="faq-row">
       <h3 class="faq-q">可以同时在 DSH 的 GUI 里操作同一个会话吗？</h3>
@@ -174,7 +174,7 @@ tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-
     </article>
     <article class="faq-row">
       <h3 class="faq-q">支持哪些 DSH 版本？如何自动发现桌面版与升级？</h3>
-      <div class="faq-a"><p>官方验证区间为 DSH <code>0.1.7 ~ 0.2.2</code>（含 <code>0.2.1-rc.5</code> 与桌面版 <code>0.2.2-rc.1</code>，支持完整 ACP 与实验性 Agent Teams 包）；<code>0.1.5</code> 仅基础派发；<code>0.2.3+</code> 尚未验证（其中 <code>0.2.2+</code> DSH 需 Node ≥ 24.9，使用桌面版时自动走其自带运行时）。服务端按 <code>桌面版 → npm 全局 → npx 缓存</code> 自动探测 DSH；调用 <code>dsh_doctor</code> 可查 <code>dsh_bin</code>、<code>dsh_runtime</code>、<code>dsh_desktop</code> 与评级。完整对照见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/compatibility.md" target="_blank" rel="noopener noreferrer">兼容性矩阵</a>。</p></div>
+      <div class="faq-a"><p>官方验证区间为 DSH <code>0.1.7 ~ 0.2.2</code>（含 <code>0.2.1-rc.5</code> 与桌面版 <code>0.2.2-rc.1</code>，支持完整 ACP 与实验性 Agent Teams 包）；<code>0.1.5</code> 仅基础派发；<code>0.2.3+</code> 尚未验证（其中 <code>0.2.2+</code> DSH 需 Node ≥ 24.9，使用桌面版时自动走其自带运行时）。服务端按 <code>桌面版 → npm 全局 → npx 缓存</code> 自动探测 DSH；调用 <code>dsh_doctor</code> 可查 <code>dsh_bin</code>、<code>dsh_runtime</code>、<code>dsh_desktop</code> 与评级，0.7.0 起还会提示 npm 上是否有新版本。完整对照见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/compatibility.md" target="_blank" rel="noopener noreferrer">兼容性矩阵</a>。</p></div>
     </article>
     <article class="faq-row">
       <h3 class="faq-q">如果不打算继续使用或想回退配置，如何安全撤销？</h3>

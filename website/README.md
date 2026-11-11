@@ -22,7 +22,7 @@ npm run build
 
 ## Cloudflare Workers 部署
 
-使用 Cloudflare Workers Static Assets，不需要数据库、API 密钥或后台服务。已有 Wrangler 登录时：
+使用 Cloudflare Workers Static Assets，外加一个只接管 `/api/stars` 的小 Worker（`src/worker.mjs`，`wrangler.jsonc` 的 `run_worker_first` 只列了 `/api/*`，其余路径直接走静态资源）。它在边缘取 GitHub star 数并缓存 10 分钟，取不到时回最近一次成功的值，这样页面不受访客 IP 的 GitHub 频控（未登录每小时 60 次）和直连超时影响；页面拿不到这个端点时（纯静态托管、本地预览）退回直连 GitHub。不需要数据库或后台服务；可选地用 `npx wrangler@4.125.0 secret put GITHUB_TOKEN` 配一个不带任何权限的 GitHub token，把边缘的额度提到每小时 5000 次。已有 Wrangler 登录时：
 
 ```bash
 npm run deploy

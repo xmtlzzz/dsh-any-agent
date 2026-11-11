@@ -27,10 +27,10 @@ export const scenarios = {
   },
   resume: {
     label: '断线恢复', summary: '进程会结束，会话身份留下来。',
-    description: '恢复已落盘的对话，接着下一轮。进程中断会打断正在执行的回合，需要重新派活。',
+    description: '恢复已落盘的对话，接着下一轮。进程中断会打断正在执行的回合（照样写出哨兵），需要重新派活；开常驻进程模式时，客户端断开不打断回合。',
     frames: [
       frame('上下文已经留在磁盘', '会话使用 DSH sessionId 持久化身份。', 'sessionId', 'conv-app → ~/.dsh/sessions/…\nprogress → implementation started', 'running', 56, '会话历史已落盘 · 当前回合执行中', { persisted: true }),
-      frame('进程中断了', '当前回合随进程停止，不会在后台凭空继续。', 'process exit', 'process → stopped\ncurrent turn → interrupted\nsession history → on disk', 'interrupted', 56, '进程退出 · 当前回合已中断', { persisted: true }),
+      frame('进程中断了', '当前回合随进程停止，并写出 interrupted 哨兵，等待方不会空等。', 'process exit', 'process → stopped\ncurrent turn → interrupted\nsentinel → stop_reason: "interrupted"\nsession history → on disk', 'interrupted', 56, '进程退出 · 当前回合已中断', { persisted: true }),
       frame('会话身份仍然在', '历史保留，工作区里已经写入的文件也仍在。', '磁盘上的 sessionId', 'conversation_id: "conv-app"\nprocess: none\nhistory: persisted', 'detached', 56, '找到已落盘的会话 · 等待重新连接', { persisted: true }),
       frame('下次调用，自动接回对话', '拉起新进程，通过 ACP session/resume 恢复。', 'session/resume', '{ sessionId: "conv-app" }\n// → history restored', 'idle', 56, '新进程已连接 · 同一会话历史已恢复', { persisted: true, preserved: true }),
       frame('重新派活，继续剩下的工作', '先核对工作区状态，再给下一轮明确目标。', 'dsh_send', '{ conversation_id: "conv-app",\n  prompt: "检查已完成修改，继续剩余测试" }\n// wait 默认 false：后台运行并返回 sentinel_file', 'running', 80, 'run-002 · 核对修改后继续测试', { persisted: true, preserved: true }),
@@ -77,10 +77,10 @@ export const scenariosEn = {
   },
   resume: {
     label: 'Resume', summary: 'Processes end; session identity stays.',
-    description: 'Resume a persisted conversation and continue. A process exit interrupts the running turn; dispatch again afterwards.',
+    description: 'Resume a persisted conversation and continue. A process exit interrupts the running turn (it still gets a sentinel); dispatch again afterwards. In resident-process mode a client disconnect does not interrupt the turn.',
     frames: [
       frame('The context is already on disk', 'The session persists its identity with a DSH sessionId.', 'sessionId', 'conv-app → ~/.dsh/sessions/…\nprogress → implementation started', 'running', 56, 'Session history persisted · current turn running', { persisted: true }),
-      frame('The process is interrupted', 'The current turn stops with the process; it does not continue in the background.', 'process exit', 'process → stopped\ncurrent turn → interrupted\nsession history → on disk', 'interrupted', 56, 'Process exited · current turn interrupted', { persisted: true }),
+      frame('The process is interrupted', 'The current turn stops with the process and gets an interrupted sentinel, so waiters are not left hanging.', 'process exit', 'process → stopped\ncurrent turn → interrupted\nsentinel → stop_reason: "interrupted"\nsession history → on disk', 'interrupted', 56, 'Process exited · current turn interrupted', { persisted: true }),
       frame('The session identity remains', 'History is kept, and files already written in the workspace remain.', 'sessionId on disk', 'conversation_id: "conv-app"\nprocess: none\nhistory: persisted', 'detached', 56, 'Persisted session found · waiting to reconnect', { persisted: true }),
       frame('The next call resumes automatically', 'A new process attaches through ACP session/resume.', 'session/resume', '{ sessionId: "conv-app" }\n// → history restored', 'idle', 56, 'New process attached · same session history restored', { persisted: true, preserved: true }),
       frame('Dispatch again and finish the remaining work', 'Check the workspace first, then give the next turn a clear goal.', 'dsh_send', '{ conversation_id: "conv-app",\n  prompt: "Check the completed edits and continue the remaining tests" }\n// wait defaults to false: runs in background, returns sentinel_file', 'running', 80, 'run-002 · checking edits, then tests', { persisted: true, preserved: true }),

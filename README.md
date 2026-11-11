@@ -185,7 +185,7 @@ dsh-any-agent dashboard --open
 
 | Document | Contents |
 |---|---|
-| [Setup](docs/en/install.md) | Requirements, profile bootstrap, 9 MCP clients |
+| [Setup](docs/en/install.md) | Requirements, profile bootstrap, 10 MCP clients |
 | [Usage](docs/en/usage.md) | Dispatch/collect, sentinels, many conversations, live view, reasoning |
 | [Usage notes](docs/en/caveats.md) | Pitfalls: model routing, cost, concurrency and the write lock, permissions, privacy, troubleshooting |
 | [Live view design](docs/en/live-view-design.md) | Event stream format, `watch` / `dashboard`, token source, privacy trade-offs |

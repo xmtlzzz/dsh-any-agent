@@ -3,8 +3,13 @@
   "name": "dsh-any-agent-site",
   "compatibility_date": "2026-11-02",
   "workers_dev": true,
+  // The worker only answers /api/stars (see src/worker.mjs); every other path is served
+  // straight from the static assets without running it.
+  "main": "src/worker.mjs",
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "404-page"
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*"]
   }
 }

@@ -52,6 +52,14 @@ export async function fetchLatestVersion(fetchImpl = fetch) {
 }
 
 export const GITHUB_REPO_URL = 'https://api.github.com/repos/xmtlzzz/dsh-any-agent';
+/** 官网自己的 Worker 端点（src/worker.mjs）：边缘取数并缓存，不受访客 IP 的 GitHub 频控影响。 */
+export const SITE_STARS_URL = '/api/stars';
+
+/** 依次问的来源：先问官网自己，没有这个端点（纯静态托管、本地预览）再直连 GitHub。 */
+const STAR_SOURCES = [
+  { id: 'site', url: SITE_STARS_URL, pick: (data) => data?.stars, headers: { accept: 'application/json' } },
+  { id: 'network', url: GITHUB_REPO_URL, pick: (data) => data?.stargazers_count, headers: { accept: 'application/vnd.github+json' } },
+];
 
 /**
  * 格式化 Star 数量：
@@ -65,12 +73,12 @@ export function formatStars(count) {
 }
 
 /**
- * 获取 GitHub Star 数量（无需任何 Access Token，GitHub 公开 API）。
- * 支持 15 分钟 localStorage 缓存以避免未登录 IP 的 60 次/小时频控。
+ * 获取 GitHub Star 数量：先问官网的 /api/stars，再退回 GitHub 公开 API（都不需要 Token）。
+ * localStorage 缓存 5 分钟；两处都取不到时用缓存里的旧值。
  */
 export async function fetchGitHubStars(fetchImpl = fetch, storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
   const CACHE_KEY = 'dsh_gh_stars_cache';
-  const CACHE_TTL_MS = 15 * 60 * 1000;
+  const CACHE_TTL_MS = 5 * 60 * 1000;
   let staleStars = null;
   try {
     const raw = storage?.getItem(CACHE_KEY);
@@ -85,23 +93,24 @@ export async function fetchGitHubStars(fetchImpl = fetch, storage = (typeof loca
     }
   } catch {}
 
-  try {
-    const res = await fetchImpl(GITHUB_REPO_URL, {
-      headers: { accept: 'application/vnd.github+json' },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(3000),
-    });
-    if (res?.ok) {
-      const data = await res.json();
-      if (typeof data?.stargazers_count === 'number') {
-        const stars = data.stargazers_count;
-        try {
-          storage?.setItem(CACHE_KEY, JSON.stringify({ stars, ts: Date.now() }));
-        } catch {}
-        return { stars, source: 'network' };
-      }
+  for (const source of STAR_SOURCES) {
+    try {
+      const res = await fetchImpl(source.url, {
+        headers: source.headers,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!res?.ok) continue;
+      const stars = source.pick(await res.json());
+      if (typeof stars !== 'number' || stars < 0) continue;
+      try {
+        storage?.setItem(CACHE_KEY, JSON.stringify({ stars, ts: Date.now() }));
+      } catch {}
+      return { stars, source: source.id };
+    } catch {
+      /* 换下一个来源 */
     }
-  } catch {}
+  }
 
   if (staleStars !== null) return { stars: staleStars, source: 'stale-cache' };
   return { stars: null, source: 'unavailable' };
