@@ -76,6 +76,12 @@ jobs:
           DSH_MCP_LOG: silent
         run: node test/run.mjs --all
 
+      - name: installed tarball MCP lifecycle with real DSH
+        env:
+          DSH_BIN: ${{ secrets.DSH_BIN }}
+          DSH_MCP_LOG: silent
+        run: npm run test:packed -- --real
+
   # `needs` + a skipped ancestor: the default `success()` is false for every job downstream
   # of a skipped one, so the three jobs below spell their condition out.
   github-release:
@@ -190,6 +196,7 @@ jobs:
         run: |
           npm run check:release
           node test/package-check.mjs
+          npm run test:packed
 
       - name: Publish
         if: steps.exists.outputs.published == 'false'

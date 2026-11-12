@@ -26,12 +26,16 @@ node scripts/release-notes.mjs x.y.z   # preview the notes the Release page will
 
 # 3. Verify the tarball itself: builds, installs, starts.
 npm pack --dry-run
+npm run test:packed              # install the tarball and exercise legacy and modern stdio
+npm run test:packed -- --real    # run the packaged lifecycle with a configured DSH provider
 #    Then in a temp dir: npm install <tgz> && node_modules/.bin/dsh-any-agent --version
 
 # 4. Merge into main (via PR, after CI is green), then tag that main commit and push the tag.
 git tag -a vx.y.z <commit on main> -m "vx.y.z"
 git push origin vx.y.z
 ```
+
+For an MCP protocol or dispatch change, install the candidate tarball in Codex and in a client that advertises roots. In a temporary workspace, check `dsh_start`, dispatch with a unique `client_run_id`, cancel the host's wait, reconnect, and read the result with the same key. Record which clients and DSH version passed in the release checklist.
 
 **Everything after the tag push is done by `.github/workflows/release.yml` — no local `npm publish`:**
 

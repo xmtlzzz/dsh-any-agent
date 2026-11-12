@@ -26,12 +26,16 @@ node scripts/release-notes.mjs x.y.z   # 预览 Release 页面上会显示的说
 
 # 3. 确认 tarball 本身：打得出来、装得上、起得来
 npm pack --dry-run
+npm run test:packed              # 安装实际 tarball，验证旧版和新版 MCP stdio
+npm run test:packed -- --real    # 用已配置的 DSH 和真实模型验证包内工作流
 #    再在临时目录里：npm install <tgz> && node_modules/.bin/dsh-any-agent --version
 
 # 4. 合进 main（走 PR，CI 绿了再合），然后在 main 的那个提交上打 tag 并推送
 git tag -a vx.y.z <main 上的提交> -m "vx.y.z"
 git push origin vx.y.z
 ```
+
+修改 MCP 协议或派活行为时，用候选 tarball 在 Codex 和一个声明 roots 的客户端各做一次验收。用临时工作区建会话，带唯一的 `client_run_id` 派活，取消宿主等待并重连，再用原键查询结果。在发布清单记录通过的客户端和 DSH 版本。
 
 **推送 tag 之后的事都由 `.github/workflows/release.yml` 完成，不需要再在本机 `npm publish`：**
 

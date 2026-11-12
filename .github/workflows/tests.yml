@@ -358,6 +358,9 @@ jobs:
       - name: package.json and bin sanity
         run: node test/package-check.mjs
 
+      - name: installed tarball MCP lifecycle
+        run: npm run test:packed
+
       - name: pack, install into a scratch project, run it
         shell: bash
         run: |
