@@ -310,7 +310,7 @@ export function createMcpServer({
         const schema = toolSchemas.get(name);
         const invalid = schemaIssue(schema?.inputSchema, args, 'arguments');
         if (invalid) {
-          ok({ content: [{ type: 'text', text: invalid }], isError: true });
+          ok({ content: [{ type: 'text', text: L(`参数校验失败（${invalid}）`, invalid) }], isError: true });
           return;
         }
         if (inflight.has(id)) {
