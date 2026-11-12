@@ -337,10 +337,10 @@ check('update 检查在、关掉时如实说没查', () => {
   assert.ok(u && u.status === 'ok' && /DSH_MCP_UPDATE_CHECK=0/.test(u.detail), JSON.stringify(u));
 });
 check('text 逐项列出结果', () => assert.match(doc.text, /dsh_bin/));
-// 本机/CI 都可能没有 DSH：dsh_bin 失败时不会产出 dsh_version，这是预期。
-if (doc.structured.checks.find((c) => c.id === 'dsh_bin')?.status !== 'fail') {
-  check('找到 DSH 时附带 dsh_version 检查', () => assert.ok(ids.includes('dsh_version')));
-}
+check('找到 DSH 时才附带 dsh_version 检查', () => {
+  const dshFound = doc.structured.checks.find((c) => c.id === 'dsh_bin')?.status !== 'fail';
+  assert.equal(ids.includes('dsh_version'), dshFound);
+});
 
 console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
 {

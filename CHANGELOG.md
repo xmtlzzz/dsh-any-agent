@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retention. Unstarted queued runs receive a cancelled sentinel on recovery.
 - The watchdog quarantines an unresponsive ACP process after a bounded grace
   period and records `watchdog_timeout`. In-flight turns sharing that process
-  also stop.
+  also stop. If a shared process exits unexpectedly, failure sentinels preserve
+  the output collected before the exit.
 - Support MCP `2026-07-28` discovery and per-request metadata alongside the
   handshake protocol. Validate tool arguments, require explicit `cwd` for
   ambiguous roots, and stop sending progress when a blocking request is cancelled.

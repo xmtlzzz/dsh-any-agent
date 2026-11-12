@@ -60,7 +60,7 @@ export class AcpProcess {
     this.initialized = false;
   }
 
-  /** 非主动 stop 的退出通知（共享进程池靠它把同组会话标成失败并唤醒等待者）。 */
+  /** 非主动 stop 的退出通知，供共享进程池解除同组会话的宿主引用。 */
   #notifyExit(reason) {
     if (this.#exitNotified || this.#stopping) return;
     this.#exitNotified = true;

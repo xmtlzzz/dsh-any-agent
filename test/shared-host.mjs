@@ -12,10 +12,12 @@
 import './live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SessionHost } from '../src/host.mjs';
-import { Hub } from '../src/hub.mjs';
+import { Conversation, Hub } from '../src/hub.mjs';
 import { SHARED_PROCESS } from '../src/config.mjs';
 import { rssMb, refreshRssMap } from '../src/procstat.mjs';
 
@@ -345,6 +347,65 @@ console.log('\n[11] 看门狗只隔离失去响应的共享宿主');
     assert.equal(healthy.alive, true);
     assert.equal(healthyA.exits.length, 0);
   });
+}
+
+console.log('\n[12] 共享 ACP 进程退出时，失败哨兵保留已收到的输出');
+{
+  const workspace = mkdtempSync(join(tmpdir(), 'dsh-any-agent-host-exit-'));
+  try {
+    const dispatch = Promise.withResolvers();
+    const reply = Promise.withResolvers();
+    class ExitingAcp extends FakeAcp {
+      request(method, params) {
+        if (method !== 'session/prompt') return super.request(method, params);
+        dispatch.resolve();
+        return reply.promise;
+      }
+
+      crash() {
+        this.alive = false;
+        reply.reject(new Error('ACP crashed'));
+        this.opts.onExit('ACP crashed');
+      }
+    }
+    const pool = new Hub({ log });
+    pool.runSentinelPath = (id, runId) => join(workspace, id, `${runId}.json`);
+    pool.runMarkerPath = (id, runId) => join(workspace, id, `${runId}.running`);
+    pool.save = () => {};
+    const cwd = process.cwd();
+    const shared = new SessionHost({
+      cwd, permission: 'read-only', log, hub: pool, AcpProcessClass: ExitingAcp,
+    });
+    const conv = new Conversation({ id: 'host-exit-session', cwd, permission: 'read-only' }, pool);
+    await shared.initialize();
+    shared.attach(conv);
+    conv.proc = shared;
+    const turn = conv.prompt('run before the crash');
+    await dispatch.promise;
+    const proc = shared.proc;
+    proc.opts.onNotification({ sessionId: conv.id, update: {
+      sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial answer' },
+    } });
+    proc.opts.onNotification({ sessionId: conv.id, update: {
+      sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Read file', status: 'completed',
+    } });
+    proc.crash();
+    const result = await turn;
+    const stored = pool.readStoredRun(conv.id, result.run_id);
+    check('失败哨兵保留正文和工具记录，供重连后的调用方读取', () => {
+      assert.equal(stored.source, 'sentinel');
+      assert.equal(stored.status, 'error');
+      assert.equal(stored.result.error, 'ACP crashed');
+      assert.equal(stored.result.answer, 'partial answer');
+      assert.equal(stored.result.tools_used[0].title, 'Read file');
+    });
+    check('失败回合收尾后，会话空闲且已解除宿主引用', () => {
+      assert.equal(conv.busy, false);
+      assert.equal(conv.proc, null);
+    });
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
 }
 
 // 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。

@@ -895,16 +895,12 @@ export class Conversation {
   }
 
   /**
-   * 共享进程池的进程意外退出：把本会话在跑的回合标成失败并落哨兵，
-   * 然后解除 proc 引用，下次调用会重新 acquireHost + resume。
+   * 共享宿主退出时解除引用，下次派活会重新 resume。ACP 会拒绝尚未完成的请求，
+   * 由 prompt 的启动失败路径或回合收尾写哨兵，保留已收到的正文和工具记录。
    */
-  onProcessExit(reason) {
+  onProcessExit() {
     this.proc = null;
     this.recycling = null;
-    if (this.busy && this.currentRun) {
-      this.busy = false;
-      this.#settleFailedRun(this.currentRun, new Error(String(reason)));
-    }
   }
 
   // ── 跑任务 ──────────────────────────────────────────────────────
