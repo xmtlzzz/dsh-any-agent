@@ -5,6 +5,8 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+**English** · [中文](CHANGELOG.zh.md)
+
 ## [Unreleased]
 
 ### Changed
@@ -18,6 +20,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exists, so it is gone: its remaining points (problems right after setup, a
   full uninstall) are now in `docs/*/install.md`. Links in the READMEs, the
   website, the issue forms and the docs point to the new places.
+- **The README covers 0.7.0.** Its feature table mentions interrupted
+  sentinels, the watchdog and worktree isolation, and no longer says
+  worktrees are left to the agent or need outer tooling; the setup doc is
+  listed as covering 10 clients (the count missed Antigravity).
+- **A Chinese changelog, `CHANGELOG.zh.md`,** with every release since 0.1.0.
+  The release check compares version headings, dates, order and release links.
+
+### Website
+
+- **The star count no longer sticks to an old number.** The header badge
+  asked `api.github.com` from each visitor's browser; unauthenticated calls
+  get 60 per hour per IP, so behind a shared proxy exit (or with
+  `api.github.com` timing out) the page kept the count cached in the browser.
+  A small worker (`website/src/worker.mjs`) now answers `/api/stars` from the
+  edge: it caches the count for 10 minutes, returns the last good value at
+  once and refreshes in the background when that copy has expired, and gives
+  up on GitHub after 2 s when nothing is cached. An optional `GITHUB_TOKEN`
+  secret raises its quota. Every other path is still served straight from
+  the static assets, and the page falls back to GitHub when `/api/stars` is
+  missing (static hosting, local preview).
+- **Copy follows 0.7.0:** interrupted sentinels, resident-process mode
+  (`setup --daemon`), the watchdog, worktree isolation, the rule for
+  `danger-full-access`, and `dsh_doctor`'s update check; the "Resume" demo
+  shows the interrupted sentinel.
+- No horizontal scroll at phone width (the footer links did not wrap), and a
+  missing space in the English hero.
 
 ## [0.7.0] — 2026-11-11
 
@@ -106,6 +134,11 @@ when a newer release is on npm.
   set to a self-hosted runner that has DSH and credentials, a tag push runs the
   full model-backed suite on the tagged commit before npm publish. Unset, the
   release workflow behaves as before.
+- **One-click install for Cursor and VS Code.** The README has install buttons
+  for both (they run `npx -y dsh-any-agent@latest`; DSH still has to be
+  installed), a Cursor plugin manifest (`.cursor-plugin/plugin.json`) lists
+  the server on cursor.directory, and the directory badges (Glama, mcprush)
+  have their own README section.
 
 ### Changed
 

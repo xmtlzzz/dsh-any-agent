@@ -11,11 +11,13 @@ npm version patch --no-git-tag-version
 #    Then edit CHANGELOG.md:
 #      - turn [Unreleased] into the new version (that section IS the GitHub Release notes, written for users)
 #      - link block at the bottom: [Unreleased] → compare/vx.y.z...HEAD, plus [x.y.z]: …/compare/vprevious...vx.y.z
+#    Make the same change in CHANGELOG.zh.md (same version heading and links, Chinese text);
+#    check:release fails when the two disagree on headings or links
 
 # 2. Run the offline suites locally (same set as CI, no tokens, no DSH needed for most).
 node test/run.mjs
 node test/package-check.mjs
-npm run check:release   # version / this CHANGELOG section and its links / release notes build / doc links / package contents
+npm run check:release   # version / this CHANGELOG section and its links / zh and en CHANGELOG agree / release notes build / doc links / package contents
 npm run docs:counts:check   # check counts in tests.md and the CI comment = the report node test/run.mjs just wrote
 #    A mismatch means tests changed without the numbers being refreshed:
 #    node test/run.mjs --all --report .state/test-report.json && npm run docs:counts

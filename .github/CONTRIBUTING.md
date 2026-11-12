@@ -54,7 +54,7 @@ Conventional prefixes are used throughout (`feat`, `fix`, `docs`, `test`, `chore
 ## Pull requests · PR
 
 - One topic per PR. Fill in the checklist in the template. · 一个 PR 一件事，按模板勾选。
-- User-visible changes get a line under `## [Unreleased]` in `CHANGELOG.md` — that section becomes the GitHub Release notes. · 用户可见的改动写进 CHANGELOG 的 Unreleased，它会成为 Release 说明。
+- User-visible changes get a line under `## [Unreleased]` in `CHANGELOG.md` — that section becomes the GitHub Release notes — and the same line in Chinese in `CHANGELOG.zh.md`. · 用户可见的改动写进 `CHANGELOG.md` 的 Unreleased（它会成为 Release 说明），并在 `CHANGELOG.zh.md` 里写同一条的中文。
 - Releases are cut by the maintainer; the process is in [docs/en/release.md](../docs/en/release.md) · [docs/zh/release.md](../docs/zh/release.md).
 
 ## Where things are · 代码地图
