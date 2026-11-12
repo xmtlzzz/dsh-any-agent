@@ -15,6 +15,7 @@ process.env.DSH_MCP_AUDIT_FILE = join(auditDir, 'audit.jsonl');
 // 这一套要覆盖"团队提示注入"，所以在本进程显式启用团队模式；
 // config 在动态 import 时读取 env（静态 import 会被提升到赋值之前）。
 process.env.DSH_MCP_TEAM = '1';
+process.env.DSH_MCP_APPROVAL = 'auto-allow';
 const { Conversation, Hub } = await import('../src/hub.mjs');
 const { createHandlers } = await import('../src/tools.mjs');
 const { TEAM_ACTIVE } = await import('../src/config.mjs');
@@ -336,10 +337,10 @@ check('update 检查在、关掉时如实说没查', () => {
   assert.ok(u && u.status === 'ok' && /DSH_MCP_UPDATE_CHECK=0/.test(u.detail), JSON.stringify(u));
 });
 check('text 逐项列出结果', () => assert.match(doc.text, /dsh_bin/));
-// 本机/CI 都可能没有 DSH：dsh_bin 失败时不会产出 dsh_version，这是预期。
-if (doc.structured.checks.find((c) => c.id === 'dsh_bin')?.status !== 'fail') {
-  check('找到 DSH 时附带 dsh_version 检查', () => assert.ok(ids.includes('dsh_version')));
-}
+check('找到 DSH 时才附带 dsh_version 检查', () => {
+  const dshFound = doc.structured.checks.find((c) => c.id === 'dsh_bin')?.status !== 'fail';
+  assert.equal(ids.includes('dsh_version'), dshFound);
+});
 
 console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
 {
@@ -358,11 +359,12 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
     assert.equal(lvl('0.2.2-rc.1'), 'verified');
     assert.equal(dshVersionStatus('0.2.2-rc.1').status, 'ok');
   });
-  check('★ 只有本发布线重跑过的版本（0.2.1）才说"跑过全量套件"', () => {
+  check('★ 只有本发布线重跑过的版本（0.2.1-rc.5）才说"跑过全量套件"', () => {
     const s = dshVersionStatus('0.2.1-rc.5');
     assert.equal(s.rerun, true);
-    assert.match(s.note, /已用 0\.6\.x 跑过全量套件/);
-    assert.match(s.noteEn, /passed the full suite on 0\.6\.x/);
+    assert.match(s.note, /已用 0\.7\.1 跑过全量套件/);
+    assert.match(s.noteEn, /was tested with the full suite on 0\.7\.1/);
+    assert.equal(dshVersionStatus('0.2.1-rc.4').rerun, false);
   });
   check('★ 区间内但本发布线没重跑的版本（0.1.7 / 0.2.2）如实说明，仍是 ok', () => {
     for (const v of ['0.1.7-rc.1', '0.2.2-rc.1']) {

@@ -30,6 +30,6 @@ export function watchdogVerdict({ elapsedMs, sinceProgressMs, toolRunning, waiti
 
 /** 巡检间隔：阈值的 1/5，夹在 50ms（测试用的小阈值）与 60 秒之间。 */
 export function watchdogTickMs({ stallMs, maxMs }) {
-  const base = stallMs > 0 ? stallMs : maxMs;
+  const base = Math.min(stallMs > 0 ? stallMs : Infinity, maxMs > 0 ? maxMs : Infinity);
   return Math.max(50, Math.min(60_000, Math.floor(base / 5)));
 }

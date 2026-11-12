@@ -9,7 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-11-12
+
 ### Changed
+
+- `workspace-write` denies escalation by default. `DSH_MCP_APPROVAL` caps the
+  policy requested by the caller, including when a stored session resumes.
+  To review escalation requests individually, set `DSH_MCP_APPROVAL=ask` in
+  the MCP server configuration and reconnect.
+- Accepted run receipts and idempotency keys survive restarts during sentinel
+  retention. Unstarted queued runs receive a cancelled sentinel on recovery.
+- The watchdog quarantines an unresponsive ACP process after a bounded grace
+  period and records `watchdog_timeout`. In-flight turns sharing that process
+  also stop. If a shared process exits unexpectedly, failure sentinels preserve
+  the output collected before the exit.
+- Support MCP `2026-07-28` discovery and per-request metadata alongside the
+  handshake protocol. Validate tool arguments, require explicit `cwd` for
+  ambiguous roots, and stop sending progress when a blocking request is cancelled.
+- Publish output schemas for start, send and get. Exercise an installed tarball
+  in CI and run the same lifecycle with a real provider on the model runner.
 
 - **Fewer documents in the repository root.** The usage notes moved to
   `docs/zh/caveats.md` / `docs/en/caveats.md`, the archived design draft to
@@ -1662,7 +1680,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.7...v0.6.8

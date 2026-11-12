@@ -43,7 +43,7 @@ export function resolveDshBin() {
  * 用 `-0` 后缀是为了把同号的 rc 版本也算进去（semver 里 `0.1.7-rc.1 < 0.1.7`）。
  * 0.2.x：2026-11-06 用 0.2.1-rc.5（npm）与 0.2.2-rc.1（桌面版自带运行时）跑过全量套件。
  *
- * `[rerunMin, rerunBelow)` 是**当前这条发布线**（rerunLine）重新跑过全量套件的 DSH 版本；
+ * `rerunVersion` 是**当前这条发布线**（rerunLine）重新跑过全量套件的 DSH 版本；
  * 已验证区间里的其它版本，最近一次实测停在 earlierLine。体检要把这两种情况说清楚，
  * 不能把"上一条线验证过"说成"本版本验证过"。
  */
@@ -52,9 +52,8 @@ export const DSH_COMPAT = Object.freeze({
   verifiedMin: '0.1.7-0',
   verifiedBelow: '0.2.3-0',
   verifiedLabel: '0.1.7 ~ 0.2.2',
-  rerunMin: '0.2.1-0',
-  rerunBelow: '0.2.2-0',
-  rerunLine: '0.6.x',
+  rerunVersion: '0.2.1-rc.5',
+  rerunLine: '0.7.1',
   earlierLine: '0.5.x',
 });
 
@@ -92,7 +91,7 @@ export function dshVersionStatus(version) {
     };
   }
   if (cmpVersion(version, C.verifiedBelow) < 0) {
-    const rerun = cmpVersion(version, C.rerunMin) >= 0 && cmpVersion(version, C.rerunBelow) < 0;
+    const rerun = version === C.rerunVersion;
     return {
       status: 'ok',
       level: 'verified',
@@ -101,7 +100,7 @@ export function dshVersionStatus(version) {
         ? `DSH ${version} 已用 ${C.rerunLine} 跑过全量套件`
         : `DSH ${version} 在已验证区间（${C.verifiedLabel}），但最近一次全量实测是 ${C.earlierLine}；${C.rerunLine} 没有对它重跑`,
       noteEn: rerun
-        ? `DSH ${version} passed the full suite on ${C.rerunLine}`
+        ? `DSH ${version} was tested with the full suite on ${C.rerunLine}`
         : `DSH ${version} is in the verified range (${C.verifiedLabel}), but its last full run was on ${C.earlierLine}; ${C.rerunLine} did not re-run it`,
     };
   }
@@ -382,6 +381,7 @@ const positiveOrOff = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
 export const WATCHDOG_AFTER_MS = positiveOrOff(numEnv('DSH_MCP_WATCHDOG_AFTER_MS', 15 * 60 * 1000));
 export const STALL_MS = positiveOrOff(numEnv('DSH_MCP_STALL_MS', 10 * 60 * 1000));
 export const TURN_MAX_MS = positiveOrOff(numEnv('DSH_MCP_TURN_MAX_MS', 2 * 60 * 60 * 1000));
+export const WATCHDOG_GRACE_MS = Math.max(0, Math.min(60_000, numEnv('DSH_MCP_WATCHDOG_GRACE_MS', 5000)));
 
 /**
  * 常驻进程模式（见 daemon.mjs），默认关。
@@ -541,11 +541,22 @@ export const ALLOW_FULL_ACCESS =
  */
 export const APPROVAL_POLICIES = ['auto-allow', 'auto-deny', 'ask'];
 
-/** 未显式指定时，按权限档推导审批策略：只读档一律拒绝，其余放行。 */
+/** 本机的默认审批策略，同时也是调用方能请求的最宽松策略。 */
 export function defaultApprovalPolicy(permission) {
   if (permission === 'read-only') return 'auto-deny';
   const configured = process.env.DSH_MCP_APPROVAL;
-  return APPROVAL_POLICIES.includes(configured) ? configured : 'auto-allow';
+  if (APPROVAL_POLICIES.includes(configured)) return configured;
+  return permission === 'danger-full-access' ? 'auto-allow' : 'auto-deny';
+}
+
+const APPROVAL_SCOPE = ['auto-deny', 'ask', 'auto-allow'];
+
+/** 已保存的会话也要服从当前机器配置。 */
+export function effectiveApprovalPolicy(permission, requested) {
+  const ceiling = defaultApprovalPolicy(permission);
+  return APPROVAL_SCOPE.includes(requested) && APPROVAL_SCOPE.indexOf(requested) <= APPROVAL_SCOPE.indexOf(ceiling)
+    ? requested
+    : ceiling;
 }
 
 /** 思考内容展示档位。 */

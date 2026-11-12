@@ -12,9 +12,10 @@ import { createHandlers } from './tools.mjs';
 import { localizeToolDefs } from './tool-defs.mjs';
 import { INSTRUCTIONS_EN } from './tool-defs.en.mjs';
 import { L, LANG } from './lang.mjs';
-import { DEFAULT_PERMISSION } from './config.mjs';
+import { DEFAULT_PERMISSION, defaultApprovalPolicy } from './config.mjs';
 import { LineDecoder } from './line-decoder.mjs';
 import { withLiveClient } from './live.mjs';
+import { isObject, schemaIssue } from './tool-schema.mjs';
 
 const SERVER_NAME = 'dsh-any-agent';
 /**
@@ -31,7 +32,13 @@ export const SERVER_VERSION = (() => {
     return '0.0.0';
   }
 })();
-const FALLBACK_PROTOCOL = '2025-06-18';
+const LEGACY_PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
+const MODERN_PROTOCOL = '2026-07-28';
+const SUPPORTED_PROTOCOLS = [MODERN_PROTOCOL, ...LEGACY_PROTOCOLS];
+const PROTOCOL_META = 'io.modelcontextprotocol/protocolVersion';
+const CLIENT_INFO_META = 'io.modelcontextprotocol/clientInfo';
+const SERVER_INFO_META = 'io.modelcontextprotocol/serverInfo';
+const validId = (id) => typeof id === 'string' || Number.isFinite(id);
 
 /**
  * 服务说明（initialize.instructions）。★ 必须短：客户端会截断过长的说明（实测 Claude Code 在
@@ -65,7 +72,7 @@ export const INSTRUCTIONS = `本服务把 DeepSeek Harness (DSH) 当作可长期
 
 【写锁】一个会话同时只能有一个写者。撞上 "already owned by an active write handle"（或笼统的 Internal error）时别重试，先看 dsh_status 的 lock_holder：stale-mcp → dsh_takeover；live-mcp → 那边 dsh_release，确需再 dsh_takeover(force=true)；none 多半是 GUI 持有 → 请用户在 GUI 里关掉，本服务绝不杀 GUI。
 
-【默认值】权限 ${DEFAULT_PERMISSION}，审批 ${process.env.DSH_MCP_APPROVAL ?? 'auto-allow'}；read-only 强制 auto-deny（分析不信任样本用它）。思考默认隐藏（reasoning='full' 才返回），思考深度默认 max（reasoning_effort 可调低）。
+【默认值】权限 ${DEFAULT_PERMISSION}，审批上限 ${defaultApprovalPolicy(DEFAULT_PERMISSION)}；read-only 强制 auto-deny（分析不信任样本用它）。思考默认隐藏（reasoning='full' 才返回），思考深度默认 max（reasoning_effort 可调低）。
 
 【隐私】本服务的日志/哨兵/注册表不写思考正文；但 DSH 自己的 ~/.dsh/sessions 会保存 reasoning。哨兵含正文与工具输入（常见密钥已脱敏），保留 7 天。`;
 
@@ -100,6 +107,11 @@ export function createMcpServer({
     output.write(JSON.stringify(obj) + '\n');
   };
   const lineDecoder = new LineDecoder();
+  const toolSchemas = new Map(toolDefs.map((tool) => [tool.name, tool]));
+  const inflight = new Map();
+  const capabilities = { tools: { listChanged: false } };
+  const serverInfo = { name: SERVER_NAME, version: SERVER_VERSION };
+  let legacyVersion;
   let initialized = false;
   let clientCapabilities = {};
   /** 这个连接的 clientInfo：live 事件流用它把会话挂到"谁派的"下面（仅名字/版本）。 */
@@ -151,14 +163,12 @@ export function createMcpServer({
     if (!Array.isArray(roots) || !roots.length) return null;
     const uris = roots.map((r) => r && typeof r.uri === 'string' ? r.uri : null).filter(Boolean);
     if (!uris.length) return null;
-    for (const uri of uris) {
-      const asPath = fileURLToPathSafe(uri);
-      if (asPath) return asPath;
+    const paths = [...new Set(uris.map(fileURLToPathSafe).filter(Boolean))];
+    if (paths.length > 1) {
+      throw new Error(L('客户端提供了多个工作区，请显式传入 cwd。', 'The client provided multiple workspace roots. Pass cwd explicitly.'));
     }
-    return null;
+    return paths[0] ?? null;
   }
-
-  const ok = (id, result) => write({ jsonrpc: '2.0', id, result });
 
   /**
    * 调用方带了 progressToken 才发进度通知（MCP 的约定：不带就是不想要）。
@@ -181,9 +191,13 @@ export function createMcpServer({
     timer.unref?.();
     return () => clearInterval(timer);
   }
-  const fail = (id, code, message) => write({ jsonrpc: '2.0', id, error: { code, message } });
+  const fail = (id, code, message, data) => write({ jsonrpc: '2.0', id, error: { code, message, data } });
 
   async function handle(msg) {
+    if (!isObject(msg) || msg.jsonrpc !== '2.0' || (msg.id !== undefined && !validId(msg.id))) {
+      fail(validId(msg?.id) ? msg.id : undefined, -32600, 'Invalid JSON-RPC request');
+      return;
+    }
     const { id, method, params } = msg;
 
     // 客户端对我们反向请求（roots/list）的响应：没有 method，只有 result/error。
@@ -193,21 +207,51 @@ export function createMcpServer({
       done(msg.error ? [] : (msg.result?.roots ?? []));
       return;
     }
+    if (typeof method !== 'string') {
+      if (!Object.hasOwn(msg, 'result') && !Object.hasOwn(msg, 'error')) fail(id, -32600, 'Invalid JSON-RPC request');
+      return;
+    }
 
     // 通知（无 id）：不需要回包
     if (id === undefined) {
-      if (method === 'notifications/initialized') initialized = true;
+      if (method === 'notifications/initialized' && legacyVersion) initialized = true;
+      if (method === 'notifications/cancelled') inflight.get(params?.requestId)?.abort();
       // 客户端换了打开的项目：丢掉缓存并重新问一次，下一次 dsh_start 才会用新目录。
-      if (method === 'notifications/roots/list_changed') {
+      if (method === 'notifications/roots/list_changed' && legacyVersion) {
         rootsGen += 1;
         rootsPromise = null;
         requestRoots().catch(() => {});
       }
       return;
     }
+    if (params !== undefined && !isObject(params)) {
+      fail(id, -32602, 'params must be an object');
+      return;
+    }
+    const version = params?._meta?.[PROTOCOL_META];
+    const modern = version === MODERN_PROTOCOL;
+    if ((version !== undefined && !modern) || (method === 'server/discover' && !modern)) {
+      fail(id, -32022, 'Unsupported protocol version', {
+        requested: typeof version === 'string' ? version : '',
+        supported: SUPPORTED_PROTOCOLS,
+      });
+      return;
+    }
+    if (!modern && !legacyVersion && method !== 'initialize' && method !== 'ping') {
+      fail(id, -32002, 'Initialize the MCP connection or provide a supported per-request protocol version');
+      return;
+    }
+    const ok = (result) => write({
+      jsonrpc: '2.0', id,
+      result: modern ? { resultType: 'complete', ...result, _meta: { [SERVER_INFO_META]: serverInfo } } : result,
+    });
 
     switch (method) {
       case 'initialize': {
+        if (modern) {
+          fail(id, -32601, 'Use server/discover with MCP 2026-07-28');
+          return;
+        }
         const requested = params?.protocolVersion;
         // 记住客户端声明了哪些能力：有 roots 的客户端（Claude Code / Cursor /
         // VS Code 等）会告诉我们它当前打开的项目目录，那是 dsh_start 最合理的
@@ -216,24 +260,29 @@ export function createMcpServer({
         clientCapabilities = caps && typeof caps === 'object' ? caps : {};
         // 按连接记，不是按进程：常驻进程模式下一个进程同时服务好几个客户端（见 tools/call）。
         clientInfo = params?.clientInfo ?? null;
-        ok(id, {
-          protocolVersion: typeof requested === 'string' ? requested : FALLBACK_PROTOCOL,
-          capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+        legacyVersion = LEGACY_PROTOCOLS.includes(requested) ? requested : LEGACY_PROTOCOLS[0];
+        ok({
+          protocolVersion: legacyVersion,
+          capabilities,
+          serverInfo,
           instructions,
         });
         return;
       }
+      case 'server/discover':
+        ok({ supportedVersions: SUPPORTED_PROTOCOLS, capabilities, instructions });
+        return;
       case 'roots/list': {
         // 有的客户端会主动问；我们不需要“暴露自己的根”，回空即可。
-        ok(id, { roots: [] });
+        if (modern) fail(id, -32601, 'Use an explicit cwd with MCP 2026-07-28');
+        else ok({ roots: [] });
         return;
       }
       case 'ping':
-        ok(id, {});
+        ok({});
         return;
       case 'tools/list':
-        ok(id, {
+        ok({
           tools: toolDefs.map((t) => ({
             name: t.name,
             title: t.title,
@@ -246,26 +295,53 @@ export function createMcpServer({
         return;
       case 'tools/call': {
         const name = params?.name;
-        const args = params?.arguments ?? {};
+        const args = params?.arguments === undefined ? {} : params.arguments;
+        if (typeof name !== 'string' || !isObject(args)) {
+          fail(id, -32602, 'tools/call requires a name and object arguments');
+          return;
+        }
         // 只认 handlers 自己的属性：`constructor` / `toString` / `__proto__` 之类的
         // 原型链名字不能被当成工具调用。
         const fn = Object.hasOwn(handlers, name) ? handlers[name] : null;
         if (typeof fn !== 'function') {
-          ok(id, { content: [{ type: 'text', text: L(`未知工具: ${name}`, `Unknown tool: ${name}`) }], isError: true });
+          fail(id, -32602, L(`未知工具: ${name}`, `Unknown tool: ${name}`));
           return;
         }
+        const schema = toolSchemas.get(name);
+        const invalid = schemaIssue(schema?.inputSchema, args, 'arguments');
+        if (invalid) {
+          ok({ content: [{ type: 'text', text: L(`参数校验失败（${invalid}）`, invalid) }], isError: true });
+          return;
+        }
+        if (inflight.has(id)) {
+          fail(id, -32600, 'Request ID is already in use');
+          return;
+        }
+        const controller = new AbortController();
+        inflight.set(id, controller);
         const stopProgress = startProgress(params?._meta?.progressToken, args);
+        controller.signal.addEventListener('abort', stopProgress, { once: true });
+        const caller = modern ? params?._meta?.[CLIENT_INFO_META] : clientInfo;
         try {
           // 进度通知必须在响应之前停下：协议不允许对已结束的请求再发进度。
           // 工具调用的整条异步链上写出的 live 事件都记在这个连接的客户端名下。
-          const out = await Promise.resolve().then(() => withLiveClient(clientInfo, () => fn(args))).finally(stopProgress);
+          const out = await withLiveClient(caller, () => fn(args, { signal: controller.signal, modern }));
+          if (controller.signal.aborted) return;
+          stopProgress();
           const result = { content: [{ type: 'text', text: out.text ?? '' }] };
+          if (out.isError) result.isError = true;
           if (out.structured !== undefined) result.structuredContent = out.structured;
-          ok(id, result);
+          const badOutput = out.isError ? null : schemaIssue(schema?.outputSchema, out.structured, 'structuredContent');
+          if (badOutput) fail(id, -32603, badOutput);
+          else ok(result);
         } catch (e) {
           // 只记错误摘要，不记工具内容（可能含对话正文或思考）
           log?.debug(`[tools/call ${name}] 失败: ${e.message}`);
-          ok(id, { content: [{ type: 'text', text: L(`工具执行失败: ${e.message}`, `Tool failed: ${e.message}`) }], isError: true });
+          stopProgress();
+          if (!controller.signal.aborted) ok({ content: [{ type: 'text', text: L(`工具执行失败: ${e.message}`, `Tool failed: ${e.message}`) }], isError: true });
+        } finally {
+          stopProgress();
+          inflight.delete(id);
         }
         return;
       }
@@ -281,7 +357,7 @@ export function createMcpServer({
       try {
         msg = JSON.parse(line);
       } catch {
-        log?.debug('[mcp] 收到非 JSON 行（已忽略）');
+        fail(undefined, -32700, 'Invalid JSON');
         continue;
       }
       Promise.resolve()
@@ -296,7 +372,12 @@ export function createMcpServer({
   return {
     start() {
       input.on('data', onData);
-      input.on('end', () => log?.debug('[mcp] 输入结束'));
+      const abortPending = () => {
+        for (const request of inflight.values()) request.abort();
+      };
+      input.once('end', abortPending);
+      input.once('close', abortPending);
+      output.once('close', abortPending);
       return this;
     },
     /** 客户端当前打开的项目目录；不支持 roots 的客户端返回 null。 */

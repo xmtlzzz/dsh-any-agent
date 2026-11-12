@@ -4,15 +4,15 @@
 
 | Tier | Approval default | Use for |
 |---|---|---|
-| `workspace-write` (raw server default; also what `setup` writes) | `auto-allow` | Writes are limited to the workspace by DSH's sandbox; out-of-workspace requests are auto-allowed unless you pass `on_approval=ask` |
+| `workspace-write` (default) | `auto-deny` | DSH limits writes to the workspace. Escalation requests are denied by default. |
 | `danger-full-access` | `auto-allow` | Whole-machine write access, and DSH no longer asks for approvals. Simplest for personal use: `dsh-any-agent-setup --yes --permission danger-full-access` makes it the default tier, which by itself counts as allowing it on the machine; if the default is another tier and only some conversations should get it, also set `DSH_MCP_ALLOW_FULL_ACCESS=1` |
 | `read-only` | `auto-deny` | Analyzing untrusted samples (malware, unknown dumps) |
 
-`on_approval` can be `auto-allow`, `auto-deny`, or `ask` (which exposes a pending approval for `dsh_approval_decide` to adjudicate).
+`DSH_MCP_APPROVAL` sets the machine's default and ceiling, in order from strictest to most permissive: `auto-deny`, `ask`, `auto-allow`. Callers may pick a stricter `on_approval`. Stored conversations are capped when restored. Set `DSH_MCP_APPROVAL=ask` and reconnect to handle requests with `dsh_approval_decide`.
 
-**Trust model: this server only dispatches; permissions follow DSH and your own configuration.** It adds no permission layer of its own: DSH runs at whatever tier your client config gives it, and under `danger-full-access` DSH asks for nothing, so everything is allowed. That means **anyone who can call these MCP tools can run commands on your machine** — including a caller agent that read a malicious web page or issue and got prompt-injected. For personal use on your own machine that risk is usually acceptable; for untrusted content use `read-only` (the one hard boundary: every approval is denied, and passing `auto-allow` or `ask` is rejected outright).
+DSH applies the requested sandbox tier. Under `danger-full-access`, commands run with the user's privileges and DSH skips approval requests. Use `read-only` when inspecting untrusted material.
 
-**Under `auto-allow`, `workspace-write` is a soft boundary.** When DSH's sandbox blocks something (e.g. child-process pipes on Windows), DSH asks for `sandbox_permissions: danger-full-access` and `auto-allow` grants it. The default is unchanged, but the grant is **no longer silent**: every turn result carries `auto_approvals_total`, `auto_escalations_total` and up to 20 redacted `auto_approvals` summaries (tool, escalation tier, justification, command preview), and the review ticket's evidence and checklist call out "N auto-approved this turn, M of them escalations". To gate each one, start a conversation with `on_approval=ask`.
+When you opt in to `auto-allow`, DSH can obtain `sandbox_permissions: danger-full-access` for blocked operations. Turn results record `auto_approvals_total`, `auto_escalations_total` and up to 20 redacted approval summaries. The review ticket includes those counts.
 
 **`read-only` is enforced, not merely a default**: it always runs with `auto-deny`; passing `auto-allow` or `ask` for a read-only conversation is rejected at `dsh_start`, and the approval layer refuses any permission request from a read-only conversation. After create/resume the server reads back the session's recorded tier; for read-only it **fails closed** if the projection cache has no permission record within the DSH flush window, rather than relying on the approval layer alone. Without that, a profile `defaultPreset` plus a permissive approval policy could let a write through (found by the adversarial audit).
 
@@ -78,7 +78,7 @@ Silent by default — **not one byte is written**.
 |---|---|---|---|
 | `<state dir>/conversations.json`, `meta/<conversation_id>.json` | Conversation registry and metadata: id, cwd, permissions, counters, title hint; no message text | Until the conversation is forgotten | `dsh_release(forget=true)` |
 | `<state dir>/runs/<conversation_id>/<run_id>.json` | Completion sentinel: answer, usage, review ticket, tool inputs (all redacted) | 7 days (`DSH_MCP_SENTINEL_TTL_MS`) | `DSH_MCP_SENTINEL_TOOL_INPUTS=0` keeps only each tool input's length (and drops auto-approval command previews); delete it once read |
-| `<state dir>/runs/<conversation_id>/<run_id>.running` | Turn-in-progress marker: run_id, task preview (redacted), this server's PID and start time | Removed when the sentinel is written | — |
+| `<state dir>/runs/<conversation_id>/<run_id>.running` | Accepted receipt: run ID, caller's idempotency key, redacted prompt preview, queue or execution status, and owning process | Removed when the sentinel is written | Keep the state directory on a filesystem that supports hard links |
 | `<state dir>/reviews/<conversation_id>/<run_id>.review.json` | Review record: verdict, notes, checklist, evidence summary (redacted) | Same as sentinels, 7 days | `DSH_MCP_REVIEW=off` stops automatic tickets |
 | `<state dir>/live/<conversation_id>/events.jsonl` | Live event stream: event type, time, tool name, client name; by default also redacted command / path / prompt previews | Same as sentinels, 7 days; rolled at 5 MB | `DSH_MCP_LIVE=meta` drops the previews, `off` writes nothing |
 | `<state dir>/locks/<conversation_id>.json` | Write-lock holder record: PIDs of this server and the DSH child, cwd | Cleared on release or once the processes exit | — |

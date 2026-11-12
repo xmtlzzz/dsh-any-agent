@@ -8,6 +8,7 @@
 import {
   APPROVAL_POLICIES,
   DEFAULT_PERMISSION,
+  defaultApprovalPolicy,
   DEFAULT_REASONING,
   DEFAULT_REASONING_EFFORT,
   DEFAULT_REVIEW,
@@ -43,10 +44,7 @@ const H = (readOnly, destructive, idempotent, openWorld) => ({
 const READ_ONLY = H(true, false, true, false);
 
 /**
- * 结构化输出的 schema。只给三个工具声明：它们的 structuredContent 就是 tools.mjs 里当场拼出来的
- * 固定形状。其余工具的形状随路径变化（dsh_send 可能是完整结果也可能是后台收据，dsh_queue 每个
- * action 都不同），而声明了 schema 的工具，客户端会按它校验返回值 —— 写错一个字段，那次调用
- * 就被客户端当成失败。所以这里宁可少写：required 只列永远存在的键，也不禁止多出来的键。
+ * 只声明各返回路径共有的字段为必填，允许不同回执与未来版本追加字段。
  */
 const OUT = (props, required) => ({ type: 'object', properties: props, required });
 
@@ -54,6 +52,10 @@ const OUT = (props, required) => ({ type: 'object', properties: props, required 
 export const TOOL_DEFS = [
   {
     name: 'dsh_start',
+    outputSchema: OUT(
+      { conversation_id: { type: 'string' }, cwd: { type: 'string' }, permission: { type: 'string' }, on_approval: { type: 'string' } },
+      ['conversation_id', 'cwd', 'permission', 'on_approval'],
+    ),
     title: '新建会话',
     annotations: H(false, false, false, true),
     description:
@@ -66,14 +68,13 @@ export const TOOL_DEFS = [
           type: 'string',
           description:
             '工作区绝对路径。决定 agent 的工作目录、AGENTS.md/技能的发现范围、以及沙箱可写根。' +
-            '**省略时自动用客户端当前打开的项目目录**（MCP roots），这样客户端里看到哪个项目就在这里干活；' +
-            '客户端不支持 roots、或 roots 为空时才会要求你显式传入。别传用户家目录本身 —— 那里会让 DSH 的 ACL 沙箱起不来。',
+            '旧版 MCP 客户端只报告一个本地 roots 目录时可省略。多个 roots、无 roots 或使用 MCP 2026-07-28 时，请显式传入 cwd。',
         },
         permission: {
           type: 'string',
           enum: PERMISSION_TIERS,
           description:
-            `权限档。默认 ${DEFAULT_PERMISSION}。read-only 适合分析不信任样本（如恶意软件）；workspace-write 由 DSH 沙箱限制可写范围，越界请求默认 auto-allow，想在调用方挂起审批请传 on_approval=ask。` +
+            `权限档。默认 ${DEFAULT_PERMISSION}。read-only 适合分析不信任样本；workspace-write 由 DSH 沙箱限制可写范围，越界审批服从本机策略。` +
             '**档位在创建时定下**：DSH 设计上"resume 的会话保留它自己记录的权限"，所以事后改这个参数不会改变已有会话，要换档需新建。' +
             '（本档位是**真实生效**的 —— 由启动时传入的 env 决定，并有 test/permission.mjs 对着会话自己的记录逐档核验。）',
         },
@@ -82,7 +83,7 @@ export const TOOL_DEFS = [
           enum: APPROVAL_POLICIES,
           description:
             `审批处理策略。**read-only 强制 auto-deny**（传 auto-allow/ask 会被直接拒绝，否则会放行 DSH 的 sandbox 提权）；` +
-            `其余档位默认 ${process.env.DSH_MCP_APPROVAL ?? 'auto-allow'}。ask 会把审批挂起，需用 dsh_approval_decide 裁决。`,
+            `默认权限档的审批上限为 ${defaultApprovalPolicy(DEFAULT_PERMISSION)}。调用方可以收紧；放宽由用户配置 DSH_MCP_APPROVAL。ask 会挂起审批，由 dsh_approval_decide 裁决。`,
         },
         title_hint: {
           type: 'string',
@@ -128,6 +129,10 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_send',
+    outputSchema: OUT(
+      { conversation_id: { type: 'string' }, run_id: { type: 'string' }, sentinel_file: { type: 'string' }, status: { type: 'string' }, background: { type: 'boolean' }, queued: { type: 'boolean' }, replayed: { type: 'boolean' } },
+      ['conversation_id', 'run_id', 'sentinel_file'],
+    ),
     title: '派发任务',
     annotations: H(false, true, false, true),
     description:
@@ -174,20 +179,20 @@ export const TOOL_DEFS = [
           type: 'boolean',
           description:
             '会话正忙时是否入队（默认 false = 直接报错）。true 时立即返回 run_id + queue_position，' +
-            '本轮结束后自动执行；哨兵只在真正结束时写，入队时不写。队列仅内存、重启丢失，用 dsh_queue 管理。' +
+            '本轮结束后自动执行；队列正文只留内存，重启后未执行任务会写出取消哨兵，用 dsh_queue 管理。' +
             "（dsh_interject(mode='queue') 也排在本轮之后，但它会阻塞到新回合跑完，且不进这个队列。）",
         },
         client_run_id: {
           type: 'string',
           maxLength: 128,
           description:
-            '调用方生成的幂等键（≤128 字符，作用域=本会话）。重复提交同一个键不会创建第二个 run，' +
+            '调用方生成的幂等键（≤128 字符，作用域=本会话，保留期跟随哨兵）。重复提交同一个键会返回原回合，' +
             '而是返回首次 run 的结果或收据（replayed=true）。用于"响应在传输层丢了、想安全重发"的场景。',
         },
         team: {
           type: 'boolean',
           description:
-            '是否在本次派发前注入"需要并行/多角色时先建团队"的提示（默认跟随 DSH_MCP_TEAM，0.4.0 起默认开）。' +
+            '是否在本次派发前注入"需要并行/多角色时先建团队"的提示（跟随团队设置，默认关闭）。' +
             '传 false 只对这一次关闭；彻底关闭用 DSH_MCP_TEAM=0。',
         },
       },
@@ -252,6 +257,18 @@ export const TOOL_DEFS = [
   },
   {
     name: 'dsh_get',
+    outputSchema: OUT(
+      {
+        conversation_id: { type: 'string' },
+        run: {
+          type: ['object', 'null'],
+          properties: { run_id: { type: 'string' }, status: { type: 'string' }, result: { type: ['object', 'null'] } },
+          required: ['run_id', 'status', 'result'],
+        },
+        sentinel_file: { type: 'string' },
+      },
+      ['conversation_id', 'run'],
+    ),
     title: '查看会话或回合结果',
     annotations: READ_ONLY,
     description:
@@ -266,7 +283,7 @@ export const TOOL_DEFS = [
         client_run_id: {
           type: 'string',
           maxLength: 128,
-          description: '按调用方幂等键取 run（与 run_id 二选一；只对仍在内存里的 run 有效，最多最近 20 条）。',
+          description: '按调用方幂等键取 run（与 run_id 二选一）。在哨兵保留期内支持跨重启查询。',
         },
         max_chars: {
           type: 'number',
@@ -478,7 +495,7 @@ export const TOOL_DEFS = [
     title: '管理队列',
     annotations: H(false, true, false, false),
     description:
-      '查看/修改会话的待执行队列（只管理已入队的任务，入队用 dsh_send(queue=true)；**仅内存**，重启丢失）。' +
+      '查看/修改会话的待执行队列（入队用 dsh_send(queue=true)；重启后未执行任务会写出取消哨兵）。' +
       'action=list 列出；remove 取消并写 cancelled 哨兵；update 改写排队文本；promote 提到队首。',
     inputSchema: S(
       {
@@ -493,7 +510,7 @@ export const TOOL_DEFS = [
   {
     name: 'dsh_doctor',
     title: '体检',
-    annotations: READ_ONLY,
+    annotations: H(true, false, true, true),
     description:
       '只读体检：DSH 可执行文件与版本、profile 是否存在/漂移、状态文件、runs/locks 目录可写、孤儿锁、' +
       '当前会话数与 RSS、生效配置。只报告不修改；ok=false 表示存在 fail 项。',

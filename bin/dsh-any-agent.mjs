@@ -8,7 +8,7 @@
  *   DSH_MCP_PROFILE             驱动用的 DSH profile（默认 dsh-mcp）
  *   DSH_MCP_STATE               会话注册表路径（默认 $DSH_HOME/.dsh-any-agent/conversations.json）
  *   DSH_MCP_PERMISSION          新建会话的默认权限档（默认 workspace-write）
- *   DSH_MCP_APPROVAL            默认审批策略（非只读档默认 auto-allow；ask = 挂起待裁决）
+ *   DSH_MCP_APPROVAL            本机审批上限（workspace-write 默认 auto-deny）
  *   DSH_MCP_REVIEW              调用方审核策略（默认 advisory；off 关闭自动审核单）
  *   DSH_MCP_REVIEWS_DIR         审核记录目录（默认 <状态文件同目录>/reviews）
  *   DSH_MCP_IDLE_TTL_MS         空闲多久回收会话进程（默认 600000 = 10 分钟；0 = 永不回收）

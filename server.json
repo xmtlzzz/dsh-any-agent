@@ -6,12 +6,12 @@
     "url": "https://github.com/xmtlzzz/dsh-any-agent",
     "source": "github"
   },
-  "version": "0.7.0",
+  "version": "0.7.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "dsh-any-agent",
-      "version": "0.7.0",
+      "version": "0.7.1",
       "transport": {
         "type": "stdio"
       },
@@ -34,11 +34,11 @@
         },
         {
           "name": "DSH_MCP_APPROVAL",
-          "description": "What happens when DSH asks to go beyond its sandbox: auto-allow, auto-deny, or ask (the caller decides with dsh_approval_decide). read-only sessions always use auto-deny.",
+          "description": "Machine-side approval ceiling for sandbox escalation: auto-deny, ask, or auto-allow. The default workspace-write tier denies escalation. Read-only always denies.",
           "format": "string",
           "isRequired": false,
           "isSecret": false,
-          "default": "auto-allow",
+          "default": "auto-deny",
           "choices": ["auto-allow", "auto-deny", "ask"]
         },
         {

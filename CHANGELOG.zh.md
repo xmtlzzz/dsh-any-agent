@@ -12,7 +12,22 @@
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-11-12
+
 ### 变更
+
+- `workspace-write` 默认拒绝越界审批。`DSH_MCP_APPROVAL` 限制调用方可请求
+  的审批策略，恢复已有会话时也会应用当前上限。
+  如需逐次确认越界请求，在 MCP 服务配置中设为 `DSH_MCP_APPROVAL=ask`，然后重新连接。
+- 哨兵保留期内，服务重启后仍可查到已接收的回执和幂等键。尚未执行的排队回合
+  会在恢复时写出取消哨兵。
+- 看门狗发出取消后，若 ACP 在宽限内无响应，服务会隔离并终止该进程，记录
+  `watchdog_timeout`。同一进程中的其他回合也会中断。共享进程意外退出时，失败哨兵
+  会保留退出前已收到的输出。
+- 支持 MCP `2026-07-28` 服务发现和逐请求元数据，同时兼容旧版握手。校验工具入参，
+  多工作区时要求显式指定 `cwd`。宿主取消阻塞请求后，停止等待和发送进度。
+- 为建会话、派活和取结果提供输出 schema。CI 验证实际安装的包，配置模型 runner 后，
+  发版时用真实模型验证同一流程。
 
 - **仓库根目录的文档少了。** 使用注意事项移到
   `docs/zh/caveats.md` / `docs/en/caveats.md`，已归档的设计草案移到
@@ -1195,7 +1210,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.7...v0.6.8

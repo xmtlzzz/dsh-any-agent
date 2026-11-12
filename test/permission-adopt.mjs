@@ -21,6 +21,7 @@ process.env.DSH_MCP_FORGOTTEN_DIR = join(home, 'forgotten');
 process.env.DSH_BIN = join(root, 'no-such-dsh.js');
 process.env.DSH_MCP_BOOTSTRAP = '0';
 delete process.env.DSH_MCP_ALLOW_FULL_ACCESS;
+delete process.env.DSH_MCP_APPROVAL;
 
 const { Hub, Conversation } = await import('../src/hub.mjs');
 
@@ -68,7 +69,15 @@ try {
   seedProj('session-write-record', 'workspace-write');
   const c2 = await hub.get('session-write-record');
   check('权限档 = workspace-write', c2.permission === 'workspace-write', c2.permission);
-  check('审批策略 = auto-allow', c2.onApproval === 'auto-allow', c2.onApproval);
+  check('workspace-write 默认拒绝越界审批', c2.onApproval === 'auto-deny', c2.onApproval);
+  for (const [ceiling, requested] of [['auto-deny', 'ask'], ['auto-deny', 'auto-allow'], ['ask', 'auto-allow']]) {
+    process.env.DSH_MCP_APPROVAL = ceiling;
+    const error = await hub.create({ cwd: root, permission: 'workspace-write', onApproval: requested }).catch((e) => e);
+    check(`机器侧 ${ceiling} 拒绝调用方请求 ${requested}`, /审批上限|approval ceiling/.test(error?.message));
+  }
+  const clamped = new Conversation({ id: 'old-approval-policy', cwd: root, permission: 'workspace-write', onApproval: 'auto-allow' }, hub);
+  check('已保存的宽松审批策略服从当前机器上限', clamped.onApproval === 'ask');
+  delete process.env.DSH_MCP_APPROVAL;
 
   console.log('\n[3] 记录 read-only 不能被侧车提升');
   seedSession('session-readonly', join(root, 'ws'));

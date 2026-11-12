@@ -138,7 +138,7 @@ Afterwards every JSON config still parses and `codex mcp list` still reads the f
 
 **`cwd` is optional: it defaults to the project the client has open**
 
-The client already knows which folder the user is working in (MCP roots). `dsh_start` without `cwd` now sends one `roots/list` request and converts the returned `file://` URI into a path, so "DSH works where the client is looking" is the default - which also removes the usual way to end up on the home directory by building the path by hand. A client that does not advertise roots, or does not answer in time, gets an actionable error instead of a guessed directory.
+On handshake-based MCP versions, `dsh_start` can use the client's single local root when `cwd` is omitted. Pass an absolute `cwd` when the client reports several roots, reports none, or uses MCP `2026-07-28`.
 
 **Do not use the home directory as `cwd`**
 

@@ -10,7 +10,8 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
-| 0.7.x | `0.2.2-rc.1` (desktop app) | ✅ Verified (offline) | Offline suite run against 0.7.0 on 2026-11-11 (41 suites, 1892 checks), all passing, plus a real-client check of resident process mode: the Claude desktop app was quit mid-turn and reopened, and the turn finished with a `done` sentinel. **The model-backed suites were not re-run for 0.7.x**; their last run is the 0.6.x row below |
+| 0.7.1 | `0.2.1-rc.5` | ✅ Verified | Windows release candidate tested with DSH via npx and Node 22.19. The full run passed 41 offline suites and found one localized error assertion failure in the model-backed `boundary` suite. After the fix, `boundary` passed all 46 checks. The optional `acceptance` suite was skipped because the profile had no IDA MCP |
+| 0.7.0 | `0.2.2-rc.1` (desktop app) | ✅ Verified (offline) | All 41 offline suites (1892 checks) passed on 2026-11-11. In a resident process test, the Claude desktop app was quit mid-turn and reopened, and the turn finished with a `done` sentinel |
 | 0.6.x | `0.2.1-rc.5` | ✅ Verified | Full suite run against 0.6.9 on 2026-11-10 (offline + model-backed; DSH via npx, Node 22.19), all passing; `acceptance` skipped because the profile has no IDA MCP. Other DSH versions were not re-verified for 0.6.x — the 0.5.x rows below are their last runs |
 | 0.5.x | `0.1.7-rc.1` or newer | ✅ Verified | ACP and the experimental Agent Teams packages are available; team mode is opt-in via `dsh-any-agent team on` |
 | 0.5.x | `0.1.5-rc.1` | ⚠️ Partial | ACP basics work; no team packages, so team mode stays off |
@@ -25,6 +26,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 ## Public contract (what callers can rely on)
 
+- **MCP stdio** supports the `2026-07-28` request metadata and service discovery, plus handshake revisions from `2024-11-05` through `2025-11-25`. Pass an explicit `cwd` with `2026-07-28`. Older clients can supply a single local MCP root.
 - **Sentinel JSON**: the top-level `schema` is the format version, currently `1` (older releases omit the field; their shape is the same as 1). Within one `schema`, fields are **only added**, never removed, renamed or retyped; callers should ignore fields they do not know. A breaking change bumps `schema` and is called out in the CHANGELOG.
 - **MCP tool surface**: tool names, parameter names and types, which parameters are required, enum values. New tools, optional parameters and enum values are compatible; removing anything, changing a type, making a parameter required or dropping an enum value is breaking, happens only with a minor version change (before 1.0), and is called out in the CHANGELOG. Tool descriptions and the returned `text` are not part of the contract (they are written for the model and change freely).
 - **Live event stream**: each event's `v` is its format version; fields are listed in [live-view-design.md](live-view-design.md) §6.

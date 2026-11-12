@@ -20,6 +20,8 @@ process.env.DSH_HOME = join(root, 'dsh-home');
 process.env.DSH_MCP_GIT_STATUS = '0';
 process.env.DSH_MCP_WATCHDOG_AFTER_MS = '150';
 process.env.DSH_MCP_STALL_MS = '200';
+process.env.DSH_MCP_WATCHDOG_GRACE_MS = '120';
+process.env.DSH_MCP_APPROVAL = 'auto-allow';
 process.env.DSH_MCP_TURN_MAX_MS = '0';
 
 const { Conversation } = await import('../src/hub.mjs');
@@ -68,6 +70,8 @@ try {
     watchdogVerdict({ ...base, maxMs: 0, elapsedMs: 99 * 3600_000, sinceProgressMs: 0 }) === null);
   check('巡检间隔：默认阈值下 60 秒一次，小阈值不低于 50ms', () =>
     watchdogTickMs({ stallMs: 10 * min, maxMs: 0 }) === 60_000 && watchdogTickMs({ stallMs: 100, maxMs: 0 }) === 50);
+  check('总时长上限比卡住阈值短时，巡检按更短的上限安排', () =>
+    watchdogTickMs({ stallMs: 10 * min, maxMs: 300 }) === 60);
 
   // ── 接入 ───────────────────────────────────────────────────────
   const sentinels = [];
@@ -86,11 +90,12 @@ try {
     },
   };
   /** 假 ACP 进程：收到 session/cancel 就以 cancelled 结束回合（与 DSH 一致）。 */
-  function fakeProc() {
+  function fakeProc({ ignoresCancel = false } = {}) {
     let finish = null;
     const proc = {
       alive: true,
       cancels: 0,
+      aborts: 0,
       request(method) {
         if (method === 'session/prompt') return new Promise((resolve) => (finish = resolve));
         return Promise.resolve({});
@@ -98,7 +103,12 @@ try {
       notify(method) {
         if (method !== 'session/cancel') return;
         proc.cancels += 1;
-        finish?.({ stopReason: 'cancelled' });
+        if (!ignoresCancel) finish?.({ stopReason: 'cancelled' });
+      },
+      abort() {
+        proc.aborts += 1;
+        proc.alive = false;
+        return Promise.resolve(true);
       },
       end(stopReason = 'end_turn') {
         finish?.({ stopReason });
@@ -106,9 +116,9 @@ try {
     };
     return proc;
   }
-  function makeConv(id, extra = {}) {
+  function makeConv(id, extra = {}, procOptions) {
     const conv = new Conversation({ id, cwd: root, permission: 'workspace-write', onApproval: 'auto-allow', ...extra }, hub);
-    const proc = fakeProc();
+    const proc = fakeProc(procOptions);
     conv.ensureAlive = async () => {
       conv.proc = proc;
       return proc;
@@ -136,6 +146,14 @@ try {
   }
 
   console.log('\n[3] ★ 一直有进展 → 不打断，正常结束');
+  {
+    const { conv, proc } = makeConv('wd-unresponsive', {}, { ignoresCancel: true });
+    const result = await conv.prompt('忽略取消请求的回合', { wait: true, timeoutMs: 5000 });
+    check('ACP 忽略取消后只隔离进程一次', () => proc.cancels === 1 && proc.aborts === 1);
+    check('没有 ACP 回包也能写 watchdog_timeout 终态', () =>
+      result.stop_reason === 'watchdog_timeout' && result.watchdog.escalated === true &&
+      sentinels.at(-1)?.result.stop_reason === 'watchdog_timeout' && !conv.busy);
+  }
   {
     const { conv, proc } = makeConv('wd-active-00000-0000-0000-000000000002');
     const pending = conv.prompt('一直在干活的任务', { wait: true, timeoutMs: 5000 });

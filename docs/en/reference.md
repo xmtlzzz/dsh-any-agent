@@ -13,7 +13,7 @@
 | `DSH_MCP_BOOTSTRAP` | on | Whether this server may create/sync the DSH profile on first start. `0` makes it drive an existing profile only and never write a file |
 | `DSH_MCP_ROUTE_SOURCE` | unset | Pin where model routes are copied from during bootstrap: a profile name (`desktop`, `web`, …) or `__home__` for `$DSH_HOME/cordis.patch.yml`. Unset = try home → desktop → web → headless → acp |
 | `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | Conversation registry, survives restarts. The old `<repo>/.state` location is migrated once on startup |
-| `DSH_MCP_APPROVAL` | `auto-allow` (non-read-only) | Default approval policy. `ask` makes out-of-workspace requests surface as pending approvals instead of being auto-allowed |
+| `DSH_MCP_APPROVAL` | `auto-deny` for `workspace-write` and `read-only` | Machine approval default and ceiling. Set `ask` to decide escalations individually. Read-only always denies. |
 | `DSH_MCP_APPROVAL_TIMEOUT_MS` | `300000` | How long a pending `ask` approval waits before being cancelled |
 | `DSH_MCP_FORGOTTEN_DIR` | `$DSH_HOME/.dsh-any-agent-forgotten` | Tombstones written by `dsh_release(forget=true)` |
 | `DSH_MCP_RUNS_DIR` | `<state file dir>/runs` | Root for async completion sentinels (`<this>/<conversation_id>/<run_id>.json`) |
@@ -40,6 +40,7 @@
 | `DSH_MCP_REASONING_EFFORT` | `max` | Default reasoning effort |
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0` (no timeout) | Wait bound for **`wait=true` only**; on expiry the turn merely moves to the background |
 | `DSH_MCP_WATCHDOG_AFTER_MS` | `900000` (15 min) | How long into a turn the watchdog starts judging whether it is stuck. `0` = no stall check |
+| `DSH_MCP_WATCHDOG_GRACE_MS` | `5000` (5 s) | Time for ACP to respond after watchdog cancellation. On expiry, the server quarantines and stops the ACP process and records `watchdog_timeout`. Other turns on that shared process also stop. |
 | `DSH_MCP_STALL_MS` | `600000` (10 min) | How long with no progress at all (answer, thinking, tool status or usage updates from DSH) counts as stuck; 3× while a tool is running, never while waiting on the caller's approval decision. A stuck turn gets `session/cancel` (same as `dsh_interrupt`) and its result carries `watchdog` |
 | `DSH_MCP_TURN_MAX_MS` | `7200000` (2 h) | Total duration cap for one turn, **regardless of progress** (catches a turn looping while it keeps producing output). `0` = no cap |
 | `DSH_MCP_DAEMON` | off | `1` = resident process mode: the process the client launches only forwards, and conversations, DSH processes and running turns live in one detached resident process, so closing, reconnecting or crashing the client no longer interrupts a turn. Clients with the same configuration (`DSH_*` and locale variables, credential variables ending in `_KEY` such as `DEEPSEEK_API_KEY` or a profile's `apiKeyEnv`, `*_PROXY`, and the `dsh-any-agent team on/off` setting) share one resident process, whose environment DSH inherits; a credential in a variable with another name is not covered, so rename it or leave this off. `dsh-any-agent-setup --yes --daemon` writes it into the client configs |
