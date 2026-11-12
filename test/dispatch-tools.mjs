@@ -359,11 +359,12 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
     assert.equal(lvl('0.2.2-rc.1'), 'verified');
     assert.equal(dshVersionStatus('0.2.2-rc.1').status, 'ok');
   });
-  check('★ 只有本发布线重跑过的版本（0.2.1）才说"跑过全量套件"', () => {
+  check('★ 只有本发布线重跑过的版本（0.2.1-rc.5）才说"跑过全量套件"', () => {
     const s = dshVersionStatus('0.2.1-rc.5');
     assert.equal(s.rerun, true);
-    assert.match(s.note, /已用 0\.6\.x 跑过全量套件/);
-    assert.match(s.noteEn, /passed the full suite on 0\.6\.x/);
+    assert.match(s.note, /已用 0\.7\.1 跑过全量套件/);
+    assert.match(s.noteEn, /was tested with the full suite on 0\.7\.1/);
+    assert.equal(dshVersionStatus('0.2.1-rc.4').rerun, false);
   });
   check('★ 区间内但本发布线没重跑的版本（0.1.7 / 0.2.2）如实说明，仍是 ok', () => {
     for (const v of ['0.1.7-rc.1', '0.2.2-rc.1']) {
