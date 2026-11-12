@@ -12,7 +12,7 @@
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg?style=flat-square)](package.json)
 [![tests](https://img.shields.io/github/actions/workflow/status/xmtlzzz/dsh-any-agent/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/xmtlzzz/dsh-any-agent/actions/workflows/tests.yml)
 
-[官网](https://dsh-any-agent.xmtlz.dev/) · [快速开始](#快速开始) · [主要优势](#-主要优势) · [工具](#-工具) · [实时查看](#-实时查看派出去的活在干什么) · [使用注意事项](docs/zh/caveats.md) · [更新日志](CHANGELOG.md)
+[官网](https://dsh-any-agent.xmtlz.dev/) · [快速开始](#快速开始) · [主要优势](#-主要优势) · [工具](#-工具) · [实时查看](#-实时查看派出去的活在干什么) · [使用注意事项](docs/zh/caveats.md) · [更新日志](CHANGELOG.zh.md)
 
 </div>
 
@@ -44,7 +44,8 @@ DSH（DeepSeek Harness）本身**全都能做** —— 它有文件/shell 工具
 |---|---|
 | 🔄 **进程死了对话也不丢** | 对话身份在磁盘上。进程崩溃、被空闲回收、甚至整个服务重启，都不影响继续——下次调用自动 `resume`，记忆完整（跨进程实测）。 |
 | 🗣️ **不用傻等** | 回合跑偏了能**插话改口**（约 100ms 收敛到 idle，四次打断实测），或**排队**等这轮跑完再说；打断后会话不损坏。 |
-| 📡 **跑完自动通知** | 长任务 `wait=false` 立刻返回 `run_id`；回合结束时**原子写出哨兵文件**，用你宿主的后台任务等它即可。不轮询、不占轮次。 |
+| 📡 **跑完自动通知** | 长任务用 `wait=false` 立刻返回 `run_id`。回合结束时**原子写出哨兵文件**，唤醒宿主的后台等待任务。看门狗会停下卡住或超过时限的回合。服务正常退出时会为未完成的回合写出 `interrupted` 哨兵，若被强制终止，则在下次启动时补写。 |
+| 🌿 **可以同时改同一个仓库** | `dsh_start(isolation="worktree")` 给会话独立的 Git worktree 和分支，你可以继续编辑原目录。在 worktree 里审核改动，确认后合并提交。默认关闭。 |
 | 🪟 **多会话并发** | `dsh_list(only_running)` 看谁在跑，`dsh_read` 游标式增量读——像切窗口一样轮流盯。 |
 | 👀 **你自己就能看见** | `dsh-any-agent watch`（终端）或 `dsh-any-agent dashboard`（本地只读网页）把派出去的活展开成调用链：客户端 → 会话 → 回合 → 工具调用 / 审批，带每回合 token 与上下文占用，回合进行中实时更新。独立进程、不碰写锁，所有客户端派的活一起看。 |
 | 🧠 **灰色思考默认隐藏** | 只给"想了 N 字 / M 秒"的统计，不烧上下文；**本服务不写日志、不落盘**（DSH 自己的会话日志仍含思考，见“日志与隐私”）。 |
@@ -64,7 +65,7 @@ DSH（DeepSeek Harness）本身**全都能做** —— 它有文件/shell 工具
 | 技能、子代理、Agent Teams、任务板 | 异步派活、收据、完成哨兵 |
 | 模型路由、沙箱、审批策略 | 增量读、插话、中断、实时调用链视图 |
 | 记忆/上下文/压缩 | 审批桥、写锁治理、队列、收件箱 |
-| worktree（agent 自己用 git 建） | 安装、状态、体检、审计 |
+| agent 在会话里自己用 git 建的 worktree | 安装、状态、体检、审计；可选的会话级 worktree 隔离（`isolation="worktree"`） |
 
 **按需派发**：`dsh_send` 只传目标，不传工具清单，也不要求调用方先了解 DSH 有哪些工具。
 DSH 的 agent 按任务自己选能力——包括它自己新长出来的能力（比如实验性 Agent Teams），
@@ -79,7 +80,7 @@ profile 切到 `dsh-team`（含实验性 Agent Teams），`dsh_send` 会提示"�
 队列、收件箱、状态、释放、抢占、体检。文件读写 / shell / 编辑器 / 任务板都不做。
 
 **什么时候需要外层再加东西**：只有当你需要"保证"而不是"行为"时——
-例如多个顶层会话并发改同一个仓库，需要外层 worktree 隔离；团队协作则优先让 DSH 自己开团队
+例如多个顶层会话并发改同一个仓库，需要 worktree 隔离（`dsh_start(isolation="worktree")` 给每个会话一个独立的 git worktree 和分支）；团队协作则优先让 DSH 自己开团队
 （需要把实验性 team 包挂进 profile，成员共享一个工作区）。
 
 ## 快速开始
@@ -112,7 +113,7 @@ dsh-any-agent-setup --yes
 <details>
 <summary>展开完整目录</summary>
 
-- **快速开始** —— [安装并连接](#快速开始) · [更新日志](CHANGELOG.md)
+- **快速开始** —— [安装并连接](#快速开始) · [更新日志](CHANGELOG.zh.md)
 - **先看这里** —— [解决什么问题](#-解决什么问题) · [主要优势](#-主要优势) · [为什么不是包一层](docs/zh/architecture.md) · [前置要求](docs/zh/install.md) · [安装配置](docs/zh/install.md)
 - **怎么用** —— [工具](#-工具) · [实时查看](#-实时查看派出去的活在干什么) · [先派活回头验收](docs/zh/usage.md) · [跑完自动通知](docs/zh/usage.md) · [多会话并发](docs/zh/usage.md)
 - **行为** —— [权限](docs/zh/security.md) · [思考内容](docs/zh/usage.md) · [日志与隐私](docs/zh/security.md) · [工作区与 GUI](docs/zh/security.md)

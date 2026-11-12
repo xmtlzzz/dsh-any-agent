@@ -12,11 +12,13 @@ npm version patch --no-git-tag-version
 #    然后手工改 CHANGELOG.md：
 #      - 把 [Unreleased] 变成新版本一节（这一节就是 GitHub Release 的说明，写给用户看）
 #      - 文末链接区：[Unreleased] 改成 compare/vx.y.z...HEAD，并加一行 [x.y.z]: …/compare/v上一版...vx.y.z
+#    CHANGELOG.zh.md 照样改一遍（同一个版本标题、同样的文末链接，内容是中文译文）；
+#    两份的版本标题或链接对不上时 check:release 会失败
 
 # 2. 本地跑一遍离线套件（和 CI 相同，不花 token、不需要 DSH）
 node test/run.mjs
 node test/package-check.mjs
-npm run check:release   # 版本号 / CHANGELOG 这一节与文末链接 / 能否生成 Release 说明 / 文档链接 / 打包清单
+npm run check:release   # 版本号 / CHANGELOG 这一节与文末链接 / 中英 CHANGELOG 版本一致 / 能否生成 Release 说明 / 文档链接 / 打包清单
 npm run docs:counts:check   # tests.md 与 CI 注释里的检查数 = 刚才 node test/run.mjs 写出的报告
 #    不一致就是改过测试没更新数字：node test/run.mjs --all --report .state/test-report.json && npm run docs:counts
 #    （模型套件的数字只有带 --all 的报告才会更新，见 docs/zh/tests.md「改了测试之后」）

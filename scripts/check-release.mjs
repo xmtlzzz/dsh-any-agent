@@ -1,8 +1,9 @@
 /**
  * Release gate: the package version, CHANGELOG and docs must agree.
  *
- * Catches the two drifts that actually happened in this repo:
+ * Checks for:
  *   - publishing a version whose CHANGELOG section was never written;
+ *   - version headings or compare links drifting between changelogs;
  *   - splitting docs and leaving relative links that 404 on GitHub.
  *
  * No network, no DSH, no tokens. Run before `npm publish`.
@@ -53,6 +54,24 @@ if (changelog.includes(`## [${version}]`) && version !== '0.0.0') {
   } else bad(`CHANGELOG.md "[Unreleased]:" link should compare v${version}...HEAD`);
 }
 
+// 中文更新日志逐版本对应英文版：版本标题（含日期）、顺序和文末链接都必须一致，
+// 免得发版时只改了一份。
+const headingsOf = (text) => text.split(/\r?\n/).filter((line) => /^## \[/.test(line));
+const linksOf = (text) => text.split(/\r?\n/).filter((line) => /^\[[^\]]+\]: /.test(line)).join('\n');
+const hasChineseChangelog = fs.existsSync(path.join(ROOT, 'CHANGELOG.zh.md'));
+if (!hasChineseChangelog) bad('CHANGELOG.zh.md is missing');
+else {
+  const changelogZh = read('CHANGELOG.zh.md');
+  const en = headingsOf(changelog);
+  const zh = headingsOf(changelogZh);
+  let d = 0;
+  while (d < Math.max(en.length, zh.length) && en[d] === zh[d]) d++;
+  if (d === en.length && d === zh.length) ok(`CHANGELOG.zh.md lists the same ${en.length} version headings`);
+  else bad(`CHANGELOG.zh.md headings differ from CHANGELOG.md at #${d + 1}: en "${en[d] ?? '(none)'}", zh "${zh[d] ?? '(none)'}"`);
+  if (linksOf(changelog) === linksOf(changelogZh)) ok('CHANGELOG.zh.md has the same compare links');
+  else bad('CHANGELOG.zh.md compare links differ from CHANGELOG.md');
+}
+
 // MCP Registry：server.json 与 package.json 必须一致（registry 用 npm 包里的 mcpName 验证归属，
 // 而 release.yml 会在 npm 发布之后把这份 server.json 登记上去）。
 if (fs.existsSync(path.join(ROOT, 'server.json'))) {
@@ -78,6 +97,8 @@ if (fs.existsSync(path.join(ROOT, 'server.json'))) {
 const docFiles = [
   'README.zh.md',
   'README.md',
+  'CHANGELOG.md',
+  ...(hasChineseChangelog ? ['CHANGELOG.zh.md'] : []),
   '.github/SECURITY.md',
   '.github/CONTRIBUTING.md',
   'docs/history/design-v0.2.md',
@@ -106,10 +127,10 @@ for (const required of ['docs/zh/team.md', 'docs/en/team.md', 'docs/zh/compatibi
   else bad(`${required} is missing`);
 }
 
-// README 与运行时提示里引用 docs/zh、docs/en；docs/brand、docs/images（图片）不进包。
-for (const d of ['docs/zh/', 'docs/en/']) {
-  if (pkg.files?.includes(d)) ok(`package.json ships ${d}`);
-  else bad(`package.json "files" does not include ${d}`);
+// npm 包应包含 README 链接到的用户文档和中文版更新日志。
+for (const entry of ['docs/zh/', 'docs/en/', 'CHANGELOG.zh.md']) {
+  if (pkg.files?.includes(entry)) ok(`package.json ships ${entry}`);
+  else bad(`package.json "files" does not include ${entry}`);
 }
 
 console.log(`\n${failed === 0 ? 'release check: 通过 ✅' : `release check: ${failed} 项失败 ❌`}`);

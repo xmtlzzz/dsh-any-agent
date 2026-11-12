@@ -44,7 +44,8 @@ DSH (DeepSeek Harness) can do all of that — it has file/shell tools, skills, s
 |---|---|
 | 🔄 **A dead process never kills a conversation** | The identity lives on disk. A crash, an idle reap, even restarting this whole server costs you nothing — the next call transparently resumes it, memory intact (verified across processes). |
 | 🗣️ **You are never stuck waiting** | Steer a conversation mid-flight — **interject** to stop and redirect (~100 ms to reach idle, measured over four cancelled turns), or **queue** a remark for after the current turn. Interrupting never damages the conversation. |
-| 📡 **Completion notification, not polling** | Long tasks return instantly with a `run_id`; when the turn ends, a **sentinel file** is written atomically so a background task in *your* host wakes you. No polling, no occupied turn. |
+| 📡 **Completion notification, not polling** | Long tasks return immediately with a `run_id`. An atomic **sentinel file** wakes your host's background waiter when the turn ends. The watchdog stops stalled turns and enforces a time limit. The server writes an `interrupted` sentinel for unfinished turns on normal shutdown or on the next startup after a forced kill. |
+| 🌿 **Edit the same repository at the same time** | `dsh_start(isolation="worktree")` gives the conversation its own Git worktree and branch while you keep editing the original directory. Review the changes in the worktree and merge its commits when ready. Worktree isolation is off by default. |
 | 🪟 **Many conversations at once** | `dsh_list(only_running)` shows what's live; `dsh_read` gives cursor-based incremental output. Cycle between them like windows. |
 | 👀 **You can see it yourself** | `dsh-any-agent watch` (terminal) or `dsh-any-agent dashboard` (local read-only web page) lays dispatched work out as a call chain — client → conversation → run → tool calls / approvals — with per-run tokens and context-window use, updating while the run is going. Separate processes, never touch the write lock, and show work from every client together. |
 | 🧠 **Reasoning hidden by default** | You get "thought for N chars / M seconds" statistics instead of context-burning prose — and it is never logged, never written to disk. |
@@ -65,7 +66,7 @@ from DSH's tool surface is proxied, duplicated or preloaded.
 | Skills, subagents, Agent Teams, task board | Async dispatch, receipts, completion sentinels |
 | Model routing, sandbox, approval policy | Incremental read, interject, interrupt, live call-chain view |
 | Memory/context/compaction | Approval bridge, write-lock governance, queue, inbox |
-| worktrees (the agent creates them with git) | Setup, status, doctor, audit |
+| worktrees the agent creates with git inside a conversation | Setup, status, doctor, audit; optional per-conversation worktree isolation (`isolation="worktree"`) |
 
 **Dispatch on demand**: `dsh_send` passes a goal, not a tool manifest, and the caller
 does not need to know DSH's tool list. The DSH agent picks what it needs — including
@@ -86,7 +87,8 @@ shell, no editor, no task board.
 
 **When to add something outside DSH**: only when you need a *guarantee* rather than a
 *behavior* — for example, several top-level sessions editing the same repository need
-outer worktree isolation. For collaboration, prefer letting DSH run the team itself
+worktree isolation (`dsh_start(isolation="worktree")` gives each conversation its own git
+worktree and branch). For collaboration, prefer letting DSH run the team itself
 (mount the experimental team packages into the profile; teammates share one workspace).
 
 ## Quick start
