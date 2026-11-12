@@ -13,7 +13,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert';
-import { Conversation } from '../src/hub.mjs';
+import { Conversation, Hub } from '../src/hub.mjs';
 import { createHandlers } from '../src/tools.mjs';
 
 let passed = 0;
@@ -30,6 +30,7 @@ function check(name, fn) {
 }
 
 const log = { info() {}, debug() {}, dshStderr() {} };
+process.env.DSH_MCP_APPROVAL = 'auto-allow';
 const root = process.cwd();
 const sentinels = [];
 const hub = {
@@ -124,7 +125,7 @@ const stubConv = {
     pending_approvals: [],
   }),
   getRun: () => {
-    throw new Error('未知 run_id');
+    return Hub.prototype.readStoredRun.call({ runSentinelPath: () => file, runMarkerPath: () => file + '.running' }, 'failure-terminal-3', runId);
   },
 };
 const handlers = createHandlers({

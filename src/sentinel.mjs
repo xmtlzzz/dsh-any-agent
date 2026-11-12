@@ -6,7 +6,7 @@
  * `sanitizeResultForSentinel`，外部的导入路径不变。
  */
 
-import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, rmdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { SENTINEL_INCLUDE_REASONING, SENTINEL_TOOL_INPUTS } from './config.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
@@ -93,7 +93,7 @@ export function pruneDirTree(dir, ttlMs) {
       if (!entry.isDirectory()) continue;
       const sub = join(dir, entry.name);
       for (const f of readdirSync(sub, { withFileTypes: true })) {
-        if (!f.isFile()) continue;
+        if (!f.isFile() || f.name.endsWith('.running')) continue;
         const fp = join(sub, f.name);
         try {
           if (statSync(fp).mtimeMs < cutoff) {
@@ -106,7 +106,7 @@ export function pruneDirTree(dir, ttlMs) {
       }
       try {
         if (readdirSync(sub).length === 0) {
-          rmSync(sub, { recursive: true, force: true });
+          rmdirSync(sub);
           dirsRemoved++;
         }
       } catch {

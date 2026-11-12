@@ -8,6 +8,7 @@ import { createInterface } from 'node:readline';
 
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-approval-details-'));
 process.env.DSH_MCP_STATE = join(root, 'state.json');
+process.env.DSH_MCP_APPROVAL = 'auto-allow';
 const { Hub, Conversation } = await import('../src/hub.mjs');
 const { createHandlers } = await import('../src/tools.mjs');
 const logs = [];

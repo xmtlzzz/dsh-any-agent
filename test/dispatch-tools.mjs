@@ -15,6 +15,7 @@ process.env.DSH_MCP_AUDIT_FILE = join(auditDir, 'audit.jsonl');
 // 这一套要覆盖"团队提示注入"，所以在本进程显式启用团队模式；
 // config 在动态 import 时读取 env（静态 import 会被提升到赋值之前）。
 process.env.DSH_MCP_TEAM = '1';
+process.env.DSH_MCP_APPROVAL = 'auto-allow';
 const { Conversation, Hub } = await import('../src/hub.mjs');
 const { createHandlers } = await import('../src/tools.mjs');
 const { TEAM_ACTIVE } = await import('../src/config.mjs');

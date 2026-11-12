@@ -56,6 +56,9 @@ class FakeAcp {
     this.stopped = true;
     return true;
   }
+  async abort() {
+    return this.stop();
+  }
 }
 
 function fakeConv(id) {
@@ -315,6 +318,33 @@ console.log('\n[10] ★ 回收：选中之后会话开跑了新回合，就不�
     },
   });
   check('选中之后用过（回合已经跑完）的会话也不停', () => assert.ok(!stopped.includes(used.id), JSON.stringify(stopped)));
+}
+
+console.log('\n[11] 看门狗只隔离失去响应的共享宿主');
+{
+  const pool = new Hub({ log });
+  const broken = new SessionHost({ cwd: '/broken', permission: 'read-only', log, hub: pool, AcpProcessClass: FakeAcp });
+  const healthy = new SessionHost({ cwd: '/healthy', permission: 'read-only', log, hub: pool, AcpProcessClass: FakeAcp });
+  const brokenA = fakeConv('broken-a');
+  const brokenB = fakeConv('broken-b');
+  const healthyA = fakeConv('healthy-a');
+  broken.attach(brokenA);
+  broken.attach(brokenB);
+  healthy.attach(healthyA);
+  pool.hosts.set('broken', broken);
+  pool.hosts.set('healthy', healthy);
+  await Promise.all([broken.initialize(), healthy.initialize()]);
+  await broken.abort();
+  check('隔离宿主退出池并通知其所有会话', () => {
+    assert.equal(pool.hosts.has('broken'), false);
+    assert.match(brokenA.exits[0], /watchdog/);
+    assert.match(brokenB.exits[0], /watchdog/);
+  });
+  check('另一个宿主和会话继续运行', () => {
+    assert.equal(pool.hosts.get('healthy'), healthy);
+    assert.equal(healthy.alive, true);
+    assert.equal(healthyA.exits.length, 0);
+  });
 }
 
 // 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。

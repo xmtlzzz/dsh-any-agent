@@ -16,6 +16,7 @@ import {
   DEFAULT_REASONING,
   DEFAULT_REASONING_EFFORT,
   DEFAULT_REVIEW,
+  defaultApprovalPolicy,
 } from './config.mjs';
 
 const CONV_ID = 'Conversation id, from dsh_start or dsh_list.';
@@ -30,19 +31,19 @@ export const TOOL_TEXT_EN = {
     params: {
       cwd:
         'Absolute path of the workspace. It decides the agent\'s working directory, where AGENTS.md and skills are discovered, ' +
-        'and the root the sandbox may write to. **When omitted, the project the client currently has open is used** (MCP roots), ' +
-        'so the work happens in the project you see in the client; an explicit value is only required when the client has no ' +
-        'roots support or reports none. Do not pass the user\'s home directory itself: DSH\'s ACL sandbox cannot start there.',
+        'and the root the sandbox may write to. A single local root can supply the default in a legacy MCP client. ' +
+        'Pass cwd explicitly with multiple roots, no roots, or MCP 2026-07-28.',
       permission:
         `Permission tier. Default ${DEFAULT_PERMISSION}. read-only suits untrusted material such as malware samples; ` +
-        'workspace-write lets DSH\'s sandbox limit where writes can go, and requests to go beyond it are auto-allowed by default ' +
-        '(pass on_approval=ask to have them wait for the caller). **The tier is fixed at creation**: by design a resumed DSH ' +
+        'workspace-write limits writes through the DSH sandbox. Escalation requests follow the machine approval policy. ' +
+        'The tier is fixed at creation. A resumed DSH ' +
         'session keeps the permission it recorded, so changing this argument later does not change an existing conversation; ' +
         'create a new one to switch tiers. (The tier is really enforced: it comes from the environment passed at spawn time, ' +
         'and test/permission.mjs checks each tier against the session\'s own record.)',
       on_approval:
         'How approval requests are handled. **read-only forces auto-deny** (auto-allow or ask is rejected outright, because it ' +
-        `would let DSH's sandbox escalation through); other tiers default to ${process.env.DSH_MCP_APPROVAL ?? 'auto-allow'}. ` +
+        `would let DSH's sandbox escalation through). The default tier has a machine ceiling of ${defaultApprovalPolicy(DEFAULT_PERMISSION)}. ` +
+        'Callers can choose a stricter policy. The operator sets DSH_MCP_APPROVAL to permit a less restrictive policy. ' +
         'ask leaves each request pending until you decide it with dsh_approval_decide.',
       title_hint:
         'A readable label for the conversation (up to 200 characters). DSH\'s own title is a truncated prefix of the first ' +
@@ -107,10 +108,10 @@ export const TOOL_TEXT_EN = {
       queue:
         'Whether to enqueue when the conversation is busy (default false = error). With true it returns run_id + ' +
         'queue_position at once and runs after the current turn; the sentinel is written only when the run really ends, not ' +
-        'when it is queued. The queue is memory-only and lost on restart; manage it with dsh_queue. ' +
+        'when it is queued. Queued prompts stay in memory. After restart, unstarted receipts resolve as cancelled. Manage the queue with dsh_queue. ' +
         "(dsh_interject(mode='queue') also runs after the current turn, but it blocks until the new turn ends and does not use this queue.)",
       client_run_id:
-        'Caller-generated idempotency key (up to 128 characters, scoped to this conversation). Submitting the same key again ' +
+        'Caller-generated idempotency key (up to 128 characters, scoped to this conversation and retained with the sentinel). Submitting the same key again ' +
         'does not create a second run: it returns the first run\'s result or receipt (replayed=true). For safely resending ' +
         'after a response was lost in transport.',
       team:
@@ -160,13 +161,13 @@ export const TOOL_TEXT_EN = {
       'Details of one conversation; with run_id, **the final result of that dispatch** (the place to collect asynchronous ' +
       'work). Without run_id it uses the most recent turn. Returns: title, workspace, permission tier, state, turn count, ' +
       'token usage, context pressure, pending approvals, and the turn\'s full result (answer, tools, usage, error) with its ' +
-      '**review ticket**. **Run records are memory-only and limited to the latest 20**; after a restart or eviction the ' +
+      '**review ticket**. The service keeps the latest 20 runs in memory. After a restart or eviction the ' +
       'result is read back from the sentinel file, which is on disk and survives restarts.',
     params: {
       conversation_id: CONV_ID,
       run_id: 'The run_id returned by dsh_send. Omit for the most recent turn.',
       client_run_id:
-        'Look the run up by the caller\'s idempotency key instead of run_id (only works while the run is still in memory, i.e. within the latest 20).',
+        'Look the run up by its idempotency key instead of run_id. Works across restarts during sentinel retention.',
       max_chars:
         'Result budget (default 0 = no truncation, full result). Above 0 it applies to **both** text and structured output: ' +
         'the answer is cut to that length (with answer_truncated / next_offset), and structured.run.result.tools_used keeps ' +
@@ -302,7 +303,7 @@ export const TOOL_TEXT_EN = {
     title: 'Manage queue',
     description:
       'Inspect or change a conversation\'s queue of pending tasks (it only manages tasks already queued; enqueue with ' +
-      'dsh_send(queue=true); **memory-only**, lost on restart). action=list lists them; remove cancels one and writes a ' +
+      'dsh_send(queue=true)). A restart marks unstarted receipts cancelled. action=list lists them. remove cancels one and writes a ' +
       'cancelled sentinel; update rewrites the queued text; promote moves one to the front.',
     params: {
       conversation_id: CONV_ID,
@@ -337,7 +338,7 @@ export const INSTRUCTIONS_EN = `This server drives DeepSeek Harness (DSH) as a c
 
 [Write lock] One writer per conversation at a time. On "already owned by an active write handle" (or a vague Internal error) do not retry; read lock_holder from dsh_status: stale-mcp -> dsh_takeover; live-mcp -> dsh_release on that side, or dsh_takeover(force=true) if you must; none usually means the GUI holds it -> ask the user to close it there. This server never kills the GUI.
 
-[Defaults] permission ${DEFAULT_PERMISSION}, approval ${process.env.DSH_MCP_APPROVAL ?? 'auto-allow'}; read-only forces auto-deny (use it for untrusted material). Reasoning is hidden by default (returned only with reasoning='full'); reasoning effort defaults to max (lower it with reasoning_effort).
+[Defaults] permission ${DEFAULT_PERMISSION}, machine approval ceiling ${defaultApprovalPolicy(DEFAULT_PERMISSION)}. Read-only forces auto-deny. Reasoning is hidden by default (returned only with reasoning='full'). Reasoning effort defaults to max (lower it with reasoning_effort).
 
 [Privacy] This server's logs, sentinels and registry never contain reasoning text, but DSH's own ~/.dsh/sessions does store it. Sentinels contain the answer and tool inputs (common secrets redacted) and are kept for 7 days.
 

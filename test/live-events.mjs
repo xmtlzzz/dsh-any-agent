@@ -18,6 +18,7 @@ const liveDir = join(root, 'live');
 process.env.DSH_MCP_STATE = join(root, 'state.json');
 process.env.DSH_MCP_LIVE_DIR = liveDir;
 process.env.DSH_MCP_LIVE = 'detail';
+process.env.DSH_MCP_APPROVAL = 'auto-allow';
 // token 用量来自 DSH 的投影缓存：指到临时 DSH_HOME，测试里自己写假的缓存文件。
 process.env.DSH_HOME = join(root, 'dsh-home');
 

@@ -1,5 +1,5 @@
 /**
- * 回合记录与会话级队列（**仅内存**；服务重启后以哨兵文件为准）。
+ * 回合记录与会话级执行队列。Hub 持久化收据及终态，队列的任务正文留在内存。
  *
  * 回合记录（run）让"先派活、回头再验收"成为一等公民：每条含
  * {run_id, status, 时间, prompt 预览, result}，只留最近 MAX_RUNS 条。
@@ -10,6 +10,7 @@
  */
 
 import { normalizeReviewMode } from './review.mjs';
+import { createHash, randomBytes } from 'node:crypto';
 
 /** 保留的回合记录条数（run 结果含正文，所以只留最近若干条）。 */
 export const MAX_RUNS = 20;
@@ -19,6 +20,10 @@ const MAX_RUN_PREVIEW = 200;
 export const MAX_QUEUE = 8;
 
 export const previewOf = (text) => (text.length > MAX_RUN_PREVIEW ? `${text.slice(0, MAX_RUN_PREVIEW)}…` : text);
+
+export function keyedRunId(clientRunId) {
+  return `run-key-${createHash('sha256').update(clientRunId).digest('hex')}`;
+}
 
 export class RunLedger {
   constructor() {
@@ -31,9 +36,9 @@ export class RunLedger {
   }
 
   /** 建一条回合记录。派活时先建，好让调用方立刻拿到 run_id（异步模式的关键）。 */
-  create(text, { conversationId, clientRunId = null, review, sessionReview }) {
+  create(text, { conversationId, clientRunId = null, review, sessionReview, reserve }) {
     const run = {
-      run_id: `run-${Date.now().toString(36)}-${++this.runSeq}`,
+      run_id: clientRunId ? keyedRunId(clientRunId) : `run-${Date.now().toString(36)}-${++this.runSeq}-${randomBytes(4).toString('hex')}`,
       conversation_id: conversationId,
       client_run_id: clientRunId ?? null,
       prompt_preview: previewOf(text),
@@ -45,6 +50,7 @@ export class RunLedger {
       elapsed_ms: null,
       result: null,
     };
+    reserve?.(run);
     this.runs.push(run);
     if (clientRunId) this.clientRuns.set(clientRunId, run.run_id);
     if (this.runs.length > MAX_RUNS) {

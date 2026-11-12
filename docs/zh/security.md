@@ -4,15 +4,15 @@
 
 | 档位 | 审批默认 | 用途 |
 |---|---|---|
-| `workspace-write`（服务端裸默认；`setup` 也默认写入它） | `auto-allow` | DSH 沙箱限制可写范围；越界请求默认放行，传 `on_approval=ask` 才挂起审批 |
+| `workspace-write`（默认） | `auto-deny` | DSH 沙箱限制可写范围，越界审批默认拒绝 |
 | `danger-full-access` | `auto-allow` | 整机写权限，DSH 不再发审批。个人使用最省事：`dsh-any-agent-setup --yes --permission danger-full-access` 把它设成默认档，这本身就算机器侧允许；默认档是别的、只想让个别会话用时，另设 `DSH_MCP_ALLOW_FULL_ACCESS=1` |
 | `read-only` | `auto-deny` | 分析不信任样本（恶意软件、来路不明 dump） |
 
-`on_approval` 可选 `auto-allow` / `auto-deny` / `ask`（`ask` 会把审批挂起，交给 `dsh_approval_decide` 裁决）。
+`DSH_MCP_APPROVAL` 同时是本机的默认审批策略和上限，按从严到宽依次为 `auto-deny`、`ask`、`auto-allow`。调用方可以传更严格的 `on_approval`。恢复已有会话时也会应用当前上限。设 `DSH_MCP_APPROVAL=ask` 后重连，可用 `dsh_approval_decide` 逐条裁决。
 
-**信任模型：本服务只是派发层，权限跟着 DSH 和你自己的配置走。** 它不额外加一层权限判断：你在客户端配置里给了什么档位，DSH 就按什么档位跑；`danger-full-access` 下 DSH 根本不发审批，所以是全放行。这意味着：**谁能调用这些 MCP 工具，谁就能在你的机器上执行命令** —— 包括读了恶意网页或 issue、被提示注入的调用方 agent。个人在自己机器上用，接受这个风险通常没问题；处理不可信内容时用 `read-only`（唯一的硬边界：审批一律拒绝，传 `auto-allow` / `ask` 会被直接拒绝）。
+DSH 按会话档位应用沙箱。启用 `danger-full-access` 后，命令以当前用户权限执行，DSH 会跳过审批。检查不可信内容时用 `read-only`。
 
-**`auto-allow` 下 `workspace-write` 是软边界。** DSH 碰到沙箱挡住的操作（例如 Windows 上子进程管道被拦）会申请 `sandbox_permissions: danger-full-access`，`auto-allow` 会直接放行。默认值不变，但放行**不再是静默的**：每个回合结果都带 `auto_approvals_total`、`auto_escalations_total` 和最多 20 条脱敏后的 `auto_approvals` 摘要（工具、提权档、理由、命令预览）；审核单的证据与清单会点名"本轮有 N 次自动放行，其中 M 次提权"。要逐次把关，就用 `on_approval=ask` 新建会话。
+显式启用 `auto-allow` 后，DSH 遇到沙箱拦截时可以申请并获得 `sandbox_permissions: danger-full-access`。回合结果记录 `auto_approvals_total`、`auto_escalations_total` 和最多 20 条脱敏审批摘要。审核单会列出放行和提权的次数。
 
 **`read-only` 是强制边界，不只是默认值**：它固定使用 `auto-deny`；给只读会话传 `auto-allow` / `ask` 会在 `dsh_start` 被直接拒绝，审批层也会拒绝来自只读会话的任何权限请求。建会话/resume 后还会回读会话自己记录的权限档；只读档如果在 DSH 投影缓存刷盘窗口内仍读不到记录，会 **fail-closed 拒绝继续**，而不是只依赖审批层兜底。否则 profile 的 `defaultPreset` 加宽松审批策略可能放行写操作（对抗审计实测过）。
 
@@ -78,7 +78,7 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 |---|---|---|---|
 | `<状态目录>/conversations.json`、`meta/<会话id>.json` | 会话注册表与元数据：id、cwd、权限、计数、标题提示；不含正文 | 到会话被 forget | `dsh_release(forget=true)` |
 | `<状态目录>/runs/<会话id>/<run_id>.json` | 完成哨兵：正文、用量、审核单、工具输入（均已脱敏） | 7 天（`DSH_MCP_SENTINEL_TTL_MS`） | `DSH_MCP_SENTINEL_TOOL_INPUTS=0` 只留工具输入的长度（自动放行审批的命令预览也去掉）；读完可以直接删 |
-| `<状态目录>/runs/<会话id>/<run_id>.running` | 回合进行中标记：run_id、任务预览（已脱敏）、本服务进程的 PID 与启动时刻 | 写出哨兵时删 | — |
+| `<状态目录>/runs/<会话id>/<run_id>.running` | 接单回执：run ID、调用方幂等键、脱敏任务预览、排队或执行状态和所属进程 | 写出哨兵时删除 | 状态目录应位于支持硬链接的文件系统 |
 | `<状态目录>/reviews/<会话id>/<run_id>.review.json` | 审核记录：裁决、理由、清单、证据摘要（已脱敏） | 同哨兵，7 天 | `DSH_MCP_REVIEW=off` 不自动出审核单 |
 | `<状态目录>/live/<会话id>/events.jsonl` | live 事件流：事件类型、时间、工具名、客户端名；默认还带脱敏后的命令 / 路径 / prompt 预览 | 同哨兵，7 天；5 MB 滚动 | `DSH_MCP_LIVE=meta` 去掉预览，`off` 不写 |
 | `<状态目录>/locks/<会话id>.json` | 写锁持有者登记：本服务与 DSH 子进程的 PID、cwd | 释放会话或进程退出后清 | — |

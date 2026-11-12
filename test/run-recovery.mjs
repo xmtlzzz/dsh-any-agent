@@ -157,10 +157,17 @@ try {
     await a.initialize();
     const started = await a.callTool('dsh_start', { cwd: root });
     const convId = started?.structuredContent?.conversation_id;
-    const sent = await a.callTool('dsh_send', { conversation_id: convId, prompt: '跑一个很长的回合' });
+    const sent = await a.callTool('dsh_send', { conversation_id: convId, prompt: '跑一个很长的回合', client_run_id: 'recovery-active' });
     const runId = sent?.structuredContent?.run_id;
     const sentinel = sent?.structuredContent?.sentinel_file;
     await check('dsh_send 立刻返回收据，标记已写出', () => typeof runId === 'string' && existsSync(markerOf(convId, runId)), McpClient.text(sent).slice(0, 200));
+    const queued = (await a.callTool('dsh_send', {
+      conversation_id: convId, prompt: '排队回合', client_run_id: 'recovery-queued', queue: true,
+    })).structuredContent;
+    await check('队列回执返回前已落盘，且不含完整任务正文', () => {
+      const receipt = readJson(markerOf(convId, queued.run_id));
+      return queued.queued && receipt.status === 'queued' && receipt.started_at === null && !Object.hasOwn(receipt, 'text');
+    });
     process.kill(a.pid, 'SIGKILL');
     for (let i = 0; i < 50 && (() => { try { process.kill(a.pid, 0); return true; } catch { return false; } })(); i++) await sleep(100);
     await check('强杀之后没人写哨兵', () => !existsSync(sentinel));
@@ -173,6 +180,16 @@ try {
     await check('标记删掉了', () => !existsSync(markerOf(convId, runId)));
     const got = await b.callTool('dsh_get', { conversation_id: convId, run_id: runId });
     await check('dsh_get 从哨兵查得到这个回合被中断', () => /interrupted/.test(McpClient.text(got)) && !got?.isError, McpClient.text(got).slice(0, 300));
+    const afterQueue = await b.callTool('dsh_get', { conversation_id: convId, client_run_id: 'recovery-queued' });
+    await check('重启后能按幂等键查到排队回合已取消', () =>
+      existsSync(queued.sentinel_file) && afterQueue.structuredContent?.run?.status === 'cancelled' &&
+      afterQueue.structuredContent.run.run_id === queued.run_id);
+    const retry = await b.callTool('dsh_send', {
+      conversation_id: convId, prompt: '重试同一任务', client_run_id: 'recovery-active',
+    });
+    await check('重启后同一个幂等键返回原终态', () =>
+      retry.structuredContent?.replayed === true && retry.structuredContent.run_id === runId &&
+      retry.structuredContent.stop_reason === 'interrupted');
     await b.close();
   }
 } catch (e) {

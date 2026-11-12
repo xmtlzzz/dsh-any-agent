@@ -102,7 +102,7 @@ dsh-any-agent-setup --yes
 
 > **第一次派活前：** 先读[使用注意事项](docs/zh/caveats.md)，尤其是模型配置与外部 MCP 的权限边界。**外部 MCP 工具的副作用不受 DSH 沙箱约束。** 新机器部署按[安装与配置](docs/zh/install.md)逐步操作。
 
-> **权限：本服务只是派发层，权限跟着 DSH 和你的配置走。** 默认是 `workspace-write`（写入限制在工作区，越界请求自动放行，结果里会列出放行了哪些）。个人在自己机器上用，大多直接开 full access：`dsh-any-agent-setup --yes --permission danger-full-access`，此时 DSH 不再发审批、全部放行。**谁能调用这些工具，谁就能在你机器上执行命令**（包括被提示注入的调用方 agent）；处理不可信内容请用 `read-only`。详见[权限与隐私](docs/zh/security.md)。
+> **默认使用 `workspace-write`，越界审批默认拒绝。** 如需逐条审批，在 MCP 服务配置中设 `DSH_MCP_APPROVAL=ask` 后重连。调用方可以选择更严格的策略。处理不可信内容请用 `read-only`。详见[权限与隐私](docs/zh/security.md)。
 
 > **想先看效果？** 先看 [54 秒宣传片](https://dsh-any-agent.xmtlz.dev/#video)（派活、插话、哨兵落地、调用方复核，终端画面回放自一次真实运行）：
 >
@@ -139,7 +139,7 @@ dsh-any-agent-setup --yes
 | `dsh_approval_decide` | 裁决待决审批（仅当 `on_approval=ask`） |
 | `dsh_status` | 轻量状态查询（单个会话），含写锁持有者 `lock_holder` |
 | `dsh_inbox` | **跨会话待决审批收件箱**：一次列出所有会话的审批、原因、输入与等待时长；裁决仍用 `dsh_approval_decide` |
-| `dsh_queue` | 查看/修改会话队列：`list` / `remove` / `update` / `promote`（队列由 `dsh_send(queue=true)` 产生，仅内存） |
+| `dsh_queue` | 查看和调整 `dsh_send(queue=true)` 的队列。服务重启后，未执行的回执会转为取消 |
 | `dsh_doctor` | 只读体检：DSH 版本、profile、状态/目录可写、孤儿锁、会话与 RSS、生效配置 |
 
 每个工具都声明了全部四个 MCP 注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`）。只读取状态的六个标成只读：`dsh_list`、`dsh_read`、`dsh_get`、`dsh_status`、`dsh_inbox`、`dsh_doctor`。工具标题、描述与服务说明有中英文两份：默认跟随系统语言，也可以设 `DSH_MCP_LANG=zh|en`。工具返回的正文也跟这个设置走；少数不常见的报错目前只有中文。

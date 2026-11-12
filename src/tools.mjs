@@ -5,7 +5,6 @@
  * 因为调用方 agent 已经有那些工具了。
  */
 
-import { readFileSync } from 'node:fs';
 import {
   DEFAULT_PERMISSION,
   DEFAULT_REASONING,
@@ -40,6 +39,7 @@ export { compactResultForBudget, psReadCommand, psWaitCommand } from './tool-ren
 function parseTimeoutMs(raw) {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) throw new Error(L('timeout_ms 必须是 >= 0 的有限数字', 'timeout_ms must be a finite number >= 0'));
+  if (n > 2_147_483_647) throw new Error(L('timeout_ms 最大为 2147483647', 'timeout_ms must not exceed 2147483647'));
   return n;
 }
 
@@ -67,10 +67,10 @@ export function createHandlers(hub, opts = {}) {
   const projectDir = typeof opts.projectDir === 'function' ? opts.projectDir : null;
 
   return {
-    async dsh_start(args) {
+    async dsh_start(args, { signal, modern } = {}) {
       let cwd = args.cwd;
       let cwdSource = cwd ? 'explicit' : null;
-      if (!cwd && projectDir) {
+      if (!cwd && projectDir && !modern) {
         // 客户端声明了 roots 才有；拿不到就照旧要求显式传，不猜。
         const fromClient = await projectDir();
         if (fromClient) {
@@ -78,6 +78,8 @@ export function createHandlers(hub, opts = {}) {
           cwdSource = 'client-root';
         }
       }
+      signal?.throwIfAborted();
+      if (!cwd && modern) throw new Error(L('MCP 2026-07-28 请显式传入 cwd。', 'Pass cwd explicitly with MCP 2026-07-28.'));
       const conv = await hub.create({
         cwd,
         permission: args.permission ?? DEFAULT_PERMISSION,
@@ -163,15 +165,16 @@ export function createHandlers(hub, opts = {}) {
       return { structured: snap, text: lines.join('\n') };
     },
 
-    async dsh_send(args) {
+    async dsh_send(args, { signal } = {}) {
       // 空/纯空白 prompt 会被 DSH 以 [-32602] 拒绝；默认 wait=false 下那会变成
       // 一个“accepted 但注定失败”的收据（错误只异步出现在哨兵里）。这里同步拦下。
       if (typeof args.prompt !== 'string' || args.prompt.trim() === '') {
         throw new Error(L('prompt 不能为空：至少包含一个非空白字符', 'prompt must not be empty: it needs at least one non-whitespace character'));
       }
       const conv = await hub.get(args.conversation_id);
+      signal?.throwIfAborted();
       const review = args.review === undefined ? undefined : normalizeReviewMode(args.review, conv.review);
-      const opts = { reasoning: args.reasoning ?? DEFAULT_REASONING };
+      const opts = { reasoning: args.reasoning ?? DEFAULT_REASONING, waitSignal: signal };
       if (review !== undefined) opts.review = review;
       if (args.timeout_ms !== undefined && args.timeout_ms !== null) opts.timeoutMs = parseTimeoutMs(args.timeout_ms);
 
@@ -387,11 +390,11 @@ export function createHandlers(hub, opts = {}) {
         run = conv.getRunByClientId(args.client_run_id);
         if (!run) {
           throw new Error(L(
-            `未知 client_run_id: ${args.client_run_id}（只在内存里保留最近 20 条；已淘汰/服务重启后请用 run_id 或直接读哨兵文件）`,
-            `Unknown client_run_id: ${args.client_run_id} (only the latest 20 are kept in memory; after eviction or a restart use run_id or read the sentinel file)`,
+            `未知或已过期的 client_run_id: ${args.client_run_id}`,
+            `Unknown or expired client_run_id: ${args.client_run_id}`,
           ));
         }
-        runSource = 'client_run_id';
+        runSource = run.source ?? 'client_run_id';
       } else if (args.run_id) {
         try {
           run = conv.getRun(args.run_id);
@@ -401,27 +404,7 @@ export function createHandlers(hub, opts = {}) {
       } else {
         run = conv.getRun();
       }
-      if (run && !runSource) runSource = 'memory';
-      // ★ 内存只留最近 MAX_RUNS 条；服务重启或被挤出后，run_id 只能从哨兵文件回读。
-      //   哨兵是"一个回合 = 一个文件"的落盘权威，把它接进入口，调用方不必自己拼路径。
-      if (!run && args.run_id) {
-        const file = hub.runSentinelPath(args.conversation_id, args.run_id);
-        try {
-          const raw = JSON.parse(readFileSync(file, 'utf8'));
-          run = {
-            run_id: raw.run_id ?? args.run_id,
-            status: raw.status ?? 'unknown',
-            started_at: null,
-            ended_at: raw.ended_at ?? null,
-            elapsed_ms: null,
-            prompt_preview: null,
-            result: raw.result ?? null,
-          };
-          runSource = 'sentinel';
-        } catch {
-          // 文件不存在或不可解析：保持 run=null，下面给明确报错
-        }
-      }
+      if (run && !runSource) runSource = run.source ?? 'memory';
       if (args.run_id && !run) {
         throw new Error(L(
           `未知 run_id: ${args.run_id}（内存只留最近 20 条；哨兵文件 ${hub.runSentinelPath(args.conversation_id, args.run_id)} 也不存在或不可读）`,
@@ -537,11 +520,12 @@ export function createHandlers(hub, opts = {}) {
       return { structured: r, text: lines.join('\n') };
     },
 
-    async dsh_interject(args) {
+    async dsh_interject(args, { signal } = {}) {
       if (typeof args.message !== 'string' || args.message.trim() === '') {
         throw new Error(L('message 不能为空：至少包含一个非空白字符', 'message must not be empty: it needs at least one non-whitespace character'));
       }
       const conv = await hub.get(args.conversation_id);
+      signal?.throwIfAborted();
       if (args.client_run_id) {
         if (String(args.client_run_id).length > 128) throw new Error(L('client_run_id 最长 128 字符', 'client_run_id may be at most 128 characters'));
         const existing = conv.getRunByClientId(args.client_run_id);
@@ -558,6 +542,7 @@ export function createHandlers(hub, opts = {}) {
         mode: args.mode ?? 'interject',
         reasoning: args.reasoning ?? DEFAULT_REASONING,
         clientRunId: args.client_run_id ?? null,
+        waitSignal: signal,
       };
       if (args.review !== undefined) opts.review = normalizeReviewMode(args.review, conv.review);
       if (args.timeout_ms !== undefined && args.timeout_ms !== null) opts.timeoutMs = parseTimeoutMs(args.timeout_ms);
@@ -615,6 +600,7 @@ export function createHandlers(hub, opts = {}) {
         const r = await hub.releaseAll({ force: args.force === true });
         audit('release_all', { released: r.released, failed: r.failed.length, skipped_busy: r.skipped_busy.length });
         return {
+          isError: r.failed.length > 0,
           structured: { released: r.released, conversations: r.conversations, skipped_busy: r.skipped_busy, failed: r.failed },
           text:
             L(
@@ -647,6 +633,7 @@ export function createHandlers(hub, opts = {}) {
         deleted: Boolean(r.deleted),
       });
       return {
+        isError: r.closed !== true || (args.forget === true && !r.forgotten),
         structured: { conversation_id: args.conversation_id, ...r },
         text: r.forgotten
           ? L('已释放进程并从注册表移除。会话日志仍在磁盘上。', 'Process released and the conversation removed from the registry. The session log is still on disk.') +
@@ -662,7 +649,9 @@ export function createHandlers(hub, opts = {}) {
                   : '')
           : args.forget === true
             ? L(`⚠️ forget 未完成：${r.error ?? '原因未知'}`, `⚠️ forget did not complete: ${r.error ?? 'unknown reason'}`)
-            : L(
+            : !r.closed
+              ? L(`⚠️ 未确认写锁已释放：${r.error ?? '原因未知'}`, `⚠️ Could not confirm write lock release: ${r.error ?? 'unknown reason'}`)
+              : L(
                 '已释放 DSH 进程（写锁已让出，你可以在自己的 DSH GUI 里打开这个会话）。会话仍可 resume。',
                 'DSH process released (the write lock is free, so you can open this conversation in your own DSH GUI). It can still be resumed.',
               ),

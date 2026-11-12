@@ -14,6 +14,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 
 // 服务端模块加载时会解析状态目录；给它一份独立的，绝不碰真实 ~/.dsh。
 const ROOT = mkdtempSync(join(tmpdir(), 'dsh-any-agent-progress-'));
@@ -38,21 +39,25 @@ const handlers = {
   async fast() { return { text: 'done' }; },
   async boom() { await sleep(120); throw new Error('nope'); },
 };
-const server = createMcpServer({ hub, handlers, toolDefs: [], progressIntervalMs: 20 });
+const input = new PassThrough();
+const output = new PassThrough();
+const server = createMcpServer({ hub, handlers, toolDefs: [], progressIntervalMs: 20, input, output });
 server.start();
+const send = (message) => input.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
+output.resume();
+send({ id: 'initialize', method: 'initialize', params: { protocolVersion: '2025-06-18' } });
+send({ method: 'notifications/initialized' });
+await sleep(0);
 
 /** 发一个 tools/call，收集到响应为止（再多等一会儿，抓响应之后不该出现的报文）。 */
 async function call(name, args, meta) {
-  const realWrite = process.stdout.write;
   const frames = [];
-  process.stdout.write = (chunk) => {
-    for (const line of String(chunk).split('\n')) if (line.trim()) frames.push({ at: Date.now(), msg: JSON.parse(line) });
-    return true;
-  };
+  const read = (chunk) => frames.push({ at: Date.now(), msg: JSON.parse(chunk) });
+  output.on('data', read);
   try {
     const id = 'req-' + name;
     const params = { name, arguments: args, ...(meta ? { _meta: meta } : {}) };
-    process.stdin.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params }) + '\n'));
+    send({ id, method: 'tools/call', params });
     const deadline = Date.now() + 3000;
     while (!frames.some((f) => f.msg.id === id) && Date.now() < deadline) await sleep(5);
     await sleep(80);
@@ -60,7 +65,7 @@ async function call(name, args, meta) {
     const progress = frames.filter((f) => f.msg.method === 'notifications/progress');
     return { response, progress };
   } finally {
-    process.stdout.write = realWrite;
+    output.off('data', read);
   }
 }
 
@@ -104,6 +109,24 @@ console.log('\n[5] 工具抛错时进度同样停下');
   check('返回 isError', response?.msg.result?.isError === true);
   check('抛错之前有进度', progress.length >= 1, String(progress.length));
   check('响应之后不再有进度', progress.every((f) => f.at <= response.at));
+}
+
+console.log('\n[6] MCP 取消停止进度和回包');
+{
+  const frames = [];
+  const read = (chunk) => frames.push(JSON.parse(chunk));
+  output.on('data', read);
+  try {
+    send({ id: 'cancel-me', method: 'tools/call', params: { name: 'slow', _meta: { progressToken: 'cancel-token' } } });
+    await sleep(65);
+    const count = frames.length;
+    send({ method: 'notifications/cancelled', params: { requestId: 'cancel-me' } });
+    await sleep(180);
+    check('取消后不再发进度，也不发送工具响应',
+      count > 0 && frames.length === count && frames.every((frame) => frame.method === 'notifications/progress'));
+  } finally {
+    output.off('data', read);
+  }
 }
 
 console.log(`\n===== progress: passed ${passed}, failed ${failed} =====`);

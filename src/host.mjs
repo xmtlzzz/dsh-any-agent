@@ -34,6 +34,10 @@ export class SessionHost {
     return !!this.proc?.alive;
   }
 
+  get quarantined() {
+    return this.aborting != null || this.proc?.quarantined === true;
+  }
+
   get pid() {
     return this.proc?.pid ?? null;
   }
@@ -57,6 +61,7 @@ export class SessionHost {
 
   /** 拉起并完成 ACP 握手；并发调用共享同一个 in-flight promise。 */
   async initialize() {
+    if (this.quarantined) throw new Error('ACP process quarantined by the turn watchdog');
     // ★ 先看 in-flight 握手：`this.proc` 在握手完成前就已赋值且 alive，只看 alive 的话
     //   并发的第二个调用者会在 initialize 回包前发 session/new（审计 B05）。
     if (this.initializing) return this.initializing;
@@ -118,11 +123,27 @@ export class SessionHost {
     return this.proc?.notify(method, params) ?? false;
   }
 
+  /** 一个无响应的宿主只影响其现有会话，同工作目录的新宿主不复用它。 */
+  abort() {
+    if (this.aborting) return this.aborting;
+    const proc = this.proc;
+    if (!proc) return Promise.resolve(true);
+    this.hub?.forgetHost?.(this);
+    this.aborting = proc.abort()
+      .then((stopped) => {
+        if (stopped) this.#onExit(proc, 'ACP process stopped by the turn watchdog');
+        return stopped;
+      })
+      .finally(() => { this.aborting = null; });
+    return this.aborting;
+  }
+
   /**
    * 让一个会话离开宿主。默认顺手 `session/close` 释放该会话的 Agent 与写锁；
    * 最后一个会话离开时停掉进程。
    */
   async detach(conv, { closeSession = true } = {}) {
+    if (this.aborting) return this.aborting;
     let closed = true;
     if (closeSession && this.proc?.alive && this.conversations.has(conv.id)) {
       try {

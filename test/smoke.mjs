@@ -80,7 +80,7 @@ try {
   check('只读工具不标成破坏性', tools.every((t) => !(t.annotations?.readOnlyHint && t.annotations?.destructiveHint)));
   check('每个工具都有标题', tools.every((t) => typeof t.title === 'string' && t.title.length > 0));
   const withSchema = tools.filter((t) => t.outputSchema).map((t) => t.name).sort().join(',');
-  check('声明 outputSchema 的是 inbox/list/status', withSchema === 'dsh_inbox,dsh_list,dsh_status', withSchema);
+  check('核心工具声明 outputSchema', withSchema === 'dsh_get,dsh_inbox,dsh_list,dsh_send,dsh_start,dsh_status', withSchema);
   // 声明了 schema 的工具，客户端会按它校验返回值：这里用同一份 schema 自己先验一遍。
   for (const [name, args] of [['dsh_list', { include_closed: false }], ['dsh_inbox', {}]]) {
     const res = await client.callTool(name, args, 30_000);
@@ -127,10 +127,11 @@ try {
       const shape = (list) => JSON.stringify(list.map((t) => [t.name, Object.keys(t.inputSchema.properties), t.inputSchema.required, t.annotations, t.outputSchema]));
       check('两种语言的名字、参数、注解与 schema 完全一致', shape(tools) === shape(enTools));
       // 工具返回的正文也跟语言走：正常结果、未知工具、参数校验报错各验一条。
+      const unknown = await en.callTool('dsh_nope', {}).catch((error) => error);
+      check('英文未知工具返回协议错误', unknown.code === -32602 && /Unknown tool/.test(unknown.message));
       for (const [name, args] of [
         ['dsh_list', { include_closed: false }],
         ['dsh_inbox', {}],
-        ['dsh_nope', {}],
         ['dsh_start', { cwd: 'relative/path' }],
         ['dsh_start', { cwd: ROOT, permission: 'read-only', on_approval: 'ask' }],
       ]) {
@@ -188,14 +189,14 @@ try {
   check('释放后会话仍在注册表（未打开）', getAfter?.structuredContent?.alive === false);
   }
 
-  console.log('\n[6] 未知工具应返回 isError 而不是崩溃');
-  const bad = await client.callTool('dsh_nope', {});
-  check('未知工具 isError', bad?.isError === true);
-  const protoTool = await client.callTool('constructor', {});
+  console.log('\n[6] 未知工具返回 JSON-RPC 参数错误');
+  const bad = await client.callTool('dsh_nope', {}).catch((error) => error);
+  check('未知工具 -32602', bad?.code === -32602);
+  const protoTool = await client.callTool('constructor', {}).catch((error) => error);
   check(
     '原型链名字不会被当成工具',
-    protoTool?.isError === true && /未知工具/.test(McpClient.text(protoTool)),
-    McpClient.text(protoTool).slice(0, 120),
+    protoTool instanceof Error && /未知工具/.test(protoTool.message),
+    protoTool?.message,
   );
 
   console.log('\n[7] 默认日志静默（stderr 必须干净）');

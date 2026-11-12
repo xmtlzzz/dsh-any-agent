@@ -21,6 +21,7 @@ import {
   copyFileSync,
   cpSync,
   mkdirSync,
+  linkSync,
   readFileSync,
   readdirSync,
   writeFileSync,
@@ -54,6 +55,7 @@ import {
   USING_DEFAULT_STATE,
   assertWritableDir,
   defaultApprovalPolicy,
+  effectiveApprovalPolicy,
 } from './config.mjs';
 import { normalizeReviewMode } from './review.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
@@ -65,6 +67,7 @@ import { SessionHost } from './host.mjs';
 import { refreshRssMap, rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { Conversation } from './conversation.mjs';
+import { keyedRunId } from './run-ledger.mjs';
 import { SENTINEL_SCHEMA, pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
 import { emitLive, livePreview } from './live.mjs';
 import { homeWorkspaceProblem } from './workspace-guard.mjs';
@@ -253,9 +256,13 @@ export class Hub {
         error: sanitizeApprovalContext(run.error ?? run.result?.error ?? null, 'error'),
         result: sanitizeResultForSentinel(run.result ?? null),
       };
-      const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-      writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
-      renameSync(tmp, file);
+      try {
+        writeRunJson(file, payload, { exclusive: true });
+      } catch (e) {
+        // 正常收尾与重启恢复都可能写终态。先落地的终态始终有效。
+        if (e.code !== 'EEXIST') throw e;
+        return file;
+      }
       // 哨兵落地了，"回合进行中"的标记就没用了（删不掉也无妨：恢复时看到哨兵已在会直接清掉它）。
       try {
         rmSync(this.runMarkerPath(conversationId, run.run_id), { force: true });
@@ -269,12 +276,10 @@ export class Hub {
     }
   }
 
-  // ── 回合进行中标记 ──────────────────────────────────────────────
+  // ── 持久化回合收据 ───────────────────────────────────────────────
   //
-  // 回合一开始就写 `<RUNS_DIR>/<会话>/<run_id>.running`（记下本进程 PID 与启动时刻），
-  // 写出哨兵时删掉。服务进程在回合结束前被杀（默认模式下客户端关掉 / 重连 / 崩溃都会这样）
-  // 就没人写哨兵了，调用方只能干等到超时；下次有服务启动时 recoverInterruptedRuns() 据这个
-  // 标记补写一个"已中断"的哨兵。后缀故意不是 .json：等哨兵的脚本不会把它当成结果。
+  // 接单前写 `<RUNS_DIR>/<会话>/<run_id>.running`，记录幂等键、状态及所属进程。
+  // 写出哨兵时删除收据。恢复时用收据补写取消或中断终态，避免重新执行带副作用的任务。
 
   runMarkerPath(conversationId, runId) {
     assertSafeId(conversationId, 'conversation_id');
@@ -282,30 +287,83 @@ export class Hub {
     return join(RUNS_DIR, conversationId, `${runId}.running`);
   }
 
-  /** 回合开始：写标记（失败只记日志 —— 它只是兜底，不能拦住派活）。 */
-  markRunStarted(conversationId, run) {
+  /** 先持久化收据，再接单。硬链接原子占位，同时阻止另一个进程接受同一个幂等键。 */
+  reserveRun(conversationId, run) {
+    const marker = this.runMarkerPath(conversationId, run.run_id);
+    const sentinel = this.runSentinelPath(conversationId, run.run_id);
+    const duplicate = () => new Error(L(
+      `回合 ${run.run_id} 已被接收，请用原 client_run_id 重试或用 dsh_get 查询。`,
+      `Run ${run.run_id} was already accepted. Retry with the same client_run_id or look it up with dsh_get.`,
+    ));
+    if (existsSync(sentinel)) throw duplicate();
     try {
-      const file = this.runMarkerPath(conversationId, run.run_id);
-      mkdirSync(dirname(file), { recursive: true });
-      const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-      writeFileSync(
-        tmp,
-        JSON.stringify({
-          conversation_id: conversationId,
-          run_id: run.run_id,
-          client_run_id: run.client_run_id ?? null,
-          prompt_preview: sanitizeApprovalContext(run.prompt_preview ?? null, 'prompt_preview'),
-          review_mode: run.review_mode ?? null,
-          started_at: run.started_at ?? now(),
-          owner_pid: process.pid,
-          owner_started_at: PROCESS_STARTED_AT,
-        }),
-        'utf8',
-      );
-      renameSync(tmp, file);
+      this.#writeRunMarker(marker, conversationId, run, { exclusive: true });
     } catch (e) {
-      this.log.info(`[hub] 写回合进行中标记失败（不影响派活）: ${e.message}`);
+      if (e.code === 'EEXIST') throw duplicate();
+      throw e;
     }
+    // 旧主人可能在第一次检查后写完哨兵并释放了占位。
+    if (existsSync(sentinel)) {
+      rmSync(marker, { force: true });
+      throw duplicate();
+    }
+  }
+
+  #writeRunMarker(file, conversationId, run, options) {
+    mkdirSync(dirname(file), { recursive: true });
+    writeRunJson(file, {
+      conversation_id: conversationId,
+      run_id: run.run_id,
+      client_run_id: run.client_run_id ?? null,
+      prompt_preview: sanitizeApprovalContext(run.prompt_preview ?? null, 'prompt_preview'),
+      review_mode: run.review_mode ?? null,
+      status: run.status,
+      started_at: run.started_at ?? null,
+      owner_pid: process.pid,
+      owner_started_at: PROCESS_STARTED_AT,
+    }, options);
+  }
+
+  markRunStarted(conversationId, run) {
+    this.#writeRunMarker(this.runMarkerPath(conversationId, run.run_id), conversationId, run);
+  }
+
+  readStoredRun(conversationId, runId) {
+    const sentinel = this.runSentinelPath(conversationId, runId);
+    const marker = this.runMarkerPath(conversationId, runId);
+    const terminal = () => {
+      const saved = readRunJson(sentinel);
+      if (!saved) return null;
+      return {
+        ...saved,
+        source: 'sentinel',
+        started_at: saved.started_at ?? null,
+        elapsed_ms: saved.result?.elapsed_ms ?? null,
+        prompt_preview: saved.prompt_preview ?? null,
+        result: saved.result ? { ...saved.result, sentinel_file: sentinel } : null,
+      };
+    };
+    // 哨兵可能在两次读之间替换标记。再读一次，避免把已接单回合误报成不存在。
+    const saved = terminal();
+    if (saved) return saved;
+    const pending = readRunJson(marker);
+    return pending ? { ...pending, status: pending.status ?? 'running', source: 'receipt', result: null } : terminal();
+  }
+
+  findRunByClientId(conversationId, clientRunId) {
+    if (!clientRunId) return null;
+    const exact = this.readStoredRun(conversationId, keyedRunId(clientRunId));
+    if (exact) return exact;
+    // 0.7.0 及以前的哨兵和活跃标记已存幂等键，但文件名是普通 run_id。
+    const dir = dirname(this.runSentinelPath(conversationId, 'run'));
+    if (!existsSync(dir)) return null;
+    for (const file of readdirSync(dir)) {
+      const match = /^(run-[a-z0-9]+-\d+)\.(?:json|running)$/.exec(file);
+      if (!match) continue;
+      const legacy = this.readStoredRun(conversationId, match[1]);
+      if (legacy?.client_run_id === clientRunId) return legacy;
+    }
+    return null;
   }
 
   /**
@@ -355,7 +413,7 @@ export class Hub {
         }
         const sentinel = this.runSentinelPath(m.conversation_id, m.run_id);
         if (existsSync(sentinel)) {
-          rmSync(markerFile, { force: true }); // 哨兵其实写出来了，只是标记没删掉
+          try { rmSync(markerFile, { force: true }); } catch {}
           continue;
         }
         const file = this.#writeInterruptedSentinel(m.conversation_id, m);
@@ -371,7 +429,11 @@ export class Hub {
    * prompt_preview / review_mode。
    */
   #writeInterruptedSentinel(conversationId, run) {
-    const error = L(
+    const queued = run.status === 'queued';
+    const error = queued ? L(
+      '服务退出时任务仍在排队，已取消。请核对后用新的幂等键派发。',
+      'The service exited while this run was queued. It was cancelled. Use a new idempotency key if it should run.',
+    ) : L(
       '服务进程在回合结束前退出（客户端关闭、重连或崩溃），回合被中断；已改动的文件不会回滚。' +
         (DAEMON_MODE ? '' : '设 DSH_MCP_DAEMON=1 可让回合扛住客户端重启。'),
       'The server process exited before the turn ended (the client closed, reconnected or crashed), so the turn was interrupted; changed files are not rolled back.' +
@@ -382,12 +444,12 @@ export class Hub {
       client_run_id: run.client_run_id ?? null,
       prompt_preview: run.prompt_preview ?? null,
       review_mode: normalizeReviewMode(run.review_mode, DEFAULT_REVIEW),
-      status: 'error',
+      status: queued ? 'cancelled' : 'error',
       error,
       ended_at: now(),
     };
     record.result = attachReview(
-      terminalResult({ conversationId, runId: run.run_id, stopReason: 'interrupted', error }),
+      terminalResult({ conversationId, runId: run.run_id, stopReason: queued ? 'cancelled' : 'interrupted', error }),
       {
         conversationId,
         run: record,
@@ -627,6 +689,7 @@ export class Hub {
 
   /** 新建一个会话：拉起进程 + ACP 初始化 + session/new。 */
   async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false, review, isolation } = {}) {
+    if (this.shuttingDown) throw new Error('Service is shutting down');
     if (!cwd) {
       throw new Error(L(
         '没有可用的工作目录。你既没传 cwd，客户端也没有提供当前打开的项目（MCP roots）。\n' +
@@ -684,6 +747,13 @@ export class Hub {
           ' auto-allow/ask 会放行 DSH 的 sandbox 提权，使只读档失效。',
         'permission=read-only requires on_approval=auto-deny (or leaving it unset).' +
           " auto-allow and ask would let DSH's sandbox escalation through and defeat the read-only tier.",
+      ));
+    }
+    if (policy !== effectiveApprovalPolicy(permission, policy)) {
+      const ceiling = defaultApprovalPolicy(permission);
+      throw new Error(L(
+        `on_approval=${policy} 超出本机审批上限 ${ceiling}。请使用更严格的策略，或由用户配置 DSH_MCP_APPROVAL 后重连。`,
+        `on_approval=${policy} exceeds the machine's approval ceiling (${ceiling}). Use a stricter policy or set DSH_MCP_APPROVAL in the client configuration and reconnect.`,
       ));
     }
     const effort = reasoningEffort ?? DEFAULT_REASONING_EFFORT;
@@ -1062,14 +1132,16 @@ export class Hub {
   }
 
   async shutdown() {
+    this.shuttingDown = true;
     if (this.#reaper) clearInterval(this.#reaper);
     this.#reaper = null;
     // 还在跑的回合随本进程一起结束：先同步写"已中断"哨兵。不能等下一个实例的启动恢复 ——
     // 客户端重连时新实例往往在本进程还没退完时就起来了，那时它会把这些标记当成"主人还活着"。
     for (const c of this.conversations.values()) {
-      const run = c.busy ? c.currentRun : null;
-      if (!run?.run_id || existsSync(this.runSentinelPath(c.id, run.run_id))) continue;
-      this.#writeInterruptedSentinel(c.id, run);
+      for (const run of c.ledger.runs) {
+        if (run.status !== 'queued' && run.status !== 'running') continue;
+        if (!existsSync(this.runSentinelPath(c.id, run.run_id))) this.#writeInterruptedSentinel(c.id, run);
+      }
     }
     for (const c of this.conversations.values()) {
       if (c.recycling) await c.recycling;
@@ -1089,5 +1161,25 @@ export class Hub {
       }
     }
     this.save();
+  }
+}
+
+function writeRunJson(file, value, { exclusive = false } = {}) {
+  const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
+  try {
+    writeFileSync(tmp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });
+    if (exclusive) linkSync(tmp, file);
+    else renameSync(tmp, file);
+  } finally {
+    try { rmSync(tmp, { force: true }); } catch {}
+  }
+}
+
+function readRunJson(file) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch (e) {
+    if (e.code === 'ENOENT' || e instanceof SyntaxError) return null;
+    throw e;
   }
 }

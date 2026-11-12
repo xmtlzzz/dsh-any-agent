@@ -18,8 +18,10 @@ export class McpClient {
    */
   createdIds = new Set();
 
-  constructor({ env = {}, clientInfo = { name: 'dsh-any-agent-test', version: '0.1.0' } } = {}) {
+  constructor({ env = {}, entry = join(PKG_ROOT, 'bin', 'dsh-any-agent.mjs'), roots, clientInfo = { name: 'dsh-any-agent-test', version: '0.1.0' } } = {}) {
     this.env = env;
+    this.entry = entry;
+    this.roots = roots;
     /** initialize 里报给服务端的客户端名（常驻进程测试要区分同一进程上的几个连接）。 */
     this.clientInfo = clientInfo;
   }
@@ -30,7 +32,7 @@ export class McpClient {
   }
 
   start() {
-    this.#child = spawn(process.execPath, [join(PKG_ROOT, 'bin', 'dsh-any-agent.mjs')], {
+    this.#child = spawn(process.execPath, [this.entry], {
       // 集成测试会显式请求 danger-full-access；0.5.0 起它需要机器侧放行。
       // 只给测试拉起的子进程放行，测试进程自身的默认值仍会被 guards 钉住。
       // 工具描述与服务说明跟系统语言走；测试断言的是中文那一份，所以钉成 zh（要测英文的套件自己传 en）。
@@ -48,7 +50,7 @@ export class McpClient {
       }
     });
     this.#child.on('exit', (code) => {
-      for (const [, p] of this.#pending) p.reject(new Error(`服务端退出 code=${code}`));
+      for (const p of this.#pending.values()) p.reject(new Error(`服务端退出 code=${code}`));
       this.#pending.clear();
     });
     return this;
@@ -73,22 +75,34 @@ export class McpClient {
         throw new Error(`服务端输出了非 JSON 内容: ${line.slice(0, 300)}`);
       }
       if (msg.id !== undefined) {
+        if (msg.method === 'roots/list' && this.roots) {
+          this.#child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { roots: this.roots() } }) + '\n');
+          continue;
+        }
         const p = this.#pending.get(msg.id);
         if (!p) continue;
-        this.#pending.delete(msg.id);
-        clearTimeout(p.timer);
-        msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result);
+        msg.error ? p.reject(Object.assign(new Error(msg.error.message), { code: msg.error.code })) : p.resolve(msg.result);
       }
     }
   }
 
-  request(method, params, timeoutMs = 120_000) {
+  request(method, params, timeoutMs = 120_000, { signal } = {}) {
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (this.#pending.delete(id)) reject(new Error(`请求超时: ${method}`));
-      }, timeoutMs);
-      this.#pending.set(id, { resolve, reject, timer });
+      signal?.throwIfAborted();
+      const settle = (fn, value) => {
+        this.#pending.delete(id);
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+        fn(value);
+      };
+      const cancel = () => {
+        this.notify('notifications/cancelled', { requestId: id });
+        settle(reject, signal.reason);
+      };
+      const timer = setTimeout(() => settle(reject, new Error(`请求超时: ${method}`)), timeoutMs);
+      this.#pending.set(id, { resolve: (value) => settle(resolve, value), reject: (error) => settle(reject, error) });
+      signal?.addEventListener('abort', cancel, { once: true });
       this.#child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
     });
   }
@@ -100,7 +114,7 @@ export class McpClient {
   async initialize() {
     const r = await this.request('initialize', {
       protocolVersion: '2025-06-18',
-      capabilities: {},
+      capabilities: this.roots ? { roots: { listChanged: true } } : {},
       clientInfo: this.clientInfo,
     });
     this.notify('notifications/initialized', {});
@@ -111,8 +125,8 @@ export class McpClient {
     return (await this.request('tools/list', {})).tools;
   }
 
-  async callTool(name, args, timeoutMs) {
-    const result = await this.request('tools/call', { name, arguments: args }, timeoutMs);
+  async callTool(name, args, timeoutMs, options) {
+    const result = await this.request('tools/call', { name, arguments: args }, timeoutMs, options);
     if (name === 'dsh_start') {
       const id = result?.structuredContent?.conversation_id;
       if (typeof id === 'string' && id) this.createdIds.add(id);
@@ -129,6 +143,7 @@ export class McpClient {
   }
 
   async close() {
+    if (!this.#child || this.#child.exitCode !== null || this.#child.signalCode !== null) return;
     try {
       this.#child.stdin.end();
     } catch {}

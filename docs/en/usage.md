@@ -26,7 +26,9 @@ MCP tool calls **block**, so `dsh_send` **does not block by default** (`wait=fal
 
 **A returned result is not "done" until the caller has reviewed it.** Every result carries a `review` ticket: a checklist derived from the turn (did it change files? did it end normally? which tools ran?) plus the evidence needed to check it. Use your own tools to verify at least one claim — read the changed files, inspect `git diff`, run the relevant test — then submit a verdict with `dsh_review`. The default `advisory` mode does **not** block the next `dsh_send`; it only makes the review request part of the returned payload instead of something the caller has to remember. `fail` / `partial` require `notes` (or `findings`). A failed review is **not** fed back to DSH automatically — dispatch a fix with `dsh_send` when you decide to.
 
-`run_id` is the receipt. Run records are **memory-only, last 20 kept**; under many concurrent runs old ones get evicted and `dsh_get` will fail — which is exactly why the completion sentinel below carries the result (and why `dsh_review` can still read the run from the sentinel).
+`run_id` is the receipt. Use it or the original `client_run_id` with `dsh_get` during sentinel retention, including after a restart. The server saves receipt metadata before accepting a run. Queued prompts stay in memory, so after a restart unstarted runs get a cancelled sentinel. An in-flight run gets an interrupted sentinel. Retry with the original key to get the original result. Use a new key when you intend to run the task again.
+
+If the host cancels a blocking MCP request, the server stops waiting and sending progress. A dispatched turn continues to its sentinel. Use `dsh_interrupt` to stop a running turn.
 
 ## 🔔 Workflow: get notified on completion (no polling)
 

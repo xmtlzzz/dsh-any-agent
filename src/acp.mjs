@@ -297,7 +297,7 @@ export class AcpProcess {
   #initResult = null;
 
   /** 优雅收尾：close 由调用方负责，这里只关 stdin（DSH 绑定 stdin EOF → 有界退出）。 */
-  async stop({ graceMs = 3000, killWaitMs = 5000 } = {}) {
+  async stop({ graceMs = 3000, killWaitMs = 5000, signal } = {}) {
     const child = this.#child;
     if (!child) return true;
     this.#stopping = true;
@@ -321,8 +321,23 @@ export class AcpProcess {
     //      （登记没了 → classifyHolder 判成 none → 连 dsh_takeover 都会拒绝）。
     //      这就是"异步派活 → 等 task → 回头再进就报有锁"的一个真实来源。
     try {
-      child.kill();
+      child.kill(signal);
     } catch {}
     return await waitExit(killWaitMs);
+  }
+
+  get quarantined() {
+    return this.#stopping && this.#child !== null;
+  }
+
+  async abort() {
+    const stopped = await this.stop({ graceMs: 0, signal: 'SIGKILL' });
+    // 即便系统尚未确认进程退出，同组调用也必须收到有界的失败。
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('ACP process quarantined by the turn watchdog'));
+    }
+    this.#pending.clear();
+    return stopped;
   }
 }

@@ -382,6 +382,7 @@ const positiveOrOff = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
 export const WATCHDOG_AFTER_MS = positiveOrOff(numEnv('DSH_MCP_WATCHDOG_AFTER_MS', 15 * 60 * 1000));
 export const STALL_MS = positiveOrOff(numEnv('DSH_MCP_STALL_MS', 10 * 60 * 1000));
 export const TURN_MAX_MS = positiveOrOff(numEnv('DSH_MCP_TURN_MAX_MS', 2 * 60 * 60 * 1000));
+export const WATCHDOG_GRACE_MS = Math.max(0, Math.min(60_000, numEnv('DSH_MCP_WATCHDOG_GRACE_MS', 5000)));
 
 /**
  * 常驻进程模式（见 daemon.mjs），默认关。
@@ -541,11 +542,22 @@ export const ALLOW_FULL_ACCESS =
  */
 export const APPROVAL_POLICIES = ['auto-allow', 'auto-deny', 'ask'];
 
-/** 未显式指定时，按权限档推导审批策略：只读档一律拒绝，其余放行。 */
+/** 本机的默认审批策略，同时也是调用方能请求的最宽松策略。 */
 export function defaultApprovalPolicy(permission) {
   if (permission === 'read-only') return 'auto-deny';
   const configured = process.env.DSH_MCP_APPROVAL;
-  return APPROVAL_POLICIES.includes(configured) ? configured : 'auto-allow';
+  if (APPROVAL_POLICIES.includes(configured)) return configured;
+  return permission === 'danger-full-access' ? 'auto-allow' : 'auto-deny';
+}
+
+const APPROVAL_SCOPE = ['auto-deny', 'ask', 'auto-allow'];
+
+/** 已保存的会话也要服从当前机器配置。 */
+export function effectiveApprovalPolicy(permission, requested) {
+  const ceiling = defaultApprovalPolicy(permission);
+  return APPROVAL_SCOPE.includes(requested) && APPROVAL_SCOPE.indexOf(requested) <= APPROVAL_SCOPE.indexOf(ceiling)
+    ? requested
+    : ceiling;
 }
 
 /** 思考内容展示档位。 */

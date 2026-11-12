@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `workspace-write` denies escalation by default. `DSH_MCP_APPROVAL` caps the
+  policy requested by the caller, including when a stored session resumes.
+- Accepted run receipts and idempotency keys survive restarts during sentinel
+  retention. Unstarted queued runs receive a cancelled sentinel on recovery.
+- The watchdog quarantines an unresponsive ACP process after a bounded grace
+  period and records `watchdog_timeout`. In-flight turns sharing that process
+  also stop.
+- Support MCP `2026-07-28` discovery and per-request metadata alongside the
+  handshake protocol. Validate tool arguments, require explicit `cwd` for
+  ambiguous roots, and stop sending progress when a blocking request is cancelled.
+- Publish output schemas for start, send and get. Exercise an installed tarball
+  in CI and run the same lifecycle with a real provider on the model runner.
+
 - **Fewer documents in the repository root.** The usage notes moved to
   `docs/zh/caveats.md` / `docs/en/caveats.md`, the archived design draft to
   `docs/history/design-v0.2.md` (not shipped), and `CONTRIBUTING.md` /

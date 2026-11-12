@@ -12,6 +12,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { L } from './lang.mjs';
 import { join } from 'node:path';
 import {
   ALLOW_FULL_ACCESS,
@@ -26,7 +27,8 @@ import {
   STALL_MS,
   TURN_MAX_MS,
   WATCHDOG_AFTER_MS,
-  defaultApprovalPolicy,
+  effectiveApprovalPolicy,
+  WATCHDOG_GRACE_MS,
 } from './config.mjs';
 import { watchdogTickMs, watchdogVerdict } from './watchdog.mjs';
 import { removeWorktree } from './worktree.mjs';
@@ -77,7 +79,7 @@ export class Conversation {
     this.id = state.id;
     this.cwd = state.cwd;
     this.permission = state.permission ?? DEFAULT_PERMISSION;
-    this.onApproval = state.onApproval ?? defaultApprovalPolicy(this.permission);
+    this.onApproval = effectiveApprovalPolicy(this.permission, state.onApproval);
     this.createdAt = state.createdAt ?? now();
     this.lastUsedAt = state.lastUsedAt ?? now();
     this.turnCount = state.turnCount ?? 0;
@@ -372,6 +374,7 @@ export class Conversation {
     // ★ 上一代进程正在回收时必须先等它停完：否则会为同一会话再拉起一个进程，
     //   去抢一个**尚未释放**的写锁（reaper/release 里 await stop() 的那个窗口）。
     if (this.recycling) await this.recycling;
+    if (this.proc?.quarantined) throw new Error('ACP process quarantined by the turn watchdog');
     if (this.proc?.alive) return this.proc;
     // ★ 机器侧开关同样管 resume：Hub.create 只挡住了“新建”，注册表/侧车里已有的
     //   danger-full-access 会话照样能被拉起（审计 A02）。
@@ -924,13 +927,17 @@ export class Conversation {
    *
    * @returns 等到回合结束 → 完整 result；没等到（wait=false 或等超时）→ 收据对象
    */
-  async prompt(text, { reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, run, wait = true, review, via = 'send' } = {}) {
+  async prompt(text, { reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, run, wait = true, waitSignal, review, via = 'send' } = {}) {
     if (this.busy) {
       throw new Error(
         `会话 ${this.id} 正在跑另一个回合。可以：dsh_interject 插话（打断并改口 / 排队），或 dsh_interrupt 打断。`,
       );
     }
     const runRecord = run ?? this.createRun(text, { review });
+    if (this.#hub.shuttingDown) {
+      this.#cancelUnstartedRun(runRecord, 'service is shutting down');
+      return runRecord.result;
+    }
     const reviewMode = runRecord.review_mode ?? normalizeReviewMode(review ?? this.review);
     runRecord.review_mode = reviewMode;
     runRecord.status = 'running';
@@ -947,12 +954,12 @@ export class Conversation {
     this.busy = true;
     this.lastUsedAt = now();
     // 服务进程在回合结束前被杀时，下次启动据这个标记补写"已中断"哨兵（见 Hub.recoverInterruptedRuns）。
-    this.#hub.markRunStarted?.(this.id, runRecord);
     // 冷启动窗口（拉进程 + resume）里 dsh_interrupt 只能记一笔，session/prompt 发出前再看。
     this.#undispatched = runRecord;
     this.#cancelBeforeDispatch = false;
     let cancelledBeforeDispatch = false;
     try {
+      this.#hub.markRunStarted?.(this.id, runRecord);
       // ★ forget 是终态：本实例的排队任务、或另一个实例写了墓碑之后，这里都不能再派活。
       //   拉进程前后各看一次（冷启动期间墓碑可能刚落地）（审计 B04 / C03）。
       this.#assertNotForgotten();
@@ -1038,7 +1045,7 @@ export class Conversation {
     const finalize = (stopReason, failure) => {
       if (finalizePromise) return finalizePromise;
       settled = true;
-      if (watchdogTimer) clearInterval(watchdogTimer);
+      watchdogTimer?.();
       finalizePromise = (async () => {
         // ★ 先启动 after 快照：调用 gitStatus 时子进程立刻 spawn，但**不 await**；
         //   这样 snapshot 的时间点仍贴近回合结束，而 busy 释放/唤醒不必等 git。
@@ -1190,63 +1197,71 @@ export class Conversation {
       waited_ms: waitedMs ?? 0,
     });
 
-    // 关键：第三个参数传 0 = **不设超时**。回合只能由它自己结束，或由 session/cancel 结束。
+    // 等待方超时只转后台；ACP 生命周期由取消与看门狗控制。
     const acp = proc.request('session/prompt', { sessionId: this.id, prompt: [{ type: 'text', text }] }, 0);
-    // 看门狗只会发 session/cancel（同 dsh_interrupt），回合仍由 DSH 自己结束、照常走 finalize。
-    watchdogTimer = this.#startWatchdog(runRecord, c, t0, proc);
-    // 这个 Promise 在 finalize **真正完成**（含 workspace_changed、审核单、哨兵）后才 settle。
-    // 等待方必须等它，而不是只等 acp —— 否则会拿到还没填完的 runRecord.result。
-    const finished = acp
-      .then(
+    const watchdogError = L('看门狗取消了超限回合', 'The watchdog stopped this turn after it exceeded its limit');
+    const finished = new Promise((resolve) => {
+      watchdogTimer = this.#startWatchdog(runRecord, c, t0, proc, () => {
+        c.watchdog.escalated = true;
+        const stopping = proc.abort?.() ?? proc.stop?.({ graceMs: 0, signal: 'SIGKILL' });
+        const recycling = Promise.resolve(stopping)
+          .catch((error) => this.#hub.log.info(`[conv ${this.id}] ACP abort failed: ${error.message}`))
+          .finally(() => {
+            if (this.recycling === recycling) this.recycling = null;
+          });
+        this.recycling = recycling;
+        resolve(finalize('watchdog_timeout', watchdogError));
+      });
+      void acp.then(
         (res) => {
           if (res?.usage) c.usage = c.usage ?? res.usage;
-          return finalize(res?.stopReason ?? null, null);
+          if (c.watchdog && res?.stopReason !== 'cancelled') {
+            resolve(finalize('watchdog_timeout', watchdogError));
+          } else {
+            resolve(finalize(res?.stopReason ?? null, null));
+          }
         },
-        (e) => finalize('error', e.message),
-      )
-      .catch((e) => {
-        // finalize 自己是防弹的；这里只兜住同步抛出的极端情况。
-        this.#hub.log.info(`[conv ${this.id}] 回合回调异常（已兜底）: ${e.message}`);
-        return runRecord.result ?? null;
-      });
+        (e) => resolve(finalize(c.watchdog ? 'watchdog_timeout' : 'error', e.message)),
+      );
+    });
 
-    if (!wait) {
+    if (!wait || waitSignal?.aborted) {
       // 同步走到这里时 finalize 还没开始（ACP 回调在微任务里），返回收据即可。
       // 若极端情况下已经收尾，则等它给出完整结果，不要返回半成品。
       return settled ? await (finalizePromise ?? runRecord.result) : receipt(0);
     }
-    if (timeoutMs <= 0) {
+    if (timeoutMs <= 0 && !waitSignal) {
       await finished;
       return runRecord.result;
     }
-    const timedOut = await Promise.race([
-      finished.then(
-        () => false,
-        () => false,
-      ),
-      new Promise((r) => setTimeout(() => r(true), timeoutMs)),
-    ]);
-    // 超时发生在 finalize 完成之前（包括 git 快照还在跑）：给收据，不返回半成品结果。
-    if (timedOut) return receipt(timeoutMs);
+    const stoppedWaiting = await new Promise((resolve) => {
+      const done = (stopped) => {
+        clearTimeout(timer);
+        waitSignal?.removeEventListener('abort', abort);
+        resolve(stopped);
+      };
+      const abort = () => done(true);
+      const timer = timeoutMs > 0 ? setTimeout(abort, timeoutMs) : null;
+      waitSignal?.addEventListener('abort', abort, { once: true });
+      void finished.then(() => done(false));
+    });
+    // 请求取消只停止本次等待。已派发任务继续运行并写出哨兵。
+    if (stoppedWaiting) return receipt(waitSignal?.aborted ? 0 : timeoutMs);
     return runRecord.result;
   }
 
   /**
    * 回合看门狗：定期看这个回合还在不在推进（判定见 watchdog.mjs），卡住或超过总时长上限
-   * 就发 session/cancel。只发取消、不杀进程：共享进程里还有别的会话，回合也要由 DSH 自己
-   * 结束才会走正常的收尾（结果、审核单、哨兵一个不少）。
+   * 先发 session/cancel，再给 ACP 有界的宽限。无响应时隔离并终止所在进程。
    *
    * 触发后每个巡检周期补发一次 cancel，直到回合真的结束（DSH 偶尔会吞掉第一次）。
    * @returns 定时器（finalize 里清掉）；三项阈值都关掉时返回 null。
    */
-  #startWatchdog(runRecord, c, t0, proc) {
+  #startWatchdog(runRecord, c, t0, proc, onUnresponsive) {
     if (!(WATCHDOG_AFTER_MS > 0 && STALL_MS > 0) && !(TURN_MAX_MS > 0)) return null;
+    let graceTimer;
     const timer = setInterval(() => {
       if (this.currentRun !== runRecord) return clearInterval(timer);
-      if (c.watchdog) {
-        proc.notify?.('session/cancel', { sessionId: this.id });
-        return;
-      }
       const t = now();
       // 还没结束的工具：不能看 currentTool —— 它是显示用的，工具重叠时短的那个一完成就被清掉，
       // 长的还在跑，宽限却会缩回不带工具的那档。
@@ -1262,6 +1277,7 @@ export class Conversation {
         maxMs: TURN_MAX_MS,
       });
       if (!verdict) return;
+      clearInterval(timer);
       c.watchdog = {
         ...verdict,
         elapsed_ms: t - t0,
@@ -1280,9 +1296,14 @@ export class Conversation {
         tool: runningTool,
       });
       proc.notify?.('session/cancel', { sessionId: this.id });
+      graceTimer = setTimeout(onUnresponsive, WATCHDOG_GRACE_MS);
+      graceTimer.unref?.();
     }, watchdogTickMs({ stallMs: STALL_MS, maxMs: TURN_MAX_MS }));
     timer.unref?.();
-    return timer;
+    return () => {
+      clearInterval(timer);
+      clearTimeout(graceTimer);
+    };
   }
 
   /** 中断当前回合（ACP 原生，走的就是用户手动停止那条路径）。 */
@@ -1334,15 +1355,19 @@ export class Conversation {
 
   /** 建一条回合记录。派活时先建，好让调用方立刻拿到 run_id（异步模式的关键）。 */
   createRun(text, { clientRunId = null, review = this.review } = {}) {
-    const run = this.ledger.create(text, { conversationId: this.id, clientRunId, review, sessionReview: this.review });
-    // 防御性清残留：正常情况下该 run_id 从未用过，但确保等待方不会被历史哨兵误触发。
-    this.#hub.clearRunSentinel(this.id, run.run_id);
-    return run;
+    if (this.#hub.shuttingDown) throw new Error('Service is shutting down');
+    return this.ledger.create(text, {
+      conversationId: this.id,
+      clientRunId,
+      review,
+      sessionReview: this.review,
+      reserve: (run) => this.#hub.reserveRun?.(this.id, run),
+    });
   }
 
   /** 按调用方幂等键取 run（不存在/已淘汰返回 null）。 */
   getRunByClientId(clientRunId) {
-    return this.ledger.byClientId(clientRunId);
+    return this.ledger.byClientId(clientRunId) ?? this.#hub.findRunByClientId?.(this.id, clientRunId) ?? null;
   }
 
   /**
@@ -1370,7 +1395,7 @@ export class Conversation {
 
   // ── 会话级队列（忙时非阻塞入队）────────────────────────────────
 
-  /** 入队；返回 run 记录与 1-based 位置。队列只在内存，重启丢失。 */
+  /** 入队；返回 run 记录与 1-based 位置。重启后未执行的收据会转成终态。 */
   enqueue(text, { reasoning = 'hide', clientRunId = null, preview = null, review = this.review } = {}) {
     if (clientRunId) {
       const existing = this.getRunByClientId(clientRunId);
@@ -1414,11 +1439,11 @@ export class Conversation {
 
   /** 空闲时取队首执行。失败也要继续下一条（否则一条坏任务卡死整条队列）。 */
   #scheduleDrain() {
-    if (this.busy || this.draining || this.queue.length === 0) return;
+    if (this.#hub.shuttingDown || this.busy || this.draining || this.queue.length === 0) return;
     this.draining = true;
     const timer = setTimeout(() => {
       this.draining = false;
-      if (this.busy || this.queue.length === 0) return;
+      if (this.#hub.shuttingDown || this.busy || this.queue.length === 0) return;
       const item = this.ledger.shift();
       const run = item.run;
       run.status = 'running';
@@ -1435,7 +1460,7 @@ export class Conversation {
    */
   getRun(runId) {
     if (runId) {
-      const r = this.ledger.find(runId);
+      const r = this.ledger.find(runId) ?? this.#hub.readStoredRun?.(this.id, runId);
       if (!r) {
         throw new Error(`未知 run_id: ${runId}（回合记录只在内存、只留最近 ${MAX_RUNS} 条；也可用 dsh_read 读输出缓冲）`);
       }
@@ -1581,7 +1606,8 @@ export class Conversation {
   }
 
   /** 等到当前回合结束（不忙则立即返回 true；`timeoutMs <= 0` 一直等；超时返回 false）。 */
-  async waitIdle(timeoutMs = 30 * 60 * 1000) {
+  async waitIdle(timeoutMs = 30 * 60 * 1000, signal) {
+    if (signal?.aborted) return false;
     if (!this.busy) return true;
     return await new Promise((resolve) => {
       let settled = false;
@@ -1590,18 +1616,23 @@ export class Conversation {
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
         resolve(true);
       };
+      const cancel = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+        const i = this.idleWaiters.indexOf(done);
+        if (i >= 0) this.idleWaiters.splice(i, 1);
+        resolve(false);
+      };
       if (timeoutMs > 0) {
-        timer = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          const i = this.idleWaiters.indexOf(done);
-          if (i >= 0) this.idleWaiters.splice(i, 1);
-          resolve(false);
-        }, timeoutMs);
+        timer = setTimeout(cancel, timeoutMs);
       }
       this.idleWaiters.push(done);
+      signal?.addEventListener('abort', cancel, { once: true });
     });
   }
 
@@ -1618,11 +1649,11 @@ export class Conversation {
    * 之所以无竞态：dsh-acp 在让 prompt 请求返回**之前**就清空了 inflight 槽位，
    * 且只在 agent 完全 idle 后才 settle（lib/index.js:1003-1011）。
    */
-  async interject(message, { mode = 'interject', reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, clientRunId = null, review } = {}) {
+  async interject(message, { mode = 'interject', reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, clientRunId = null, review, waitSignal } = {}) {
     // 先建 run：幂等键要在"等待上一轮"之前就登记，否则重试会造出第二个 run。
     const run = this.createRun(message, { clientRunId, review });
     if (!this.busy) {
-      const r = await this.prompt(message, { reasoning, timeoutMs, run, via: 'interject' });
+      const r = await this.prompt(message, { reasoning, timeoutMs, run, via: 'interject', waitSignal });
       return { ...r, interjected: 'idle', waited_ms: 0 };
     }
     const t0 = now();
@@ -1635,19 +1666,19 @@ export class Conversation {
     // 排队等待的时长跟随调用方的 timeoutMs（0 = 一直等），不再固定 30 分钟。
     // ★ 被唤醒时会话可能已被同时等待的另一条插话/队列抢先占住：继续等，而不是撞上
     //   “正在跑另一个回合”失败、留下一条永远 queued 且没有哨兵的 run（审计 C04）。
-    let idle = await this.waitIdle(timeoutMs);
+    let idle = await this.waitIdle(timeoutMs, waitSignal);
     while (idle && this.busy) {
       const left = timeoutMs > 0 ? timeoutMs - (now() - t0) : 0;
-      idle = timeoutMs > 0 && left <= 0 ? false : await this.waitIdle(left);
+      idle = timeoutMs > 0 && left <= 0 ? false : await this.waitIdle(left, waitSignal);
     }
     const waited = now() - t0;
-    if (!idle) {
-      const err = new Error('等待当前回合结束超时，插话未发送');
+    if (!idle || waitSignal?.aborted) {
+      const err = new Error(waitSignal?.aborted ? '插话请求已取消，未发送' : '等待当前回合结束超时，插话未发送');
       err.runId = run.run_id;
       this.#cancelUnstartedRun(run, err.message);
       throw err;
     }
-    const r = await this.prompt(message, { reasoning, timeoutMs, run, via: mode === 'queue' ? 'queue' : 'interject' });
+    const r = await this.prompt(message, { reasoning, timeoutMs, run, via: mode === 'queue' ? 'queue' : 'interject', waitSignal });
     return { ...r, interjected: mode, waited_ms: waited };
   }
 

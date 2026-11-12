@@ -25,6 +25,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 ## Public contract (what callers can rely on)
 
+- **MCP stdio** supports the `2026-07-28` request metadata and service discovery, plus handshake revisions from `2024-11-05` through `2025-11-25`. Pass an explicit `cwd` with `2026-07-28`. Older clients can supply a single local MCP root.
 - **Sentinel JSON**: the top-level `schema` is the format version, currently `1` (older releases omit the field; their shape is the same as 1). Within one `schema`, fields are **only added**, never removed, renamed or retyped; callers should ignore fields they do not know. A breaking change bumps `schema` and is called out in the CHANGELOG.
 - **MCP tool surface**: tool names, parameter names and types, which parameters are required, enum values. New tools, optional parameters and enum values are compatible; removing anything, changing a type, making a parameter required or dropping an enum value is breaking, happens only with a minor version change (before 1.0), and is called out in the CHANGELOG. Tool descriptions and the returned `text` are not part of the contract (they are written for the model and change freely).
 - **Live event stream**: each event's `v` is its format version; fields are listed in [live-view-design.md](live-view-design.md) §6.
