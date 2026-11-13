@@ -9,6 +9,8 @@
 
 | dsh-any-agent | DSH | 状态 | 说明 |
 |---|---|---|---|
+| 0.7.3 | `0.2.2-rc.1`（桌面版） | ✅ 已验证（升级） | Windows 使用真实模型，从 npm 已发布的 0.7.2 原地换装 0.7.3，验证了旧结果读回、幂等重试，以及在原会话完成新回合 |
+| 0.7.2 | `0.2.2-rc.1`（桌面版） | ✅ 已验证（安装包工作流） | Windows 使用桌面版自带运行时和真实模型。Codex 验证了派活、取消客户端等待和重连后取结果。[发版验收记录](https://github.com/xmtlzzz/dsh-any-agent/pull/27)。[托管 CI](https://github.com/xmtlzzz/dsh-any-agent/actions/runs/43357420994)在 Windows、Linux 和 macOS 上用模拟 ACP 验证安装包 |
 | 0.7.1 | `0.2.1-rc.5` | ✅ 已验证 | Windows 候选版用 npx 启动 DSH，Node 22.19。全量测试的 41 个离线套件全过，模型套件 `boundary` 有一条本地化错误断言失败，修复后复跑 46 项全过。可选的 `acceptance` 因 profile 未配 IDA MCP 跳过 |
 | 0.7.0 | `0.2.2-rc.1`（桌面版） | ✅ 已验证（离线） | 2026-11-11 的 41 个离线套件（1892 项）全过。实测常驻进程模式时，Claude 桌面版在回合中途退出后重新打开，回合照常跑完并写出 `done` 哨兵 |
 | 0.6.x | `0.2.1-rc.5` | ✅ 已验证 | 2026-11-10 用 0.6.9 全量套件实测（离线 + 需要模型，DSH 走 npx、Node 22.19）全过；`acceptance` 因 profile 未配 IDA MCP 跳过。其它 DSH 版本未针对 0.6.x 重新验证，最近一次实测见下面的 0.5.x 行 |
@@ -65,7 +67,7 @@ dsh-any-agent team status        # 团队开关与 profile
 - `dsh_runtime`：拉起 DSH 的运行时的 Node 版本是否满足 DSH 的 `engines.node`，不满足时 **warn**；
 - `dsh_desktop`：桌面版版本，与本服务所用 DSH 不一致时 **warn**（两边共用 `~/.dsh` 会话存储）；
 - `dsh_candidates`：发现的全部 DSH 来源，以及自动选中了哪一个；
-- `dsh_version`：按上表给版本定档 —— `verified` 为 ok（说明里会区分：当前发布线重跑过全量套件的版本，还是最近一次实测停在上一条发布线的版本）；`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
+- `dsh_version`：`verified` 为 ok。体检说明引用的是全量套件记录，表中也列出了 0.7.2 安装包工作流等专项验证。`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
 - `profile`：是否存在、是否漂移、路由来源；
 - `team`：`on` / `off` / `requested but unavailable`（版本或 profile 不含 team 包）；
 - `config`：当前 permission、空闲回收、共享进程等生效值；

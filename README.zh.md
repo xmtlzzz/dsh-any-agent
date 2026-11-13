@@ -93,7 +93,9 @@ dsh-any-agent-setup
 dsh-any-agent-setup --yes
 ```
 
-第二条命令只预览，加 `--yes` 才会写入配置。重新连接客户端的 MCP 服务，然后让你的 agent 在当前项目中开启 DSH 会话、派活、收结果。[先派活，回头验收](docs/zh/usage.md)展示了完整的工具调用顺序。
+第二条命令只预览，加 `--yes` 才会写入配置。重新连接客户端的 MCP 服务，按[安装自检](docs/zh/install.md#3-自检)确认能连通和取回结果。[先派活，回头验收](docs/zh/usage.md)展示了在项目里派活和收结果的完整流程。
+
+**重连后取结果**。用会话 ID 和原 `run_id` 或 `client_run_id` 调用 `dsh_get`。只记得会话 ID 时，`dsh_get` 也能查到最近一次已开始的回合。结果文件默认在服务启动时清理超过 7 天的记录。幂等键还要用于重试时，请保留对应的结果文件。
 
 只用 Cursor 或 VS Code？也可以一键添加（运行的是 `npx -y dsh-any-agent@latest`；DSH 仍需先装好）：
 
@@ -130,7 +132,7 @@ dsh-any-agent-setup --yes
 | `dsh_send` | 派任务。**默认 `wait=false`：立刻返回 `run_id` + `sentinel_file`**，回合在后台跑，跑完由哨兵文件通知你（推荐）。`wait=true` 才原地阻塞到回合结束；到期（`timeout_ms`，默认 0 = 一直等）**只会转后台，不取消回合、不丢结果** |
 | `dsh_list` | 所有会话及运行状态：`running` / `idle` / `detached`，已跑时长、当前工具、本轮输出。`only_running=true` 只看活动会话 |
 | `dsh_read` | **游标式增量读**——看正在跑的会话此刻吐出了什么。cursor 是**修订号**：文本被追加过的条目会再次返回，按 `seq` 替换全文（不要重复累加） |
-| `dsh_get` | 会话详情；带 `run_id` 时返回**那一次派活的完整结果 + 审核单**（"回头验收"的入口）。run 记录只在内存（最近 20 条），服务重启后请读哨兵文件 |
+| `dsh_get` | 会话详情和回合结果。传 `run_id` 或 `client_run_id` 查指定回合，只传会话 ID 查当前或最近已开始的回合。重启后可读回保留的磁盘结果和审核单 |
 | `dsh_review` | **调用方审核**。对已完成的 run 提交 `pass` / `partial` / `fail`，可带理由与 findings。裁决写入 `<状态目录>/reviews/<conversation_id>/<run_id>.review.json`，并回写内存 run 与哨兵。默认 advisory：**不阻塞**下一次 `dsh_send` |
 | `dsh_interject` | 会话在忙时插话：`interject` 打断并改口，`queue` 等本轮跑完接着说。**这一轮同样会写哨兵**，返回里给 `sentinel_file`。两种模式以及会话空闲时都会**阻塞到新回合跑完**；想排队又不阻塞用 `dsh_send(queue=true)` |
 | `dsh_takeover` | **抢占写锁**。锁被别的 DSH 进程占着时的唯一出路（DSH 没有夺锁 API，抢 = 杀掉持有者）。先判定持有者：本服务残留的孤儿 → 自动抢；另一个活着的实例 → 需 `force`；**GUI/未知 → 绝不杀**，只报告 |

@@ -12,6 +12,16 @@
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-11-13
+
+### 变更
+
+- 重连后只传会话 ID 给 `dsh_get`，也能从磁盘找回最近已开始的回合。
+- 在采集最终 Git 快照前先保存 ACP 结果。服务在采集期间退出时，
+  恢复会保留原终态和正文，并标明快照未完成。
+- CI 和发版前会验证从 npm 已发布的 0.7.2 升级。
+- 安装文档增加可在 MCP 客户端执行的自检步骤。
+
 ## [0.7.2] — 2026-11-13
 
 ### 修复
@@ -1223,7 +1233,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...v0.7.0

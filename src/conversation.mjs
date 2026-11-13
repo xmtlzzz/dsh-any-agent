@@ -61,7 +61,7 @@ import {
 import { attachReview, terminalResult } from './run-result.mjs';
 import { MAX_AUTO_APPROVALS_KEPT, approvalDecision, autoApprovalSummary, escalationOf } from './approval-policy.mjs';
 import { OutBuffer } from './out-buffer.mjs';
-import { MAX_RUNS, RunLedger } from './run-ledger.mjs';
+import { RunLedger } from './run-ledger.mjs';
 
 const now = () => Date.now();
 
@@ -1043,10 +1043,40 @@ export class Conversation {
       settled = true;
       watchdogTimer?.();
       finalizePromise = (async () => {
-        // ★ 先启动 after 快照：调用 gitStatus 时子进程立刻 spawn，但**不 await**；
-        //   这样 snapshot 的时间点仍贴近回合结束，而 busy 释放/唤醒不必等 git。
-        const afterPromise = gitStatus(this.cwd);
         try {
+          const result = {
+            conversation_id: this.id,
+            run_id: runRecord.run_id,
+            stop_reason: stopReason,
+            error: failure,
+            answer: c.answer,
+            thinking: formatReasoning(c, reasoning),
+            thinking_stats: {
+              hidden: reasoning === 'hide' || reasoning === 'marker',
+              chars: c.reasoning.length,
+              chunks: c.reasoningChunks,
+              ms: c.reasoningStartedAt ? now() - c.reasoningStartedAt : 0,
+            },
+            tools_used: [...c.tools.values()],
+            usage: c.usage,
+            auto_approvals_total: c.autoApprovalTotal,
+            auto_escalations_total: c.autoEscalationTotal,
+            auto_approvals: c.autoApprovals,
+            ...(c.watchdog ? { watchdog: c.watchdog } : {}),
+            workspace_changed: false,
+            diff_stat: null,
+            elapsed_ms: now() - t0,
+          };
+          const status = failure ? 'error' : stopReason === 'cancelled' ? 'cancelled' : 'done';
+          if (this.#hub.checkpointRunResult) {
+            const checkpoint = {
+              ...result,
+              ...(process.env.DSH_MCP_GIT_STATUS !== '0' ? { git_snapshot_incomplete: true } : {}),
+            };
+            this.#hub.checkpointRunResult(this.id, runRecord, withReview(checkpoint), status, now());
+          }
+          // 先暂存 ACP 结果，再启动 Git 快照；释放会话不必等快照完成。
+          const afterPromise = gitStatus(this.cwd);
           this.busy = false;
           if (this.currentRun === runRecord) this.currentRun = null;
           this.collector = null;
@@ -1071,7 +1101,7 @@ export class Conversation {
             {
               run: runRecord.run_id,
               turn: this.currentTurn,
-              status: failure ? 'error' : stopReason === 'cancelled' ? 'cancelled' : 'done',
+              status,
               stop_reason: stopReason ?? null,
               duration_ms: now() - t0,
               tool_count: c.tools.size,
@@ -1089,7 +1119,7 @@ export class Conversation {
           this.idleWaiters = [];
           for (const w of waiters) w();
           this.#scheduleDrain();
-          // 到这里才允许被 git 拖慢；结果/审核单/哨兵必须等快照完成后再落。
+          // 完整哨兵和审核单仍等 Git 快照，提前暂存的终态只用于进程崩溃恢复。
           const after = await afterPromise;
           // 回合结束后 DSH 的 token 累计已经落盘（真机实测在哨兵之前）：发一次最终值。
           // 只发给本回合自己的跟踪器——下一回合可能已经在 git 快照期间开始了。
@@ -1097,33 +1127,13 @@ export class Conversation {
             this.#liveUsageTick({ force: true });
             this.#liveUsage = null;
           }
-          const result = {
-            conversation_id: this.id,
-            run_id: runRecord.run_id,
-            stop_reason: stopReason,
-            error: failure,
-            answer: c.answer,
-            thinking: formatReasoning(c, reasoning),
-            thinking_stats: {
-              hidden: reasoning === 'hide' || reasoning === 'marker',
-              chars: c.reasoning.length,
-              chunks: c.reasoningChunks,
-              ms: c.reasoningStartedAt ? now() - c.reasoningStartedAt : 0,
-            },
-            tools_used: [...c.tools.values()],
-            usage: c.usage,
-            auto_approvals_total: c.autoApprovalTotal,
-            auto_escalations_total: c.autoEscalationTotal,
-            auto_approvals: c.autoApprovals,
-            ...(c.watchdog ? { watchdog: c.watchdog } : {}),
-            workspace_changed: !sameWorkspaceSnapshot(before, after),
-            diff_stat: after,
-            elapsed_ms: now() - t0,
-          };
+          result.workspace_changed = !sameWorkspaceSnapshot(before, after);
+          result.diff_stat = after;
+          result.elapsed_ms = now() - t0;
           withReview(result);
           runRecord.ended_at = now();
           runRecord.elapsed_ms = result.elapsed_ms;
-          runRecord.status = failure ? 'error' : stopReason === 'cancelled' ? 'cancelled' : 'done';
+          runRecord.status = status;
           runRecord.result = result;
           // ★ 无条件写哨兵：**一个回合 = 一个哨兵文件**，没有例外。
           //   之前只在"调用方没在原地等"时才写，于是插话那一轮没有哨兵 —— 调用方的
@@ -1459,7 +1469,7 @@ export class Conversation {
     if (runId) {
       const r = this.ledger.find(runId) ?? this.#hub.readStoredRun?.(this.id, runId);
       if (!r) {
-        throw new Error(`未知 run_id: ${runId}（回合记录只在内存、只留最近 ${MAX_RUNS} 条；也可用 dsh_read 读输出缓冲）`);
+        throw new Error(`未知 run_id: ${runId}`);
       }
       return r;
     }

@@ -74,6 +74,17 @@ function writeMarker(conv, run, extra = {}) {
 }
 const DEAD = 2147483000;
 const isInterrupted = (s) => s.status === 'error' && s.result?.stop_reason === 'interrupted' && Boolean(s.result?.review);
+async function killServer(client) {
+  process.kill(client.pid, 'SIGKILL');
+  for (let i = 0; i < 50; i++) {
+    try { process.kill(client.pid, 0); } catch (e) {
+      if (e.code === 'ESRCH') return;
+      throw e;
+    }
+    await sleep(100);
+  }
+  throw new Error('测试服务进程未退出');
+}
 
 const allClients = [];
 try {
@@ -211,8 +222,7 @@ try {
       const receipt = readJson(markerOf(convId, queued.run_id));
       return queued.queued && receipt.status === 'queued' && receipt.started_at === null && !Object.hasOwn(receipt, 'text');
     });
-    process.kill(a.pid, 'SIGKILL');
-    for (let i = 0; i < 50 && (() => { try { process.kill(a.pid, 0); return true; } catch { return false; } })(); i++) await sleep(100);
+    await killServer(a);
     await check('强杀之后没人写哨兵', () => !existsSync(sentinel));
 
     const b = new McpClient({ env }).start();
@@ -227,12 +237,74 @@ try {
     await check('重启后能按幂等键查到排队回合已取消', () =>
       existsSync(queued.sentinel_file) && afterQueue.structuredContent?.run?.status === 'cancelled' &&
       afterQueue.structuredContent.run.run_id === queued.run_id);
+    const latest = (await b.callTool('dsh_get', { conversation_id: convId })).structuredContent?.run;
+    await check('重启后无 ID 查询找到已开跑的回合，忽略取消的排队回合', () =>
+      latest?.run_id === runId && latest.source === 'sentinel');
     const retry = await b.callTool('dsh_send', {
       conversation_id: convId, prompt: '重试同一任务', client_run_id: 'recovery-active',
     });
     await check('重启后同一个幂等键返回原终态', () =>
       retry.structuredContent?.replayed === true && retry.structuredContent.run_id === runId &&
       retry.structuredContent.stop_reason === 'interrupted');
+    await b.close();
+  }
+
+  console.log('\n[6] 旧哨兵与按开始时间排序');
+  {
+    const id = randomUUID();
+    mkdirSync(join(runsDir, id), { recursive: true });
+    writeFileSync(sentinelOf(id, 'run-legacy'), JSON.stringify({
+      conversation_id: id, run_id: 'run-legacy', status: 'done', ended_at: 5000, result: { elapsed_ms: 1000 },
+    }));
+    writeFileSync(sentinelOf(id, 'run-legacy-queued'), JSON.stringify({
+      conversation_id: id, run_id: 'run-legacy-queued', status: 'cancelled', ended_at: 6000, result: { elapsed_ms: 0 },
+    }));
+    await check('旧哨兵按结束时间和耗时推算，排队后取消的回合跳过', async () =>
+      (await hub.readLatestStoredRun(id))?.run_id === 'run-legacy');
+    hub.writeRunSentinel(id, { run_id: 'run-later', status: 'done', started_at: 4500, ended_at: 4800, result: {} });
+    await check('后开跑的回合优先，即使之前的回合更晚落盘', async () =>
+      (await hub.readLatestStoredRun(id))?.run_id === 'run-later');
+  }
+
+  console.log('\n[7] ACP 已应答但 Git 快照未结束时强杀，重启可取回原结果');
+  {
+    const project = join(root, 'crash-after-acp');
+    execFileSync('git', ['init', '-q', project]);
+    const reachedEnd = join(root, 'acp-result-received');
+    const entry = join(root, 'pause-finalization.mjs');
+    writeFileSync(entry, [
+      "import { writeFileSync } from 'node:fs';",
+      "import { Conversation } from " + JSON.stringify(new URL('../src/conversation.mjs', import.meta.url).href) + ';',
+      'const pushOut = Conversation.prototype.pushOut;',
+      'Conversation.prototype.pushOut = function (kind, text, extra) {',
+      '  pushOut.call(this, kind, text, extra);',
+      "  if (kind !== 'turn' || extra?.phase !== 'end' || extra.stop_reason !== 'end_turn') return;",
+      '  writeFileSync(' + JSON.stringify(reachedEnd) + ", 'ready');",
+      '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);',
+      '};',
+      'await import(' + JSON.stringify(new URL('../bin/dsh-any-agent.mjs', import.meta.url).href) + ');',
+    ].join('\n'));
+    const a = new McpClient({ entry, env: { ...env, DSH_MCP_GIT_STATUS: '1', FAKE_ACP_PROMPT_MS: '100' } }).start();
+    allClients.push(a);
+    await a.initialize();
+    const id = (await a.callTool('dsh_start', { cwd: project })).structuredContent?.conversation_id;
+    const args = { conversation_id: id, client_run_id: 'finished-before-crash' };
+    const receipt = (await a.callTool('dsh_send', { ...args, prompt: '完成回合' })).structuredContent;
+    for (let i = 0; i < 100 && !existsSync(reachedEnd); i++) await sleep(100);
+    await check('ACP 已结束，最终哨兵尚未写出', () => existsSync(reachedEnd) && !existsSync(receipt.sentinel_file));
+    await killServer(a);
+    const b = new McpClient({ env }).start();
+    allClients.push(b);
+    await b.initialize();
+    const result = (await b.callTool('dsh_get', { conversation_id: id })).structuredContent?.run;
+    await check('重启后保留真实终态、正文，并标出缺失的 Git 快照', () =>
+      result?.run_id === receipt.run_id && result.source === 'sentinel' && result.status === 'done' &&
+      result.result.answer === 'fake answer' && result.result.stop_reason === 'end_turn' &&
+      result.result.git_snapshot_incomplete === true && result.result.review?.evidence.workspace_changed === null &&
+      !existsSync(markerOf(id, receipt.run_id)));
+    const replay = (await b.callTool('dsh_send', { ...args, prompt: '不能再跑', wait: true })).structuredContent;
+    await check('恢复后的原幂等键返回已完成正文', () =>
+      replay?.replayed === true && replay.run_id === receipt.run_id && replay.answer === 'fake answer');
     await b.close();
   }
 } catch (e) {

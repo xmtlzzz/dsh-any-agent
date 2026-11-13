@@ -101,7 +101,9 @@ dsh-any-agent-setup
 dsh-any-agent-setup --yes
 ```
 
-The second command previews the changes; `--yes` applies them. Reconnect your client's MCP server, then ask your agent to start a DSH conversation in your project, dispatch a task, and collect the result. The [dispatch workflow](docs/en/usage.md) shows the tool sequence.
+The second command previews the changes; `--yes` applies them. Reconnect your client's MCP server and run the [installation check](docs/en/install.md#3-verify-the-installation). The [dispatch workflow](docs/en/usage.md) shows how to send a task in your project and collect the result.
+
+**Collect results after reconnecting.** Call `dsh_get` with the conversation ID and the original `run_id` or `client_run_id`. With only the conversation ID, it can find the most recently started turn. On startup the server prunes result files older than seven days by default. Keep the result file while you still need its idempotency key for retries.
 
 Only using Cursor or VS Code? Add it in one click instead (runs `npx -y dsh-any-agent@latest`; DSH still has to be installed):
 
@@ -136,7 +138,7 @@ Only using Cursor or VS Code? Add it in one click instead (runs `npx -y dsh-any-
 | `dsh_send` | Hand it a task. **Defaults to `wait=false`: returns a `run_id` + `sentinel_file` immediately**, the turn runs in the background and the sentinel file notifies you when it's done (recommended). `wait=true` blocks until the turn ends; hitting `timeout_ms` (default `0` = wait forever) **only downgrades to background — the turn is never cancelled and the result is never lost** |
 | `dsh_list` | All conversations with live state: `running` / `idle` / `detached`, elapsed time, current tool, output so far. `only_running=true` for active ones |
 | `dsh_read` | **Cursor-based incremental read** of what a *running* conversation is producing right now. The cursor is a **revision number**: an entry whose text grew since your last read reappears — match it by `seq` and replace its text, don't append again |
-| `dsh_get` | Conversation details; with `run_id`, the **final result of that dispatch** (the "collect the result later" entry point) **plus its review ticket**. Run records live in memory (last 20) — use the sentinel file after a restart |
+| `dsh_get` | Conversation details and turn results. Pass `run_id` or `client_run_id` for a specific turn, or use the conversation ID alone for the current or most recently started turn. Retained results and review tickets remain queryable after a restart |
 | `dsh_review` | **Caller review.** Submit `pass` / `partial` / `fail` for a completed run, with notes and optional findings. The verdict is written to `<state dir>/reviews/<conversation_id>/<run_id>.review.json` and back into the in-memory run and sentinel. Advisory by default: it never blocks the next `dsh_send` |
 | `dsh_interject` | Interject while it's busy: `interject` = stop and redirect, `queue` = wait for the current turn, then speak. **This round writes a sentinel too**, and the reply carries its `sentinel_file`. In both modes, and on an idle conversation, it **blocks until the new turn ends**; to queue without blocking, use `dsh_send(queue=true)` |
 | `dsh_takeover` | **Preempt the write lock.** The only way out when another DSH process holds it (DSH has no steal API — preempting means killing the holder). It classifies the holder first: our own orphaned child → taken automatically; another live instance → needs `force`; **GUI/unknown → never killed**, reported instead |

@@ -10,6 +10,8 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
+| 0.7.3 | `0.2.2-rc.1` (desktop app) | ✅ Verified (upgrade) | On Windows with a real provider, upgraded the installed npm 0.7.2 package to 0.7.3, retrieved the saved result, replayed the original key, and completed another turn in the existing session |
+| 0.7.2 | `0.2.2-rc.1` (desktop app) | ✅ Verified (installed package lifecycle) | Windows with the desktop app's bundled runtime and a real provider. Codex passed dispatch, wait cancellation, and result retrieval after reconnecting. [Release verification](https://github.com/xmtlzzz/dsh-any-agent/pull/27). [Hosted CI](https://github.com/xmtlzzz/dsh-any-agent/actions/runs/43357420994) exercised the installed package on Windows, Linux, and macOS with simulated ACP |
 | 0.7.1 | `0.2.1-rc.5` | ✅ Verified | Windows release candidate tested with DSH via npx and Node 22.19. The full run passed 41 offline suites and found one localized error assertion failure in the model-backed `boundary` suite. After the fix, `boundary` passed all 46 checks. The optional `acceptance` suite was skipped because the profile had no IDA MCP |
 | 0.7.0 | `0.2.2-rc.1` (desktop app) | ✅ Verified (offline) | All 41 offline suites (1892 checks) passed on 2026-11-11. In a resident process test, the Claude desktop app was quit mid-turn and reopened, and the turn finished with a `done` sentinel |
 | 0.6.x | `0.2.1-rc.5` | ✅ Verified | Full suite run against 0.6.9 on 2026-11-10 (offline + model-backed; DSH via npx, Node 22.19), all passing; `acceptance` skipped because the profile has no IDA MCP. Other DSH versions were not re-verified for 0.6.x — the 0.5.x rows below are their last runs |
@@ -69,7 +71,7 @@ In an MCP client, call `dsh_doctor` and look at:
 - `dsh_runtime`: whether the launching runtime's Node satisfies DSH's `engines.node`; **warn** if not;
 - `dsh_desktop`: the desktop app's version; **warn** when it differs from the DSH this server uses (both share the `~/.dsh` session store);
 - `dsh_candidates`: every DSH found and which one was picked;
-- `dsh_version`: the version graded against the table above — `verified` is ok (the note says whether the current release line re-ran the full suite on that version, or its last full run was on the previous line); `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
+- `dsh_version`: `verified` is ok. The note refers to full-suite testing; the table also records narrower checks such as the 0.7.2 installed package lifecycle. `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
 - `profile`: exists, drift, route source;
 - `team`: `on` / `off` / `requested but unavailable` (version or profile lacks the team package);
 - `config`: effective permission, idle reaping, shared process, and so on;

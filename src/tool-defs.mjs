@@ -279,7 +279,7 @@ export const TOOL_DEFS = [
     inputSchema: S(
       {
         conversation_id: CONV_ID,
-        run_id: { type: 'string', maxLength: 200, description: 'dsh_send 返回的 run_id；不传则取最近一次回合。' },
+        run_id: { type: 'string', maxLength: 200, description: 'dsh_send 返回的 run_id；只传会话 ID 时查当前或最近已开始的回合，重连后可查磁盘记录。' },
         client_run_id: {
           type: 'string',
           maxLength: 128,
