@@ -12,6 +12,19 @@
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-11-13
+
+### 修复
+
+- 服务正常关闭时，会等待已收到 ACP 结果的回合保存正文和最终 Git 快照，
+  避免把已完成的回合误记为中断。
+
+### 变更
+
+- Linux、Windows 和 macOS 的 CI 都会安装候选包并跑完整工作流，
+  核对重连后读回的正文和结束原因。
+- 手动模型工作流也会用真实模型验收安装包，与发版工作流共用并发组。
+
 ## [0.7.1] — 2026-11-12
 
 ### 变更
@@ -1210,7 +1223,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.8...v0.6.9

@@ -32,7 +32,7 @@ name: tests
 #     watchdog          turn watchdog (stall / max duration)  33 checks
 #     worktree          isolation=worktree sessions      30 checks
 #     daemon            DSH_MCP_DAEMON=1 resident process  23 checks
-#     run-recovery      interrupted-turn sentinels   21 checks
+#     run-recovery      interrupted-turn sentinels   22 checks
 #     contract          tool surface + sentinel shape snapshot  13 checks
 #     update-check      dsh_doctor npm version check (fake fetch)  17 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
@@ -326,6 +326,9 @@ jobs:
       - name: package-check (publishability)
         run: node test/package-check.mjs
 
+      - name: installed tarball MCP lifecycle
+        run: npm run test:packed
+
       - name: version and help answer without side effects
         shell: bash
         run: |
@@ -357,9 +360,6 @@ jobs:
 
       - name: package.json and bin sanity
         run: node test/package-check.mjs
-
-      - name: installed tarball MCP lifecycle
-        run: npm run test:packed
 
       - name: pack, install into a scratch project, run it
         shell: bash
