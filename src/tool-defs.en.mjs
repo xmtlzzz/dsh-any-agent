@@ -165,7 +165,7 @@ export const TOOL_TEXT_EN = {
       'result is read back from the sentinel file, which is on disk and survives restarts.',
     params: {
       conversation_id: CONV_ID,
-      run_id: 'The run_id returned by dsh_send. Omit for the most recent turn.',
+      run_id: 'The run_id returned by dsh_send. With only the conversation ID, look up the current or most recently started turn, including retained results after reconnecting.',
       client_run_id:
         'Look the run up by its idempotency key instead of run_id. Works across restarts during sentinel retention.',
       max_chars:

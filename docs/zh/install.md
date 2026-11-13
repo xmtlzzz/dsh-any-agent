@@ -272,11 +272,12 @@ tool_timeout_sec = 120.0
 
 ### 3. 自检
 
-```bash
-dsh-any-agent --version      # 打印版本，不启动任何东西
-dsh-any-agent --help         # 参数、关键环境变量、文档链接
-node test/smoke.mjs          # 不调用 LLM，验证整条管道
-```
+1. 在客户端重新连接 MCP 服务，调用 `dsh_doctor`。能拿到结果就说明 MCP 已连通。看 `dsh_bin` 和 `dsh_runtime` 确认选中的 DSH 及其运行时，再看 `profile` 确认路由配置。这一步不会请求模型。
+2. 如果也想验证模型，在客户端打开一个空目录，发送下面这段话。它会发起一次短的 DSH 模型请求。回合结束并返回 `OK`，就说明能派活并拿到结果。
+
+> 用 `dsh_start` 在当前目录建一个 `read-only` 会话。调用 `dsh_send`，设置 `wait=true` 和 `client_run_id="install-check"`，提示词用「只回复 OK，不要调用工具」。把结果、`conversation_id` 和 `run_id` 给我。
+
+如果体检能返回但短任务失败，检查 DSH 的模型路由和 provider 凭据。如果只是客户端等待超时，先用会话 ID 和 `client_run_id="install-check"` 调用 `dsh_get` 看结果，再决定是否重发。
 
 **装完常见问题**
 

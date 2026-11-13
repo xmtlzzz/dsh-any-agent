@@ -222,6 +222,7 @@
       "result.workspace_changed": "boolean",
       "run_id": "string",
       "schema": "number",
+      "started_at": "number",
       "status": "string"
     },
     "interrupted": {
@@ -266,6 +267,7 @@
       "result.workspace_changed": "boolean",
       "run_id": "string",
       "schema": "number",
+      "started_at": "number",
       "status": "string"
     }
   }

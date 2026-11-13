@@ -27,6 +27,7 @@ node scripts/release-notes.mjs x.y.z   # preview the notes the Release page will
 # 3. Verify the tarball itself: builds, installs, starts.
 npm pack --dry-run
 npm run test:packed              # install the tarball and exercise legacy and modern stdio
+npm run test:packed -- --upgrade # fetch npm 0.7.2, then upgrade that installation to the candidate
 npm run test:packed -- --real    # run the packaged lifecycle with a configured DSH provider
 #    Then in a temp dir: npm install <tgz> && node_modules/.bin/dsh-any-agent --version
 
@@ -35,7 +36,7 @@ git tag -a vx.y.z <commit on main> -m "vx.y.z"
 git push origin vx.y.z
 ```
 
-For an MCP protocol or dispatch change, install the candidate tarball in Codex and in a client that advertises roots. In a temporary workspace, check `dsh_start`, dispatch with a unique `client_run_id`, cancel the host's wait, reconnect, and read the result with the same key. Record which clients and DSH version passed in the release checklist.
+For an MCP protocol or dispatch change, install the candidate tarball in Codex and in a client that advertises roots. In a temporary workspace, check `dsh_start`, dispatch with a unique `client_run_id`, cancel the host's wait, reconnect, and read the result with the same key. Record the OS, DSH version and installation source, clients, and checks that passed in the [compatibility matrix](compatibility.md).
 
 **Everything after the tag push is done by `.github/workflows/release.yml` — no local `npm publish`:**
 
@@ -43,7 +44,7 @@ For an MCP protocol or dispatch change, install the candidate tarball in Codex a
 2. **GitHub Release**: created only after the npm job. Notes are this version's CHANGELOG section (`scripts/release-notes.mjs`), followed by the install command and a compare link. If the Release already exists only its notes are updated, so re-running is safe. It comes after npm because directories such as Glama rebuild on a new GitHub Release with `npm install -g dsh-any-agent`; a Release that arrives first gets the previous version (on v0.6.4 the Release was public about 2.7 minutes before npm served it).
 3. **MCP Registry**: after npm, the workflow logs in to the official MCP Registry with its own GitHub OIDC token (the `io.github.xmtlzzz/*` namespace) and publishes `server.json`. The registry checks ownership through the `mcpName` field inside the npm package, which is why it runs after npm. `mcp-publisher` is pinned and its signature is verified with cosign before it runs.
 
-**Optional release gate (model suites)**. Set the repository variable `MODEL_SUITE_RUNNER` to the label of a self-hosted runner with DSH and a configured provider. A tag push runs `node test/run.mjs --all` and `npm run test:packed -- --real` there before publishing to npm. When the variable is unset, the release uses the offline package check. To run the same real-provider tests before tagging, dispatch the `model-suites` workflow on that runner. The two workflows share a concurrency group because the full suite cleans up test sessions. Run local model tests separately from those workflows on that machine.
+**Optional release gate (model suites)**. Set the repository variable `MODEL_SUITE_RUNNER` to the label of a self-hosted runner with DSH and a configured provider. A tag push runs `node test/run.mjs --all` and `npm run test:packed -- --real` there before publishing to npm. The package lifecycle and upgrade checks use simulated ACP and run regardless of that setting. To run the same real-provider tests before tagging, dispatch the `model-suites` workflow on that runner. The two workflows share a concurrency group because the full suite cleans up test sessions. Run local model tests separately from those workflows on that machine.
 **One-time setup**: npmjs.com → package `dsh-any-agent` → Settings → Trusted Publisher → GitHub Actions, repository `xmtlzzz/dsh-any-agent`, workflow file `release.yml`. Until then the npm job fails with an auth error and no GitHub Release is created; publish locally with `npm publish` as a fallback, then re-run: the npm job skips and the Release is created.
 
 **Refreshing an old Release's notes**: Actions → release → Run workflow with an existing tag (e.g. `v0.6.2`). The npm job skips because the version exists.

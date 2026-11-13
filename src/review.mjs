@@ -78,7 +78,12 @@ export function buildReviewChecklist({ result = {}, permission = null } = {}) {
       `Check what the tools did: this turn used [${tools.join(', ')}]; confirm the exit status and output of the key commands and writes are what you expect.`,
     ));
   }
-  if (result.workspace_changed) {
+  if (result.git_snapshot_incomplete) {
+    items.push(L(
+      '最终 Git 快照未完成，请检查工作区，确认本轮实际改动。',
+      'The final Git snapshot was incomplete. Inspect the workspace to verify the changes from this turn.',
+    ));
+  } else if (result.workspace_changed) {
     const n = result.diff_stat?.changed_files;
     items.push(L(
       `检查改动范围：工作区发生了变化${Number.isFinite(n) ? `（当前有 ${n} 个文件有改动）` : ''}，确认都在预期内，没有越界修改。`,
@@ -155,7 +160,7 @@ export function buildReviewTicket({
   const evidence = {
     stop_reason: result?.stop_reason ?? null,
     error: result?.error ? String(result.error).slice(0, 500) : null,
-    workspace_changed: result?.workspace_changed ?? null,
+    workspace_changed: result?.git_snapshot_incomplete ? null : result?.workspace_changed ?? null,
     changed_files: result?.diff_stat?.changed_files ?? null,
     tools: toolNames(result),
     auto_approvals: Number.isFinite(result?.auto_approvals_total) ? result.auto_approvals_total : null,

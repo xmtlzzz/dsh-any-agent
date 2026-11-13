@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-11-13
+
+### Changed
+
+- `dsh_get` can find the most recently started turn on disk when called with
+  only a conversation ID after reconnecting.
+- Save the ACP outcome before collecting the final Git snapshot. If the service
+  exits during collection, recovery preserves the outcome and answer and
+  reports that the snapshot is incomplete.
+- Check upgrades from the published 0.7.2 package in CI and before release.
+- Add an installation check that users can run in their MCP client.
+
 ## [0.7.2] — 2026-11-13
 
 ### Fixed
@@ -1694,7 +1706,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...v0.7.0

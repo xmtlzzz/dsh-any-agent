@@ -403,6 +403,12 @@ export function createHandlers(hub, opts = {}) {
         }
       } else {
         run = conv.getRun();
+        if (!run?.started_at && run?.status !== 'running') {
+          run = (await hub.readLatestStoredRun?.(args.conversation_id)) ?? run;
+          // 磁盘查询期间可能刚有一个新回合开跑。
+          const current = conv.getRun();
+          if (current?.started_at || current?.status === 'running') run = current;
+        }
       }
       if (run && !runSource) runSource = run.source ?? 'memory';
       if (args.run_id && !run) {
@@ -446,6 +452,9 @@ export function createHandlers(hub, opts = {}) {
           meta.push(L(`  （思考 ${run.result.thinking_stats.chars} 字已隐藏）`, `  (${run.result.thinking_stats.chars} chars of reasoning hidden)`));
         }
         if (run.result?.error) meta.push(L(`  ⚠️ 失败: ${run.result.error}`, `  ⚠️ Failed: ${run.result.error}`));
+        if (run.result?.git_snapshot_incomplete) {
+          meta.push(L('  已恢复回合结果，最终 Git 快照未完成。', '  Turn result recovered before the final Git snapshot completed.'));
+        }
         const review = run.review ?? run.result?.review;
         if (review) {
           meta.push('');

@@ -26,10 +26,10 @@ export async function startHub(log) {
   } catch {
     /* 清理失败不影响启动 */
   }
-  // 上一个进程没跑完就死掉的回合：补写"已中断"哨兵，别让调用方一直等一个不会出现的文件。
+  // 上一个进程退出后补写哨兵：优先恢复已暂存的 ACP 结果。
   const recovered = hub.recoverInterruptedRuns();
   if (recovered.length) {
-    log.info(`[dsh-any-agent] 为 ${recovered.length} 个被中断的回合补写了哨兵: ${recovered.map((r) => r.run_id).join(', ')}`);
+    log.info(`[dsh-any-agent] 为 ${recovered.length} 个回合补写了哨兵: ${recovered.map((r) => r.run_id).join(', ')}`);
   }
   if (prunedSentinels.pruned || prunedSentinels.reviews_pruned) {
     log.info(

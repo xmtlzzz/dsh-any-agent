@@ -27,6 +27,7 @@ node scripts/release-notes.mjs x.y.z   # 预览 Release 页面上会显示的说
 # 3. 确认 tarball 本身：打得出来、装得上、起得来
 npm pack --dry-run
 npm run test:packed              # 安装实际 tarball，验证旧版和新版 MCP stdio
+npm run test:packed -- --upgrade # 从 npm 取 0.7.2，再原地换装候选包
 npm run test:packed -- --real    # 用已配置的 DSH 和真实模型验证包内工作流
 #    再在临时目录里：npm install <tgz> && node_modules/.bin/dsh-any-agent --version
 
@@ -35,7 +36,7 @@ git tag -a vx.y.z <main 上的提交> -m "vx.y.z"
 git push origin vx.y.z
 ```
 
-修改 MCP 协议或派活行为时，用候选 tarball 在 Codex 和一个声明 roots 的客户端各做一次验收。用临时工作区建会话，带唯一的 `client_run_id` 派活，取消宿主等待并重连，再用原键查询结果。在发布清单记录通过的客户端和 DSH 版本。
+修改 MCP 协议或派活行为时，用候选 tarball 在 Codex 和一个声明 roots 的客户端各做一次验收。用临时工作区建会话，带唯一的 `client_run_id` 派活，取消宿主等待并重连，再用原键查询结果。在[兼容性矩阵](compatibility.md)记录操作系统、DSH 版本及安装来源、客户端和实际通过的检查。
 
 **推送 tag 之后的事都由 `.github/workflows/release.yml` 完成，不需要再在本机 `npm publish`：**
 
@@ -43,7 +44,7 @@ git push origin vx.y.z
 2. **GitHub Release**：npm 那一步完成后才创建。说明取自 CHANGELOG 里这个版本的那一节（`scripts/release-notes.mjs`），末尾附安装命令和 compare 链接。Release 已存在时只更新说明，所以重跑是安全的。之所以排在 npm 之后：Glama 等目录在新的 GitHub Release 出现时会重新构建并 `npm install -g dsh-any-agent`，Release 先出来就会装到上一个版本（v0.6.4 时 Release 比 npm 可用早了约 2.7 分钟）。
 3. **MCP Registry**：npm 发布之后，用工作流自己的 GitHub OIDC 登录官方 MCP Registry（`io.github.xmtlzzz/*` 命名空间），把 `server.json` 登记上去。Registry 通过 npm 包里的 `mcpName` 字段确认归属，所以必须在 npm 之后。`mcp-publisher` 版本固定，并用 cosign 校验签名后才执行。
 
-**可选的真机发版验证**。将仓库变量 `MODEL_SUITE_RUNNER` 设为已安装 DSH 并配置好模型服务的自托管 runner 标签。推送 tag 后，发版流程会先在该 runner 上跑 `node test/run.mjs --all` 和 `npm run test:packed -- --real`，通过后再发布到 npm。变量为空时，发版使用离线安装包检查。要在打标签前跑同样的真机检查，可以手动触发 `model-suites` 工作流。两条工作流共用并发组，因为全量套件会清理测试会话。在这台机器上手动跑模型测试时，应与工作流错开。
+**可选的真机发版验证**。将仓库变量 `MODEL_SUITE_RUNNER` 设为已安装 DSH 并配置好模型服务的自托管 runner 标签。推送 tag 后，发版流程会先在该 runner 上跑 `node test/run.mjs --all` 和 `npm run test:packed -- --real`，通过后再发布到 npm。安装包工作流和升级检查使用模拟 ACP，始终执行。要在打标签前跑同样的真机检查，可以手动触发 `model-suites` 工作流。两条工作流共用并发组，因为全量套件会清理测试会话。在这台机器上手动跑模型测试时，应与工作流错开。
 **一次性配置（只需做一次）**：npmjs.com → 包 `dsh-any-agent` → Settings → Trusted Publisher → GitHub Actions，填仓库 `xmtlzzz/dsh-any-agent`、工作流文件 `release.yml`。没配之前，npm 那一步会报认证错误，GitHub Release 也不会创建；这时可以在本机手动 `npm publish` 兜底，再在 Actions 里重跑：npm 那一步会跳过，GitHub Release 照常创建。
 
 **重发某个旧版本的 Release 说明**：Actions → release → Run workflow，填已有的 tag（如 `v0.6.2`）。npm 那一步会因为版本已存在而跳过。

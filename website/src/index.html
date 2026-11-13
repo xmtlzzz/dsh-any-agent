@@ -150,7 +150,7 @@ tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-
     </article>
     <article class="faq-row">
       <h3 class="faq-q">编辑器关闭，或者进程崩溃，任务会怎样？</h3>
-      <div class="faq-a"><p>已经落盘的会话可在下次调用时恢复。默认模式下，客户端关闭、重连或崩溃会打断进行中的回合，但 0.7.0 起服务退出前（被强杀则在下次启动时）都会为它写出 <code>stop_reason: "interrupted"</code> 的哨兵，等待方不会空等；文件改动不回滚，恢复后先核对工作区再重新派活。想让回合不受客户端影响，可用 <code>dsh-any-agent-setup --yes --daemon</code> 开启常驻进程模式：客户端关掉、重连或崩溃，回合都照常跑完并写出哨兵。卡住的回合交给看门狗：开跑 15 分钟后连续 10 分钟没有任何进展（有工具在跑时宽限放大 3 倍）就取消，另有 2 小时总时长上限。ACP 在取消后的宽限内无响应时，服务会隔离并终止对应进程。正常完成的回合由原子哨兵文件唤醒（Windows 自动附带 PowerShell 原生等待命令），无需轮询。首次成功回合之前的会话可能尚未落盘。</p></div>
+      <div class="faq-a"><p>已落盘的会话可在下次调用时恢复。服务正常退出时会保存已经收到的 ACP 结果，未完成的回合会记为 <code>stop_reason: "interrupted"</code>。服务被强杀后，如果 ACP 结果已落盘，下次启动会保留正文和原终态，否则记为中断。重连后可以用 <code>dsh_get</code> 取结果。回合中断或出现 <code>git_snapshot_incomplete: true</code> 时，先检查工作区再派活。用 <code>dsh-any-agent-setup --yes --daemon</code> 开启常驻进程模式后，客户端关闭或崩溃时，回合仍可跑完并写入结果文件。看门狗会取消卡住的回合，默认总时长上限为 2 小时。首次成功回合前中断的会话可能尚未落盘。</p></div>
     </article>
     <article class="faq-row">
       <h3 class="faq-q">需要指定的编辑器、模型或 API 服务吗？</h3>

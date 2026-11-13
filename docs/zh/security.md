@@ -77,8 +77,8 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 | 路径 | 内容 | 保留多久 | 怎么关 / 清 |
 |---|---|---|---|
 | `<状态目录>/conversations.json`、`meta/<会话id>.json` | 会话注册表与元数据：id、cwd、权限、计数、标题提示；不含正文 | 到会话被 forget | `dsh_release(forget=true)` |
-| `<状态目录>/runs/<会话id>/<run_id>.json` | 完成哨兵：正文、用量、审核单、工具输入（均已脱敏） | 7 天（`DSH_MCP_SENTINEL_TTL_MS`） | `DSH_MCP_SENTINEL_TOOL_INPUTS=0` 只留工具输入的长度（自动放行审批的命令预览也去掉）；读完可以直接删 |
-| `<状态目录>/runs/<会话id>/<run_id>.running` | 接单回执：run ID、调用方幂等键、脱敏任务预览、排队或执行状态和所属进程 | 写出哨兵时删除 | 状态目录应位于支持硬链接的文件系统 |
+| `<状态目录>/runs/<会话id>/<run_id>.json` | 完成哨兵：正文、用量、审核单、工具输入（均已脱敏） | 7 天（`DSH_MCP_SENTINEL_TTL_MS`） | `DSH_MCP_SENTINEL_TOOL_INPUTS=0` 只留工具输入的长度（自动放行审批的命令预览也去掉）；保留文件可继续查询和按原幂等键重试 |
+| `<状态目录>/runs/<会话id>/<run_id>.running` | 接单回执：run ID、调用方幂等键、脱敏任务预览、排队或执行状态、所属进程，以及最终 Git 快照前暂存的脱敏结果 | 写出哨兵时删除 | 状态目录应位于支持硬链接的文件系统 |
 | `<状态目录>/reviews/<会话id>/<run_id>.review.json` | 审核记录：裁决、理由、清单、证据摘要（已脱敏） | 同哨兵，7 天 | `DSH_MCP_REVIEW=off` 不自动出审核单 |
 | `<状态目录>/live/<会话id>/events.jsonl` | live 事件流：事件类型、时间、工具名、客户端名；默认还带脱敏后的命令 / 路径 / prompt 预览 | 同哨兵，7 天；5 MB 滚动 | `DSH_MCP_LIVE=meta` 去掉预览，`off` 不写 |
 | `<状态目录>/locks/<会话id>.json` | 写锁持有者登记：本服务与 DSH 子进程的 PID、cwd | 释放会话或进程退出后清 | — |

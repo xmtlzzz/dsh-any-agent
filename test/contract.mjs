@@ -145,7 +145,9 @@ try {
   doneRaw = JSON.parse(readFileSync(r.sentinel_file, 'utf8'));
   // 被中断的回合：服务进程死掉后由下一个进程补写（见 test/run-recovery.mjs）。
   const marker = join(env.DSH_MCP_RUNS_DIR, conv.id, 'run-dead.running');
-  writeFileSync(marker, JSON.stringify({ conversation_id: conv.id, run_id: 'run-dead', review_mode: 'advisory', owner_pid: 2147483000 }));
+  writeFileSync(marker, JSON.stringify({
+    conversation_id: conv.id, run_id: 'run-dead', review_mode: 'advisory', owner_pid: 2147483000, started_at: Date.now(),
+  }));
   const [rec] = hub.recoverInterruptedRuns({ alive: () => false });
   interruptedRaw = rec ? JSON.parse(readFileSync(rec.sentinel_file, 'utf8')) : null;
   await hub.shutdown();

@@ -26,7 +26,9 @@ MCP tool calls **block**, so `dsh_send` **does not block by default** (`wait=fal
 
 **A returned result is not "done" until the caller has reviewed it.** Every result carries a `review` ticket: a checklist derived from the turn (did it change files? did it end normally? which tools ran?) plus the evidence needed to check it. Use your own tools to verify at least one claim — read the changed files, inspect `git diff`, run the relevant test — then submit a verdict with `dsh_review`. The default `advisory` mode does **not** block the next `dsh_send`; it only makes the review request part of the returned payload instead of something the caller has to remember. `fail` / `partial` require `notes` (or `findings`). A failed review is **not** fed back to DSH automatically — dispatch a fix with `dsh_send` when you decide to.
 
-`run_id` is the receipt. Use it or the original `client_run_id` with `dsh_get` during sentinel retention, including after a restart. The server saves receipt metadata before accepting a run. Queued prompts stay in memory, so after a restart unstarted runs get a cancelled sentinel. An in-flight run gets an interrupted sentinel. Retry with the original key to get the original result. Use a new key when you intend to run the task again.
+`run_id` is the receipt. Use it or the original `client_run_id` with `dsh_get` during sentinel retention, including after a restart. With only `conversation_id`, the tool checks memory for the current or most recently started turn and falls back to disk. Look up an unstarted queued run by its ID.
+
+The server saves receipt metadata before accepting a run. On restart, it marks unstarted queued runs as cancelled and turns that did not return an ACP result as interrupted. If the ACP result was already saved, recovery preserves its original outcome and redacted answer. A recovered result with `git_snapshot_incomplete: true` needs a manual workspace check. Reuse the original key to retrieve the result and use a new key when you intend to execute the task again.
 
 If the host cancels a blocking MCP request, the server stops waiting and sending progress. A dispatched turn continues to its sentinel. Use `dsh_interrupt` to stop a running turn.
 
@@ -65,7 +67,7 @@ Design notes (especially under **concurrent multi-session** use):
 - **Review survives the sentinel**: `result.review` is written with the result, so a caller that only reads the file still sees the checklist. `dsh_review` then **atomically rewrites** that review block (`status` → `pass`/`partial`/`fail`, plus `notes`, `reviewed_at`, `review_file`); the latch itself never disappears. Review records live under `<state dir>/reviews/` and are pruned on the same 7-day TTL as sentinels.
 - **★ No reasoning in the sentinel**: the payload carries the answer, thinking *statistics*, usage and (credential-redacted) tool inputs, but never reasoning text — `result.thinking` is stripped and replaced by a boolean `thinking_omitted` (`true` when reasoning was removed, `false` when there was none), because this server's rule is that reasoning never reaches its own disk artifacts. `dsh_get(run_id)` still returns it from memory while the record lives. `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` breaks that guarantee deliberately. Note that **DSH's own session log does contain reasoning** — see [Logging and privacy](security.md).
 
-> Cleanup: sentinels and review records contain full answers/notes, so the service **prunes them once they are older than 7 days at startup** (tune with `DSH_MCP_SENTINEL_TTL_MS`; `0` disables). Your waiter should still `rm` the file after consuming it.
+> On startup, the service prunes sentinels and review records older than seven days by default. Set `DSH_MCP_SENTINEL_TTL_MS` to change the retention period or set it to `0` to disable pruning. Keep the sentinel while you still need the result or its idempotency key.
 
 ## 🧵 Workflow: many conversations at once
 

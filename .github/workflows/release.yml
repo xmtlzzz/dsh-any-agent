@@ -197,6 +197,7 @@ jobs:
           npm run check:release
           node test/package-check.mjs
           npm run test:packed
+          npm run test:packed -- --upgrade
 
       - name: Publish
         if: steps.exists.outputs.published == 'false'

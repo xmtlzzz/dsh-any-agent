@@ -149,7 +149,9 @@ export function renderSendResult(r) {
   }
   const tools = (r.tools_used ?? []).map((t) => t.name ?? t.title).filter(Boolean);
   if (tools.length) meta.push(L(`工具=[${[...new Set(tools)].join(', ')}]`, `tools=[${[...new Set(tools)].join(', ')}]`));
-  if (r.workspace_changed) {
+  if (r.git_snapshot_incomplete) {
+    meta.push(L('已恢复回合结果，最终 Git 快照未完成。', 'Turn result recovered before the final Git snapshot completed.'));
+  } else if (r.workspace_changed) {
     const n = r.diff_stat?.changed_files ?? '?';
     meta.push(L(
       `本轮工作区状态发生变化(当前共 ${n} 个文件有改动)`,

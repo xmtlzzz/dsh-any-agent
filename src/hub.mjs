@@ -30,6 +30,7 @@ import {
   statSync,
   rmSync,
 } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   ALLOW_FULL_ACCESS,
@@ -248,27 +249,7 @@ export class Hub {
     const file = this.runSentinelPath(conversationId, run.run_id);
     try {
       mkdirSync(dirname(file), { recursive: true });
-      const payload = {
-        schema: SENTINEL_SCHEMA,
-        conversation_id: conversationId,
-        run_id: run.run_id,
-        client_run_id: run.client_run_id ?? null,
-        status: run.status ?? 'unknown',
-        ended_at: run.ended_at ?? Date.now(),
-        error: sanitizeApprovalContext(run.error ?? run.result?.error ?? null, 'error'),
-        result: sanitizeResultForSentinel(run.result ?? null),
-      };
-      try {
-        writeRunJson(file, payload, { exclusive: true });
-      } catch (e) {
-        // 正常收尾与重启恢复都可能写终态。先落地的终态始终有效。
-        if (e.code !== 'EEXIST') throw e;
-        return file;
-      }
-      // 哨兵落地了，"回合进行中"的标记就没用了（删不掉也无妨：恢复时看到哨兵已在会直接清掉它）。
-      try {
-        rmSync(this.runMarkerPath(conversationId, run.run_id), { force: true });
-      } catch {}
+      this.#publishRunSentinel(file, this.runMarkerPath(conversationId, run.run_id), runSentinelPayload(conversationId, run));
       return file;
     } catch (e) {
       const msg = `写完成哨兵失败（${file}）: ${e.message}`;
@@ -276,6 +257,16 @@ export class Hub {
       this.log.info(`[hub] ${msg}`);
       return null;
     }
+  }
+
+  #publishRunSentinel(file, marker, payload) {
+    try {
+      writeRunJson(file, payload, { exclusive: true });
+    } catch (e) {
+      // 正常收尾和并发恢复都保留第一个落地的终态。
+      if (e.code !== 'EEXIST') throw e;
+    }
+    try { rmSync(marker, { force: true }); } catch {}
   }
 
   // ── 持久化回合收据 ───────────────────────────────────────────────
@@ -311,7 +302,7 @@ export class Hub {
     }
   }
 
-  #writeRunMarker(file, conversationId, run, options) {
+  #writeRunMarker(file, conversationId, run, { checkpoint, ...options } = {}) {
     mkdirSync(dirname(file), { recursive: true });
     writeRunJson(file, {
       conversation_id: conversationId,
@@ -323,11 +314,24 @@ export class Hub {
       started_at: run.started_at ?? null,
       owner_pid: process.pid,
       owner_started_at: PROCESS_STARTED_AT,
+      ...(checkpoint ? { checkpoint } : {}),
     }, options);
   }
 
   markRunStarted(conversationId, run) {
     this.#writeRunMarker(this.runMarkerPath(conversationId, run.run_id), conversationId, run);
+  }
+
+  /** ACP 已结束，先把脱敏终态写进收据。最终哨兵仍在 Git 快照完成后发布。 */
+  checkpointRunResult(conversationId, run, result, status, endedAt) {
+    try {
+      const marker = this.runMarkerPath(conversationId, run.run_id);
+      if (!existsSync(marker)) return; // 关闭流程可能已经写出了中断哨兵。
+      const checkpoint = runSentinelPayload(conversationId, { ...run, status, ended_at: endedAt, result });
+      this.#writeRunMarker(marker, conversationId, run, { checkpoint });
+    } catch (e) {
+      this.log.info(`[hub] 回合 ${run.run_id} 的终态暂存失败: ${e.message}`);
+    }
   }
 
   readStoredRun(conversationId, runId) {
@@ -336,20 +340,50 @@ export class Hub {
     const terminal = () => {
       const saved = readRunJson(sentinel);
       if (!saved) return null;
-      return {
-        ...saved,
-        source: 'sentinel',
-        started_at: saved.started_at ?? null,
-        elapsed_ms: saved.result?.elapsed_ms ?? null,
-        prompt_preview: saved.prompt_preview ?? null,
-        result: saved.result ? { ...saved.result, sentinel_file: sentinel } : null,
-      };
+      return storedSentinel(saved, sentinel);
     };
     // 哨兵可能在两次读之间替换标记。再读一次，避免把已接单回合误报成不存在。
     const saved = terminal();
     if (saved) return saved;
     const pending = readRunJson(marker);
-    return pending ? { ...pending, status: pending.status ?? 'running', source: 'receipt', result: null } : terminal();
+    if (!pending) return terminal();
+    const { checkpoint: _checkpoint, ...receipt } = pending;
+    return { ...receipt, status: receipt.status ?? 'running', source: 'receipt', result: null };
+  }
+
+  async readLatestStoredRun(conversationId) {
+    const dir = dirname(this.runSentinelPath(conversationId, 'run'));
+    let files;
+    try {
+      files = await readdir(dir, { withFileTypes: true });
+    } catch (e) {
+      if (e.code === 'ENOENT') return null;
+      throw e;
+    }
+    let latest = null;
+    let latestStartedAt = -Infinity;
+    for (const entry of files) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const runId = entry.name.slice(0, -'.json'.length);
+      try { assertSafeId(runId, 'run_id'); } catch { continue; }
+      const file = join(dir, entry.name);
+      let saved;
+      try {
+        saved = JSON.parse(await readFile(file, 'utf8'));
+      } catch (e) {
+        if (e.code === 'ENOENT' || e instanceof SyntaxError) continue;
+        throw e;
+      }
+      if (saved?.conversation_id !== conversationId || saved.run_id !== runId || !saved.result ||
+          !Number.isFinite(saved.ended_at)) continue;
+      const startedAt = sentinelStartTime(saved);
+      if (startedAt === null || startedAt < latestStartedAt) continue;
+      if (startedAt === latestStartedAt && saved.ended_at < latest.ended_at) continue;
+      if (startedAt === latestStartedAt && saved.ended_at === latest.ended_at && saved.run_id <= latest.run_id) continue;
+      latest = saved;
+      latestStartedAt = startedAt;
+    }
+    return latest ? storedSentinel(latest, this.runSentinelPath(conversationId, latest.run_id)) : null;
   }
 
   findRunByClientId(conversationId, clientRunId) {
@@ -369,7 +403,7 @@ export class Hub {
   }
 
   /**
-   * 启动时：给"上一个进程没跑完就死掉"的回合补写哨兵（status=error，stop_reason=interrupted）。
+   * 启动时：恢复已暂存的 ACP 结果，或给未完成的回合补写中断/取消哨兵。
    *
    * 只认领主人确实不在了的标记：PID 不存在，或 PID 还在但启动时刻对不上（被别的进程复用了）。
    * 读不到启动时刻时按"还活着"处理 —— 宁可不补，也不能给另一个实例正在跑的回合写一个假的终态。
@@ -418,7 +452,18 @@ export class Hub {
           try { rmSync(markerFile, { force: true }); } catch {}
           continue;
         }
-        const file = this.#writeInterruptedSentinel(m.conversation_id, m);
+        let file;
+        if (m.checkpoint?.schema === SENTINEL_SCHEMA && m.checkpoint.conversation_id === m.conversation_id &&
+            m.checkpoint.run_id === m.run_id && m.checkpoint.result) {
+          try {
+            this.#publishRunSentinel(sentinel, markerFile, m.checkpoint);
+            file = sentinel;
+          } catch (e) {
+            this.log.info(`[hub] 恢复回合 ${m.run_id} 的终态失败: ${e.message}`);
+          }
+        } else {
+          file = this.#writeInterruptedSentinel(m.conversation_id, m);
+        }
         if (file) recovered.push({ conversation_id: m.conversation_id, run_id: m.run_id, sentinel_file: file });
       }
     }
@@ -448,6 +493,7 @@ export class Hub {
       review_mode: normalizeReviewMode(run.review_mode, DEFAULT_REVIEW),
       status: queued ? 'cancelled' : 'error',
       error,
+      started_at: run.started_at ?? null,
       ended_at: now(),
     };
     record.result = attachReview(
@@ -1176,6 +1222,39 @@ export class Hub {
       this.save();
     }
   }
+}
+
+function runSentinelPayload(conversationId, run) {
+  return {
+    schema: SENTINEL_SCHEMA,
+    conversation_id: conversationId,
+    run_id: run.run_id,
+    client_run_id: run.client_run_id ?? null,
+    status: run.status ?? 'unknown',
+    started_at: run.started_at ?? null,
+    ended_at: run.ended_at ?? Date.now(),
+    error: sanitizeApprovalContext(run.error ?? run.result?.error ?? null, 'error'),
+    result: sanitizeResultForSentinel(run.result ?? null),
+  };
+}
+
+function storedSentinel(saved, file) {
+  return {
+    ...saved,
+    source: 'sentinel',
+    started_at: saved.started_at ?? null,
+    elapsed_ms: saved.result?.elapsed_ms ?? null,
+    prompt_preview: saved.prompt_preview ?? null,
+    result: saved.result ? { ...saved.result, sentinel_file: file } : null,
+  };
+}
+
+function sentinelStartTime(saved) {
+  if (Object.hasOwn(saved, 'started_at')) return Number.isFinite(saved.started_at) ? saved.started_at : null;
+  // 旧哨兵没有开始时间。未开始即取消的回合耗时为 0。
+  const elapsed = saved.result.elapsed_ms;
+  if (!Number.isFinite(saved.ended_at) || (saved.status === 'cancelled' && !(elapsed > 0))) return null;
+  return saved.ended_at - (Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : 0);
 }
 
 function writeRunJson(file, value, { exclusive = false } = {}) {
