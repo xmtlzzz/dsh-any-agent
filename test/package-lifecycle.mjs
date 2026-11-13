@@ -8,6 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { McpClient } from './mcp-client.mjs';
 import { cleanupSuite } from './residue.mjs';
+import { resolveDsh } from '../src/dsh-locate.mjs';
 
 const real = process.argv.includes('--real');
 const npm = process.env.npm_execpath;
@@ -63,6 +64,7 @@ function connect() {
 }
 
 try {
+  const runtime = real ? resolveDsh() : null;
   mkdirSync(project);
   mkdirSync(second);
   const [{ filename }] = JSON.parse(npmRun(['pack', '--ignore-scripts', '--json', '--pack-destination', root]));
@@ -119,10 +121,15 @@ try {
   await reopened.initialize();
   const readBack = (await reopened.callTool('dsh_get', args)).structuredContent?.run;
   assert.equal(readBack?.run_id, finished.run_id);
+  assert.equal(readBack.status, finished.status);
+  assert.equal(readBack.source, 'sentinel');
+  assert.equal(readBack.result.answer, finished.result.answer);
+  assert.equal(readBack.result.stop_reason, finished.result.stop_reason);
   const replay = (await reopened.callTool('dsh_send', { ...args, prompt: 'This retry must not run.' })).structuredContent;
   assert.equal(replay?.replayed, true);
   assert.equal(replay.run_id, finished.run_id);
-  console.log(`Packaged MCP lifecycle passed (${real ? 'real DSH and provider' : 'simulated ACP'}).`);
+  const backend = runtime ? `DSH ${runtime.version ?? 'unknown version'} via ${runtime.source}, real provider` : 'simulated ACP';
+  console.log(`Packaged MCP lifecycle passed (${backend}; ${process.platform}, Node ${process.versions.node}).`);
 } finally {
   for (const client of clients) await client.close();
   if (real) cleanupSuite({ clients, roots: [root] });

@@ -122,6 +122,8 @@ export class Hub {
   }
 
   #reaper;
+  /** 已收到 ACP 结果，仍在生成工作区快照及写入哨兵的回合。 */
+  #finalizingRuns = new Map();
   /** 同一 id 的磁盘接管 in-flight Promise，防止并发请求各自构造一个 Conversation。 */
   #adopting = new Map();
   /** 本实例从注册表移除过的会话 id（save 合并盘上条目时跳过）。 */
@@ -1131,6 +1133,12 @@ export class Hub {
     return { released: released.length, conversations: released, skipped_busy: skippedBusy, failed };
   }
 
+  trackRunFinalization(run, finalization) {
+    const pending = finalization.finally(() => this.#finalizingRuns.delete(run));
+    this.#finalizingRuns.set(run, pending);
+    return pending;
+  }
+
   async shutdown() {
     this.shuttingDown = true;
     if (this.#reaper) clearInterval(this.#reaper);
@@ -1140,27 +1148,33 @@ export class Hub {
     for (const c of this.conversations.values()) {
       for (const run of c.ledger.runs) {
         if (run.status !== 'queued' && run.status !== 'running') continue;
+        if (this.#finalizingRuns.has(run)) continue;
         if (!existsSync(this.runSentinelPath(c.id, run.run_id))) this.#writeInterruptedSentinel(c.id, run);
       }
     }
-    for (const c of this.conversations.values()) {
-      if (c.recycling) await c.recycling;
-      const proc = c.proc;
-      if (proc) {
-        const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
-        c.recycling = stopping
-          .catch(() => false)
-          .finally(() => {
-            if (c.proc === proc) c.proc = null;
-            c.recycling = null;
-          });
-        const stopped = await c.recycling;
-        // 只有确认子进程退出、锁真的释放后才删登记；否则留给下个实例归因。
-        if (stopped) removeMarker(c.id);
-        else this.log.info(`[hub] 关闭 ${c.id} 时进程未确认退出，保留写锁登记`);
+    const finalizing = Promise.allSettled(this.#finalizingRuns.values());
+    try {
+      for (const c of this.conversations.values()) {
+        if (c.recycling) await c.recycling;
+        const proc = c.proc;
+        if (proc) {
+          const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
+          c.recycling = stopping
+            .catch(() => false)
+            .finally(() => {
+              if (c.proc === proc) c.proc = null;
+              c.recycling = null;
+            });
+          const stopped = await c.recycling;
+          // 只有确认子进程退出、锁真的释放后才删登记；否则留给下个实例归因。
+          if (stopped) removeMarker(c.id);
+          else this.log.info(`[hub] 关闭 ${c.id} 时进程未确认退出，保留写锁登记`);
+        }
       }
+    } finally {
+      await finalizing;
+      this.save();
     }
-    this.save();
   }
 }
 

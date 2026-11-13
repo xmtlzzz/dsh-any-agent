@@ -43,7 +43,7 @@ git push origin vx.y.z
 2. **GitHub Release**：npm 那一步完成后才创建。说明取自 CHANGELOG 里这个版本的那一节（`scripts/release-notes.mjs`），末尾附安装命令和 compare 链接。Release 已存在时只更新说明，所以重跑是安全的。之所以排在 npm 之后：Glama 等目录在新的 GitHub Release 出现时会重新构建并 `npm install -g dsh-any-agent`，Release 先出来就会装到上一个版本（v0.6.4 时 Release 比 npm 可用早了约 2.7 分钟）。
 3. **MCP Registry**：npm 发布之后，用工作流自己的 GitHub OIDC 登录官方 MCP Registry（`io.github.xmtlzzz/*` 命名空间），把 `server.json` 登记上去。Registry 通过 npm 包里的 `mcpName` 字段确认归属，所以必须在 npm 之后。`mcp-publisher` 版本固定，并用 cosign 校验签名后才执行。
 
-**可选的发版闸门（模型套件）**：在仓库 Settings → Secrets and variables → Actions → Variables 里加一个 `MODEL_SUITE_RUNNER`，值是一台装了 DSH、配好 provider 与凭据的自托管 runner 的标签。设了之后，推送 tag 时会先在这台 runner 上对被打 tag 的提交跑 `node test/run.mjs --all`，npm 发布等它通过；失败就在发布任何东西之前停下。没设这个变量时该任务被跳过，流程与以前完全一样。手动重跑旧 tag（刷新 Release 说明）不会触发它。注意：真机套件不能并发（`cleanup.mjs` 会删掉所有测试会话），工作流已用 concurrency 组串行化，但这台 runner 上不要同时手动跑 `--all`。
+**可选的真机发版验证**。将仓库变量 `MODEL_SUITE_RUNNER` 设为已安装 DSH 并配置好模型服务的自托管 runner 标签。推送 tag 后，发版流程会先在该 runner 上跑 `node test/run.mjs --all` 和 `npm run test:packed -- --real`，通过后再发布到 npm。变量为空时，发版使用离线安装包检查。要在打标签前跑同样的真机检查，可以手动触发 `model-suites` 工作流。两条工作流共用并发组，因为全量套件会清理测试会话。在这台机器上手动跑模型测试时，应与工作流错开。
 **一次性配置（只需做一次）**：npmjs.com → 包 `dsh-any-agent` → Settings → Trusted Publisher → GitHub Actions，填仓库 `xmtlzzz/dsh-any-agent`、工作流文件 `release.yml`。没配之前，npm 那一步会报认证错误，GitHub Release 也不会创建；这时可以在本机手动 `npm publish` 兜底，再在 Actions 里重跑：npm 那一步会跳过，GitHub Release 照常创建。
 
 **重发某个旧版本的 Release 说明**：Actions → release → Run workflow，填已有的 tag（如 `v0.6.2`）。npm 那一步会因为版本已存在而跳过。

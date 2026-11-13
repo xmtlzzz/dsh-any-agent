@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-11-13
+
+### Fixed
+
+- Graceful shutdown waits for turns that have already received an ACP result to
+  finish writing their result files, including the final Git snapshot.
+
+### Changed
+
+- CI runs the installed package lifecycle on Linux, Windows, and macOS and
+  verifies that reconnecting returns the saved answer and stop reason.
+- The manual model workflow also exercises the installed package against a
+  real provider and shares the release workflow's runner concurrency group.
+
 ## [0.7.1] — 2026-11-12
 
 ### Changed
@@ -1680,7 +1694,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.6.8...v0.6.9

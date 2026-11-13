@@ -10,6 +10,7 @@
  *   4. 本进程关闭时，在停任何子进程之前就同步给还在跑的回合写好哨兵；
  *   5. ★ 端到端：服务进程在回合中途被强杀，下一个服务进程启动时补出哨兵，dsh_get 也查得到。
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -150,7 +151,49 @@ try {
     await check('关闭后标记不在了', () => !existsSync(markerOf(c.id, runId)));
   }
 
-  console.log('\n[4] ★ 端到端：服务进程在回合中途被强杀，下一个服务进程补出哨兵');
+  console.log('\n[4] 关闭时等待已收到 ACP 结果的回合完成落盘');
+  {
+    const project = join(root, 'finalizing-project');
+    execFileSync('git', ['init', '-q', project]);
+    const h = new Hub({ log });
+    await h.load();
+    process.env.DSH_MCP_GIT_STATUS = '1';
+    process.env.FAKE_ACP_PROMPT_MS = '100';
+    let closing;
+    let stopping;
+    try {
+      const c = await h.create({ cwd: project });
+      const pushOut = c.pushOut.bind(c);
+      c.pushOut = (kind, text, extra) => {
+        pushOut(kind, text, extra);
+        if (kind === 'turn' && extra?.phase === 'end' && extra.stop_reason === 'end_turn') {
+          // 收尾已收到 ACP 结果，下一次微任务仍在等异步 Git 快照。
+          queueMicrotask(() => {
+            const { run_id } = c.ledger.latest();
+            // 让子进程退出与 Hub 关闭独立，避免 stop() 恰好替 shutdown 等完 Git。
+            const proc = c.proc;
+            c.onProcessExit();
+            stopping = proc.stop();
+            closing = h.shutdown().then(() => h.readStoredRun(c.id, run_id));
+          });
+        }
+      };
+      const result = await c.prompt('完成后立即关闭服务', { wait: true });
+      const stored = await closing;
+      await check('关闭期间保存真实终态、正文与 Git 快照', () =>
+        Boolean(closing) && result.stop_reason === 'end_turn' && stored?.status === 'done' &&
+        stored.result.stop_reason === result.stop_reason && stored.result.answer === 'fake answer' &&
+        stored.result.diff_stat?.changed_files === 0 && !existsSync(markerOf(c.id, result.run_id)),
+      JSON.stringify({ status: stored?.status, reason: stored?.result?.stop_reason, answer: stored?.result?.answer }));
+    } finally {
+      await (closing ?? h.shutdown());
+      await stopping;
+      process.env.DSH_MCP_GIT_STATUS = env.DSH_MCP_GIT_STATUS;
+      delete process.env.FAKE_ACP_PROMPT_MS;
+    }
+  }
+
+  console.log('\n[5] ★ 端到端：服务进程在回合中途被强杀，下一个服务进程补出哨兵');
   {
     const a = new McpClient({ env: { ...env, FAKE_ACP_PROMPT_MS: '60000' } }).start();
     allClients.push(a);

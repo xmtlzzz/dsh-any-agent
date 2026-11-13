@@ -1178,6 +1178,7 @@ export class Conversation {
         }
         return runRecord.result;
       });
+      finalizePromise = this.#hub.trackRunFinalization?.(runRecord, finalizePromise) ?? finalizePromise;
       return finalizePromise;
     };
 

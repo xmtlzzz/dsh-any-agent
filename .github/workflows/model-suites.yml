@@ -23,6 +23,9 @@ jobs:
   model:
     name: full model-backed suite
     runs-on: ${{ inputs.runner }}
+    concurrency:
+      group: dsh-model-suites
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -47,6 +50,13 @@ jobs:
           DSH_BIN: ${{ secrets.DSH_BIN }}
           DSH_MCP_LOG: silent
         run: node test/run.mjs --all
+
+      - name: installed tarball MCP lifecycle with real DSH
+        if: steps.dsh.outputs.ok == '1'
+        env:
+          DSH_BIN: ${{ secrets.DSH_BIN }}
+          DSH_MCP_LOG: silent
+        run: npm run test:packed -- --real
 
       - name: explain the skip
         if: steps.dsh.outputs.ok != '1'
