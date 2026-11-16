@@ -22,6 +22,8 @@ When you opt in to `auto-allow`, DSH can obtain `sandbox_permissions: danger-ful
 - **`cwd` cannot be the filesystem root for writable tiers.** `workspace-write` at `/` or `C:\` would make the sandbox root the whole disk; the home/root guard resolves symlinks first, so a symlink to the root or home is rejected too. `danger-full-access` remains an explicit opt-in.
 - **`title_hint` is capped at 200 characters** (schema + runtime), because it is persisted in the registry and sidecar on every turn.
 
+The MCP host runs Windows process checks, registry discovery and the dashboard launcher with executable paths under `System32`. Git uses absolute entries in the host's `PATH`. Keep those entries limited to directories you trust. Relative `DSH_BIN` and `DSH_RUNTIME` overrides resolve against the MCP server's working directory before the child starts in its workspace.
+
 ## 🪟 Workspace visibility in the DSH GUI
 
 Two different things — don't confuse them:

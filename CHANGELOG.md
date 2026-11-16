@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Use system executable paths for Windows process checks, registry discovery and the dashboard browser launcher. Resolve DSH overrides before changing the child process working directory, and ignore relative PATH entries when looking up host tools.
+
 ## [0.7.4] — 2026-11-16
 
 ### Fixed
