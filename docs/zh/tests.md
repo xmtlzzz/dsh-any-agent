@@ -49,7 +49,7 @@ npm run docs:counts:check # 只检查文档与报告是否一致，不一致 exi
 | `shared-host` | 44 | **共享进程宿主**：通知/审批按 `sessionId` 路由、未知会话审批一律取消、进程退出扇出所有挂载会话、最后一个会话 detach 才停进程；**默认开启且 `=0` 可关闭**（空串按未设置处理）；`takeover` 杀共享进程前的连坐检查；RSS 读取；**回收器选中会话之后、刷新 RSS 期间它开跑了回合（或刚用过），就不再停它**（不花 token） |
 | `shared-process` | 8（无 DSH 时 skip） | **共享进程真机验证**：同 `(cwd, permission)` 的两个会话落在同一个 PID、关一个不影响另一个、全部关闭后宿主清空且 PID 退出（需要本机 DSH，`--all` 时运行） |
 | `resume-retry` | 65 | **冷启动 resume 超时重试**（用 `test/fake-acp.mjs` 当 DSH，共享进程与 `DSH_MCP_SHARED_PROCESS=0` 各跑一遍）：第一次 `session/resume` 没回话 → 在新进程上重试一次（旧子进程已退出、写锁登记指向新进程）；一直没回话 → 恰好重试一次后如实报错，不留僵尸子进程与登记；撞写锁、invalid params 一律**不**重试；`AcpProcess` 超时错误带 `code=ACP_TIMEOUT` 与 `method`；共享宿主上还挂着别的会话时不重试（不花 token） |
-| `dispatch-tools` | 85（非 Windows 81） | **派发面**：`dsh_inbox` 跨会话汇总待决审批、`client_run_id` 幂等命中与淘汰、队列 list/update/promote/remove（remove 写 cancelled 哨兵）、`dsh_get(max_chars)` 同时压缩 text 与 structured（正文截断、工具输入只留 `input_chars`，`max_chars=0` 仍返回全文）、`dsh_doctor` 的 DSH 版本档位（含桌面版 0.2.2-rc.3 实测记录，0.2.3+ 未验证）与 npx 缓存识别、PowerShell 哨兵等待命令的转义与真机执行、哨兵**读取**命令（`-Encoding UTF8`，在 Windows PowerShell 5.1 下正确解析中文；真机执行仅 Windows）、审计只记元数据不记正文、`dsh_doctor` 关键检查项；有回合在跑时，`dsh_status` 与不带 `run_id` 的 `dsh_get` 取的是正在跑的那个，后面排队的、排队后被取消的回合不会顶替它；DSH 不带工具名时，像标识符的 title（`pwsh`）补成 `tools_used[].name`，描述性的 title 不算，DSH 给的 name 优先（不花 token） |
+| `dispatch-tools` | 85（非 Windows 82） | **派发面**：`dsh_inbox` 跨会话汇总待决审批、`client_run_id` 幂等命中与淘汰、队列 list/update/promote/remove（remove 写 cancelled 哨兵）、`dsh_get(max_chars)` 同时压缩 text 与 structured（正文截断、工具输入只留 `input_chars`，`max_chars=0` 仍返回全文）、`dsh_doctor` 的 DSH 版本档位（含桌面版 0.2.2-rc.3 实测记录，0.2.3+ 未验证）与 npx 缓存识别、PowerShell 哨兵等待命令的转义与真机执行、哨兵**读取**命令（`-Encoding UTF8`，在 Windows PowerShell 5.1 下正确解析中文；真机执行仅 Windows）、审计只记元数据不记正文、`dsh_doctor` 关键检查项；有回合在跑时，`dsh_status` 与不带 `run_id` 的 `dsh_get` 取的是正在跑的那个，后面排队的、排队后被取消的回合不会顶替它；DSH 不带工具名时，像标识符的 title（`pwsh`）补成 `tools_used[].name`，描述性的 title 不算，DSH 给的 name 优先（不花 token） |
 | `read-cursor` | 26 | **`dsh_read` 游标语义**：追加到已读条目里的文本必须再次返回（修订号游标，按 `seq` 替换全文）；**每个工具调用各占一条**、状态更新原地替换（以前会拼成一条、只剩第一个工具的 id）；空回合的开始/结束仍是两条；**`answer` 里被工具调用隔开的正文之间补空行**（以前首尾相接）；`limit` 钳到 1..500，`0`/负数不会空转或丢尾（不花 token） |
 | `line-decoder` | 4 | **UTF-8 行分帧**：MCP/ACP 的 chunk 边界不能把中文/emoji 截成 U+FFFD；覆盖逐字节、任意 chunk、CRLF 与 EOF 残留（不花 token） |
 | `progress` | 16 | **MCP 进度通知**：调用带 `progressToken` 时阻塞中的 `tools/call` 定时回报；不带 token 不发、progress 递增、响应之后不再发、工具抛错同样停下、消息只有时长/工具名/字数（不花 token） |
@@ -96,7 +96,7 @@ npm run docs:counts:check # 只检查文档与报告是否一致，不一致 exi
 
 需要模型的套件（`boundary` 46、`integration` 30、`async` 21、`sentinel` 36、`timeout` 40、`lock` 79、`multi` 19、`list` 17、`permission` 11、`shared-process` 8、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`reasoning-check` 8）名义合计 **464 项**；有 DSH 时 `smoke` 还会多跑 14 项会话段。它们要可用的 DSH 与 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**；`shared-process` 没有 DSH 时也会 skip。
 
-> 三个总数是刻意分开的：本机 `node test/run.mjs`（1948）、CI 离线 job（名义 Linux/macOS 1870，Windows 1876；hosted runner 没有 DSH 也没有客户端 fixture，`smoke` 跳过会话段、`real-configs` 整体跳过）、需要模型的集合（名义 464）。数字取各套件自己打印的汇总，由 `npm run docs:counts` 从报告写回，不在这里手抄；不要把一个数字套到另一个 runner 上。
+> 三个总数是刻意分开的：本机 `node test/run.mjs`（1948）、CI 离线 job（名义 Linux/macOS 1871，Windows 1876；hosted runner 没有 DSH 也没有客户端 fixture，`smoke` 跳过会话段、`real-configs` 整体跳过）、需要模型的集合（名义 464）。数字取各套件自己打印的汇总，由 `npm run docs:counts` 从报告写回，不在这里手抄；不要把一个数字套到另一个 runner 上。
 <!-- counts:end -->
 
 ### 🔢 改了测试之后：检查数是算出来的

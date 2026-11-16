@@ -14,6 +14,7 @@ const auditDir = mkdtempSync(join(tmpdir(), 'dsh-any-agent-audit-'));
 process.env.DSH_MCP_AUDIT_FILE = join(auditDir, 'audit.jsonl');
 process.env.DSH_HOME = join(auditDir, 'home');
 process.env.DSH_MCP_APPROVAL = 'auto-allow';
+process.env.DSH_MCP_GIT_STATUS = '0';
 const { Conversation, Hub } = await import('../src/hub.mjs');
 const { createHandlers } = await import('../src/tools.mjs');
 
@@ -193,7 +194,7 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
   const a = settle(c.interject('A', { mode: 'queue', clientRunId: 'race-qa' }));
   const b = settle(c.interject('B', { mode: 'queue', clientRunId: 'race-qb' }));
   await tick();
-  // 每一轮都等 session/prompt 真的发出再结束它（前面还有 git 快照要跑）。
+  // 每一轮都等 session/prompt 真的发出再结束它。
   for (let n = 1; n <= 3; n++) {
     for (let i = 0; i < 300 && proc.prompts < n; i++) await tick(10);
     proc.end();
@@ -231,7 +232,7 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
   const got = await handlers.dsh_get({ conversation_id: c.id });
   check('不带 run_id 的 dsh_get 取的也是正在跑的那个', () => assert.equal(got.structured.run?.run_id, running.run_id));
   proc.end();
-  // 收尾先放开 busy、等 git 快照之后才把状态改成 done（见 conversation.mjs 的 finalize）：等到状态落定。
+  // 收尾先放开 busy，再将状态改成 done：等到状态落定。
   for (let i = 0; i < 500 && c.getRun(running.run_id).status === 'running'; i++) await tick(10);
   const st3 = await handlers.dsh_status({ conversation_id: c.id });
   check('跑完以后：run 是刚跑完的那个，不是更晚建、没开跑就取消的排队回合', () =>
@@ -515,7 +516,7 @@ if (!process.env.DSH_MCP_ALLOW_FULL_ACCESS) {
   console.log('  skipped: 当前进程已放行 danger-full-access');
 }
 
-rmSync(auditDir, { recursive: true, force: true });
+rmSync(auditDir, { recursive: true, force: true, maxRetries: 4 });
 
 // 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
 console.log(`\n===== dispatch tools: passed ${passed}, failed ${failed} =====`);
