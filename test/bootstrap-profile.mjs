@@ -21,6 +21,7 @@ import { load as yamlLoad, dump as yamlDump } from '../src/yaml-lite.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BOOT = pathToFileURL(join(HERE, '..', 'src', 'bootstrap.mjs')).href;
 const CONFIG = pathToFileURL(join(HERE, '..', 'src', 'config.mjs')).href;
+const ACP = pathToFileURL(join(HERE, '..', 'src', 'acp.mjs')).href;
 const EXAMPLE = join(HERE, '..', 'profile-example', 'cordis.patch.yml');
 
 let passed = 0;
@@ -48,8 +49,9 @@ function seedProfile(name, text) {
 function runBootstrap(profile = 'test-mcp', overrides = {}) {
   const script =
     `import { ensureProfile } from ${JSON.stringify(BOOT)};\n` +
-    `import { DSH_PROFILE, TEAM_ACTIVE } from ${JSON.stringify(CONFIG)};\n` +
-    'console.log(JSON.stringify({ ...ensureProfile(), profile: DSH_PROFILE, team: TEAM_ACTIVE }));';
+    `import { resolveTeamProfile } from ${JSON.stringify(CONFIG)};\n` +
+    'const teamProfile = resolveTeamProfile();\n' +
+    'console.log(JSON.stringify({ ...ensureProfile({ teamProfile }), profile: teamProfile.profile, team: !!teamProfile.backend }));';
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     encoding: 'utf8',
     timeout: 30_000,
@@ -246,7 +248,7 @@ try {
   renameSync(sourcePatch, sourcePatch + '.bak');
   try {
     writeFileSync(teamPatch, legacyTeamText);
-    const migrated = runBootstrap('dsh-team', teamEnv('0.2.2-rc.3'));
+    const migrated = runBootstrap('dsh-team', { ...teamEnv('0.2.2-rc.3'), DSH_MCP_ROUTE_SOURCE: 'desktop' });
     check('原来源消失时用旧受管团队 profile 的路由完成迁移', migrated.result?.written && readFileSync(teamPatch, 'utf8').includes('defaultEnabled: true'));
     for (const [label, previous] of [['原生', nativeText], ['实验版', legacyTeamText]]) {
       writeFileSync(ordinaryPatch, previous);
@@ -264,6 +266,28 @@ try {
   writeFileSync(teamPatch, manualTeam);
   const fallback = runBootstrap('dsh-team', { ...teamEnv('0.2.2-rc.3'), ...useDefault });
   check('过时的手写 team profile 保留，隐式选择退回普通模式', fallback.result?.team === false && fallback.result?.profile === 'dsh-mcp' && readFileSync(teamPatch, 'utf8') === manualTeam);
+
+  writeFileSync(teamPatch, legacyTeamText);
+  const hotEnv = teamEnv('0.2.2-rc.1');
+  const manifest = join(dirname(hotEnv.DSH_BIN), '..', 'package.json');
+  const hot = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { writeFileSync } from 'node:fs';
+    import { AcpProcess } from ${JSON.stringify(ACP)};
+    const before = new AcpProcess({ cwd: process.cwd(), permission: 'workspace-write' });
+    before.start();
+    writeFileSync(${JSON.stringify(manifest)}, '{"version":"0.2.2-rc.3"}');
+    const after = new AcpProcess({ cwd: process.cwd(), permission: 'workspace-write' });
+    after.start();
+    console.log(JSON.stringify([before.teamProfile, after.teamProfile]));
+  `], {
+    encoding: 'utf8', timeout: 30_000,
+    env: { ...process.env, ...useDefault, ...hotEnv, DSH_HOME: home, DSH_MCP_BOOTSTRAP: '', DSH_MCP_ROUTE_SOURCE: '' },
+  });
+  const selections = hot.status === 0 ? JSON.parse(hot.stdout) : [];
+  check('同一服务内，已启动宿主保留原 profile 实现，新宿主使用升级后的原生团队',
+    selections[0]?.backend === 'experimental' && selections[1]?.backend === 'native' &&
+    selections.every((entry) => entry.profile === 'dsh-team') && readFileSync(teamPatch, 'utf8') === nativeText,
+    hot.stderr);
 } catch (e) {
   failed++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

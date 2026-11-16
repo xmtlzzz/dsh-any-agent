@@ -59,8 +59,9 @@ If an older client config still carries `DSH_MCP_TEAM`, it overrides `team on/of
 
 ## Notes
 
-- After upgrading to DSH `0.2.2-rc.2` or later, the managed team profile migrates
-  when DSH starts. In a custom profile, remove the experimental team plugin
+- From MCP `0.7.4`, an in-place upgrade to DSH `0.2.2-rc.2` or later migrates the
+  managed team profile the next time a DSH process starts. Running processes keep
+  the team implementation they started with. In a custom profile, remove the experimental team plugin
   entries, re-enable standard subagent tools, and set `defaultEnabled: true` in
   the native `agent-team` entry's `config`.
 - `dsh_doctor` warns when the team configuration is incompatible with the DSH

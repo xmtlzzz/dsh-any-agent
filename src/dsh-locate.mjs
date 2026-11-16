@@ -529,8 +529,15 @@ function explicitDsh(binPath, runtimePath) {
 export function resolveDsh({ fresh = false } = {}) {
   const explicit = process.env.DSH_BIN;
   if (explicit) return explicitDsh(explicit, process.env.DSH_RUNTIME || null);
-  const list = discoverDsh({ fresh });
-  if (list.length) return list[0];
+  let [selected] = discoverDsh({ fresh });
+  if (selected && !fresh) {
+    // A desktop update or npm replacement can change the entry at the cached path.
+    const { version, enginesNode } = readDshPackage(selected.bin);
+    if (version !== selected.version || enginesNode !== selected.enginesNode || !existsMaybeAsar(selected.bin)) {
+      [selected] = discoverDsh({ fresh: true });
+    }
+  }
+  if (selected) return selected;
   throw new Error(
     'DSH CLI 未找到：没有发现 DeepSeek Harness 桌面版、npm 全局安装或 npx 缓存里的 @deepseek-ai/dsh。\n' +
       '  安装桌面版即可自动识别；或 npm i -g @deepseek-ai/dsh；或设置 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js',

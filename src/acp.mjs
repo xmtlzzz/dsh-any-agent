@@ -13,10 +13,10 @@ import { spawn } from 'node:child_process';
 import { ensureProfile } from './bootstrap.mjs';
 import {
   CHILD_MAX_OLD_SPACE_MB,
-  DSH_PROFILE,
   PKG_VERSION,
   REQUEST_TIMEOUT_MS,
   resolveDsh,
+  resolveTeamProfile,
 } from './config.mjs';
 import { LineDecoder } from './line-decoder.mjs';
 
@@ -41,6 +41,7 @@ export class AcpProcess {
   #onNotification;
   #onExit;
   #exitNotified = false;
+  #teamProfile = null;
 
   /**
    * @param {object} opts
@@ -80,6 +81,10 @@ export class AcpProcess {
     return this.#child?.pid ?? null;
   }
 
+  get teamProfile() {
+    return this.#teamProfile;
+  }
+
   /** DSH stderr 的内存尾部（诊断用；默认不打印、不落盘）。 */
   get stderrTail() {
     return this.#stderrTail.join('\n');
@@ -88,24 +93,26 @@ export class AcpProcess {
   /** 拉起进程。注意 ACP 没有"就绪"握手信号，spawn 后即可发请求。 */
   start() {
     if (this.#child) throw new Error('AcpProcess 已经启动过了');
+    // 桌面版用 Electron 运行 asar 内的 CLI，npm/npx 一般用本进程的 node。
+    const dsh = resolveDsh();
+    const teamProfile = resolveTeamProfile(dsh.version ?? null);
+    this.#teamProfile = teamProfile;
     // ★ 拉进程前确保 profile 就绪：首次使用会自动按本机已有路由建一份。
     //   放在这里而不是模块加载期，是为了让"改完配置再拉起"这种场景也能生效，
     //   并且失败时只让本次拉起失败（由 DSH 自己报错），不拖垮整个 MCP 服务。
-    const ready = ensureProfile({ log: this.#log });
+    const ready = ensureProfile({ log: this.#log, teamProfile });
     if (!ready.ok) {
       this.#log.info(`[acp] profile 引导失败（继续尝试拉起，由 DSH 自己报错）: ${ready.error}`);
     } else if (ready.skipped) {
       this.#log.debug(`[acp] profile 引导跳过: ${ready.skipped}`);
     }
-    // 桌面版：用它自带的 Electron 以 Node 模式跑 asar 里的 CLI；npm/npx：用本进程的 node。
-    const dsh = resolveDsh();
     const env = { ...process.env, ...dsh.env, DSH_PERMISSION_MODE: this.permission };
     // 0.4.0：可选的子进程堆上限。只加参数、不覆盖用户已有的 NODE_OPTIONS。
     if (CHILD_MAX_OLD_SPACE_MB > 0) {
       const prev = String(env.NODE_OPTIONS ?? '').trim();
       env.NODE_OPTIONS = `${prev} --max-old-space-size=${CHILD_MAX_OLD_SPACE_MB}`.trim();
     }
-    this.#child = spawn(dsh.command, [...dsh.args, '--profile', DSH_PROFILE], {
+    this.#child = spawn(dsh.command, [...dsh.args, '--profile', teamProfile.profile], {
       cwd: this.cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],

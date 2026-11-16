@@ -55,5 +55,5 @@ dsh-any-agent team off
 
 ## 注意
 
-- 升级到 `0.2.2-rc.2` 或更新的 DSH 后，受管团队 profile 会在启动 DSH 时迁移。自定义 profile 需移除实验版团队插件配置，恢复标准子代理工具，并在原生 `agent-team` 条目的 `config` 中设置 `defaultEnabled: true`。
+- MCP `0.7.4` 起，原地升级到 DSH `0.2.2-rc.2` 或更新版本后，下次启动 DSH 进程时会按新版本迁移受管团队 profile，已运行的进程继续使用启动时的团队实现。自定义 profile 需移除实验版团队插件配置，恢复标准子代理工具，并在原生 `agent-team` 条目的 `config` 中设置 `defaultEnabled: true`。
 - 团队配置与 DSH 版本不兼容时，`dsh_doctor` 会给出提示。未显式指定 profile 时，服务回到 `dsh-mcp`。

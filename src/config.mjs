@@ -49,7 +49,7 @@ export const DSH_COMPAT = Object.freeze({
   verifiedMin: '0.1.7-0',
   verifiedBelow: '0.2.3-0',
   verifiedLabel: '0.1.7 ~ 0.2.2',
-  fullSuiteRuns: Object.freeze({ '0.2.1-rc.5': '0.7.1', '0.2.2-rc.1': '0.5.x', '0.2.2-rc.3': '0.7.3' }),
+  fullSuiteRuns: Object.freeze({ '0.2.1-rc.5': '0.7.1', '0.2.2-rc.1': '0.5.x', '0.2.2-rc.3': '0.7.4' }),
 });
 
 /**
@@ -149,14 +149,14 @@ export const TEAM_MODE = (() => {
   return readTeamSetting() ?? false;
 })();
 
-/** 运行中的 DSH 版本（读不到为 null）。 */
-export const DSH_VERSION = (() => {
+/** 当前候选 DSH 的版本（读不到为 null）。 */
+export function resolveDshVersion() {
   try {
     return resolveDsh().version ?? null;
   } catch {
     return null;
   }
-})();
+}
 
 /**
  * 是否允许 bootstrap 自动创建/同步 DSH profile（默认开）。
@@ -170,16 +170,9 @@ export const BOOTSTRAP_ENABLED = (() => {
 
 export const MANAGED_PROFILE_MARKER = 'dsh-mcp:managed';
 
-/** DSH 0.2.2-rc.2 introduced the session-level team mode in its base bundle. */
-const requestedTeamBackend = (() => {
-  if (!TEAM_MODE || !DSH_VERSION || cmpVersion(DSH_VERSION, '0.1.7-0') < 0) return null;
-  return cmpVersion(DSH_VERSION, '0.2.2-rc.2') >= 0 ? 'native' : 'experimental';
-})();
+const profileOverride = process.env.DSH_MCP_PROFILE;
 
-const teamProfile = process.env.DSH_MCP_PROFILE ?? 'dsh-team';
-
-export const TEAM_BACKEND = (() => {
-  if (!requestedTeamBackend) return null;
+function compatibleTeamBackend(teamProfile, requestedTeamBackend) {
   let text;
   try {
     text = readFileSync(join(DSH_HOME, 'profiles', teamProfile, 'cordis.patch.yml'), 'utf8');
@@ -205,12 +198,19 @@ export const TEAM_BACKEND = (() => {
   } catch {
     return null;
   }
-})();
+}
 
-export const TEAM_ACTIVE = TEAM_BACKEND !== null;
-
-/** 用于驱动 DSH 的 profile（由 bootstrap 在首启时按 acp 模板创建）。 */
-export const DSH_PROFILE = process.env.DSH_MCP_PROFILE ?? (TEAM_ACTIVE ? teamProfile : 'dsh-mcp');
+/** 对本次选定的 DSH 版本选择 profile 与团队实现。 */
+export function resolveTeamProfile(version = resolveDshVersion()) {
+  const teamProfile = profileOverride ?? 'dsh-team';
+  let backend = null;
+  if (TEAM_MODE && version && cmpVersion(version, '0.1.7-0') >= 0) {
+    // DSH 0.2.2-rc.2 起，dsh-base 自带会话团队模式。
+    const requested = cmpVersion(version, '0.2.2-rc.2') >= 0 ? 'native' : 'experimental';
+    backend = compatibleTeamBackend(teamProfile, requested);
+  }
+  return { profile: profileOverride ?? (backend ? teamProfile : 'dsh-mcp'), backend };
+}
 
 /**
  * 抄路由时**只**用这个 profile（默认空 = 按 home 层 → desktop → web → headless → acp 顺序找）。

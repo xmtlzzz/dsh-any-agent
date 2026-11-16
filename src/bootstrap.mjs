@@ -26,10 +26,9 @@ import { join } from 'node:path';
 import {
   BOOTSTRAP_ENABLED,
   DSH_HOME,
-  DSH_PROFILE,
   MANAGED_PROFILE_MARKER as MANAGED_MARKER,
   ROUTE_SOURCE_PROFILE,
-  TEAM_BACKEND,
+  resolveTeamProfile,
 } from './config.mjs';
 import { load as yamlLoad, dump as yamlDump } from './yaml-lite.mjs';
 
@@ -81,16 +80,16 @@ function scrubSecrets(value, key = '') {
 }
 
 /** profile 目录：$DSH_HOME/profiles/<name>。 */
-export function profileDir() {
-  return join(DSH_HOME, 'profiles', DSH_PROFILE);
+function profileDir(profile) {
+  return join(DSH_HOME, 'profiles', profile);
 }
 
 function sha256(text) {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-function readManagedState() {
-  const p = join(profileDir(), MANAGED_STATE);
+function readManagedState(dir) {
+  const p = join(dir, MANAGED_STATE);
   if (!existsSync(p)) return null;
   try {
     return JSON.parse(readFileSync(p, 'utf8'));
@@ -202,12 +201,12 @@ function firstRoute(providers) {
 }
 
 /** 生成 profile 目录里除 cordis.patch.yml 之外的文件（与 dsh 的 initProfile 一致）。 */
-function ensureProfileScaffold(dir) {
+function ensureProfileScaffold(dir, profile) {
   mkdirSync(dir, { recursive: true });
   const manifestPath = join(dir, 'package.json');
   if (!existsSync(manifestPath)) {
     const manifest = {
-      name: 'dsh-profile-' + DSH_PROFILE,
+      name: 'dsh-profile-' + profile,
       private: true,
       dependencies: {},
       dsh: { profile: { bundles: [...PROFILE_BUNDLES] } },
@@ -233,7 +232,7 @@ function ensureProfileScaffold(dir) {
 }
 
 /** 组装要写入的 patch 条目。 */
-function buildEntries(routing) {
+function buildEntries(routing, backend) {
   const entries = [];
   if (routing.providers) {
     entries.push({
@@ -285,10 +284,10 @@ function buildEntries(routing) {
     },
   });
 
-  if (TEAM_BACKEND === 'native') {
+  if (backend === 'native') {
     // 新版团队由 dsh-base 提供，成员继续使用标准子代理工具。
     entries.push({ id: 'agent-team', config: { defaultEnabled: true } });
-  } else if (TEAM_BACKEND === 'experimental') {
+  } else if (backend === 'experimental') {
     entries.push({ id: 'tool-subagent-control', disabled: true });
     entries.push({ id: 'tool-subagent-list-agents', disabled: true });
     entries.push({ id: 'tool-subagent', disabled: true });
@@ -330,18 +329,19 @@ function renderDocument(entries, source) {
  * 调用时机：拉起 DSH 子进程之前（懒执行）。失败**不阻断**启动 —— 让 DSH 自己报出
  * 它的问题，比在这里吞掉更有用。
  *
- * @param {{log?: {info: Function, debug: Function}}} [options]
+ * @param {{log?: {info: Function, debug: Function}, teamProfile?: {profile: string, backend: string|null}}} [options]
  * @returns {object} 结构化的结果，供日志与测试断言
  */
-export function ensureProfile({ log } = {}) {
+export function ensureProfile({ log, teamProfile = resolveTeamProfile() } = {}) {
   const info = (m) => log?.info?.(m);
   const debug = (m) => log?.debug?.(m);
 
   if (!BOOTSTRAP_ENABLED) return { ok: true, skipped: 'DSH_MCP_BOOTSTRAP=0' };
 
-  const dir = profileDir();
+  const { profile, backend } = teamProfile;
+  const dir = profileDir(profile);
   try {
-    ensureProfileScaffold(dir);
+    ensureProfileScaffold(dir, profile);
   } catch (e) {
     return { ok: false, error: '创建 profile 目录失败: ' + e.message };
   }
@@ -374,11 +374,11 @@ export function ensureProfile({ log } = {}) {
     try {
       const previous = yamlLoad(currentText);
       const team = Array.isArray(previous) ? previous.findLast((entry) => entry?.id === 'agent-team') : null;
-      const clearTeam = !TEAM_BACKEND && (
-        team?.config?.defaultEnabled === true || team?.name === '@deepseek-ai/dsh-experimental-agent-team'
-      );
-      const routing = clearTeam || (TEAM_BACKEND && !ROUTE_SOURCE_PROFILE) ? extractRouting(previous) : null;
-      if (routing) found = { ...found, routing, source: readManagedState()?.source ?? DSH_PROFILE };
+      const previousBackend = team?.name === '@deepseek-ai/dsh-experimental-agent-team' ? 'experimental'
+        : team?.config?.defaultEnabled === true ? 'native' : null;
+      const migrateTeam = previousBackend && previousBackend !== backend;
+      const routing = migrateTeam || (backend && !ROUTE_SOURCE_PROFILE) ? extractRouting(previous) : null;
+      if (routing) found = { ...found, routing, source: readManagedState(dir)?.source ?? profile };
     } catch {
       // 读不到路由，保留原来的处理方式。
     }
@@ -395,7 +395,7 @@ export function ensureProfile({ log } = {}) {
 
   let entries;
   try {
-    entries = buildEntries(found.routing);
+    entries = buildEntries(found.routing, backend);
   } catch (e) {
     return { ok: false, error: e.message, reason: '未写入 profile' };
   }
@@ -431,7 +431,7 @@ export function ensureProfile({ log } = {}) {
     '[bootstrap] ' +
       (existed ? '同步' : '创建') +
       ' DSH profile "' +
-      DSH_PROFILE +
+      profile +
       '"（路由来源: ' +
       found.source +
       '）',
@@ -446,10 +446,10 @@ export function ensureProfile({ log } = {}) {
 }
 
 /** 供诊断/测试用：当前 profile 的状态，不改动任何东西。 */
-export function inspectProfile() {
-  const dir = profileDir();
+export function inspectProfile(profile) {
+  const dir = profileDir(profile);
   const patchPath = join(dir, 'cordis.patch.yml');
-  const state = readManagedState();
+  const state = readManagedState(dir);
   let routes = [];
   let agentDefaultModel = null;
   if (existsSync(patchPath)) {
@@ -463,7 +463,7 @@ export function inspectProfile() {
   }
   return {
     home: DSH_HOME,
-    profile: DSH_PROFILE,
+    profile,
     dir,
     exists: existsSync(patchPath),
     managed: Boolean(state),

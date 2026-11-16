@@ -228,6 +228,24 @@ try {
     assert.throws(() => resolveDsh({ fresh: true }), /DSH_RUNTIME 指向的文件不存在/);
     delete process.env.DSH_RUNTIME;
   });
+  check('自动发现缓存中的安装被原地更新后立即读取新版本', () => {
+    const savedAppData = process.env.APPDATA;
+    process.env.APPDATA = join(root, 'roaming');
+    try {
+      const pkg = join(process.env.APPDATA, 'npm', 'node_modules', '@deepseek-ai', 'dsh');
+      mkdirSync(join(pkg, 'lib'), { recursive: true });
+      const bin = join(pkg, 'lib', 'bin.js');
+      const manifest = join(pkg, 'package.json');
+      writeFileSync(bin, '');
+      writeFileSync(manifest, JSON.stringify({ version: '999.0.0-rc.1' }));
+      assert.equal(resolveDsh({ fresh: true }).bin, bin);
+      writeFileSync(manifest, JSON.stringify({ version: '999.0.0-rc.3' }));
+      assert.equal(resolveDsh().version, '999.0.0-rc.3');
+    } finally {
+      if (savedAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = savedAppData;
+    }
+  });
 
   console.log('\n[6] 注册表导出解析');
   check('★ 解析 .reg：转义的反斜杠/引号还原、按 section 分组', () => {

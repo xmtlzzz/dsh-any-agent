@@ -104,7 +104,7 @@ if (argv[0] === 'team') {
     writeSettings(cur);
     process.stdout.write(
       `团队模式已${action === 'on' ? '开启' : '关闭'}（${cfg.TEAM_SETTINGS_FILE}）。\n` +
-        `DSH 版本: ${cfg.DSH_VERSION ?? '未检测到'}（团队需要 >= 0.1.7-0）。\n`,
+        `DSH 版本: ${cfg.resolveDshVersion() ?? '未检测到'}（团队需要 >= 0.1.7-0）。\n`,
     );
     if (cfg.TEAM_MODE_SOURCE === 'env') {
       process.stdout.write(
@@ -116,13 +116,14 @@ if (argv[0] === 'team') {
   }
   if (action === 'status') {
     const file = readSettings();
+    const { profile, backend } = cfg.resolveTeamProfile();
     process.stdout.write(
       '团队模式状态：\n' +
         `  环境变量 DSH_MCP_TEAM: ${process.env.DSH_MCP_TEAM ?? '(未设置)'}\n` +
         `  设置文件: ${cfg.TEAM_SETTINGS_FILE}（team=${file.team === undefined ? '未设置' : file.team}）\n` +
         `  生效值: ${cfg.TEAM_MODE ? '开' : '关'}（来源: ${cfg.TEAM_MODE_SOURCE}）\n` +
-        `  profile: ${cfg.DSH_PROFILE}\n` +
-        `  团队能力可用: ${cfg.TEAM_ACTIVE ? '是' : '否'}\n`,
+        `  profile: ${profile}\n` +
+        `  团队能力可用: ${backend ? '是' : '否'}\n`,
     );
     process.exit(0);
   }

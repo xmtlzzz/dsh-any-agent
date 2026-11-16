@@ -12,21 +12,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const auditDir = mkdtempSync(join(tmpdir(), 'dsh-any-agent-audit-'));
 process.env.DSH_MCP_AUDIT_FILE = join(auditDir, 'audit.jsonl');
-// 实验版提示测试不依赖本机 DSH 是否安装，原生团队由 bootstrap-profile 覆盖。
-const fakeDsh = join(auditDir, 'dsh');
-mkdirSync(join(fakeDsh, 'lib'), { recursive: true });
-writeFileSync(join(fakeDsh, 'package.json'), JSON.stringify({ version: '0.2.2-rc.1' }));
-process.env.DSH_BIN = join(fakeDsh, 'lib', 'bin.js');
-writeFileSync(process.env.DSH_BIN, '');
-delete process.env.DSH_RUNTIME;
 process.env.DSH_HOME = join(auditDir, 'home');
-process.env.DSH_MCP_BOOTSTRAP = '1';
-process.env.DSH_MCP_PROFILE = 'dsh-team';
-process.env.DSH_MCP_TEAM = '1';
 process.env.DSH_MCP_APPROVAL = 'auto-allow';
 const { Conversation, Hub } = await import('../src/hub.mjs');
 const { createHandlers } = await import('../src/tools.mjs');
-const { TEAM_BACKEND } = await import('../src/config.mjs');
 
 let passed = 0;
 let failed = 0;
@@ -150,10 +139,12 @@ function fakeProc() {
     alive: true,
     prompts: 0,
     log: [],
-    request(method) {
+    promptTexts: [],
+    request(method, params) {
       proc.log.push(method);
       if (method !== 'session/prompt') return Promise.resolve({});
       proc.prompts += 1;
+      proc.promptTexts.push(params.prompt[0].text);
       return new Promise((resolve) => pending.push(resolve));
     },
     notify(method) {
@@ -368,7 +359,7 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
     assert.equal(dshVersionStatus('0.2.2-rc.1').status, 'ok');
   });
   check('★ 有全量实测记录的版本报告对应的 MCP 发布版本', () => {
-    for (const [version, release] of [['0.2.1-rc.5', '0.7.1'], ['0.2.2-rc.1', '0.5.x'], ['0.2.2-rc.3', '0.7.3']]) {
+    for (const [version, release] of [['0.2.1-rc.5', '0.7.1'], ['0.2.2-rc.1', '0.5.x'], ['0.2.2-rc.3', '0.7.4']]) {
       const s = dshVersionStatus(version);
       assert.equal(s.rerun, true);
       assert.ok(s.note.includes(`已用 ${release} 跑过全量套件`));
@@ -481,31 +472,31 @@ console.log('\n[6c] PowerShell 哨兵等待命令');
 console.log('\n[7] 团队提示注入');
 
 {
-  const captured = [];
-  const fakeConv = {
-    id: 'fake-team',
-    busy: false,
-    lastResult: null,
-    createRun: (t) => ({ run_id: 'run-fake', prompt_preview: t }),
-    prompt: async (t) => {
-      captured.push(t);
-      return { still_running: true, run_id: 'run-fake' };
-    },
+  const { c, proc } = raceConv('team-prompts');
+  hub.conversations.set(c.id, c);
+  proc.teamProfile = { profile: 'dsh-team', backend: 'experimental' };
+  const first = await handlers.dsh_send({ conversation_id: c.id, prompt: 'do it' });
+  check('实验版 ACP 收到团队提示和原任务', () => assert.match(proc.promptTexts[0], /spawn_teammate[\s\S]*do it$/));
+  const second = await handlers.dsh_send({ conversation_id: c.id, prompt: 'skip hint', team: false, queue: true });
+  const third = await handlers.dsh_send({ conversation_id: c.id, prompt: 'queued before upgrade', queue: true });
+  const waitUntil = async (condition) => {
+    for (let i = 0; i < 300 && !condition(); i++) await tick(10);
   };
-  const fakeHub = {
-    get: async () => fakeConv,
-    runSentinelPath: () => '/tmp/run-fake.json',
-    conversations: new Map(),
-  };
-  const h2 = createHandlers(fakeHub, {});
-  await h2.dsh_send({ conversation_id: 'fake-team', prompt: 'do it' });
-  check('实验版在 prompt 前注入团队提示', () => {
-    assert.equal(TEAM_BACKEND, 'experimental');
-    assert.match(captured[0], /^【团队】/);
+  proc.end();
+  await waitUntil(() => proc.prompts >= 2);
+  check('排队的 team=false 关闭本次提示', () => assert.equal(proc.promptTexts[1], 'skip hint'));
+  proc.teamProfile = { profile: 'dsh-team', backend: 'native' };
+  proc.end();
+  await waitUntil(() => proc.prompts >= 3);
+  check('实验版入队、原生宿主出队的任务不带实验版提示', () => assert.equal(proc.promptTexts[2], 'queued before upgrade'));
+  proc.end();
+  const runs = [first, second, third].map((receipt) => c.getRun(receipt.structured.run_id));
+  await waitUntil(() => runs.every((run) => run.status === 'done'));
+  check('三次派发都完成并保留原文预览', () => {
+    assert.deepEqual(runs.map((run) => [run.status, run.prompt_preview]), [
+      ['done', 'do it'], ['done', 'skip hint'], ['done', 'queued before upgrade'],
+    ]);
   });
-  check('注入不吞掉原任务', () => assert.match(captured[0], /do it$/));
-  await h2.dsh_send({ conversation_id: 'fake-team', prompt: 'do it', team: false });
-  check('team=false 不注入', () => assert.equal(captured[1], 'do it'));
 }
 
 console.log('\n[8] danger-full-access 需要机器侧显式放行');

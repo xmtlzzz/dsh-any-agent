@@ -19,15 +19,13 @@ import {
   RUNS_DIR,
   SHARED_PROCESS,
   STATE_FILE,
-  TEAM_ACTIVE,
-  TEAM_BACKEND,
   TEAM_MODE,
-  DSH_PROFILE,
   DAEMON_MODE,
   STALL_MS,
   TURN_MAX_MS,
   WATCHDOG_AFTER_MS,
   dshVersionStatus,
+  resolveTeamProfile,
 } from './config.mjs';
 import {
   SOURCE_LABEL,
@@ -121,12 +119,14 @@ export function inspectLive({ dir = liveSettings().dir, level = liveSettings().l
 export async function runDoctor(hub) {
   const checks = [];
   const add = (id, status, detail, fix = null) => checks.push({ id, status, detail, fix });
+  let dshVersion = null;
 
   try {
     // 体检总是重新探测（不吃 60 秒缓存）：用户刚装/升级完桌面版就来查，必须看到新结果。
     const all = discoverDsh({ fresh: true });
     const dsh = resolveDsh();
     const { bin, version } = dsh;
+    dshVersion = version ?? null;
     const fromNpx = isNpxCachePath(bin);
     add(
       'dsh_bin',
@@ -221,8 +221,9 @@ export async function runDoctor(hub) {
     );
   }
 
+  const { profile, backend } = resolveTeamProfile(dshVersion);
   try {
-    const p = inspectProfile();
+    const p = inspectProfile(profile);
     add(
       'profile',
       p.exists ? (p.drifted ? 'warn' : 'ok') : 'warn',
@@ -302,17 +303,17 @@ export async function runDoctor(hub) {
   add(
     'config',
     'ok',
-    `profile=${DSH_PROFILE} team=${TEAM_ACTIVE ? 'on' : 'off'} permission=${DEFAULT_PERMISSION} ` +
+    `profile=${profile} team=${backend ? 'on' : 'off'} permission=${DEFAULT_PERMISSION} ` +
       `idle_ttl=${IDLE_TTL_MS}ms max_live=${MAX_LIVE} max_rss=${MAX_RSS_MB}MB shared=${SHARED_PROCESS} ` +
       `daemon=${DAEMON_MODE ? 'on' : 'off'} watchdog=${WATCHDOG_AFTER_MS}/${STALL_MS}/${TURN_MAX_MS}ms`,
   );
   add(
     'team',
-    TEAM_ACTIVE ? 'ok' : TEAM_MODE ? 'warn' : 'ok',
-    TEAM_ACTIVE
+    backend ? 'ok' : TEAM_MODE ? 'warn' : 'ok',
+    backend
       ? L(
-          `on（profile=${DSH_PROFILE}，${TEAM_BACKEND === 'native' ? 'DSH 会话团队模式' : '实验版团队模式'}）`,
-          `on (profile=${DSH_PROFILE}, ${TEAM_BACKEND === 'native' ? 'DSH session team mode' : 'experimental team mode'})`,
+          `on（profile=${profile}，${backend === 'native' ? 'DSH 会话团队模式' : '实验版团队模式'}）`,
+          `on (profile=${profile}, ${backend === 'native' ? 'DSH session team mode' : 'experimental team mode'})`,
         )
       : TEAM_MODE
         ? L(
@@ -320,7 +321,7 @@ export async function runDoctor(hub) {
             'requested but unavailable: unknown or unsupported DSH version, or no compatible team configuration in the profile',
           )
         : L('off（opt-in：dsh-any-agent team on）', 'off (opt-in: dsh-any-agent team on)'),
-    TEAM_ACTIVE
+    backend
       ? null
       : TEAM_MODE
         ? L('检查 DSH 版本 / profile，或 dsh-any-agent team off', 'check the DSH version / profile, or run dsh-any-agent team off')
