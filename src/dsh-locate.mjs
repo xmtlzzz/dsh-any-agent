@@ -41,8 +41,13 @@ let discoveryCache = null;
 
 /** 极简 semver 比较（够用于挑最新）；返回 a-b 的符号。 */
 export function cmpVersion(a, b) {
-  const [ac, ap] = String(a).split('-', 2);
-  const [bc, bp] = String(b).split('-', 2);
+  const parts = (value) => {
+    const [version] = String(value).split('+', 1);
+    const dash = version.indexOf('-');
+    return dash < 0 ? [version, ''] : [version.slice(0, dash), version.slice(dash + 1)];
+  };
+  const [ac, ap] = parts(a);
+  const [bc, bp] = parts(b);
   const an = ac.split('.').map(Number);
   const bn = bc.split('.').map(Number);
   for (let i = 0; i < 3; i++) {
@@ -54,17 +59,19 @@ export function cmpVersion(a, b) {
   if (ap && bp) {
     const ar = ap.split('.');
     const br = bp.split('.');
-    for (let i = 0; i < Math.max(ar.length, br.length); i++) {
-      const x = ar[i] ?? '';
-      const y = br[i] ?? '';
-      const xn = x !== '' && Number.isFinite(Number(x));
-      const yn = y !== '' && Number.isFinite(Number(y));
+    for (let i = 0; i < Math.min(ar.length, br.length); i++) {
+      const x = ar[i];
+      const y = br[i];
+      const xn = /^\d+$/.test(x);
+      const yn = /^\d+$/.test(y);
       if (xn && yn) {
-        if (Number(x) !== Number(y)) return Number(x) - Number(y);
+        if (x.length !== y.length) return x.length - y.length;
+        if (x !== y) return x < y ? -1 : 1;
       } else if (xn) return -1;
       else if (yn) return 1;
       else if (x !== y) return x < y ? -1 : 1;
     }
+    return ar.length - br.length;
   }
   return 0;
 }

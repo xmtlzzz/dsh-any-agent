@@ -8,7 +8,7 @@
  *   4. 离线 / HTTP 错误 / 响应不对 / 超时都报"未知"，不缓存、不抛错；fetch 不理 abort 也按时返回；
  *   5. 版本比较：更高的 latest = 有新版本，相同或更低 = 没有，正式版高于同号预发布版。
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { UPDATE_URL, checkForUpdate } from '../src/update-check.mjs';
@@ -69,6 +69,28 @@ try {
     check('本地更高（开发中的预发布版）：newer=false', ahead.newer === false);
     const rc = await checkForUpdate({ fetchImpl: f, cacheFile: join(root, 'rc.json'), current: '0.7.0-rc.2', now: T0 });
     check('同号预发布版 vs 正式版：newer=true', rc.newer === true);
+    const withMetadata = fakeFetch(() => json({ version: '0.7.0-rc-win.1+build.007' }));
+    const longer = await checkForUpdate({ fetchImpl: withMetadata, cacheFile: join(root, 'longer.json'), current: '0.7.0-rc-win', now: T0 });
+    check('合法的连字符预发布与构建元数据保留，预发布后缀参与比较', longer.latest === '0.7.0-rc-win.1+build.007' && longer.newer === true);
+    const sameRelease = await checkForUpdate({ fetchImpl: f, cacheFile: join(root, 'build.json'), current: '0.7.0+local', now: T0 });
+    check('构建元数据不影响优先级', sameRelease.status === 'ok' && sameRelease.newer === false);
+  }
+
+  console.log('\n[2b] 外部数据必须是完整版本号');
+  {
+    const marker = 'DIAGNOSTIC_TEST_MARKER';
+    const cacheFile = join(root, 'invalid-version.json');
+    const invalid = ['0.7.1\n', `0.7.1\n${marker}`, '0.7.1 unexpected', '00.7.1', '0.7.1-rc.01', '0.7.1+'];
+    const results = await Promise.all(invalid.map((version) => checkForUpdate({ fetchImpl: fakeFetch(() => json({ version })), cacheFile, now: T0 })));
+    check('npm 响应的多行、任意后缀或非法 SemVer 被拒绝且不缓存',
+      results.every((result) => result.status === 'unknown' && result.error === 'no version in the response') && !existsSync(cacheFile));
+    const refreshed = fakeFetch(() => json({ version: '0.7.1' }));
+    writeFileSync(cacheFile, JSON.stringify({ latest: `0.7.1\n${marker}`, checked_at: T0 }));
+    const result = await checkForUpdate({ fetchImpl: refreshed, cacheFile, now: T0 });
+    check('污染的未过期缓存也被丢弃并刷新', result.latest === '0.7.1' && result.cached === false && refreshed.calls.length === 1);
+    const malformed = await checkForUpdate({ fetchImpl: fakeFetch(() => ({ ok: true, json() { throw new SyntaxError(marker); } })),
+      cacheFile: join(root, 'malformed.json'), now: T0 });
+    check('诊断不回显解析错误里的响应文本', malformed.status === 'unknown' && malformed.error === 'fetch failed');
   }
 
   console.log('\n[3] 查不到时报"未知"，不缓存、不抛错');
