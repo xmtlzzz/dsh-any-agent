@@ -189,8 +189,9 @@ try {
       process.env.DSH_BIN = 'bin.js';
       process.env.DSH_RUNTIME = 'runtime';
       const d = resolveDsh();
-      assert.deepEqual(d.args, [join(root, 'bin.js')]);
-      assert.equal(d.command, join(root, 'runtime'));
+      // The OS can canonicalize the temporary path during chdir (for example /var on macOS).
+      assert.deepEqual(d.args, [join(process.cwd(), 'bin.js')]);
+      assert.equal(d.command, join(process.cwd(), 'runtime'));
       assert.equal(desktopExeForAsar(asar, 'runtime'), desktopExeForAsar(asar));
     } finally {
       process.chdir(cwd);
