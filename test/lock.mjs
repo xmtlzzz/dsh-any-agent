@@ -324,14 +324,15 @@ try {
 
   // 制造"持有者 MCP 失联"：登记里 MCP 进程**仍在**（用一个确定活着的外部 PID），
   // 但心跳是十分钟前的 —— 这正是"活着但卡死"的形态。进程本身不动。
-  writeRawMarker(conv2, {
-    conversation_id: conv2,
+  const wedged = {
+    ...m3,
     mcp_pid: process.ppid,
     mcp_token: 'wedged-instance',
     child_pid: wedgedPid,
     cwd: ws2,
     heartbeat_at: Date.now() - 10 * 60 * 1000,
-  });
+  };
+  writeRawMarker(conv2, wedged);
   const holder3 = locks.classifyHolder(conv2);
   check('★ 判定为 stale-mcp（失联的持有者）', holder3.kind === 'stale-mcp', holder3.reason);
   check('判定理由点名"心跳已过期"', /心跳.*过期|卡死/.test(holder3.reason), holder3.reason);
@@ -344,6 +345,12 @@ try {
   check('★ C 撞锁并指出可安全抢占', /写锁|占用/.test(tC) && /dsh_takeover/.test(tC), tC.slice(0, 300));
   check('★ 且明确说"无需 force"', /无需 force|即可|直接/.test(tC), tC.slice(0, 300));
 
+  const legacyMarker = { ...wedged };
+  delete legacyMarker.child_started_at;
+  writeRawMarker(conv2, legacyMarker);
+  const legacyTakeover = (await C.callTool('dsh_takeover', { conversation_id: conv2, force: true }, 240_000)).structuredContent;
+  check('★ force 也不能终止只有旧登记的进程', legacyTakeover?.ok === false && legacyTakeover.killed_pid === null && locks.isPidAlive(wedgedPid));
+  writeRawMarker(conv2, wedged);
   const tkC = await C.callTool('dsh_takeover', { conversation_id: conv2 }, 240_000);
   const tkCs = tkC?.structuredContent ?? {};
   check('★★ 无 force 抢占成功（失联持有者可自动接管）', tkCs.ok === true, JSON.stringify(tkCs).slice(0, 400));

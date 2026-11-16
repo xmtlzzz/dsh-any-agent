@@ -10,7 +10,8 @@
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-state-safety-'));
 const home = join(root, 'home');
@@ -133,6 +134,27 @@ try {
   writeMarker('marker-spawn-test', { childPid: 22222, cwd: root });
   const m3 = JSON.parse(readFileSync(markerPath('marker-spawn-test'), 'utf8'));
   check('同一子进程时沿用 spawned_at', m3.spawned_at === m2.spawned_at, `${m2.spawned_at} -> ${m3.spawned_at}`);
+
+  console.log('\n[7b] 接管核对操作系统记录的进程身份');
+  const { isPidAlive, killHolderChild, readProcessStartTime, processStartTime } = await import('../src/locks.mjs');
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+  const exited = once(child, 'exit');
+  try {
+    await once(child, 'spawn');
+    const startedAt = await readProcessStartTime(child.pid);
+    writeMarker('marker-verified-child', { childPid: child.pid, childStartedAt: startedAt, cwd: root });
+    const marker = JSON.parse(readFileSync(markerPath('marker-verified-child'), 'utf8'));
+    check('登记保存操作系统提供的启动时间', Number.isFinite(startedAt) && marker.child_started_at === processStartTime(child.pid));
+    const legacy = killHolderChild(child.pid);
+    check('仅有旧登记时间或 PID 时不终止进程', !legacy.killed && isPidAlive(child.pid));
+    const mismatch = killHolderChild(child.pid, { expectedStartedAt: startedAt - 60_000 });
+    check('启动时间相差一分钟也拒绝终止', !mismatch.killed && isPidAlive(child.pid));
+    const matched = killHolderChild(child.pid, { expectedStartedAt: marker.child_started_at });
+    check('成功核对身份后可以终止原进程', matched.killed, matched.reason);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    await exited;
+  }
 
   console.log('\n[8] workspace_changed 用快照内容比较');
   const { sameWorkspaceSnapshot } = await import('../src/hub.mjs');

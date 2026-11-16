@@ -82,6 +82,7 @@ const MAX_PROMPT_ECHO = 4000;
 const toolNameFromTitle = (title) => (typeof title === 'string' && /^[\w.:-]{1,40}$/.test(title) ? title : null);
 
 export class Conversation {
+  #lastChildStartedAt = null;
   constructor(state, hub) {
     this.id = state.id;
     this.cwd = state.cwd;
@@ -142,6 +143,18 @@ export class Conversation {
   }
 
   #hub;
+
+  /** 只有会话取得写锁之后才登记，失败的 resume 需保留上一代进程的身份。 */
+  async recordChildProcess(proc) {
+    const pid = proc.pid;
+    const startedAt = await proc.startTime;
+    if (this.proc !== proc || proc.pid !== pid || !proc.alive) {
+      throw new Error(L('登记写锁时 DSH 进程已退出', 'The DSH process exited while registering its write lock'));
+    }
+    writeMarker(this.id, { childPid: pid, childStartedAt: startedAt, cwd: this.cwd });
+    this.lastChildPid = pid;
+    this.#lastChildStartedAt = startedAt;
+  }
 
   // 只读视图（测试与快照在用）。`?.` 兜住用 Object.create(Conversation.prototype) 做的替身。
   /** 输出缓冲里的条目。 */
@@ -409,7 +422,7 @@ export class Conversation {
       proc.start();
       this.proc = proc;
     }
-    // ★ lastChildPid **推迟到 resume 真正成功后**再写（见 writeMarker 处）。
+    // ★ lastChildPid **推迟到 resume 真正成功后**再写（见 recordChildProcess）。
     //   若在这里就覆盖，一次注定撞锁失败的 resume 会把"上一代还活着的子进程"
     //   这条抢占线索换成刚拉起、注定失败的新进程，takeover 就归因不到真正的持有者。
     // ★ 登记**推迟到真正拿到写锁之后**（见下面 resume 成功处）。
@@ -431,9 +444,7 @@ export class Conversation {
       // ★ 回读会话自己的权限记录，防止 profile defaultPreset 无声提权。
       await this.verifyPermissionRecorded();
       // 锁到手了，这时才登记；从此别人能查到"锁在我们手上"
-      writeMarker(this.id, { childPid: proc.pid, cwd: this.cwd });
-      // 只有真正拿到写锁后才更新"我拉起的最后一个子进程"：失败路径需要保留上一代的 PID。
-      this.lastChildPid = proc.pid;
+      await this.recordChildProcess(proc);
       this.lockConflict = null; // 拿到锁了，之前的撞锁记录作废
       this.#hub.log.info(`[conv ${this.id}] 已 resume`);
       return proc;
@@ -590,8 +601,8 @@ export class Conversation {
     report.holder_kind = holder.kind;
     report.holder = holder.marker;
     // 登记可能已随回收被删，但"我们自己的残留子进程"仍可归因（见 locks.classifyHolder）
-    const markerChild = holder.marker?.child_pid ?? null;
-    const killTarget = isPidAlive(markerChild) ? markerChild : (holder.known_child_pid ?? markerChild);
+    const killTarget = holder.known_child_pid ?? holder.marker?.child_pid;
+    const expectedStartedAt = holder.known_child_pid ? this.#lastChildStartedAt : holder.marker?.child_started_at;
 
     if (holder.kind === 'none' || !holder.childAlive) {
       report.message =
@@ -624,13 +635,13 @@ export class Conversation {
     }
 
     // 4) 杀 + 重试（内核在持有者进程退出时释放信号量）
-    const kill = killHolderChild(killTarget, { expectedSpawnedAt: holder.marker?.spawned_at });
-    report.killed_pid = killTarget;
+    const kill = killHolderChild(killTarget, { expectedStartedAt });
     report.kill = kill;
     if (!kill.killed) {
       report.message = `抢占失败：${kill.reason}`;
       return report;
     }
+    report.killed_pid = killTarget;
     removeMarker(this.id, { force: true });
     // 等它**真的**退出再接管：只发 kill 就立刻 resume 会撞上尚未释放的锁
     // （进程退出与内核回收信号量之间有一小段窗口）。

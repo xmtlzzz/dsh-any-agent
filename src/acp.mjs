@@ -19,6 +19,7 @@ import {
   resolveTeamProfile,
 } from './config.mjs';
 import { LineDecoder } from './line-decoder.mjs';
+import { readProcessStartTime } from './locks.mjs';
 
 /** ACP 协议版本（@agentclientprotocol/sdk 的 v1）。 */
 const PROTOCOL_VERSION = 1;
@@ -42,6 +43,7 @@ export class AcpProcess {
   #onExit;
   #exitNotified = false;
   #teamProfile = null;
+  #startTime = null;
 
   /**
    * @param {object} opts
@@ -83,6 +85,10 @@ export class AcpProcess {
 
   get teamProfile() {
     return this.#teamProfile;
+  }
+
+  get startTime() {
+    return this.#startTime;
   }
 
   /** DSH stderr 的内存尾部（诊断用；默认不打印、不落盘）。 */
@@ -159,6 +165,8 @@ export class AcpProcess {
       this.#log.debug(`[acp] 进程退出 code=${code}`);
     });
     this.#child.on('error', (e) => this.#log.info(`[acp] spawn 失败: ${e.message}`));
+    const child = this.#child;
+    this.#startTime = readProcessStartTime(child.pid).then((time) => this.#child === child && this.alive ? time : null);
     return this;
   }
 

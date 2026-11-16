@@ -295,8 +295,8 @@ export function createHandlers(hub, opts = {}) {
             `- conversation ${o.conversation_id} (child PID ${o.child_pid}, out of contact for ${orphanAge(o)})`,
           )).join('\n') +
           L(
-            '\n→ 用 dsh_takeover 抢占即可（这些是本服务自己的残留，抢占是安全的）。',
-            '\n→ Take them over with dsh_takeover (they are this server\'s own leftovers, so that is safe).',
+            '\n→ 可用 dsh_takeover 尝试接管，服务会先核实持锁进程的身份。',
+            '\n→ Try dsh_takeover. The server verifies the lock holder’s process identity first.',
           )
         : '';
       return {

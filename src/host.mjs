@@ -42,6 +42,10 @@ export class SessionHost {
     return this.proc?.pid ?? null;
   }
 
+  get startTime() {
+    return this.proc?.startTime ?? null;
+  }
+
   get stderrTail() {
     return this.proc?.stderrTail ?? '';
   }

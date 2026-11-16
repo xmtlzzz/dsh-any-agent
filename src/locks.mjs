@@ -11,7 +11,7 @@
  *
  * 于是我们只登记**自己拉起的** DSH 子进程：一个会话一个文件
  *   `<状态文件同目录>/locks/<conversation_id>.json`
- *     { conversation_id, mcp_pid, mcp_token, child_pid, cwd, spawned_at, heartbeat_at }
+ *     { conversation_id, mcp_pid, mcp_token, child_pid, child_started_at, cwd, spawned_at, heartbeat_at }
  *
  * ## 三类持有者，三种处置
  *
@@ -19,7 +19,7 @@
  * |---|---|---|
  * | `none` | 没有登记文件 | 直接尝试；失败则报"未知持有者（多半是你的 DSH GUI）"，**绝不杀** |
  * | `self` | mcp_pid/token 都是自己 | 正常路径，无需抢占 |
- * | `stale-mcp` | 登记在，但 mcp_pid 已死**或**心跳过期 | **可安全杀掉**：那是我们自己实例的孤儿残留 |
+ * | `stale-mcp` | 登记在，但 mcp_pid 已死**或**心跳过期 | 核实子进程身份后可接管 |
  * | `live-mcp` | 登记在且心跳新鲜 | 默认拒绝（另一个宿主可能在用），`force` 才杀 |
  *
  * `mcp_token` 是每个 MCP 进程启动时生成的随机串，用来防 PID 复用误判；
@@ -27,7 +27,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, renameSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { processListExecutable, windowsSystemExecutable } from './host-executable.mjs';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -52,9 +52,12 @@ export const LOCKS_DIR = process.env.DSH_MCP_LOCKS_DIR ?? join(dirname(STATE_FIL
 /** 某个会话的持有者登记文件路径。 */
 export const markerPath = (conversationId) => join(LOCKS_DIR, `${conversationId}.json`);
 
+const validPid = (pid) => Number.isSafeInteger(pid) && pid > 0 && pid <= 0x7fffffff;
+const validStartTime = (time) => Number.isSafeInteger(time) && time > 0 && time <= 8.64e15;
+
 /** 判断 PID 是否还活着（同用户下可靠；EPERM 表示存在但无权限，也算活着）。 */
 export function isPidAlive(pid) {
-  if (!pid || typeof pid !== 'number') return false;
+  if (!validPid(pid)) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -86,7 +89,7 @@ function writeJson(file, obj) {
 }
 
 /** 登记"我这个 MCP 进程为这个会话拉起了哪个 DSH 子进程"。 */
-export function writeMarker(conversationId, { childPid, cwd }) {
+export function writeMarker(conversationId, { childPid, childStartedAt, cwd }) {
   const p = markerPath(conversationId);
   const prev = readJson(p);
   // ★ 绝不覆盖"别人**还活着**的"登记。
@@ -107,9 +110,9 @@ export function writeMarker(conversationId, { childPid, cwd }) {
     mcp_pid: process.pid,
     mcp_token: MCP_TOKEN,
     child_pid: childPid ?? null,
+    child_started_at: validStartTime(childStartedAt) ? childStartedAt : null,
     cwd: cwd ?? null,
-    // 只有同一个子进程才沿用旧启动时间；子进程换了（PID 变化）必须重置，
-    // 否则 PID 复用保护会把新进程误判成“复用旧 PID”而拒绝 takeover。
+    // 保留旧登记时间字段供旧客户端读取，接管只信 OS 返回的 child_started_at。
     spawned_at:
       prev && prev.child_pid === childPid && Number.isFinite(prev.spawned_at)
         ? prev.spawned_at
@@ -249,26 +252,46 @@ export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
  * 杀掉一个 DSH 子进程。**只允许对 classification 判定为 `stale-mcp` / `live-mcp(force)`
  * 的、由本 MCP 登记过的进程调用** —— 调用方负责先做分类。
  */
-export function killHolderChild(pid, { expectedSpawnedAt } = {}) {
-  if (!pid || !isPidAlive(pid)) return { killed: false, reason: L('进程已经不在了', 'the process is already gone') };
-  // ★ PID 会被复用。抢占是"杀进程"这种不可逆动作，所以先核对启动时间：
-  //   登记时间与 OS 记录的启动时间差太多 → 这已经不是当初登记的那个进程，拒绝杀。
-  if (Number.isFinite(expectedSpawnedAt)) {
-    const actual = processStartTime(pid);
-    if (Number.isFinite(actual) && Math.abs(actual - expectedSpawnedAt) > 10 * 60 * 1000) {
-      return {
-        killed: false,
-        reason: L(
-          `PID ${pid} 的启动时间与登记不符（登记 ${new Date(expectedSpawnedAt).toISOString()}，` +
-            `实际 ${new Date(actual).toISOString()}），疑似 PID 已被复用，拒绝杀。`,
-          `PID ${pid} started at a different time than registered (registered ${new Date(expectedSpawnedAt).toISOString()}, ` +
-            `actual ${new Date(actual).toISOString()}); the PID was probably reused, so it is not killed.`,
-        ),
-      };
-    }
+export function killHolderChild(pid, { expectedStartedAt } = {}) {
+  if (pid === process.pid || !isPidAlive(pid)) {
+    return { killed: false, reason: L('目标进程不可用', 'the target process is unavailable') };
   }
+  const unverified = {
+    killed: false,
+    reason: L('无法核实持锁进程的启动时间。请在原宿主释放或关闭会话后重试。',
+      'Could not verify when the lock holder started. Release or close the session in its original host and retry.'),
+  };
+  const mismatch = {
+    killed: false,
+    reason: L(`PID ${pid} 的启动时间与登记不符，拒绝接管。`, `PID ${pid} started at a different time than registered. Takeover refused.`),
+  };
+  if (!validStartTime(expectedStartedAt)) return unverified;
   try {
-    process.kill(pid, 'SIGKILL');
+    if (process.platform === 'win32') {
+      const powershell = windowsSystemExecutable('WindowsPowerShell', 'v1.0', 'powershell.exe');
+      if (!powershell) return unverified;
+      // Accessing Handle pins the process object. StartTime and Kill use that same handle.
+      const script = [
+        "$ErrorActionPreference = 'Stop'",
+        `$target = [System.Diagnostics.Process]::GetProcessById(${pid})`,
+        'try {',
+        '  $null = $target.Handle',
+        "  $started = $target.StartTime.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)",
+        `  if ($started -ne '${new Date(expectedStartedAt).toISOString()}') { exit 2 }`,
+        '  $target.Kill()',
+        '} finally { $target.Dispose() }',
+      ].join('\n');
+      const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], {
+        timeout: 3000, stdio: 'ignore', windowsHide: true,
+      });
+      if (result.status === 2) return mismatch;
+      if (result.status !== 0) return unverified;
+    } else {
+      const actual = processStartTime(pid);
+      if (actual === null) return unverified;
+      if (actual !== expectedStartedAt) return mismatch;
+      process.kill(pid, 'SIGKILL');
+    }
   } catch (e) {
     return { killed: false, reason: L(`杀不掉: ${e.message}`, `could not kill it: ${e.message}`) };
   }
@@ -276,28 +299,48 @@ export function killHolderChild(pid, { expectedSpawnedAt } = {}) {
 }
 
 /**
- * 读取进程启动时间（毫秒时间戳）。拿不到时返回 null（调用方按旧行为处理）。
- * Windows 用 PowerShell 的 Get-Process.StartTime；POSIX 用 ps -o lstart=。
- * 只在 takeover 这种低频、不可逆动作前调用，不在热路径上。
+ * Windows 用 Get-Process.StartTime，POSIX 用固定语言和时区的 ps -o lstart=。
  */
-export function processStartTime(pid) {
-  if (!pid) return null;
+function startTimeQuery(pid) {
+  if (!validPid(pid)) return null;
   const win = process.platform === 'win32';
   const command = win
     ? windowsSystemExecutable('WindowsPowerShell', 'v1.0', 'powershell.exe')
     : processListExecutable();
   if (!command) return null;
+  const args = win
+    ? ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`]
+    : ['-o', 'lstart=', '-p', String(pid)];
+  const env = win ? process.env : { ...process.env, LC_ALL: 'C', TZ: 'UTC' };
+  return { command, args, options: { env, encoding: 'utf8', timeout: 3000, windowsHide: true } };
+}
+
+function parseStartTime(stdout) {
+  const text = stdout.trim();
+  const startedAt = Date.parse(process.platform === 'win32' ? text : `${text} UTC`);
+  return validStartTime(startedAt) ? startedAt : null;
+}
+
+/** 毫秒时间戳，系统无法核实时返回 null。 */
+export function processStartTime(pid) {
+  const query = startTimeQuery(pid);
+  if (!query) return null;
   try {
-    const args = win
-      ? ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${Number(pid)} -ErrorAction SilentlyContinue).StartTime.ToUniversalTime().ToString('o')`]
-      : ['-o', 'lstart=', '-p', String(pid)];
-    const r = spawnSync(command, args, {
-      encoding: 'utf8',
-      timeout: 3000,
-      windowsHide: true,
+    const r = spawnSync(query.command, query.args, query.options);
+    return r.status === 0 ? parseStartTime(r.stdout) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 新建 ACP 进程时在后台读一次启动时间，握手可以并行进行。 */
+export async function readProcessStartTime(pid) {
+  const query = startTimeQuery(pid);
+  if (!query) return null;
+  try {
+    return await new Promise((resolve) => {
+      execFile(query.command, query.args, query.options, (err, stdout) => resolve(err ? null : parseStartTime(stdout)));
     });
-    const t = Date.parse(String(r.stdout || '').trim());
-    return Number.isFinite(t) ? t : null;
   } catch {
     return null;
   }
@@ -375,8 +418,8 @@ export function describeLeaseConflict(conversationId, holder) {
   ];
   if (holder.kind === 'stale-mcp') {
     lines.push(L(
-      '→ 这是本服务自己留下的孤儿进程，可以安全抢占：调用 dsh_takeover 即可（无需 force）。',
-      "→ It is an orphan this server left behind and is safe to preempt: call dsh_takeover (no force needed).",
+      '→ 调用 dsh_takeover 可尝试接管（无需 force）。服务会先核实进程身份。',
+      '→ Try dsh_takeover (no force needed). The server verifies the holder’s process identity first.',
     ));
   } else if (holder.kind === 'live-mcp') {
     lines.push(L(

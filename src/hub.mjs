@@ -89,7 +89,6 @@ import {
   isPidAlive,
   processStartTime,
   removeMarker,
-  writeMarker,
 } from './locks.mjs';
 import { attachReview, terminalResult } from './run-result.mjs';
 
@@ -870,10 +869,9 @@ export class Hub {
         this,
       );
       conv.proc = proc;
-      conv.lastChildPid = proc.pid;
       // ★ 新建会话的进程也要登记持有者 —— 走的是 Hub.create 这条独立路径，
       //   不登记的话 dsh_takeover 会把"本服务自己持有的会话"误判成 none 而拒绝抢占。
-      writeMarker(res.sessionId, { childPid: proc.pid, cwd });
+      await conv.recordChildProcess(proc);
       if (shared) proc.attach(conv);
       else {
         proc.attachRoutes({
