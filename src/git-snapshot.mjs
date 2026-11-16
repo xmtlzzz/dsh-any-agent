@@ -8,9 +8,8 @@
 
 import { lstatSync, readdirSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { promisify } from 'node:util';
+import { execGit } from './git-executable.mjs';
 
 /**
  * 两次 workspace 快照是否表示同一组工作区变更。
@@ -32,7 +31,6 @@ export function sameWorkspaceSnapshot(a, b) {
 const GIT_TIMEOUT_MS = 8000;
 const GIT_MAX_BUFFER = 64 * 1024 * 1024;
 const MAX_UNTRACKED_DIR_ENTRIES = 2000;
-const execFileAsync = promisify(execFile);
 
 /**
  * 安全 git 参数（放 subcommand 之前）。
@@ -48,7 +46,7 @@ function gitEnv() {
 
 /** 异步跑一次 git 并取 stdout；非 git 目录/超时/输出过大都抛给调用方。 */
 async function gitOutput(cwd, args) {
-  const { stdout } = await execFileAsync('git', args, {
+  const { stdout } = await execGit(args, {
     cwd,
     encoding: 'utf8',
     timeout: GIT_TIMEOUT_MS,
