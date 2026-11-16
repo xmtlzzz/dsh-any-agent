@@ -4,8 +4,9 @@
 
 **0.5.0 起默认关闭。** 需要时用一条命令开启，不用手改客户端配置。
 
-开启后：profile 切到 `dsh-team`（含实验性 Agent Teams，关闭旧的 `subagent` 工具），
-`dsh_send` 会在 prompt 前注入一句"需要并行/多角色时先建团队"；简单任务不会被强制组队。
+开启后默认切到 `dsh-team` profile。DSH `0.2.2-rc.2` 起，新会话会启用共享任务板和普通子代理工具。恢复会话时，DSH 保留已保存的团队状态。
+
+DSH `0.1.7-rc.1` 至 `0.2.2-rc.1` 使用实验版团队工具。`dsh_send` 会在派发前提示按需组队。
 
 ## 命令
 
@@ -28,13 +29,7 @@ dsh-any-agent team status   # 查看当前生效值、来源、profile
 
 2. 重连 MCP 服务：Claude Code 用 `/mcp` → `dsh-any-agent` → reconnect；
    其它客户端重启或在 MCP 面板里 reconnect。
-3. 验证：调用 `dsh_start`，返回里应该出现：
-
-   ```
-   团队模式: 开（profile=dsh-team；派发时会提示"需要时先建团队"，简单任务不会组队）
-   ```
-
-   或调用 `dsh_doctor`，`team` 检查应为 `on`。
+3. 调用 `dsh_doctor`，`team` 检查应为 `on`，并注明使用 DSH 会话团队模式还是实验版团队模式。
 
 ## 关闭
 
@@ -42,13 +37,9 @@ dsh-any-agent team status   # 查看当前生效值、来源、profile
 dsh-any-agent team off
 ```
 
-重连后 profile 回到 `dsh-mcp`，没有 team 工具，也不注入提示。
+重连后，新会话默认回到 `dsh-mcp`。已保存的原生团队状态可在 DSH 界面按会话关闭。
 
-**单次关闭**（只这一次不提示组队，profile 仍是 `dsh-team`）：
-
-```
-dsh_send(..., team=false)
-```
+实验版可用 `dsh_send(team=false)` 关闭本次派发的组队提示。
 
 ## 优先级与排查
 
@@ -64,8 +55,5 @@ dsh_send(..., team=false)
 
 ## 注意
 
-- 团队模式要求 DSH `>= 0.1.7-0`；版本不够时即使 `team on` 也不会启用，
-  `dsh_doctor` 会把它标成 `warn`。
-- team profile 会关闭旧的 `subagent` 工具，换成 9 个团队工具；成员共享一个工作区。
-- 团队是**实验性**能力，DSH 不提供稳定性承诺。
-- 不需要删 `~/.dsh/profiles/dsh-team`；关闭后它只是不被使用。
+- 升级到 `0.2.2-rc.2` 或更新的 DSH 后，受管团队 profile 会在启动 DSH 时迁移。自定义 profile 需移除实验版团队插件配置，恢复标准子代理工具，并在原生 `agent-team` 条目的 `config` 中设置 `defaultEnabled: true`。
+- 团队配置与 DSH 版本不兼容时，`dsh_doctor` 会给出提示。未显式指定 profile 时，服务回到 `dsh-mcp`。

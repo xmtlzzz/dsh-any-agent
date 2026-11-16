@@ -8,7 +8,8 @@
 import {
   DEFAULT_PERMISSION,
   DEFAULT_REASONING,
-  TEAM_ACTIVE,
+  TEAM_BACKEND,
+  TEAM_MODE,
   DSH_PROFILE,
   toPosixPath,
 } from './config.mjs';
@@ -99,6 +100,17 @@ export function createHandlers(hub, opts = {}) {
         keep_alive: conv.keepAlive === true,
       });
       const snap = conv.snapshot();
+      let teamStatus = L('关（默认关闭；需要时运行 dsh-any-agent team on）', 'off (the default; run dsh-any-agent team on to enable)');
+      if (TEAM_BACKEND === 'native') {
+        teamStatus = L(`开（profile=${DSH_PROFILE}；使用 DSH 的会话团队模式）`, `on (profile=${DSH_PROFILE}; uses DSH session team mode)`);
+      } else if (TEAM_BACKEND === 'experimental') {
+        teamStatus = L(
+          `开（profile=${DSH_PROFILE}；派发时会提示"需要时先建团队"，简单任务不会组队）`,
+          `on (profile=${DSH_PROFILE}; dispatches carry a "form a team first when needed" hint, simple tasks stay single-agent)`,
+        );
+      } else if (TEAM_MODE) {
+        teamStatus = L('未启用（用 dsh_doctor 检查 DSH 版本与 profile）', 'unavailable (check the DSH version and profile with dsh_doctor)');
+      }
       const lines = [
         L('已创建会话。', 'Conversation created.'),
         `conversation_id: ${snap.conversation_id}`,
@@ -118,13 +130,7 @@ export function createHandlers(hub, opts = {}) {
               '保活: 否（空闲后可被回收，下次派活自动 resume）',
               'Keep alive: no (may be reaped when idle; the next dispatch resumes it)',
             ),
-        L('团队模式: ', 'Team mode: ') +
-          (TEAM_ACTIVE
-            ? L(
-                `开（profile=${DSH_PROFILE}；派发时会提示"需要时先建团队"，简单任务不会组队）`,
-                `on (profile=${DSH_PROFILE}; dispatches carry a "form a team first when needed" hint, simple tasks stay single-agent)`,
-              )
-            : L('关（默认关闭；需要时运行 dsh-any-agent team on）', 'off (the default; run dsh-any-agent team on to enable)')),
+        L('团队模式: ', 'Team mode: ') + teamStatus,
         L('对话名: ', 'Title: ') +
           (snap.title ?? L('(DSH 尚未生成，发出第一条消息后自动生成)', '(not generated yet; DSH creates it after the first message)')) +
           (snap.title_hint && snap.title !== snap.title_hint
@@ -192,8 +198,8 @@ export function createHandlers(hub, opts = {}) {
         }
       }
 
-      // 团队提示：只描述"需要时怎么做"，不改变任务本身；简单任务不会因此组队。
-      const teamOn = TEAM_ACTIVE && args.team !== false;
+      // 原生团队由 DSH 按会话提供任务板指导，只有实验版需要前缀。
+      const teamOn = TEAM_BACKEND === 'experimental' && args.team !== false;
       const promptText = teamOn ? TEAM_PREFIX + args.prompt : args.prompt;
 
       // ── 忙时：显式 queue=true 才入队；否则保持"直接报错"的旧契约 ──

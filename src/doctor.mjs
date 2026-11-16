@@ -20,6 +20,7 @@ import {
   SHARED_PROCESS,
   STATE_FILE,
   TEAM_ACTIVE,
+  TEAM_BACKEND,
   TEAM_MODE,
   DSH_PROFILE,
   DAEMON_MODE,
@@ -309,11 +310,14 @@ export async function runDoctor(hub) {
     'team',
     TEAM_ACTIVE ? 'ok' : TEAM_MODE ? 'warn' : 'ok',
     TEAM_ACTIVE
-      ? L(`on（profile=${DSH_PROFILE}）`, `on (profile=${DSH_PROFILE})`)
+      ? L(
+          `on（profile=${DSH_PROFILE}，${TEAM_BACKEND === 'native' ? 'DSH 会话团队模式' : '实验版团队模式'}）`,
+          `on (profile=${DSH_PROFILE}, ${TEAM_BACKEND === 'native' ? 'DSH session team mode' : 'experimental team mode'})`,
+        )
       : TEAM_MODE
         ? L(
-            'requested but unavailable：DSH < 0.1.7-0，或该 profile 不含 team 包',
-            'requested but unavailable: DSH < 0.1.7-0, or the profile lacks the team packages',
+            'requested but unavailable：DSH 版本未知或不支持，或者 profile 缺少兼容的团队配置',
+            'requested but unavailable: unknown or unsupported DSH version, or no compatible team configuration in the profile',
           )
         : L('off（opt-in：dsh-any-agent team on）', 'off (opt-in: dsh-any-agent team on)'),
     TEAM_ACTIVE

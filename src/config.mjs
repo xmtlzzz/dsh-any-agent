@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cmpVersion, resolveDsh } from './dsh-locate.mjs';
+import { load as yamlLoad } from './yaml-lite.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const PKG_ROOT = join(HERE, '..');
@@ -41,20 +42,14 @@ export function resolveDshBin() {
  * 兼容性矩阵（docs/zh/compatibility.md）的机器可读版本，供 dsh_doctor 使用。
  * 改矩阵时同步改这里：`[verifiedMin, verifiedBelow)` 是“已验证”区间。
  * 用 `-0` 后缀是为了把同号的 rc 版本也算进去（semver 里 `0.1.7-rc.1 < 0.1.7`）。
- * 0.2.x：2026-11-06 用 0.2.1-rc.5（npm）与 0.2.2-rc.1（桌面版自带运行时）跑过全量套件。
- *
- * `rerunVersion` 是**当前这条发布线**（rerunLine）重新跑过全量套件的 DSH 版本；
- * 已验证区间里的其它版本，最近一次实测停在 earlierLine。体检要把这两种情况说清楚，
- * 不能把"上一条线验证过"说成"本版本验证过"。
+ * 只有明确记录全量套件的版本才在体检里显示对应的 MCP 发布版本。
  */
 export const DSH_COMPAT = Object.freeze({
   partialMin: '0.1.5-0',
   verifiedMin: '0.1.7-0',
   verifiedBelow: '0.2.3-0',
   verifiedLabel: '0.1.7 ~ 0.2.2',
-  rerunVersion: '0.2.1-rc.5',
-  rerunLine: '0.7.1',
-  earlierLine: '0.5.x',
+  fullSuiteRuns: Object.freeze({ '0.2.1-rc.5': '0.7.1', '0.2.2-rc.1': '0.5.x', '0.2.2-rc.3': '0.7.3' }),
 });
 
 /**
@@ -91,17 +86,17 @@ export function dshVersionStatus(version) {
     };
   }
   if (cmpVersion(version, C.verifiedBelow) < 0) {
-    const rerun = version === C.rerunVersion;
+    const testedOn = C.fullSuiteRuns[version];
     return {
       status: 'ok',
       level: 'verified',
-      rerun,
-      note: rerun
-        ? `DSH ${version} 已用 ${C.rerunLine} 跑过全量套件`
-        : `DSH ${version} 在已验证区间（${C.verifiedLabel}），但最近一次全量实测是 ${C.earlierLine}；${C.rerunLine} 没有对它重跑`,
-      noteEn: rerun
-        ? `DSH ${version} was tested with the full suite on ${C.rerunLine}`
-        : `DSH ${version} is in the verified range (${C.verifiedLabel}), but its last full run was on ${C.earlierLine}; ${C.rerunLine} did not re-run it`,
+      rerun: Boolean(testedOn),
+      note: testedOn
+        ? `DSH ${version} 已用 ${testedOn} 跑过全量套件`
+        : `DSH ${version} 在已验证区间（${C.verifiedLabel}），具体实测版本见兼容性矩阵`,
+      noteEn: testedOn
+        ? `DSH ${version} was tested with the full suite on ${testedOn}`
+        : `DSH ${version} is in the verified range (${C.verifiedLabel}); see the compatibility matrix for exact test records`,
     };
   }
   return {
@@ -163,35 +158,6 @@ export const DSH_VERSION = (() => {
   }
 })();
 
-// 注意用 `0.1.7-0` 而不是 `0.1.7`：semver 里 `0.1.7-rc.1 < 0.1.7`，
-// 但 team 包正是随 0.1.7-rc.1 发布的。
-const teamVersionOk = DSH_VERSION === null || cmpVersion(DSH_VERSION, '0.1.7-0') >= 0;
-
-/** 用于驱动 DSH 的 profile（由 bootstrap 在首启时按 acp 模板创建）。 */
-export const DSH_PROFILE =
-  process.env.DSH_MCP_PROFILE ?? (TEAM_MODE && teamVersionOk ? 'dsh-team' : 'dsh-mcp');
-
-/**
- * 团队能力是否真正可用：
- *   - 用户没有关（TEAM_MODE）；
- *   - DSH >= 0.1.7（team 包从 0.1.7 才有）；
- *   - **profile 里真的含 team 包**（显式指定了不含 team 的 profile 时不注入，
- *     否则模型会看到一个不存在的工具）。
- * profile 还不存在时（首启）交给 bootstrap 创建，视为可用。
- */
-const profileTeamText = (() => {
-  try {
-    return readFileSync(join(DSH_HOME, 'profiles', DSH_PROFILE, 'cordis.patch.yml'), 'utf8');
-  } catch {
-    return null;
-  }
-})();
-
-export const TEAM_ACTIVE =
-  TEAM_MODE &&
-  teamVersionOk &&
-  (profileTeamText === null || profileTeamText.includes('@deepseek-ai/dsh-experimental-agent-team'));
-
 /**
  * 是否允许 bootstrap 自动创建/同步 DSH profile（默认开）。
  * 关掉（DSH_MCP_BOOTSTRAP=0）后本服务只驱动已存在的 profile，不再写任何文件。
@@ -201,6 +167,50 @@ export const BOOTSTRAP_ENABLED = (() => {
   if (v === undefined || String(v).trim() === '') return true;
   return !(v === '0' || v.toLowerCase() === 'false');
 })();
+
+export const MANAGED_PROFILE_MARKER = 'dsh-mcp:managed';
+
+/** DSH 0.2.2-rc.2 introduced the session-level team mode in its base bundle. */
+const requestedTeamBackend = (() => {
+  if (!TEAM_MODE || !DSH_VERSION || cmpVersion(DSH_VERSION, '0.1.7-0') < 0) return null;
+  return cmpVersion(DSH_VERSION, '0.2.2-rc.2') >= 0 ? 'native' : 'experimental';
+})();
+
+const teamProfile = process.env.DSH_MCP_PROFILE ?? 'dsh-team';
+
+export const TEAM_BACKEND = (() => {
+  if (!requestedTeamBackend) return null;
+  let text;
+  try {
+    text = readFileSync(join(DSH_HOME, 'profiles', teamProfile, 'cordis.patch.yml'), 'utf8');
+  } catch (e) {
+    return e.code === 'ENOENT' && BOOTSTRAP_ENABLED ? requestedTeamBackend : null;
+  }
+
+  try {
+    const entries = yamlLoad(text);
+    if (!Array.isArray(entries)) return null;
+    const team = entries.findLast((entry) => entry?.id === 'agent-team');
+    const tools = entries.findLast((entry) => entry?.id === 'tool-agent-team');
+    const experimental = team?.name === '@deepseek-ai/dsh-experimental-agent-team' &&
+      tools?.name === '@deepseek-ai/dsh-experimental-tool-agent-team';
+    const native = team?.config?.defaultEnabled === true &&
+      (team.name === undefined || team.name === '@deepseek-ai/dsh-agent-team') &&
+      (tools?.name === undefined || tools.name === '@deepseek-ai/dsh-tool-agent-team');
+    if (BOOTSTRAP_ENABLED && text.includes(MANAGED_PROFILE_MARKER) && (teamProfile === 'dsh-team' || experimental || native)) {
+      return requestedTeamBackend;
+    }
+    if (team?.disabled === true || tools?.disabled === true) return null;
+    return (requestedTeamBackend === 'native' ? native : experimental) ? requestedTeamBackend : null;
+  } catch {
+    return null;
+  }
+})();
+
+export const TEAM_ACTIVE = TEAM_BACKEND !== null;
+
+/** 用于驱动 DSH 的 profile（由 bootstrap 在首启时按 acp 模板创建）。 */
+export const DSH_PROFILE = process.env.DSH_MCP_PROFILE ?? (TEAM_ACTIVE ? teamProfile : 'dsh-mcp');
 
 /**
  * 抄路由时**只**用这个 profile（默认空 = 按 home 层 → desktop → web → headless → acp 顺序找）。

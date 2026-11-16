@@ -68,11 +68,11 @@ DSH（DeepSeek Harness）本身**全都能做** —— 它有文件/shell 工具
 | agent 在会话里自己用 git 建的 worktree | 安装、状态、体检、审计；可选的会话级 worktree 隔离（`isolation="worktree"`） |
 
 **按需派发**：`dsh_send` 只传目标，不传工具清单，也不要求调用方先了解 DSH 有哪些工具。
-DSH 的 agent 按任务自己选能力——包括它自己新长出来的能力（比如实验性 Agent Teams），
+DSH 的 agent 按任务自己选能力——包括它自己新长出来的能力（比如 Agent Teams），
 本服务不需要为每一个新能力加一个 MCP 工具。
 
 **团队模式（0.5.0 起按需开启）**：默认关闭。运行 `dsh-any-agent team on` 并重连后，
-profile 切到 `dsh-team`（含实验性 Agent Teams），`dsh_send` 会提示"需要时先建团队"，简单任务不组队。
+profile 默认切到 `dsh-team`。DSH `0.2.2-rc.2` 起，新会话使用 DSH 的共享任务板和普通子代理工具；更早版本使用实验版团队工具。
 关闭：`dsh-any-agent team off`；单次关闭：`dsh_send(team=false)`。
 注意 team profile 会关闭旧的 `subagent` 工具，换成 9 个团队工具；成员共享一个工作区。
 
@@ -81,7 +81,7 @@ profile 切到 `dsh-team`（含实验性 Agent Teams），`dsh_send` 会提示"�
 
 **什么时候需要外层再加东西**：只有当你需要"保证"而不是"行为"时——
 例如多个顶层会话并发改同一个仓库，需要 worktree 隔离（`dsh_start(isolation="worktree")` 给每个会话一个独立的 git worktree 和分支）；团队协作则优先让 DSH 自己开团队
-（需要把实验性 team 包挂进 profile，成员共享一个工作区）。
+（成员共享一个工作区）。
 
 ## 快速开始
 
@@ -200,9 +200,8 @@ dsh-any-agent dashboard --open
 
 ## 🧑‍🤝‍🧑 团队模式（按需开启）
 
-默认关闭。运行 `dsh-any-agent team on`，重连服务后 profile 切到 `dsh-team`（含实验性 Agent Teams）；
-`dsh_send` 会提示"需要并行/多角色时先建团队"，简单任务不组队。
-关闭：`dsh-any-agent team off`；单次关闭：`dsh_send(team=false)`。
+默认关闭。运行 `dsh-any-agent team on` 或 `dsh-any-agent team off`，然后重连。
+DSH `0.2.2-rc.2` 起会保留每个会话的团队状态。
 
 > 完整步骤（命令、验证、回退）见 [团队模式](docs/zh/team.md)。
 

@@ -10,7 +10,7 @@
  *   [6] yaml-lite 对 profile-example 的解析/序列化往返一致
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, renameSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -20,6 +20,7 @@ import { load as yamlLoad, dump as yamlDump } from '../src/yaml-lite.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BOOT = pathToFileURL(join(HERE, '..', 'src', 'bootstrap.mjs')).href;
+const CONFIG = pathToFileURL(join(HERE, '..', 'src', 'config.mjs')).href;
 const EXAMPLE = join(HERE, '..', 'profile-example', 'cordis.patch.yml');
 
 let passed = 0;
@@ -44,10 +45,11 @@ function seedProfile(name, text) {
   return dir;
 }
 
-function runBootstrap(profile = 'test-mcp') {
+function runBootstrap(profile = 'test-mcp', overrides = {}) {
   const script =
     `import { ensureProfile } from ${JSON.stringify(BOOT)};\n` +
-    'console.log(JSON.stringify(ensureProfile()));';
+    `import { DSH_PROFILE, TEAM_ACTIVE } from ${JSON.stringify(CONFIG)};\n` +
+    'console.log(JSON.stringify({ ...ensureProfile(), profile: DSH_PROFILE, team: TEAM_ACTIVE }));';
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     encoding: 'utf8',
     timeout: 30_000,
@@ -57,6 +59,7 @@ function runBootstrap(profile = 'test-mcp') {
       DSH_MCP_PROFILE: profile,
       DSH_MCP_BOOTSTRAP: '',
       DSH_MCP_ROUTE_SOURCE: '',
+      ...overrides,
     },
   });
   const lines = String(r.stdout || '').trim().split(/\r?\n/).filter(Boolean);
@@ -209,6 +212,45 @@ try {
   check('dump→load 结构一致', JSON.stringify(again) === JSON.stringify(example));
   const model = example.find((e) => e?.id === 'llm-pi-ai')?.config?.providers?.myprovider?.models?.[0];
   check('嵌套 models/input 解析正确', model?.id === 'my-model' && JSON.stringify(model?.input) === JSON.stringify(['text', 'image']), JSON.stringify(model));
+
+  console.log('\n[7] DSH 新旧团队实现与 profile 迁移');
+  function teamEnv(version) {
+    const pkg = join(root, 'runtime', version, '@deepseek-ai', 'dsh');
+    const bin = join(pkg, 'lib', 'bin.js');
+    mkdirSync(dirname(bin), { recursive: true });
+    writeFileSync(bin, '');
+    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ version }));
+    return { DSH_BIN: bin, DSH_RUNTIME: '', DSH_MCP_TEAM: '1' };
+  }
+  // 未提供显式 profile 时让 config 自选，避免从执行测试的客户端继承覆盖。
+  const useDefault = { DSH_MCP_PROFILE: undefined };
+  const legacy = runBootstrap('dsh-team', teamEnv('0.2.2-rc.1'));
+  const teamPatch = join(home, 'profiles', 'dsh-team', 'cordis.patch.yml');
+  const legacyTeamText = readFileSync(teamPatch, 'utf8');
+  check('rc.1 保留实验版团队 profile', legacy.result?.team && legacyTeamText.includes('dsh-experimental-agent-team'));
+  const native = runBootstrap('dsh-team', teamEnv('0.2.2-rc.3'));
+  const nativeText = readFileSync(teamPatch, 'utf8');
+  const nativeEntries = yamlLoad(nativeText);
+  check('rc.3 迁移已有受管团队 profile', native.result?.ok && native.result?.team && native.result?.written && !nativeText.includes('dsh-experimental-agent-team'));
+  check('新团队 profile 为新会话开启原生任务板', nativeEntries.some((e) => e.id === 'agent-team' && e.config?.defaultEnabled === true));
+  check('原生团队保留普通子代理工具', !nativeEntries.some((e) => e.id?.startsWith('tool-subagent') && e.disabled));
+  const againNative = runBootstrap('dsh-team', teamEnv('0.2.2-rc.3'));
+  check('原生团队 profile 幂等', againNative.result?.team && againNative.result?.written === false);
+  const disabledBootstrap = runBootstrap('dsh-team', { ...teamEnv('0.2.2-rc.3'), DSH_MCP_BOOTSTRAP: '0' });
+  check('已配置原生团队的 profile 在关闭引导后仍被识别', disabledBootstrap.result?.team && disabledBootstrap.result?.skipped);
+  const sourcePatch = join(home, 'profiles', 'desktop', 'cordis.patch.yml');
+  renameSync(sourcePatch, sourcePatch + '.bak');
+  try {
+    writeFileSync(teamPatch, legacyTeamText);
+    const migrated = runBootstrap('dsh-team', teamEnv('0.2.2-rc.3'));
+    check('原来源消失时用旧受管团队 profile 的路由完成迁移', migrated.result?.written && readFileSync(teamPatch, 'utf8').includes('defaultEnabled: true'));
+  } finally {
+    renameSync(sourcePatch + '.bak', sourcePatch);
+  }
+  const manualTeam = legacyTeamText.replace('dsh-mcp:managed', 'user-owned');
+  writeFileSync(teamPatch, manualTeam);
+  const fallback = runBootstrap('dsh-team', { ...teamEnv('0.2.2-rc.3'), ...useDefault });
+  check('过时的手写 team profile 保留，隐式选择退回普通模式', fallback.result?.team === false && fallback.result?.profile === 'dsh-mcp' && readFileSync(teamPatch, 'utf8') === manualTeam);
 } catch (e) {
   failed++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

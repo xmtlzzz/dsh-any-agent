@@ -2,20 +2,22 @@
 
 # 🧩 Compatibility matrix
 
-`dsh-any-agent` drives DSH through its ACP profile; team mode additionally needs the
-experimental Agent Teams packages shipped since DSH 0.1.7. Check this table before
+`dsh-any-agent` drives DSH through its ACP profile. Team mode uses experimental
+plugins or the session team mode, depending on the DSH version. Check this table before
 upgrading DSH, and run `dsh_doctor` afterwards.
 
 ## Versions
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
+| Unreleased | `0.2.2-rc.3` (desktop app) | ✅ Verified (team mode) | Windows desktop DSH with a local simulated model endpoint retained subagents and exposed and executed a team task board tool when enabled |
+| 0.7.3 | `0.2.2-rc.3` (desktop app) | ✅ Verified (standard ACP) | Full Windows regression and real-provider install and upgrade from 0.7.2 passed. IDA MCP acceptance skipped without a configured server. Using the newer team mode requires an MCP update |
 | 0.7.3 | `0.2.2-rc.1` (desktop app) | ✅ Verified (upgrade) | On Windows with a real provider, upgraded the installed npm 0.7.2 package to 0.7.3, retrieved the saved result, replayed the original key, and completed another turn in the existing session |
 | 0.7.2 | `0.2.2-rc.1` (desktop app) | ✅ Verified (installed package lifecycle) | Windows with the desktop app's bundled runtime and a real provider. Codex passed dispatch, wait cancellation, and result retrieval after reconnecting. [Release verification](https://github.com/xmtlzzz/dsh-any-agent/pull/27). [Hosted CI](https://github.com/xmtlzzz/dsh-any-agent/actions/runs/43357420994) exercised the installed package on Windows, Linux, and macOS with simulated ACP |
 | 0.7.1 | `0.2.1-rc.5` | ✅ Verified | Windows release candidate tested with DSH via npx and Node 22.19. The full run passed 41 offline suites and found one localized error assertion failure in the model-backed `boundary` suite. After the fix, `boundary` passed all 46 checks. The optional `acceptance` suite was skipped because the profile had no IDA MCP |
 | 0.7.0 | `0.2.2-rc.1` (desktop app) | ✅ Verified (offline) | All 41 offline suites (1892 checks) passed on 2026-11-11. In a resident process test, the Claude desktop app was quit mid-turn and reopened, and the turn finished with a `done` sentinel |
 | 0.6.x | `0.2.1-rc.5` | ✅ Verified | Full suite run against 0.6.9 on 2026-11-10 (offline + model-backed; DSH via npx, Node 22.19), all passing; `acceptance` skipped because the profile has no IDA MCP. Other DSH versions were not re-verified for 0.6.x — the 0.5.x rows below are their last runs |
-| 0.5.x | `0.1.7-rc.1` or newer | ✅ Verified | ACP and the experimental Agent Teams packages are available; team mode is opt-in via `dsh-any-agent team on` |
+| 0.5.x | `0.1.7-rc.1` through `0.2.2-rc.1` | ✅ Verified | ACP and the experimental team tools are available. Enable team mode with `dsh-any-agent team on` |
 | 0.5.x | `0.1.5-rc.1` | ⚠️ Partial | ACP basics work; no team packages, so team mode stays off |
 | 0.5.x | `0.2.1-rc.5` – `0.2.2-rc.1` | ✅ Verified | Full suites run on 2026-11-06 (0.2.1-rc.5 from npm, 0.2.2-rc.1 on the desktop app's bundled runtime); from 0.2.2 DSH requires Node ≥ 24.9 |
 | 0.5.x | `0.2.3` or newer | ⚠️ Unverified | The ACP `session/*` surface may change; team packages must match the DSH version. Run `dsh_doctor` and the offline suite before upgrading |
@@ -73,7 +75,7 @@ In an MCP client, call `dsh_doctor` and look at:
 - `dsh_candidates`: every DSH found and which one was picked;
 - `dsh_version`: `verified` is ok. The note refers to full-suite testing; the table also records narrower checks such as the 0.7.2 installed package lifecycle. `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
 - `profile`: exists, drift, route source;
-- `team`: `on` / `off` / `requested but unavailable` (version or profile lacks the team package);
+- `team`: `on` / `off` / `requested but unavailable` (the version or profile lacks compatible team configuration);
 - `config`: effective permission, idle reaping, shared process, and so on;
 - `update`: this server's version against the latest on npm; **warn** when a newer one exists (read at most once a day, 4 s timeout; offline reads as unknown, not a problem; `DSH_MCP_UPDATE_CHECK=0` skips it).
 
@@ -82,7 +84,6 @@ In an MCP client, call `dsh_doctor` and look at:
 1. Record `dsh_doctor` before upgrading DSH;
 2. After upgrading, run `node test/run.mjs` (offline) and `node test/run.mjs --all` (needs a provider);
 3. If team mode will not turn on, check `dsh-any-agent team status` and `dsh_doctor`'s
-   `team` check, then verify `~/.dsh/profiles/dsh-team/cordis.patch.yml` contains
-   `@deepseek-ai/dsh-experimental-agent-team`;
+   `team` check, then review the [team profile configuration](team.md);
 4. By default the server follows the desktop app: after the app updates, the next DSH launch picks
    up the new version (discovery is cached for 60 s). Set `DSH_BIN` only to pin a specific version.

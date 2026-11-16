@@ -27,8 +27,9 @@ import {
   BOOTSTRAP_ENABLED,
   DSH_HOME,
   DSH_PROFILE,
+  MANAGED_PROFILE_MARKER as MANAGED_MARKER,
   ROUTE_SOURCE_PROFILE,
-  TEAM_ACTIVE,
+  TEAM_BACKEND,
 } from './config.mjs';
 import { load as yamlLoad, dump as yamlDump } from './yaml-lite.mjs';
 
@@ -37,9 +38,6 @@ const PROFILE_BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-acp-app'];
 
 /** 抄路由时依次尝试的来源（前面的优先）。'__home__' 指 $DSH_HOME/cordis.patch.yml。 */
 const DEFAULT_SOURCES = ['__home__', 'desktop', 'web', 'headless', 'acp'];
-
-/** 生成文件里的管理标记：既当注释，也用来认出"这是本模块写的"。 */
-const MANAGED_MARKER = 'dsh-mcp:managed';
 
 /** 记下我们上次写了什么，用来区分"没人动过"与"用户手改过"。 */
 const MANAGED_STATE = '.dsh-mcp-bootstrap.json';
@@ -287,9 +285,10 @@ function buildEntries(routing) {
     },
   });
 
-  // ★ 团队模式（默认开）：官方 team profile 层会关掉旧的 subagent 工具，
-  //   换成 9 个 Agent Teams 工具。DSH < 0.1.7 时 TEAM_ACTIVE=false，不写这些行。
-  if (TEAM_ACTIVE) {
+  if (TEAM_BACKEND === 'native') {
+    // 新版团队由 dsh-base 提供，成员继续使用标准子代理工具。
+    entries.push({ id: 'agent-team', config: { defaultEnabled: true } });
+  } else if (TEAM_BACKEND === 'experimental') {
     entries.push({ id: 'tool-subagent-control', disabled: true });
     entries.push({ id: 'tool-subagent-list-agents', disabled: true });
     entries.push({ id: 'tool-subagent', disabled: true });
@@ -369,7 +368,16 @@ export function ensureProfile({ log } = {}) {
     return { ok: true, skipped: 'profile 由用户维护（无管理标记），保持原样' };
   }
 
-  const found = findRouting();
+  let found = findRouting();
+  if (!found.routing && currentText !== null && TEAM_BACKEND && !ROUTE_SOURCE_PROFILE) {
+    // 已有受管团队 profile 可用自身的路由完成迁移，即使原来源已不存在。
+    try {
+      const routing = extractRouting(yamlLoad(currentText));
+      if (routing) found = { ...found, routing, source: readManagedState()?.source ?? DSH_PROFILE };
+    } catch {
+      // 读不到路由，保留原来的处理方式。
+    }
+  }
   if (!found.routing) {
     if (existed) return { ok: true, skipped: '本机没有可复制的模型路由，且 profile 已存在' };
     return {
