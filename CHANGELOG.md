@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Resolve host Git from absolute PATH entries for snapshots and worktree operations, so a same-named executable in the workspace cannot intercept the command on Windows.
+- Use DSH's session team mode from 0.2.2-rc.2, keeping the standard subagent tools and enabling the shared task board for new sessions when opted in.
+- Record the test runtime while the test temp directory still exists, so Windows desktop DSH is reported correctly.
+
 ## [0.7.3] — 2026-11-13
 
 ### Changed

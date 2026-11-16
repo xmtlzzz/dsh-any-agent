@@ -42,6 +42,8 @@ process.env.TEMP = RUN_ROOT;
 process.env.TMP = RUN_ROOT;
 process.env.TMPDIR = RUN_ROOT;
 process.env.DSH_MCP_TEST_RUN_ROOT = RUN_ROOT;
+// 桌面版探测在 Windows 上会往 tmpdir() 导出注册表，必须在本轮临时根仍存在时采样。
+const reportEnvironment = reportOpt.path ? await collectEnvironment() : null;
 // 给调用方看的文字跟系统语言走；套件断言的是中文那一份，所以整轮钉成 zh（要测英文的套件自己传 en）。
 process.env.DSH_MCP_LANG ??= 'zh';
 
@@ -286,7 +288,7 @@ if (reportOpt.path) {
       argv: process.argv.slice(2),
       all,
       results,
-      env: await collectEnvironment(),
+      env: reportEnvironment,
       startedAt,
       endedAt: Date.now(),
     });
