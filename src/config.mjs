@@ -49,7 +49,7 @@ export const DSH_COMPAT = Object.freeze({
   verifiedMin: '0.1.7-0',
   verifiedBelow: '0.2.3-0',
   verifiedLabel: '0.1.7 ~ 0.2.2',
-  fullSuiteRuns: Object.freeze({ '0.2.1-rc.5': '0.7.1', '0.2.2-rc.1': '0.5.x', '0.2.2-rc.3': '0.7.4' }),
+  fullSuiteRuns: Object.freeze({ '0.2.1-rc.5': '0.7.1', '0.2.2-rc.1': '0.5.x', '0.2.2-rc.3': '0.7.5' }),
 });
 
 /**

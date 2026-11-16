@@ -1,4 +1,4 @@
-/** Exercise the installed tarball over stdio. --upgrade starts on npm 0.7.3; --real uses the configured provider. */
+/** Exercise the installed tarball over stdio. --upgrade starts on npm 0.7.4; --real uses the configured provider. */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -12,7 +12,7 @@ import { resolveDsh } from '../src/dsh-locate.mjs';
 
 const real = process.argv.includes('--real');
 const upgrade = process.argv.includes('--upgrade');
-const baseline = '0.7.3';
+const baseline = '0.7.4';
 const npm = process.env.npm_execpath;
 assert.ok(npm, 'Run this suite with npm run test:packed');
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-package-lifecycle-'));

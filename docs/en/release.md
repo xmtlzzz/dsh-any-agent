@@ -27,7 +27,7 @@ node scripts/release-notes.mjs x.y.z   # preview the notes the Release page will
 # 3. Verify the tarball itself: builds, installs, starts.
 npm pack --dry-run
 npm run test:packed              # install the tarball and exercise legacy and modern stdio
-npm run test:packed -- --upgrade # fetch npm 0.7.3, then upgrade that installation to the candidate
+npm run test:packed -- --upgrade # fetch npm 0.7.4, then upgrade that installation to the candidate
 npm run test:packed -- --real    # run the packaged lifecycle with a configured DSH provider
 #    Then in a temp dir: npm install <tgz> && node_modules/.bin/dsh-any-agent --version
 

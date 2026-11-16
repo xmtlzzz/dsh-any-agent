@@ -361,7 +361,7 @@ jobs:
       - name: package.json and bin sanity
         run: node test/package-check.mjs
 
-      - name: upgrade from the published 0.7.3 package
+      - name: upgrade from the published 0.7.4 package
         run: npm run test:packed -- --upgrade
 
       - name: pack, install into a scratch project, run it
