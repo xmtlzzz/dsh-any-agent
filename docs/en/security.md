@@ -91,6 +91,6 @@ Silent by default — **not one byte is written**.
 | `<state dir>/update-check.json` | The latest version number `dsh_doctor` last read from npm, and when | Re-checked and overwritten after 24 hours | `DSH_MCP_UPDATE_CHECK=0` (also stops the network request) |
 | `.bak-dsh-<stamp>` next to client configs | The config as it was before `dsh-any-agent-setup` wrote to it | Up to 20 per config file (`DSH_MCP_BACKUP_KEEP`) | Delete by hand |
 
-Network: this server itself contacts `registry.npmjs.org` only when `dsh_doctor` is called (to read this package's latest version; the request carries no user data; `DSH_MCP_UPDATE_CHECK=0` turns it off). Model requests are made by DSH, not by this server.
+Network: `dsh_doctor` checks this package's latest release at `registry.npmjs.org` with a fixed package name and an `Accept` header. It accepts only complete SemVer strings from the response and cache, and uses fixed error messages. Set `DSH_MCP_UPDATE_CHECK=0` to disable the check. Model requests are made by DSH, not by this server.
 
 On the DSH side (not under this server's control): the session logs in `~/.dsh/sessions` (with full reasoning, see above); this server also registers each conversation's workspace in DSH's `workspace.json` so the GUI shows it (`DSH_MCP_REGISTER_WORKSPACE=0` turns that off).

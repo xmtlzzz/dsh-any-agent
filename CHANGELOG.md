@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Use system executable paths for Windows process checks, registry discovery and the dashboard browser launcher. Resolve DSH overrides before changing the child process working directory, and ignore relative PATH entries when looking up host tools.
+- Verify the lock holder's OS start time before terminating it during takeover. Older registrations without a verified start time require release from the original host.
+- Validate npm update responses and cached versions as complete SemVer strings and keep response text out of diagnostic errors.
 
 ## [0.7.4] — 2026-11-16
 

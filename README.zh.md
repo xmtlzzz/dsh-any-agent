@@ -135,7 +135,7 @@ dsh-any-agent-setup --yes
 | `dsh_get` | 会话详情和回合结果。传 `run_id` 或 `client_run_id` 查指定回合，只传会话 ID 查当前或最近已开始的回合。重启后可读回保留的磁盘结果和审核单 |
 | `dsh_review` | **调用方审核**。对已完成的 run 提交 `pass` / `partial` / `fail`，可带理由与 findings。裁决写入 `<状态目录>/reviews/<conversation_id>/<run_id>.review.json`，并回写内存 run 与哨兵。默认 advisory：**不阻塞**下一次 `dsh_send` |
 | `dsh_interject` | 会话在忙时插话：`interject` 打断并改口，`queue` 等本轮跑完接着说。**这一轮同样会写哨兵**，返回里给 `sentinel_file`。两种模式以及会话空闲时都会**阻塞到新回合跑完**；想排队又不阻塞用 `dsh_send(queue=true)` |
-| `dsh_takeover` | **抢占写锁**。锁被别的 DSH 进程占着时的唯一出路（DSH 没有夺锁 API，抢 = 杀掉持有者）。先判定持有者：本服务残留的孤儿 → 自动抢；另一个活着的实例 → 需 `force`；**GUI/未知 → 绝不杀**，只报告 |
+| `dsh_takeover` | **抢占写锁**。核实持锁进程的系统启动时间后才能终止它。接管另一个活着的实例还需要 `force=true`。无法核实身份时的处置见[写锁](docs/zh/locking.md)。 |
 | `dsh_interrupt` | 只停下、不说新话（会话不会损坏）；停下并改口用 `dsh_interject` |
 | `dsh_release` | 交还会话（释放写锁，之后可在你自己的 DSH GUI 里打开）。仍可 resume；`forget=true` 会写墓碑，此后按 id 查询一律拒绝，直到删除 `$DSH_HOME/.dsh-any-agent-forgotten/<id>.json` |
 | `dsh_approval_decide` | 裁决待决审批（仅当 `on_approval=ask`） |

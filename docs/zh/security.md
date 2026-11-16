@@ -91,6 +91,6 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 | `<状态目录>/update-check.json` | `dsh_doctor` 上次从 npm 查到的最新版本号与时间 | 24 小时后重查覆盖 | `DSH_MCP_UPDATE_CHECK=0`（同时不再联网） |
 | 客户端配置旁的 `.bak-dsh-<时间戳>` | `dsh-any-agent-setup` 写入前的原配置 | 每个配置文件最多 20 份（`DSH_MCP_BACKUP_KEEP`） | 手动删 |
 
-联网：本服务自己只在调用 `dsh_doctor` 时访问一次 `registry.npmjs.org`（查本包的最新版本号，请求里没有任何用户数据；`DSH_MCP_UPDATE_CHECK=0` 关闭）。模型请求由 DSH 发出，不经过本服务。
+联网：`dsh_doctor` 默认访问 `registry.npmjs.org` 查询本包最新版本，请求只带固定的包名和 `Accept` 头。响应和缓存的版本必须符合完整 SemVer，联网出错时显示固定的失败原因。可用 `DSH_MCP_UPDATE_CHECK=0` 关闭。模型请求由 DSH 发出，不经过本服务。
 
 DSH 那一侧（不归本服务管）：`~/.dsh/sessions` 里的会话日志（含完整思考，见上）；本服务还会把会话的工作区登记进 DSH 的 `workspace.json`，GUI 才看得到这些会话（`DSH_MCP_REGISTER_WORKSPACE=0` 关闭）。
