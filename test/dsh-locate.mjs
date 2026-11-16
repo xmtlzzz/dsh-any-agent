@@ -180,6 +180,23 @@ try {
     assert.equal(d.command, rt);
     assert.equal(d.runtime, 'custom');
   });
+  check('相对覆盖和安装提示按服务目录处理，派活工作区不会重新解析路径', () => {
+    const cwd = process.cwd();
+    try {
+      process.chdir(root);
+      writeFileSync(join(root, 'runtime'), '');
+      writeFileSync(join(root, 'bin.js'), '');
+      process.env.DSH_BIN = 'bin.js';
+      process.env.DSH_RUNTIME = 'runtime';
+      const d = resolveDsh();
+      // The OS can canonicalize the temporary path during chdir (for example /var on macOS).
+      assert.deepEqual(d.args, [join(process.cwd(), 'bin.js')]);
+      assert.equal(d.command, join(process.cwd(), 'runtime'));
+      assert.equal(desktopExeForAsar(asar, 'runtime'), desktopExeForAsar(asar));
+    } finally {
+      process.chdir(cwd);
+    }
+  });
   check('普通路径的 DSH_BIN → 用本进程 node，并按 engines 判定', () => {
     const pkgDir = join(root, 'npm', 'node_modules', '@deepseek-ai', 'dsh');
     mkdirSync(join(pkgDir, 'lib'), { recursive: true });

@@ -3,7 +3,7 @@
  */
 import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { request } from 'node:http';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -253,10 +253,20 @@ try {
     const url = 'http://127.0.0.1:1234/?t=abc_DEF-123';
     await openInBrowser(url, { platform: 'win32', spawnFn: fake });
     await openInBrowser(url, { platform: 'darwin', spawnFn: fake });
-    await openInBrowser(url, { platform: 'linux', spawnFn: fake });
-    check('Windows 用 cmd /c start "" <url>：空标题传空字符串（Node 转成 ""）', () => calls[0][0] === 'cmd' && JSON.stringify(calls[0][1]) === JSON.stringify(['/c', 'start', '', url]));
-    check('macOS 用 open，Linux 用 xdg-open', () => calls[1][0] === 'open' && calls[2][0] === 'xdg-open' && calls[2][1][0] === url);
-    const failing = await openInBrowser(url, { platform: 'linux', spawnFn: () => { throw new Error('ENOENT'); } });
+    check('Windows 用 System32 的 cmd.exe，start 的空标题传空字符串', () =>
+      win32.isAbsolute(calls[0][0]) && /\\System32\\cmd\.exe$/i.test(calls[0][0]) &&
+      JSON.stringify(calls[0][1]) === JSON.stringify(['/d', '/c', 'start', '', url]));
+    const savedPath = process.env.PATH;
+    let launchedLinux;
+    try {
+      process.env.PATH = '.';
+      launchedLinux = await openInBrowser(url, { platform: 'linux', spawnFn: fake });
+    } finally {
+      if (savedPath === undefined) delete process.env.PATH;
+      else process.env.PATH = savedPath;
+    }
+    check('macOS 用系统 open，Linux 忽略相对 PATH', () => calls[1][0] === '/usr/bin/open' && !launchedLinux && calls.length === 2);
+    const failing = await openInBrowser(url, { platform: 'darwin', spawnFn: () => { throw new Error('ENOENT'); } });
     check('启动失败不抛错（打印的地址仍可手动打开）', () => failing === false);
   }
 

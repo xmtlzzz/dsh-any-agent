@@ -235,16 +235,14 @@ export const TOOL_TEXT_EN = {
       '**Preempt a conversation\'s write lock.** DSH\'s write lock is a cross-process kernel semaphore that never expires ' +
       'while its holder lives, and no API can take it away: the only means is killing the holder, so this tool first works out ' +
       'who that is. (1) If the lock is actually free, a normal resume follows and nothing is killed. (2) If the holder is ' +
-      '**an orphan this server left behind** (the MCP crashed or restarted while the child lived on holding the lock), it is ' +
-      '**killed and taken over automatically**; this is safe. (3) If the holder is **another live dsh-any-agent instance**, ' +
-      'the request is refused unless force=true. (4) If the holder cannot be identified (**most likely your own DSH GUI has ' +
-      'this conversation open**) it is **never killed** (that would take your UI and the conversation you are reading down ' +
-      'with it): it is only reported, so you can close the conversation in that window and retry. ' +
+      '**an orphan this server left behind**, its OS start time must match the registration before takeover. ' +
+      '(3) Another live dsh-any-agent instance also requires force=true. (4) If the holder is unknown, or its start time ' +
+      'is missing or differs from the registration, release the conversation in its original host and retry. ' +
       'Killing a holder that is running a turn interrupts that turn (logged as interrupted); the conversation itself is unharmed.',
     params: {
       conversation_id: CONV_ID,
       force:
-        'Only for the "another live dsh-any-agent instance holds it" case; it has no effect on a GUI or unknown holder (never killed).',
+        'Allow takeover from another live instance or a shared child process. The lock holder’s process identity still has to be verified.',
     },
   },
   dsh_release: {

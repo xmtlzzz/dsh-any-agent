@@ -10,6 +10,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
+| 0.7.5 | `0.2.2-rc.3` (desktop app) | ✅ Verified (ACP, upgrade) | Upgraded the installed npm 0.7.4 package on Windows with a real provider. Verified result retrieval, idempotent replay, and a new turn in the original session |
 | 0.7.4 | `0.2.2-rc.3` (desktop app) | ✅ Verified (ACP, team mode) | Standard ACP dispatch and in-place upgrade from npm 0.7.3 on Windows. Desktop DSH with a local simulated model endpoint verified that team mode is off by default and that enabling it exposes both the native task board and standard subagents |
 | 0.7.3 | `0.2.2-rc.3` (desktop app) | ✅ Verified (standard ACP) | Full Windows regression and real-provider install and upgrade from 0.7.2 passed. IDA MCP acceptance skipped without a configured server. Using the newer team mode requires an MCP update |
 | 0.7.3 | `0.2.2-rc.1` (desktop app) | ✅ Verified (upgrade) | On Windows with a real provider, upgraded the installed npm 0.7.2 package to 0.7.3, retrieved the saved result, replayed the original key, and completed another turn in the existing session |

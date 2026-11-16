@@ -22,6 +22,8 @@ DSH 按会话档位应用沙箱。启用 `danger-full-access` 后，命令以当
 - **可写档位下 `cwd` 不能是文件系统根目录**：`workspace-write` 选 `/` 或 `C:\` 会让沙箱根变成整个磁盘；家目录/根目录守卫会先解析 symlink，所以指向根目录或家目录的软链也会被拒绝。`danger-full-access` 仍需显式开启。
 - **`title_hint` 最长 200 字**（schema + 运行时）：它会写进注册表与侧车，且每轮都会重复落盘。
 
+MCP 宿主在 Windows 上通过 `System32` 的绝对路径执行进程检测、注册表探测和仪表板的浏览器启动命令。Git 从宿主 `PATH` 的绝对路径条目中查找，请只把信任的目录加入 `PATH`。相对的 `DSH_BIN` 和 `DSH_RUNTIME` 以 MCP 服务的工作目录为基准解析，再在目标工作区启动子进程。
+
 ## 🪟 会话在 DSH GUI 里的可见性
 
 两件事，别混淆：
@@ -89,6 +91,6 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 | `<状态目录>/update-check.json` | `dsh_doctor` 上次从 npm 查到的最新版本号与时间 | 24 小时后重查覆盖 | `DSH_MCP_UPDATE_CHECK=0`（同时不再联网） |
 | 客户端配置旁的 `.bak-dsh-<时间戳>` | `dsh-any-agent-setup` 写入前的原配置 | 每个配置文件最多 20 份（`DSH_MCP_BACKUP_KEEP`） | 手动删 |
 
-联网：本服务自己只在调用 `dsh_doctor` 时访问一次 `registry.npmjs.org`（查本包的最新版本号，请求里没有任何用户数据；`DSH_MCP_UPDATE_CHECK=0` 关闭）。模型请求由 DSH 发出，不经过本服务。
+联网：`dsh_doctor` 默认访问 `registry.npmjs.org` 查询本包最新版本，请求只带固定的包名和 `Accept` 头。响应和缓存的版本必须符合完整 SemVer，联网出错时显示固定的失败原因。可用 `DSH_MCP_UPDATE_CHECK=0` 关闭。模型请求由 DSH 发出，不经过本服务。
 
 DSH 那一侧（不归本服务管）：`~/.dsh/sessions` 里的会话日志（含完整思考，见上）；本服务还会把会话的工作区登记进 DSH 的 `workspace.json`，GUI 才看得到这些会话（`DSH_MCP_REGISTER_WORKSPACE=0` 关闭）。

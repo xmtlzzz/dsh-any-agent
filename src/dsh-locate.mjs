@@ -21,7 +21,8 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
+import { isHostAbsolute, windowsSystemExecutable } from './host-executable.mjs';
 
 /** 相对 DSH 包根的入口与包描述。 */
 const DSH_PKG_PARTS = ['@deepseek-ai', 'dsh'];
@@ -40,8 +41,13 @@ let discoveryCache = null;
 
 /** 极简 semver 比较（够用于挑最新）；返回 a-b 的符号。 */
 export function cmpVersion(a, b) {
-  const [ac, ap] = String(a).split('-', 2);
-  const [bc, bp] = String(b).split('-', 2);
+  const parts = (value) => {
+    const [version] = String(value).split('+', 1);
+    const dash = version.indexOf('-');
+    return dash < 0 ? [version, ''] : [version.slice(0, dash), version.slice(dash + 1)];
+  };
+  const [ac, ap] = parts(a);
+  const [bc, bp] = parts(b);
   const an = ac.split('.').map(Number);
   const bn = bc.split('.').map(Number);
   for (let i = 0; i < 3; i++) {
@@ -53,17 +59,19 @@ export function cmpVersion(a, b) {
   if (ap && bp) {
     const ar = ap.split('.');
     const br = bp.split('.');
-    for (let i = 0; i < Math.max(ar.length, br.length); i++) {
-      const x = ar[i] ?? '';
-      const y = br[i] ?? '';
-      const xn = x !== '' && Number.isFinite(Number(x));
-      const yn = y !== '' && Number.isFinite(Number(y));
+    for (let i = 0; i < Math.min(ar.length, br.length); i++) {
+      const x = ar[i];
+      const y = br[i];
+      const xn = /^\d+$/.test(x);
+      const yn = /^\d+$/.test(y);
       if (xn && yn) {
-        if (Number(x) !== Number(y)) return Number(x) - Number(y);
+        if (x.length !== y.length) return x.length - y.length;
+        if (x !== y) return x < y ? -1 : 1;
       } else if (xn) return -1;
       else if (yn) return 1;
       else if (x !== y) return x < y ? -1 : 1;
     }
+    return ar.length - br.length;
   }
   return 0;
 }
@@ -250,12 +258,13 @@ function windowsRegistryInstalls() {
     'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
     'HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
   ];
-  const reg = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'reg.exe');
+  const reg = windowsSystemExecutable('reg.exe');
+  if (!reg || !existsSync(reg)) return [];
   const found = [];
   roots.forEach((root, i) => {
     const file = join(tmpdir(), `dsh-locate-${process.pid}-${Date.now()}-${i}.reg`);
     try {
-      execFileSync(existsSync(reg) ? reg : 'reg', ['export', root, file, '/y'], {
+      execFileSync(reg, ['export', root, file, '/y'], {
         stdio: 'ignore',
         windowsHide: true,
         timeout: 5000,
@@ -294,7 +303,7 @@ function defaultDesktopDirs() {
 
 /** 由 asar 路径推导桌面版可执行文件（显式 DSH_BIN 指进 asar 时也用它）。 */
 export function desktopExeForAsar(asarPath, exeHint = null) {
-  if (exeHint && existsSync(exeHint)) return exeHint;
+  if (exeHint && isHostAbsolute(exeHint) && existsSync(exeHint)) return exeHint;
   const resources = dirname(asarPath);
   if (process.platform === 'darwin' && basename(resources) === 'Resources') {
     const macos = join(dirname(resources), 'MacOS');
@@ -327,6 +336,7 @@ export function desktopExeForAsar(asarPath, exeHint = null) {
 
 /** 检查一个桌面版安装目录，返回候选（不是有效安装时返回 null）。导出供测试。 */
 export function desktopCandidate({ dir, exe = null, displayVersion = null, via }) {
+  if (!isHostAbsolute(dir)) return null;
   const asar =
     process.platform === 'darwin' && /\.app$/i.test(dir)
       ? join(dir, 'Contents', 'Resources', 'app.asar')
@@ -371,7 +381,7 @@ function desktopCandidates() {
 // ── npm 全局 / npx 缓存 ─────────────────────────────────────────
 
 function nodeCandidate(source, bin) {
-  if (!existsSync(bin)) return null;
+  if (!isHostAbsolute(bin) || !existsSync(bin)) return null;
   const pkg = readDshPackage(bin);
   return {
     source,
@@ -451,7 +461,7 @@ export function rankCandidates(list) {
 
 /** 自动发现到的全部候选（已排序，第一个就是默认选择）。结果缓存 60 秒。 */
 export function discoverDsh({ fresh = false } = {}) {
-  const runtime = process.env.DSH_RUNTIME || null;
+  const runtime = process.env.DSH_RUNTIME ? resolve(process.env.DSH_RUNTIME) : null;
   if (
     !fresh &&
     discoveryCache &&
@@ -528,7 +538,11 @@ function explicitDsh(binPath, runtimePath) {
  */
 export function resolveDsh({ fresh = false } = {}) {
   const explicit = process.env.DSH_BIN;
-  if (explicit) return explicitDsh(explicit, process.env.DSH_RUNTIME || null);
+  if (explicit) {
+    // The child may run in another workspace. Resolve configured paths in the server before spawning it.
+    const runtime = process.env.DSH_RUNTIME;
+    return explicitDsh(resolve(explicit), runtime ? resolve(runtime) : null);
+  }
   let [selected] = discoverDsh({ fresh });
   if (selected && !fresh) {
     // A desktop update or npm replacement can change the entry at the cached path.

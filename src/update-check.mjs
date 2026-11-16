@@ -13,6 +13,13 @@ import { cmpVersion } from './dsh-locate.mjs';
 
 export const UPDATE_URL = 'https://registry.npmjs.org/dsh-any-agent/latest';
 const CACHE_MS = 24 * 60 * 60 * 1000;
+const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?![\s\S])/;
+
+function isVersion(value) {
+  if (typeof value !== 'string' || value.length > 256) return false;
+  const match = VERSION_PATTERN.exec(value);
+  return !!match && !match[4]?.split('.').some((id) => /^0\d+$/.test(id));
+}
 
 const verdict = (current, latest, cached) => ({ status: 'ok', current, latest, newer: cmpVersion(latest, current) > 0, cached });
 
@@ -34,30 +41,36 @@ export async function checkForUpdate({
   if (!enabled) return { status: 'off', current };
   try {
     const c = JSON.parse(readFileSync(cacheFile, 'utf8'));
-    if (typeof c.latest === 'string' && now >= c.checked_at && now - c.checked_at < CACHE_MS) return verdict(current, c.latest, true);
+    if (isVersion(c.latest) && Number.isFinite(c.checked_at) && now >= c.checked_at && now - c.checked_at < CACHE_MS) {
+      return verdict(current, c.latest, true);
+    }
   } catch {
     /* 没有缓存或读不懂：去查 */
   }
   const ctl = new AbortController();
   let timer;
-  const timedOut = new Promise((_, reject) => {
+  const timedOut = new Promise((resolve) => {
     timer = setTimeout(() => {
+      resolve({ error: `timed out after ${timeoutMs}ms` });
       ctl.abort();
-      reject(new Error(`timed out after ${timeoutMs}ms`));
     }, timeoutMs);
   });
   try {
     // 超时同时盖住连接与读响应体；fetch 不理 signal 时 race 也能按时返回。
-    const latest = await Promise.race([
+    const { latest, error } = await Promise.race([
       (async () => {
-        const res = await fetchImpl(UPDATE_URL, { signal: ctl.signal, headers: { accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const v = (await res.json())?.version;
-        if (typeof v !== 'string' || !/^\d+\.\d+\.\d+/.test(v)) throw new Error('no version in the response');
-        return v;
+        try {
+          const res = await fetchImpl(UPDATE_URL, { signal: ctl.signal, headers: { accept: 'application/json' } });
+          if (!res.ok) return { error: Number.isInteger(res.status) ? `HTTP ${res.status}` : 'invalid HTTP response' };
+          const latest = (await res.json())?.version;
+          return isVersion(latest) ? { latest } : { error: 'no version in the response' };
+        } catch {
+          return { error: 'fetch failed' };
+        }
       })(),
       timedOut,
     ]);
+    if (error) return { status: 'unknown', current, error };
     try {
       mkdirSync(dirname(cacheFile), { recursive: true });
       const tmp = `${cacheFile}.tmp.${process.pid}`;
@@ -67,10 +80,7 @@ export async function checkForUpdate({
       /* 缓存写不了就下次再查 */
     }
     return verdict(current, latest, false);
-  } catch (e) {
-    return { status: 'unknown', current, error: String(e?.message ?? e) };
   } finally {
     clearTimeout(timer);
-    timedOut.catch(() => {});
   }
 }

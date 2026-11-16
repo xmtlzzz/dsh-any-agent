@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] — 2026-11-16
+
+### Fixed
+
+- Use system executable paths for Windows process checks, registry discovery and the dashboard browser launcher. Resolve DSH overrides before changing the child process working directory, and ignore relative PATH entries when looking up host tools.
+- Verify the lock holder's OS start time before terminating it during takeover. Older registrations without a verified start time require release from the original host.
+- Validate npm update responses and cached versions as complete SemVer strings and keep response text out of diagnostic errors.
+
 ## [0.7.4] — 2026-11-16
 
 ### Fixed
@@ -1715,7 +1723,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...HEAD
+[0.7.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.1...v0.7.2

@@ -18,7 +18,7 @@
 | `DSH_MCP_APPROVAL` | `workspace-write` 和 `read-only` 为 `auto-deny` | 本机审批默认值和上限。设成 `ask` 可逐条裁决越界请求。只读始终拒绝审批。 |
 | `DSH_MCP_APPROVAL_TIMEOUT_MS` | `300000` | 待决 `ask` 审批的等待上限；超时按拒绝处理 |
 | `DSH_MCP_FORGOTTEN_DIR` | `$DSH_HOME/.dsh-any-agent-forgotten` | `dsh_release(forget=true)` 写的墓碑目录 |
-| `DSH_MCP_LOCK_STALE_MS` | `90000`（3× `REAP_INTERVAL_MS`，下限 30 秒） | 持锁登记多久没续心跳就算"持有者失联"（此时可被 `dsh_takeover` 自动抢占）；改回收间隔会改变推导出的默认值 |
+| `DSH_MCP_LOCK_STALE_MS` | `90000`（3× `REAP_INTERVAL_MS`，下限 30 秒） | 持锁登记多久没续心跳就算"持有者失联"（`dsh_takeover` 核实进程身份后可接管）；改回收间隔会改变推导出的默认值 |
 | `DSH_MCP_IDLE_TTL_MS` | `600000`（10 分钟） | 会话空闲多久回收其 DSH 进程。**默认 10 分钟**：回收后内存释放，下次派活自动 resume（对话不丢），代价是写锁会空出来、GUI 可能拿走。设 `0` = 永不回收（一直握锁，代价是每会话常驻 300–480MB）；需要长期握锁的个别会话用 `dsh_start(keep_alive=true)` |
 | `DSH_MCP_MAX_LIVE` | `4`（最坏约 1.2–1.9GB） | ★ **最多同时保活几个会话进程**（`0` = 不限）。超标时回收**最久没用过**的（**在跑的回合绝不回收**）。`keep_alive=true` 的会话不受本上限约束。用完想立刻放掉空闲会话：`dsh_release(all=true)`（busy 回合默认跳过，`force=true` 才中断） |
 | `DSH_MCP_MAX_RSS_MB` | `0`（关闭） | 全局子进程内存预算（MB）。实际 RSS 超过预算时按"最久未用"回收空闲会话，`keep_alive` 会话最后才动。按实际内存而不是会话数，适合上下文大小差异大的场景 |

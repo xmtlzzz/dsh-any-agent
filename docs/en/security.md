@@ -22,6 +22,8 @@ When you opt in to `auto-allow`, DSH can obtain `sandbox_permissions: danger-ful
 - **`cwd` cannot be the filesystem root for writable tiers.** `workspace-write` at `/` or `C:\` would make the sandbox root the whole disk; the home/root guard resolves symlinks first, so a symlink to the root or home is rejected too. `danger-full-access` remains an explicit opt-in.
 - **`title_hint` is capped at 200 characters** (schema + runtime), because it is persisted in the registry and sidecar on every turn.
 
+The MCP host runs Windows process checks, registry discovery and the dashboard launcher with executable paths under `System32`. Git uses absolute entries in the host's `PATH`. Keep those entries limited to directories you trust. Relative `DSH_BIN` and `DSH_RUNTIME` overrides resolve against the MCP server's working directory before the child starts in its workspace.
+
 ## 🪟 Workspace visibility in the DSH GUI
 
 Two different things — don't confuse them:
@@ -89,6 +91,6 @@ Silent by default — **not one byte is written**.
 | `<state dir>/update-check.json` | The latest version number `dsh_doctor` last read from npm, and when | Re-checked and overwritten after 24 hours | `DSH_MCP_UPDATE_CHECK=0` (also stops the network request) |
 | `.bak-dsh-<stamp>` next to client configs | The config as it was before `dsh-any-agent-setup` wrote to it | Up to 20 per config file (`DSH_MCP_BACKUP_KEEP`) | Delete by hand |
 
-Network: this server itself contacts `registry.npmjs.org` only when `dsh_doctor` is called (to read this package's latest version; the request carries no user data; `DSH_MCP_UPDATE_CHECK=0` turns it off). Model requests are made by DSH, not by this server.
+Network: `dsh_doctor` checks this package's latest release at `registry.npmjs.org` with a fixed package name and an `Accept` header. It accepts only complete SemVer strings from the response and cache, and uses fixed error messages. Set `DSH_MCP_UPDATE_CHECK=0` to disable the check. Model requests are made by DSH, not by this server.
 
 On the DSH side (not under this server's control): the session logs in `~/.dsh/sessions` (with full reasoning, see above); this server also registers each conversation's workspace in DSH's `workspace.json` so the GUI shows it (`DSH_MCP_REGISTER_WORKSPACE=0` turns that off).

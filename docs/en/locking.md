@@ -15,9 +15,11 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 | `lock_holder` | Meaning | Action |
 |---|---|---|
 | `self` | this process holds it | nothing to preempt |
-| `stale-mcp` | the holder is **alive but silent** (no heartbeat for 90 s — typically that MCP is wedged) | ✅ `dsh_takeover` **kills and takes over** |
-| `live-mcp` | another **live** dsh-any-agent instance is using it | ⚠️ refused by default; `force=true` takes it |
+| `stale-mcp` | the holder is **alive but silent** (no heartbeat for 90 s — typically that MCP is wedged) | ✅ `dsh_takeover` verifies the holder’s process identity before taking over |
+| `live-mcp` | another **live** dsh-any-agent instance is using it | ⚠️ takeover requires `force=true` and a verified process identity |
 | `none` | no registration → most likely **your own DSH GUI** | ❌ **never killed** (GUI conversations live inside the single `dsh web` process, so killing it takes down your whole UI and every GUI conversation with it), reported only |
+
+Process identity consists of the PID and the OS-reported start time. If the start time differs, cannot be read, or is missing from an older registration, release the conversation with `dsh_release` in the original host or close it there, then retry. This check also applies with `force=true`.
 
 > **Two measured footnotes.** ① **A crash leaves no orphan lock** — `SIGKILL` the MCP and its children exit with it (their stdio pipe closes), releasing the lock automatically ✓; so `stale-mcp` really means "**alive but wedged**". ② **Several instances**: the registry is last-writer-wins (a later save drops conversations it never saw), but the **session store is authoritative** — any session on disk is recoverable **by id alone**; if you give instances different `DSH_MCP_STATE` files, **point `DSH_MCP_LOCKS_DIR` at one shared directory**, or they cannot see each other's holder registrations.
 >
