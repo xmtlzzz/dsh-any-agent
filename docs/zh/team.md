@@ -37,7 +37,7 @@ dsh-any-agent team status   # 查看当前生效值、来源、profile
 dsh-any-agent team off
 ```
 
-重连后，新会话默认回到 `dsh-mcp`。已保存的原生团队状态可在 DSH 界面按会话关闭。
+重连后，新会话默认回到 `dsh-mcp`。已保存的原生团队状态可在 DSH 界面按会话关闭。自定义 profile 里的团队设置也由该 profile 的维护者控制。
 
 实验版可用 `dsh_send(team=false)` 关闭本次派发的组队提示。
 

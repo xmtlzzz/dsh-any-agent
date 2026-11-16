@@ -170,7 +170,7 @@ tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-
     </article>
     <article class="faq-row">
       <h3 class="faq-q">团队模式是什么？怎么开启？</h3>
-      <div class="faq-a"><p>0.5.0 起默认关闭、按需开启：运行 <code>dsh-any-agent team on</code> 并重连，DSH 就能在需要并行或多角色时创建具名成员协作，简单任务不会组队。关闭用 <code>dsh-any-agent team off</code>，单次关闭用 <code>dsh_send(team=false)</code>。完整步骤见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/team.md" target="_blank" rel="noopener noreferrer">团队模式文档</a>。</p></div>
+      <div class="faq-a"><p>0.5.0 起默认关闭。运行 <code>dsh-any-agent team on</code> 并重连，为新会话开启团队模式。运行 <code>dsh-any-agent team off</code> 并重连，关闭新会话的团队默认设置。DSH <code>0.2.2-rc.2</code> 起会保留已有会话的团队设置。<code>dsh_send(team=false)</code> 只关闭实验版团队模式的本次派发提示。完整步骤见<a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/zh/team.md" target="_blank" rel="noopener noreferrer">团队模式文档</a>。</p></div>
     </article>
     <article class="faq-row">
       <h3 class="faq-q">支持哪些 DSH 版本？如何自动发现桌面版与升级？</h3>

@@ -223,7 +223,11 @@ try {
     return { DSH_BIN: bin, DSH_RUNTIME: '', DSH_MCP_TEAM: '1' };
   }
   // 未提供显式 profile 时让 config 自选，避免从执行测试的客户端继承覆盖。
-  const useDefault = { DSH_MCP_PROFILE: undefined };
+  const useDefault = { DSH_MCP_PROFILE: undefined, DSH_MCP_SETTINGS: join(home, 'team-settings.json') };
+  const teamOff = { ...teamEnv('0.2.2-rc.3'), ...useDefault, DSH_MCP_TEAM: '' };
+  const defaultMode = runBootstrap('dsh-team', teamOff);
+  const ordinaryPatch = join(home, 'profiles', 'dsh-mcp', 'cordis.patch.yml');
+  check('rc.3 未配置团队开关时使用普通 profile', defaultMode.result?.profile === 'dsh-mcp' && defaultMode.result?.team === false && !readFileSync(ordinaryPatch, 'utf8').includes('agent-team'));
   const legacy = runBootstrap('dsh-team', teamEnv('0.2.2-rc.1'));
   const teamPatch = join(home, 'profiles', 'dsh-team', 'cordis.patch.yml');
   const legacyTeamText = readFileSync(teamPatch, 'utf8');
@@ -244,6 +248,15 @@ try {
     writeFileSync(teamPatch, legacyTeamText);
     const migrated = runBootstrap('dsh-team', teamEnv('0.2.2-rc.3'));
     check('原来源消失时用旧受管团队 profile 的路由完成迁移', migrated.result?.written && readFileSync(teamPatch, 'utf8').includes('defaultEnabled: true'));
+    for (const [label, previous] of [['原生', nativeText], ['实验版', legacyTeamText]]) {
+      writeFileSync(ordinaryPatch, previous);
+      const off = runBootstrap('dsh-team', { ...teamOff, DSH_MCP_ROUTE_SOURCE: 'desktop' });
+      const restored = yamlLoad(readFileSync(ordinaryPatch, 'utf8'));
+      check(`原来源消失时默认关闭受管 profile 残留的${label}团队设置`,
+        off.result?.written && off.result?.team === false &&
+        !restored.some((entry) => /agent-team|tool-subagent/.test(entry.id)) &&
+        restored.some((entry) => entry.id === 'acp' && entry.config?.provider === 'testprov'));
+    }
   } finally {
     renameSync(sourcePatch + '.bak', sourcePatch);
   }

@@ -73,7 +73,7 @@ DSH 的 agent 按任务自己选能力——包括它自己新长出来的能力
 
 **团队模式（0.5.0 起按需开启）**：默认关闭。运行 `dsh-any-agent team on` 并重连后，
 profile 默认切到 `dsh-team`。DSH `0.2.2-rc.2` 起，新会话使用 DSH 的共享任务板和普通子代理工具；更早版本使用实验版团队工具。
-关闭：`dsh-any-agent team off`；单次关闭：`dsh_send(team=false)`。
+`dsh-any-agent team off` 重连后关闭新会话的团队默认设置。实验版可用 `dsh_send(team=false)` 关闭本次提示。
 注意 team profile 会关闭旧的 `subagent` 工具，换成 9 个团队工具；成员共享一个工作区。
 
 **只有"派发语义"本身需要的才做成工具**：建会话、派活、读进度、验收、审核、插话、中断、审批、

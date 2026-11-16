@@ -42,7 +42,8 @@ dsh-any-agent team off
 ```
 
 After reconnecting, new sessions default to `dsh-mcp` again. Use the DSH interface
-to turn off team mode for an existing session with a saved setting.
+to turn off team mode for an existing session with a saved setting. Custom
+profiles control their own team settings.
 
 For the experimental team mode, `dsh_send(team=false)` suppresses the hint for one dispatch.
 

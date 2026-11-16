@@ -170,7 +170,7 @@ tool_timeout_sec = 120.0</code></pre></div><div class="install-card-note manual-
     </article>
     <article class="faq-row">
       <h3 class="faq-q">What is team mode, and how do I enable it?</h3>
-      <div class="faq-a"><p>Off by default since 0.5.0; opt in as needed: run <code>dsh-any-agent team on</code> and reconnect. DSH can then form named teams when a task needs parallel or multi-role work, while simple tasks stay single-agent. Turn it off globally with <code>dsh-any-agent team off</code>, or for a single turn with <code>dsh_send(team=false)</code>. Full steps are in the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/team.md" target="_blank" rel="noopener noreferrer">team mode guide</a>.</p></div>
+      <div class="faq-a"><p>Off by default since 0.5.0. Run <code>dsh-any-agent team on</code> and reconnect to enable team mode for new sessions. Run <code>dsh-any-agent team off</code> and reconnect to turn off that default. From DSH <code>0.2.2-rc.2</code>, existing sessions keep their saved team setting. <code>dsh_send(team=false)</code> suppresses the experimental team hint for one dispatch. See the <a href="https://github.com/xmtlzzz/dsh-any-agent/blob/main/docs/en/team.md" target="_blank" rel="noopener noreferrer">team mode guide</a> for details.</p></div>
     </article>
     <article class="faq-row">
       <h3 class="faq-q">Which DSH versions are supported, and does it detect the desktop app?</h3>

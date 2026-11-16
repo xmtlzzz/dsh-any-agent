@@ -369,10 +369,15 @@ export function ensureProfile({ log } = {}) {
   }
 
   let found = findRouting();
-  if (!found.routing && currentText !== null && TEAM_BACKEND && !ROUTE_SOURCE_PROFILE) {
-    // 已有受管团队 profile 可用自身的路由完成迁移，即使原来源已不存在。
+  if (!found.routing && currentText !== null) {
+    // 原来源不可用时保留已有受管路由，仍可迁移团队配置或清除已关闭的团队设置。
     try {
-      const routing = extractRouting(yamlLoad(currentText));
+      const previous = yamlLoad(currentText);
+      const team = Array.isArray(previous) ? previous.findLast((entry) => entry?.id === 'agent-team') : null;
+      const clearTeam = !TEAM_BACKEND && (
+        team?.config?.defaultEnabled === true || team?.name === '@deepseek-ai/dsh-experimental-agent-team'
+      );
+      const routing = clearTeam || (TEAM_BACKEND && !ROUTE_SOURCE_PROFILE) ? extractRouting(previous) : null;
       if (routing) found = { ...found, routing, source: readManagedState()?.source ?? DSH_PROFILE };
     } catch {
       // 读不到路由，保留原来的处理方式。

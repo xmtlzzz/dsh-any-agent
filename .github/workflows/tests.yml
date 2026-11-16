@@ -23,7 +23,7 @@ name: tests
 #     release-notes     Release notes from CHANGELOG   12 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            25 checks
-#     bootstrap-profile zero-dependency bootstrap     35 checks
+#     bootstrap-profile zero-dependency bootstrap     38 checks
 #     workspace-safety  data-loss boundaries          23 checks
 #     residue-purge     test residue cleanup, sandboxed 161 checks
 #     permission-adopt  no silent privilege escalation 26 checks
