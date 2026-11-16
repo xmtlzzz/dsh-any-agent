@@ -192,8 +192,8 @@ export const TOOL_DEFS = [
         team: {
           type: 'boolean',
           description:
-            '是否在本次派发前注入"需要并行/多角色时先建团队"的提示（跟随团队设置，默认关闭）。' +
-            '传 false 只对这一次关闭；彻底关闭用 DSH_MCP_TEAM=0。',
+            '实验版团队模式的派发提示开关，传 false 可关闭本次提示。' +
+            'DSH 0.2.2-rc.2 起，团队工具与指导由 DSH 按会话管理。',
         },
       },
       ['conversation_id', 'prompt'],

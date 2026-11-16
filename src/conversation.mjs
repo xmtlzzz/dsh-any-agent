@@ -65,6 +65,13 @@ import { RunLedger } from './run-ledger.mjs';
 
 const now = () => Date.now();
 
+const TEAM_PREFIX = L(
+  '【团队】如果这个任务需要并行或多角色协作，先用 spawn_teammate 创建团队再执行；' +
+    '不需要就单 agent 完成。不要为简单任务组队。\n\n',
+  '[Team] If this task needs parallel or multi-role work, create a team with spawn_teammate first and then do it; ' +
+    'otherwise finish it as a single agent. Do not form a team for a simple task.\n\n',
+);
+
 /** 记录用户发话时的截断长度（避免一条把缓冲撑爆）。 */
 const MAX_PROMPT_ECHO = 4000;
 
@@ -923,7 +930,9 @@ export class Conversation {
    *
    * @returns 等到回合结束 → 完整 result；没等到（wait=false 或等超时）→ 收据对象
    */
-  async prompt(text, { reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, run, wait = true, waitSignal, review, via = 'send' } = {}) {
+  async prompt(text, {
+    reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, run, wait = true, waitSignal, review, via = 'send', teamHint = false,
+  } = {}) {
     if (this.busy) {
       throw new Error(
         `会话 ${this.id} 正在跑另一个回合。可以：dsh_interject 插话（打断并改口 / 排队），或 dsh_interrupt 打断。`,
@@ -1205,7 +1214,9 @@ export class Conversation {
     });
 
     // 等待方超时只转后台；ACP 生命周期由取消与看门狗控制。
-    const acp = proc.request('session/prompt', { sessionId: this.id, prompt: [{ type: 'text', text }] }, 0);
+    // 冷恢复或出队后可能换了宿主，按实际接收请求的进程决定是否需要实验版提示。
+    const promptText = teamHint && proc.teamProfile?.backend === 'experimental' ? TEAM_PREFIX + text : text;
+    const acp = proc.request('session/prompt', { sessionId: this.id, prompt: [{ type: 'text', text: promptText }] }, 0);
     const watchdogError = L('看门狗取消了超限回合', 'The watchdog stopped this turn after it exceeded its limit');
     const finished = new Promise((resolve) => {
       watchdogTimer = this.#startWatchdog(runRecord, c, t0, proc, () => {
@@ -1403,17 +1414,16 @@ export class Conversation {
   // ── 会话级队列（忙时非阻塞入队）────────────────────────────────
 
   /** 入队；返回 run 记录与 1-based 位置。重启后未执行的收据会转成终态。 */
-  enqueue(text, { reasoning = 'hide', clientRunId = null, preview = null, review = this.review } = {}) {
+  enqueue(text, { reasoning = 'hide', clientRunId = null, teamHint = false, review = this.review } = {}) {
     if (clientRunId) {
       const existing = this.getRunByClientId(clientRunId);
       if (existing) return { run: existing, position: 0, deduped: true };
     }
     this.ledger.assertRoom();
-    // 预览用调用方原文，执行用可能已注入团队前缀的 text。
-    const run = this.createRun(preview ?? text, { clientRunId, review });
+    const run = this.createRun(text, { clientRunId, review });
     run.status = 'queued';
     // client：排队的客户端。出队时可能是另一个客户端的回合刚结束，run.start 要记回排队的那个。
-    const position = this.ledger.enqueue({ run, text, reasoning, clientRunId, enqueued_at: now(), client: liveClient() });
+    const position = this.ledger.enqueue({ run, text, reasoning, clientRunId, teamHint, enqueued_at: now(), client: liveClient() });
     emitLive(
       this.id,
       'run.queued',
@@ -1454,7 +1464,9 @@ export class Conversation {
       const item = this.ledger.shift();
       const run = item.run;
       run.status = 'running';
-      withLiveClient(item.client, () => this.prompt(item.text, { reasoning: item.reasoning, run, wait: false, via: 'queue' }))
+      withLiveClient(item.client, () => this.prompt(item.text, {
+        reasoning: item.reasoning, run, wait: false, via: 'queue', teamHint: item.teamHint,
+      }))
         .catch(() => {})
         .finally(() => this.#scheduleDrain());
     }, 0);

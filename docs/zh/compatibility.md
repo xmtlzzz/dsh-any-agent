@@ -2,19 +2,21 @@
 
 # 🧩 兼容性矩阵
 
-`dsh-any-agent` 依赖 DSH 的 ACP profile；团队模式还依赖 DSH 0.1.7 起才有的实验性 Agent Teams 包。
+`dsh-any-agent` 依赖 DSH 的 ACP profile。团队模式随 DSH 版本选择实验版插件或会话团队模式。
 升级 DSH 之前先对照这张表，并在升级后跑一遍 `dsh_doctor`。
 
 ## 版本
 
 | dsh-any-agent | DSH | 状态 | 说明 |
 |---|---|---|---|
+| 0.7.4 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（ACP、团队） | Windows 实测常规派活与从 npm 0.7.3 原地升级。桌面版 DSH 配合本地模拟模型接口验证团队默认关闭，开启后可同时使用原生任务板与普通子代理 |
+| 0.7.3 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（常规 ACP） | Windows 全量回归通过，真实模型通过安装和从 0.7.2 升级；IDA MCP 验收因缺少配置跳过。此组合需更新 MCP 才能使用新版团队模式 |
 | 0.7.3 | `0.2.2-rc.1`（桌面版） | ✅ 已验证（升级） | Windows 使用真实模型，从 npm 已发布的 0.7.2 原地换装 0.7.3，验证了旧结果读回、幂等重试，以及在原会话完成新回合 |
 | 0.7.2 | `0.2.2-rc.1`（桌面版） | ✅ 已验证（安装包工作流） | Windows 使用桌面版自带运行时和真实模型。Codex 验证了派活、取消客户端等待和重连后取结果。[发版验收记录](https://github.com/xmtlzzz/dsh-any-agent/pull/27)。[托管 CI](https://github.com/xmtlzzz/dsh-any-agent/actions/runs/43357420994)在 Windows、Linux 和 macOS 上用模拟 ACP 验证安装包 |
 | 0.7.1 | `0.2.1-rc.5` | ✅ 已验证 | Windows 候选版用 npx 启动 DSH，Node 22.19。全量测试的 41 个离线套件全过，模型套件 `boundary` 有一条本地化错误断言失败，修复后复跑 46 项全过。可选的 `acceptance` 因 profile 未配 IDA MCP 跳过 |
 | 0.7.0 | `0.2.2-rc.1`（桌面版） | ✅ 已验证（离线） | 2026-11-11 的 41 个离线套件（1892 项）全过。实测常驻进程模式时，Claude 桌面版在回合中途退出后重新打开，回合照常跑完并写出 `done` 哨兵 |
 | 0.6.x | `0.2.1-rc.5` | ✅ 已验证 | 2026-11-10 用 0.6.9 全量套件实测（离线 + 需要模型，DSH 走 npx、Node 22.19）全过；`acceptance` 因 profile 未配 IDA MCP 跳过。其它 DSH 版本未针对 0.6.x 重新验证，最近一次实测见下面的 0.5.x 行 |
-| 0.5.x | `0.1.7-rc.1` 及以上 | ✅ 已验证 | ACP + 实验性 Agent Teams 包均可用；团队模式需 `dsh-any-agent team on` |
+| 0.5.x | `0.1.7-rc.1` 至 `0.2.2-rc.1` | ✅ 已验证 | ACP 与实验版团队工具可用；团队模式需 `dsh-any-agent team on` |
 | 0.5.x | `0.1.5-rc.1` | ⚠️ 部分可用 | ACP 基本路径可用；缺 team 包，团队模式会自动保持关闭 |
 | 0.5.x | `0.2.1-rc.5` ~ `0.2.2-rc.1` | ✅ 已验证 | 2026-11-06 全量套件实测（0.2.1-rc.5 走 npm，0.2.2-rc.1 走桌面版自带运行时）；0.2.2 起 DSH 要求 Node ≥ 24.9 |
 | 0.5.x | `0.2.3` 及以上 | ⚠️ 未验证 | ACP 的 `session/*` 面可能变化；team 包必须与 DSH 版本匹配。升级前先跑 `dsh_doctor` 和离线套件 |
@@ -52,7 +54,7 @@
 
 多个来源同时存在时：当前运行时能满足 `engines.node` 的优先 → 版本高的优先 → 桌面版 > 全局 > npx。
 `DSH_BIN`（可指进 `.asar` 内部）与 `DSH_RUNTIME`（指定拉起 DSH 的可执行文件）只作显式覆盖。
-- 团队模式额外要求 DSH `>= 0.1.7-0`，并且 profile 里真的挂上了两个 team 包。
+- `0.1.7-rc.1` 至 `0.2.2-rc.1` 使用实验版团队包。从 `0.2.2-rc.2` 起使用 DSH 的会话团队模式，详见[团队模式](team.md)。
 
 ## 怎么确认
 
@@ -69,7 +71,7 @@ dsh-any-agent team status        # 团队开关与 profile
 - `dsh_candidates`：发现的全部 DSH 来源，以及自动选中了哪一个；
 - `dsh_version`：`verified` 为 ok。体检说明引用的是全量套件记录，表中也列出了 0.7.2 安装包工作流等专项验证。`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
 - `profile`：是否存在、是否漂移、路由来源；
-- `team`：`on` / `off` / `requested but unavailable`（版本或 profile 不含 team 包）；
+- `team`：`on` / `off` / `requested but unavailable`（版本或 profile 缺少兼容的团队配置）；
 - `config`：当前 permission、空闲回收、共享进程等生效值；
 - `update`：本服务的版本和 npm 上的最新版比；有新版本时 **warn**（一天最多查一次，4 秒超时；离线算未知，不算问题；`DSH_MCP_UPDATE_CHECK=0` 不查）。
 
@@ -77,8 +79,6 @@ dsh-any-agent team status        # 团队开关与 profile
 
 1. 升级 DSH 前先记录 `dsh_doctor` 的输出；
 2. 升级后重新跑 `node test/run.mjs`（离线）和 `node test/run.mjs --all`（需要 provider）；
-3. 如果团队模式打不开，先看 `dsh-any-agent team status` 和 `dsh_doctor` 的 `team` 检查，
-   再确认 `~/.dsh/profiles/dsh-team/cordis.patch.yml` 是否包含
-   `@deepseek-ai/dsh-experimental-agent-team`；
+3. 如果团队模式打不开，先看 `dsh-any-agent team status` 和 `dsh_doctor` 的 `team` 检查，再对照[团队 profile 配置](team.md)；
 4. 默认跟随桌面版：桌面版升级后服务会在下次拉起 DSH 时自动用上新版本（发现结果缓存 60 秒）。
    确实需要固定某个版本时才显式设置 `DSH_BIN`。

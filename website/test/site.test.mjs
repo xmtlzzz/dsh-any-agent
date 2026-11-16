@@ -135,8 +135,14 @@ test('Website docs alignment: compatibility range, 15 tools, dashboard showcase,
     'dsh_list', 'dsh_status', 'dsh_read', 'dsh_get', 'dsh_review',
     'dsh_inbox', 'dsh_approval_decide', 'dsh_takeover', 'dsh_release', 'dsh_doctor',
   ];
+  assert.match(html, /0\.5\.0 起默认关闭/);
+  assert.match(html, /dsh_send\(team=false\)<\/code> 只关闭实验版/);
+  assert.match(enHtml, /Off by default since 0\.5\.0/);
+  assert.match(enHtml, /dsh_send\(team=false\)<\/code> suppresses the experimental team hint/);
   for (const page of [html, enHtml]) {
     assert.match(page, /0\.1\.7 ~ 0\.2\.2/);
+    assert.match(page, /0\.2\.2-rc\.3/);
+    assert.match(page, /0\.2\.2-rc\.2/);
     assert.match(page, /0\.2\.3\+/);
     assert.doesNotMatch(page, /0\.2\.x 尚未验证|0\.2\.x is unverified/);
     assert.match(page, /data-config="zed"/);

@@ -12,6 +12,15 @@
 
 ## [Unreleased]
 
+## [0.7.4] — 2026-11-16
+
+### 修复
+
+- 快照和 worktree 从 PATH 的绝对路径条目解析 Git，防止 Windows 工作区里的同名程序被宿主执行。
+- 适配 DSH 0.2.2-rc.2 起的会话团队模式，开启后为新会话启用共享任务板，并保留普通子代理工具。关闭时，即使原模型路由来源不可用，也会清除受管 profile 中残留的团队设置。
+- 每次启动 ACP 进程时，按实际解析到的 DSH 版本选择团队 profile。原地升级后，排队和恢复的任务按实际接收它的进程派发。
+- 在删除测试临时目录前记录运行时，修复 Windows 上的桌面版 DSH 版本误报。
+
 ## [0.7.3] — 2026-11-13
 
 ### 变更
@@ -1233,7 +1242,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.0...v0.7.1

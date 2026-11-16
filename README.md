@@ -70,16 +70,13 @@ from DSH's tool surface is proxied, duplicated or preloaded.
 
 **Dispatch on demand**: `dsh_send` passes a goal, not a tool manifest, and the caller
 does not need to know DSH's tool list. The DSH agent picks what it needs — including
-capabilities added after this server was built (for example the experimental Agent
-Teams). This server does not grow one MCP tool per DSH feature.
+capabilities added after this server was built (for example Agent Teams). This
+server does not grow one MCP tool per DSH feature.
 
 **Team mode (opt-in since 0.5.0)**: off by default. Run `dsh-any-agent team on`
-and reconnect; the profile switches to `dsh-team` (the experimental Agent Teams
-packages), and `dsh_send` then adds a short "form a team if this needs parallel or
-multi-role work" line; simple tasks are not forced into a team. Turn it off with
-`dsh-any-agent team off`, or for one call with `dsh_send(team=false)`. The team
-profile disables the legacy `subagent` tools and replaces them with nine team
-tools; teammates share one workspace.
+and reconnect to use the `dsh-team` profile by default. From DSH `0.2.2-rc.2`, new
+sessions use DSH's shared task board and standard subagent tools. Earlier DSH
+versions use the experimental team tools. Teammates share one workspace.
 
 **Only dispatch semantics become tools**: start, send, read, get, review, interject,
 interrupt, approve, queue, inbox, status, release, takeover, doctor. No file I/O, no
@@ -88,8 +85,7 @@ shell, no editor, no task board.
 **When to add something outside DSH**: only when you need a *guarantee* rather than a
 *behavior* — for example, several top-level sessions editing the same repository need
 worktree isolation (`dsh_start(isolation="worktree")` gives each conversation its own git
-worktree and branch). For collaboration, prefer letting DSH run the team itself
-(mount the experimental team packages into the profile; teammates share one workspace).
+worktree and branch). For collaboration, prefer letting DSH run the team itself.
 
 ## Quick start
 
@@ -205,11 +201,8 @@ dsh-any-agent dashboard --open
 
 ## 🧑‍🤝‍🧑 Team mode (opt-in)
 
-Off by default. Run `dsh-any-agent team on` and reconnect; the profile switches
-to `dsh-team` (the experimental Agent Teams packages) and `dsh_send` adds a
-short "form a team when this needs parallel or multi-role work" line. Simple
-tasks are not forced into a team. Turn it off with `dsh-any-agent team off`, or
-for one call with `dsh_send(team=false)`.
+Run `dsh-any-agent team on` or `dsh-any-agent team off`, then reconnect. DSH
+`0.2.2-rc.2` and newer remember the team setting for each session.
 
 > Full steps (commands, verification, rollback) are in [Team mode](docs/en/team.md).
 

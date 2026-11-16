@@ -27,7 +27,7 @@ node scripts/release-notes.mjs x.y.z   # 预览 Release 页面上会显示的说
 # 3. 确认 tarball 本身：打得出来、装得上、起得来
 npm pack --dry-run
 npm run test:packed              # 安装实际 tarball，验证旧版和新版 MCP stdio
-npm run test:packed -- --upgrade # 从 npm 取 0.7.2，再原地换装候选包
+npm run test:packed -- --upgrade # 从 npm 取 0.7.3，再原地换装候选包
 npm run test:packed -- --real    # 用已配置的 DSH 和真实模型验证包内工作流
 #    再在临时目录里：npm install <tgz> && node_modules/.bin/dsh-any-agent --version
 

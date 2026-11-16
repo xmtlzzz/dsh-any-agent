@@ -8,8 +8,7 @@
 import {
   DEFAULT_PERMISSION,
   DEFAULT_REASONING,
-  TEAM_ACTIVE,
-  DSH_PROFILE,
+  TEAM_MODE,
   toPosixPath,
 } from './config.mjs';
 import { audit } from './audit.mjs';
@@ -42,17 +41,6 @@ function parseTimeoutMs(raw) {
   if (n > 2_147_483_647) throw new Error(L('timeout_ms 最大为 2147483647', 'timeout_ms must not exceed 2147483647'));
   return n;
 }
-
-/**
- * 团队模式下注入到派发 prompt 前的一句策略。
- * 只描述"需要时怎么做"，不改变任务本身；简单任务不会因此组队。
- */
-const TEAM_PREFIX = L(
-  '【团队】如果这个任务需要并行或多角色协作，先用 spawn_teammate 创建团队再执行；' +
-    '不需要就单 agent 完成。不要为简单任务组队。\n\n',
-  '[Team] If this task needs parallel or multi-role work, create a team with spawn_teammate first and then do it; ' +
-    'otherwise finish it as a single agent. Do not form a team for a simple task.\n\n',
-);
 
 /**
  * 工具处理器表。
@@ -99,6 +87,18 @@ export function createHandlers(hub, opts = {}) {
         keep_alive: conv.keepAlive === true,
       });
       const snap = conv.snapshot();
+      const { profile, backend } = conv.proc?.teamProfile ?? {};
+      let teamStatus = L('关（默认关闭；需要时运行 dsh-any-agent team on）', 'off (the default; run dsh-any-agent team on to enable)');
+      if (backend === 'native') {
+        teamStatus = L(`开（profile=${profile}；使用 DSH 的会话团队模式）`, `on (profile=${profile}; uses DSH session team mode)`);
+      } else if (backend === 'experimental') {
+        teamStatus = L(
+          `开（profile=${profile}；派发时会提示"需要时先建团队"，简单任务不会组队）`,
+          `on (profile=${profile}; dispatches carry a "form a team first when needed" hint, simple tasks stay single-agent)`,
+        );
+      } else if (TEAM_MODE) {
+        teamStatus = L('未启用（用 dsh_doctor 检查 DSH 版本与 profile）', 'unavailable (check the DSH version and profile with dsh_doctor)');
+      }
       const lines = [
         L('已创建会话。', 'Conversation created.'),
         `conversation_id: ${snap.conversation_id}`,
@@ -118,13 +118,7 @@ export function createHandlers(hub, opts = {}) {
               '保活: 否（空闲后可被回收，下次派活自动 resume）',
               'Keep alive: no (may be reaped when idle; the next dispatch resumes it)',
             ),
-        L('团队模式: ', 'Team mode: ') +
-          (TEAM_ACTIVE
-            ? L(
-                `开（profile=${DSH_PROFILE}；派发时会提示"需要时先建团队"，简单任务不会组队）`,
-                `on (profile=${DSH_PROFILE}; dispatches carry a "form a team first when needed" hint, simple tasks stay single-agent)`,
-              )
-            : L('关（默认关闭；需要时运行 dsh-any-agent team on）', 'off (the default; run dsh-any-agent team on to enable)')),
+        L('团队模式: ', 'Team mode: ') + teamStatus,
         L('对话名: ', 'Title: ') +
           (snap.title ?? L('(DSH 尚未生成，发出第一条消息后自动生成)', '(not generated yet; DSH creates it after the first message)')) +
           (snap.title_hint && snap.title !== snap.title_hint
@@ -192,17 +186,15 @@ export function createHandlers(hub, opts = {}) {
         }
       }
 
-      // 团队提示：只描述"需要时怎么做"，不改变任务本身；简单任务不会因此组队。
-      const teamOn = TEAM_ACTIVE && args.team !== false;
-      const promptText = teamOn ? TEAM_PREFIX + args.prompt : args.prompt;
+      const teamHint = args.team !== false;
 
       // ── 忙时：显式 queue=true 才入队；否则保持"直接报错"的旧契约 ──
       if (conv.busy) {
         if (args.queue === true && args.wait !== true) {
-          const { run, position, deduped } = conv.enqueue(promptText, {
+          const { run, position, deduped } = conv.enqueue(args.prompt, {
             reasoning: opts.reasoning,
             clientRunId: args.client_run_id ?? null,
-            preview: args.prompt,
+            teamHint,
             review: review ?? conv.review,
           });
           if (deduped) return replayRun(hub, conv, run, false);
@@ -223,14 +215,13 @@ export function createHandlers(hub, opts = {}) {
       }
 
       const wait = args.wait === true;
-      // 记录与预览保留调用方原文；实际派发用 promptText（可能带团队提示）。
       const run = conv.createRun(args.prompt, {
         clientRunId: args.client_run_id ?? null,
         review: review ?? conv.review,
       });
       // prompt() 自己负责收尾与写哨兵。这里 await 是为了**同步暴露 resume/启动失败** ——
       // 否则调用方会拿到一个 accepted 但注定失败的收据（冷启动要几秒，热会话瞬时）。
-      const r = await conv.prompt(promptText, { ...opts, run, wait });
+      const r = await conv.prompt(args.prompt, { ...opts, run, wait, teamHint });
       conv.lastResult = r;
       audit('send', {
         conversation_id: conv.id,

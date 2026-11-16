@@ -20,16 +20,13 @@
  * 只是指针文件，需要的话由 DSH 在 worktree 里自己 `git lfs pull`。
  */
 
-import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { STATE_FILE } from './config.mjs';
+import { execGit } from './git-executable.mjs';
 import { filterOverrides } from './git-snapshot.mjs';
 import { L } from './lang.mjs';
-
-const execFileAsync = promisify(execFile);
 
 /** dsh_start 的 isolation 取值：none（默认，用原目录）/ worktree。 */
 export const ISOLATION_MODES = ['none', 'worktree'];
@@ -48,8 +45,7 @@ async function git(cwd, args, root) {
   // 仓库配置的 filter 驱动也是仓库能让宿主执行的命令：`worktree add` 检出时跑 smudge，
   // `status`（含 `worktree remove` 内部的那次）跑 clean。一律置空，同 git-snapshot.mjs。
   const noFilters = await filterOverrides(cwd);
-  const { stdout } = await execFileAsync(
-    'git',
+  const { stdout } = await execGit(
     ['-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${noHooksDir(root)}`, ...noFilters, ...args],
     { cwd, encoding: 'utf8', timeout: 120_000, windowsHide: true, maxBuffer: 16 << 20, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } },
   );

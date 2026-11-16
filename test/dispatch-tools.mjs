@@ -7,18 +7,16 @@
 
 import './live-sandbox.mjs'; // 必须是第一条 import：live 事件别写进真实 ~/.dsh
 import assert from 'node:assert';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const auditDir = mkdtempSync(join(tmpdir(), 'dsh-any-agent-audit-'));
 process.env.DSH_MCP_AUDIT_FILE = join(auditDir, 'audit.jsonl');
-// 这一套要覆盖"团队提示注入"，所以在本进程显式启用团队模式；
-// config 在动态 import 时读取 env（静态 import 会被提升到赋值之前）。
-process.env.DSH_MCP_TEAM = '1';
+process.env.DSH_HOME = join(auditDir, 'home');
 process.env.DSH_MCP_APPROVAL = 'auto-allow';
+process.env.DSH_MCP_GIT_STATUS = '0';
 const { Conversation, Hub } = await import('../src/hub.mjs');
 const { createHandlers } = await import('../src/tools.mjs');
-const { TEAM_ACTIVE } = await import('../src/config.mjs');
 
 let passed = 0;
 let failed = 0;
@@ -142,10 +140,12 @@ function fakeProc() {
     alive: true,
     prompts: 0,
     log: [],
-    request(method) {
+    promptTexts: [],
+    request(method, params) {
       proc.log.push(method);
       if (method !== 'session/prompt') return Promise.resolve({});
       proc.prompts += 1;
+      proc.promptTexts.push(params.prompt[0].text);
       return new Promise((resolve) => pending.push(resolve));
     },
     notify(method) {
@@ -194,7 +194,7 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
   const a = settle(c.interject('A', { mode: 'queue', clientRunId: 'race-qa' }));
   const b = settle(c.interject('B', { mode: 'queue', clientRunId: 'race-qb' }));
   await tick();
-  // 每一轮都等 session/prompt 真的发出再结束它（前面还有 git 快照要跑）。
+  // 每一轮都等 session/prompt 真的发出再结束它。
   for (let n = 1; n <= 3; n++) {
     for (let i = 0; i < 300 && proc.prompts < n; i++) await tick(10);
     proc.end();
@@ -232,7 +232,7 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
   const got = await handlers.dsh_get({ conversation_id: c.id });
   check('不带 run_id 的 dsh_get 取的也是正在跑的那个', () => assert.equal(got.structured.run?.run_id, running.run_id));
   proc.end();
-  // 收尾先放开 busy、等 git 快照之后才把状态改成 done（见 conversation.mjs 的 finalize）：等到状态落定。
+  // 收尾先放开 busy，再将状态改成 done：等到状态落定。
   for (let i = 0; i < 500 && c.getRun(running.run_id).status === 'running'; i++) await tick(10);
   const st3 = await handlers.dsh_status({ conversation_id: c.id });
   check('跑完以后：run 是刚跑完的那个，不是更晚建、没开跑就取消的排队回合', () =>
@@ -359,20 +359,22 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
     assert.equal(lvl('0.2.2-rc.1'), 'verified');
     assert.equal(dshVersionStatus('0.2.2-rc.1').status, 'ok');
   });
-  check('★ 只有本发布线重跑过的版本（0.2.1-rc.5）才说"跑过全量套件"', () => {
-    const s = dshVersionStatus('0.2.1-rc.5');
-    assert.equal(s.rerun, true);
-    assert.match(s.note, /已用 0\.7\.1 跑过全量套件/);
-    assert.match(s.noteEn, /was tested with the full suite on 0\.7\.1/);
+  check('★ 有全量实测记录的版本报告对应的 MCP 发布版本', () => {
+    for (const [version, release] of [['0.2.1-rc.5', '0.7.1'], ['0.2.2-rc.1', '0.5.x'], ['0.2.2-rc.3', '0.7.4']]) {
+      const s = dshVersionStatus(version);
+      assert.equal(s.rerun, true);
+      assert.ok(s.note.includes(`已用 ${release} 跑过全量套件`));
+      assert.ok(s.noteEn.includes(`was tested with the full suite on ${release}`));
+    }
     assert.equal(dshVersionStatus('0.2.1-rc.4').rerun, false);
   });
-  check('★ 区间内但本发布线没重跑的版本（0.1.7 / 0.2.2）如实说明，仍是 ok', () => {
-    for (const v of ['0.1.7-rc.1', '0.2.2-rc.1']) {
+  check('★ 区间内没有精确全量记录的版本指向兼容性矩阵，仍是 ok', () => {
+    for (const v of ['0.1.7-rc.1', '0.2.2-rc.2']) {
       const s = dshVersionStatus(v);
       assert.equal(s.status, 'ok');
       assert.equal(s.rerun, false);
-      assert.match(s.note, /最近一次全量实测是 0\.5\.x/);
-      assert.match(s.noteEn, /last full run was on 0\.5\.x/);
+      assert.match(s.note, /具体实测版本见兼容性矩阵/);
+      assert.match(s.noteEn, /compatibility matrix for exact test records/);
     }
   });
   check('每个档位都带英文说明', () => {
@@ -430,7 +432,6 @@ console.log('\n[6c] PowerShell 哨兵等待命令');
   // 真跑一遍：只在 Windows 且有 powershell.exe 时执行（CI 的 windows-latest 会覆盖到）。
   if (process.platform === 'win32') {
     const { spawnSync } = await import('node:child_process');
-    const { writeFileSync, mkdirSync } = await import('node:fs');
     const dir = mkdtempSync(join(tmpdir(), "dsh-any-agent-ps'wait-"));
     try {
       mkdirSync(join(dir, 'a $b [c]'), { recursive: true });
@@ -471,31 +472,32 @@ console.log('\n[6c] PowerShell 哨兵等待命令');
 
 console.log('\n[7] 团队提示注入');
 
-if (TEAM_ACTIVE) {
-  const captured = [];
-  const fakeConv = {
-    id: 'fake-team',
-    busy: false,
-    lastResult: null,
-    createRun: (t) => ({ run_id: 'run-fake', prompt_preview: t }),
-    prompt: async (t) => {
-      captured.push(t);
-      return { still_running: true, run_id: 'run-fake' };
-    },
+{
+  const { c, proc } = raceConv('team-prompts');
+  hub.conversations.set(c.id, c);
+  proc.teamProfile = { profile: 'dsh-team', backend: 'experimental' };
+  const first = await handlers.dsh_send({ conversation_id: c.id, prompt: 'do it' });
+  check('实验版 ACP 收到团队提示和原任务', () => assert.match(proc.promptTexts[0], /spawn_teammate[\s\S]*do it$/));
+  const second = await handlers.dsh_send({ conversation_id: c.id, prompt: 'skip hint', team: false, queue: true });
+  const third = await handlers.dsh_send({ conversation_id: c.id, prompt: 'queued before upgrade', queue: true });
+  const waitUntil = async (condition) => {
+    for (let i = 0; i < 300 && !condition(); i++) await tick(10);
   };
-  const fakeHub = {
-    get: async () => fakeConv,
-    runSentinelPath: () => '/tmp/run-fake.json',
-    conversations: new Map(),
-  };
-  const h2 = createHandlers(fakeHub, {});
-  await h2.dsh_send({ conversation_id: 'fake-team', prompt: 'do it' });
-  check('默认在 prompt 前注入团队提示', () => assert.match(captured[0], /^【团队】/));
-  check('注入不吞掉原任务', () => assert.match(captured[0], /do it$/));
-  await h2.dsh_send({ conversation_id: 'fake-team', prompt: 'do it', team: false });
-  check('team=false 不注入', () => assert.equal(captured[1], 'do it'));
-} else {
-  console.log('  skipped: 当前 DSH 版本不启用团队模式');
+  proc.end();
+  await waitUntil(() => proc.prompts >= 2);
+  check('排队的 team=false 关闭本次提示', () => assert.equal(proc.promptTexts[1], 'skip hint'));
+  proc.teamProfile = { profile: 'dsh-team', backend: 'native' };
+  proc.end();
+  await waitUntil(() => proc.prompts >= 3);
+  check('实验版入队、原生宿主出队的任务不带实验版提示', () => assert.equal(proc.promptTexts[2], 'queued before upgrade'));
+  proc.end();
+  const runs = [first, second, third].map((receipt) => c.getRun(receipt.structured.run_id));
+  await waitUntil(() => runs.every((run) => run.status === 'done'));
+  check('三次派发都完成并保留原文预览', () => {
+    assert.deepEqual(runs.map((run) => [run.status, run.prompt_preview]), [
+      ['done', 'do it'], ['done', 'skip hint'], ['done', 'queued before upgrade'],
+    ]);
+  });
 }
 
 console.log('\n[8] danger-full-access 需要机器侧显式放行');
@@ -514,7 +516,7 @@ if (!process.env.DSH_MCP_ALLOW_FULL_ACCESS) {
   console.log('  skipped: 当前进程已放行 danger-full-access');
 }
 
-rmSync(auditDir, { recursive: true, force: true });
+rmSync(auditDir, { recursive: true, force: true, maxRetries: 4 });
 
 // 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。
 console.log(`\n===== dispatch tools: passed ${passed}, failed ${failed} =====`);

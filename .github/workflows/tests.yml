@@ -9,13 +9,13 @@ name: tests
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     progress          MCP progress notifications     16 checks
 #     guards            env-var edge cases            43 checks
-#     dsh-locate        DSH auto-discovery (asar)     21 checks
+#     dsh-locate        DSH auto-discovery (asar)     22 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          40 checks
 #     failure-terminal  terminal state on failure     10 checks
 #     shared-host       shared process host           44 checks
 #     resume-retry      cold-resume timeout retry     65 checks (fake ACP server)
-#     dispatch-tools    dispatch surface              84 checks (81 off Windows)
+#     dispatch-tools    dispatch surface              85 checks (82 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        26 checks
 #     live-events       live event stream, write side  47 checks
@@ -23,12 +23,12 @@ name: tests
 #     release-notes     Release notes from CHANGELOG   12 checks
 #     review            caller review tickets        70 checks
 #     forget-tombstone  forget is terminal            25 checks
-#     bootstrap-profile zero-dependency bootstrap     27 checks
+#     bootstrap-profile zero-dependency bootstrap     39 checks
 #     workspace-safety  data-loss boundaries          23 checks
 #     residue-purge     test residue cleanup, sandboxed 161 checks
 #     permission-adopt  no silent privilege escalation 26 checks
 #     state-safety      state/sentinel/lock storage   26 checks
-#     workspace-snapshot workspace_changed full fingerprint  27 checks
+#     workspace-snapshot workspace_changed full fingerprint  30 checks
 #     watchdog          turn watchdog (stall / max duration)  33 checks
 #     worktree          isolation=worktree sessions      30 checks
 #     daemon            DSH_MCP_DAEMON=1 resident process  23 checks
@@ -361,7 +361,7 @@ jobs:
       - name: package.json and bin sanity
         run: node test/package-check.mjs
 
-      - name: upgrade from the published 0.7.2 package
+      - name: upgrade from the published 0.7.3 package
         run: npm run test:packed -- --upgrade
 
       - name: pack, install into a scratch project, run it

@@ -10,7 +10,7 @@
  *   [6] yaml-lite 对 profile-example 的解析/序列化往返一致
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, renameSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -20,6 +20,8 @@ import { load as yamlLoad, dump as yamlDump } from '../src/yaml-lite.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BOOT = pathToFileURL(join(HERE, '..', 'src', 'bootstrap.mjs')).href;
+const CONFIG = pathToFileURL(join(HERE, '..', 'src', 'config.mjs')).href;
+const ACP = pathToFileURL(join(HERE, '..', 'src', 'acp.mjs')).href;
 const EXAMPLE = join(HERE, '..', 'profile-example', 'cordis.patch.yml');
 
 let passed = 0;
@@ -44,10 +46,12 @@ function seedProfile(name, text) {
   return dir;
 }
 
-function runBootstrap(profile = 'test-mcp') {
+function runBootstrap(profile = 'test-mcp', overrides = {}) {
   const script =
     `import { ensureProfile } from ${JSON.stringify(BOOT)};\n` +
-    'console.log(JSON.stringify(ensureProfile()));';
+    `import { resolveTeamProfile } from ${JSON.stringify(CONFIG)};\n` +
+    'const teamProfile = resolveTeamProfile();\n' +
+    'console.log(JSON.stringify({ ...ensureProfile({ teamProfile }), profile: teamProfile.profile, team: !!teamProfile.backend }));';
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     encoding: 'utf8',
     timeout: 30_000,
@@ -57,6 +61,7 @@ function runBootstrap(profile = 'test-mcp') {
       DSH_MCP_PROFILE: profile,
       DSH_MCP_BOOTSTRAP: '',
       DSH_MCP_ROUTE_SOURCE: '',
+      ...overrides,
     },
   });
   const lines = String(r.stdout || '').trim().split(/\r?\n/).filter(Boolean);
@@ -209,6 +214,80 @@ try {
   check('dump→load 结构一致', JSON.stringify(again) === JSON.stringify(example));
   const model = example.find((e) => e?.id === 'llm-pi-ai')?.config?.providers?.myprovider?.models?.[0];
   check('嵌套 models/input 解析正确', model?.id === 'my-model' && JSON.stringify(model?.input) === JSON.stringify(['text', 'image']), JSON.stringify(model));
+
+  console.log('\n[7] DSH 新旧团队实现与 profile 迁移');
+  function teamEnv(version) {
+    const pkg = join(root, 'runtime', version, '@deepseek-ai', 'dsh');
+    const bin = join(pkg, 'lib', 'bin.js');
+    mkdirSync(dirname(bin), { recursive: true });
+    writeFileSync(bin, '');
+    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ version }));
+    return { DSH_BIN: bin, DSH_RUNTIME: '', DSH_MCP_TEAM: '1' };
+  }
+  // 未提供显式 profile 时让 config 自选，避免从执行测试的客户端继承覆盖。
+  const useDefault = { DSH_MCP_PROFILE: undefined, DSH_MCP_SETTINGS: join(home, 'team-settings.json') };
+  const teamOff = { ...teamEnv('0.2.2-rc.3'), ...useDefault, DSH_MCP_TEAM: '' };
+  const defaultMode = runBootstrap('dsh-team', teamOff);
+  const ordinaryPatch = join(home, 'profiles', 'dsh-mcp', 'cordis.patch.yml');
+  check('rc.3 未配置团队开关时使用普通 profile', defaultMode.result?.profile === 'dsh-mcp' && defaultMode.result?.team === false && !readFileSync(ordinaryPatch, 'utf8').includes('agent-team'));
+  const legacy = runBootstrap('dsh-team', teamEnv('0.2.2-rc.1'));
+  const teamPatch = join(home, 'profiles', 'dsh-team', 'cordis.patch.yml');
+  const legacyTeamText = readFileSync(teamPatch, 'utf8');
+  check('rc.1 保留实验版团队 profile', legacy.result?.team && legacyTeamText.includes('dsh-experimental-agent-team'));
+  const native = runBootstrap('dsh-team', teamEnv('0.2.2-rc.3'));
+  const nativeText = readFileSync(teamPatch, 'utf8');
+  const nativeEntries = yamlLoad(nativeText);
+  check('rc.3 迁移已有受管团队 profile', native.result?.ok && native.result?.team && native.result?.written && !nativeText.includes('dsh-experimental-agent-team'));
+  check('新团队 profile 为新会话开启原生任务板', nativeEntries.some((e) => e.id === 'agent-team' && e.config?.defaultEnabled === true));
+  check('原生团队保留普通子代理工具', !nativeEntries.some((e) => e.id?.startsWith('tool-subagent') && e.disabled));
+  const againNative = runBootstrap('dsh-team', teamEnv('0.2.2-rc.3'));
+  check('原生团队 profile 幂等', againNative.result?.team && againNative.result?.written === false);
+  const disabledBootstrap = runBootstrap('dsh-team', { ...teamEnv('0.2.2-rc.3'), DSH_MCP_BOOTSTRAP: '0' });
+  check('已配置原生团队的 profile 在关闭引导后仍被识别', disabledBootstrap.result?.team && disabledBootstrap.result?.skipped);
+  const sourcePatch = join(home, 'profiles', 'desktop', 'cordis.patch.yml');
+  renameSync(sourcePatch, sourcePatch + '.bak');
+  try {
+    writeFileSync(teamPatch, legacyTeamText);
+    const migrated = runBootstrap('dsh-team', { ...teamEnv('0.2.2-rc.3'), DSH_MCP_ROUTE_SOURCE: 'desktop' });
+    check('原来源消失时用旧受管团队 profile 的路由完成迁移', migrated.result?.written && readFileSync(teamPatch, 'utf8').includes('defaultEnabled: true'));
+    for (const [label, previous] of [['原生', nativeText], ['实验版', legacyTeamText]]) {
+      writeFileSync(ordinaryPatch, previous);
+      const off = runBootstrap('dsh-team', { ...teamOff, DSH_MCP_ROUTE_SOURCE: 'desktop' });
+      const restored = yamlLoad(readFileSync(ordinaryPatch, 'utf8'));
+      check(`原来源消失时默认关闭受管 profile 残留的${label}团队设置`,
+        off.result?.written && off.result?.team === false &&
+        !restored.some((entry) => /agent-team|tool-subagent/.test(entry.id)) &&
+        restored.some((entry) => entry.id === 'acp' && entry.config?.provider === 'testprov'));
+    }
+  } finally {
+    renameSync(sourcePatch + '.bak', sourcePatch);
+  }
+  const manualTeam = legacyTeamText.replace('dsh-mcp:managed', 'user-owned');
+  writeFileSync(teamPatch, manualTeam);
+  const fallback = runBootstrap('dsh-team', { ...teamEnv('0.2.2-rc.3'), ...useDefault });
+  check('过时的手写 team profile 保留，隐式选择退回普通模式', fallback.result?.team === false && fallback.result?.profile === 'dsh-mcp' && readFileSync(teamPatch, 'utf8') === manualTeam);
+
+  writeFileSync(teamPatch, legacyTeamText);
+  const hotEnv = teamEnv('0.2.2-rc.1');
+  const manifest = join(dirname(hotEnv.DSH_BIN), '..', 'package.json');
+  const hot = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { writeFileSync } from 'node:fs';
+    import { AcpProcess } from ${JSON.stringify(ACP)};
+    const before = new AcpProcess({ cwd: process.cwd(), permission: 'workspace-write' });
+    before.start();
+    writeFileSync(${JSON.stringify(manifest)}, '{"version":"0.2.2-rc.3"}');
+    const after = new AcpProcess({ cwd: process.cwd(), permission: 'workspace-write' });
+    after.start();
+    console.log(JSON.stringify([before.teamProfile, after.teamProfile]));
+  `], {
+    encoding: 'utf8', timeout: 30_000,
+    env: { ...process.env, ...useDefault, ...hotEnv, DSH_HOME: home, DSH_MCP_BOOTSTRAP: '', DSH_MCP_ROUTE_SOURCE: '' },
+  });
+  const selections = hot.status === 0 ? JSON.parse(hot.stdout) : [];
+  check('同一服务内，已启动宿主保留原 profile 实现，新宿主使用升级后的原生团队',
+    selections[0]?.backend === 'experimental' && selections[1]?.backend === 'native' &&
+    selections.every((entry) => entry.profile === 'dsh-team') && readFileSync(teamPatch, 'utf8') === nativeText,
+    hot.stderr);
 } catch (e) {
   failed++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

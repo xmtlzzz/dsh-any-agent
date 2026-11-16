@@ -8,7 +8,7 @@
 | `DSH_RUNTIME` | auto | Explicit executable that launches DSH (e.g. a Node 24). Used with `DSH_BIN`, or on its own for auto-discovered npm global / npx installs (their `engines.node` is re-checked against it); the desktop app always keeps its bundled runtime (only it can read the asar). Unset: the desktop app's bundled runtime, otherwise this server's node |
 | `DSH_HOME` | `~/.dsh` | DSH home shared with the GUI (credentials, sessions, workspace registry). Point it elsewhere only for isolation/multi-account |
 | `DSH_MCP_PROFILE` | `dsh-mcp` (`dsh-team` when team is on) | DSH profile to drive; an explicit value wins |
-| `DSH_MCP_TEAM` | `0` (off) | Team mode, opt-in. `dsh-any-agent team on` writes the settings file; this env var overrides it. When on, uses the `dsh-team` profile and injects a "form a team when needed" line before `dsh_send`; per call use `dsh_send(team=false)` |
+| `DSH_MCP_TEAM` | `0` (off) | `1`/`0` overrides `dsh-any-agent team on/off`. Enabling it selects `dsh-team` by default. DSH `0.2.2-rc.2` and later enable team tools per session. `dsh_send(team=false)` suppresses the experimental hint for one dispatch |
 | `DSH_MCP_SETTINGS` | `$DSH_HOME/.dsh-any-agent/settings.json` | Settings file written by `dsh-any-agent team on/off` |
 | `DSH_MCP_BOOTSTRAP` | on | Whether this server may create/sync the DSH profile on first start. `0` makes it drive an existing profile only and never write a file |
 | `DSH_MCP_ROUTE_SOURCE` | unset | Pin where model routes are copied from during bootstrap: a profile name (`desktop`, `web`, …) or `__home__` for `$DSH_HOME/cordis.patch.yml`. Unset = try home → desktop → web → headless → acp |
@@ -47,7 +47,7 @@
 | `DSH_MCP_DAEMON_IDLE_MS` | `600000` (10 min) | How long the resident process waits with no clients connected and no turn running before it exits. `0` = never exits on its own |
 | `DSH_MCP_WORKTREES_DIR` | `<state dir>/worktrees` | Where `dsh_start(isolation="worktree")` puts its worktrees |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |
-| `DSH_MCP_GIT_STATUS` | on | `0` disables the per-turn `git status` summary. Useful for untrusted repos (git can run repo-configured fsmonitor/filters outside DSH's sandbox) |
+| `DSH_MCP_GIT_STATUS` | on | `0` disables the per-turn `git status` summary. Snapshots run outside the DSH sandbox, resolve Git from absolute PATH entries, and disable fsmonitor and repository-configured filters |
 | `DSH_MCP_BACKUP_KEEP` | `20` | How many `.bak-dsh-*` copies to keep per client config (rotation is best-effort) |
 | `DSH_MCP_REQUEST_TIMEOUT_MS` | `60000` | Per-request timeout on the ACP channel (initialize, session/new, …) |
 | `DSH_MCP_REAP_INTERVAL_MS` | `30000` | How often the idle reaper checks for conversations to reclaim. Values below the safe floor fall back to the default |

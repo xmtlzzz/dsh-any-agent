@@ -115,8 +115,8 @@ export const TOOL_TEXT_EN = {
         'does not create a second run: it returns the first run\'s result or receipt (replayed=true). For safely resending ' +
         'after a response was lost in transport.',
       team:
-        'Whether to prepend the "form a team first when this needs parallel or multi-role work" hint to this dispatch ' +
-        '(default follows DSH_MCP_TEAM). false turns it off for this call only; DSH_MCP_TEAM=0 turns it off entirely.',
+        'Controls the experimental team hint for this dispatch. Pass false to suppress it for this call. ' +
+        'From DSH 0.2.2-rc.2, DSH manages team tools and guidance per session.',
     },
   },
   dsh_list: {

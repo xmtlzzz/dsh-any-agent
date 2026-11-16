@@ -7,7 +7,7 @@
 | `DSH_BIN` | 自动探测（桌面版 → npm 全局 → npx 缓存） | 显式指定 `@deepseek-ai/dsh/lib/bin.js` 路径（可指进桌面版 `app.asar` 内部） |
 | `DSH_RUNTIME` | 自动 | 显式指定拉起 DSH 的可执行文件（如一个 Node 24）。配合 `DSH_BIN` 使用，或单独设置时作用于自动发现的 npm 全局 / npx 版 DSH（并按它的 Node 版本重新判定 `engines.node`）；桌面版始终用其自带运行时（asar 只有它读得了）。不设时：桌面版用自带运行时，其余用本服务的 node |
 | `DSH_MCP_PROFILE` | `dsh-mcp`（团队开启时 `dsh-team`） | 驱动用的 DSH profile；显式设置优先 |
-| `DSH_MCP_TEAM` | `0`（关闭） | 团队模式，按需开启。`dsh-any-agent team on` 写设置文件；这里设 `1`/`0` 可覆盖它。开启后使用 `dsh-team` profile，并在 `dsh_send` 前注入"需要时先建团队"的提示；单次关闭用 `dsh_send(team=false)` |
+| `DSH_MCP_TEAM` | `0`（关闭） | `1`/`0` 覆盖 `dsh-any-agent team on/off` 的设置。开启后默认选择 `dsh-team`。DSH `0.2.2-rc.2` 起按会话启用团队工具；`dsh_send(team=false)` 只用于关闭实验版的单次提示 |
 | `DSH_MCP_SETTINGS` | `$DSH_HOME/.dsh-any-agent/settings.json` | 团队开关的设置文件（`dsh-any-agent team on/off` 写它） |
 | `DSH_HOME` | `~/.dsh` | DSH 主目录。**默认就用本机用户自己的**，凭据与会话历史因此与 GUI 共用。指向别处即隔离环境（那就得自己准备那个目录的凭据与 profile） |
 | `DSH_MCP_BOOTSTRAP` | 开 | `0` 关闭首启 profile 自动创建/同步（关掉后只驱动已存在的 profile，不写任何文件） |
@@ -47,7 +47,7 @@
 | `DSH_MCP_DAEMON_IDLE_MS` | `600000`（10 分钟） | 常驻进程在没有客户端连着、也没有回合在跑时，空闲多久后自己退出。`0` = 不自动退出 |
 | `DSH_MCP_WORKTREES_DIR` | `<状态目录>/worktrees` | `dsh_start(isolation="worktree")` 建的 worktree 放在哪里 |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |
-| `DSH_MCP_GIT_STATUS` | 开 | `0` 关闭每回合的 `git status` 摘要。分析不可信仓库时建议关掉（git 可能触发仓库配置的 fsmonitor/filter，且发生在 DSH 沙箱之外） |
+| `DSH_MCP_GIT_STATUS` | 开 | `0` 关闭每回合的 `git status` 摘要。快照在 DSH 沙箱外运行，从 PATH 的绝对路径条目选择 Git，并关闭 fsmonitor 和仓库配置的过滤器 |
 | `DSH_MCP_BACKUP_KEEP` | `20` | 每个客户端配置最多保留多少份 `.bak-dsh-*`（尽力轮转） |
 | `DSH_MCP_REQUEST_TIMEOUT_MS` | `60000` | ACP 通道单请求超时（initialize、session/new 等） |
 | `DSH_MCP_REAP_INTERVAL_MS` | `30000` | 空闲回收器多久检查一次。低于安全下限的值会回落到默认值 |

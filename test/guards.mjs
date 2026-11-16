@@ -35,9 +35,10 @@ function read(env) {
   const code = `
     const a = await import(${JSON.stringify(cfg)});
     const b = await import(${JSON.stringify(lk)});
+    const { profile, backend } = a.resolveTeamProfile();
     process.stdout.write(JSON.stringify({
       ttl: a.IDLE_TTL_MS, reap: a.REAP_INTERVAL_MS, stale: b.STALE_MS, maxLive: a.MAX_LIVE,
-      team: a.TEAM_MODE, active: a.TEAM_ACTIVE, profile: a.DSH_PROFILE,
+      team: a.TEAM_MODE, active: Boolean(backend), profile,
       permission: a.DEFAULT_PERMISSION, allowFull: a.ALLOW_FULL_ACCESS,
     }));
   `;

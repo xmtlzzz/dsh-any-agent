@@ -13,9 +13,9 @@
  * 临时目录一律 os.tmpdir() + mkdtemp，收尾经 sandbox-home 的守卫删除。
  */
 
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { assertSafeSandbox, removeSandbox } from './sandbox-home.mjs';
 
@@ -77,6 +77,7 @@ function commitAll(dir) {
 }
 
 const { gitStatus, sameWorkspaceSnapshot } = await import('../src/hub.mjs');
+const { createWorktree } = await import('../src/worktree.mjs');
 
 try {
   console.log('\n[1] 同一状态行但内容变了（回合前已经是 M foo.js）');
@@ -233,6 +234,39 @@ try {
       `elapsed=${elapsed}ms ticks=${ticks}`,
     );
     console.log(`    gitStatus 耗时 ${elapsed}ms，期间定时器触发 ${ticks} 次`);
+  }
+
+  console.log('\n[6] 宿主 Git 不从工作区查找可执行文件');
+  {
+    const repo = makeRepo('untrusted-git');
+    writeFileSync(join(repo, 'file.txt'), 'committed\n');
+    commitAll(repo);
+    const path = process.env.PATH;
+    const cwdSearch = process.env.NoDefaultCurrentDirectoryInExePath;
+    try {
+      if (process.platform === 'win32') {
+        copyFileSync(process.execPath, join(repo, 'git.exe'));
+        delete process.env.NoDefaultCurrentDirectoryInExePath;
+      } else {
+        writeFileSync(join(repo, 'git'), '#!/bin/sh\nexit 42\n', { mode: 0o755 });
+      }
+      process.env.PATH = `.${delimiter}${path ?? ''}`;
+      const bare = spawnSync('git', ['--version'], { cwd: repo, encoding: 'utf8' });
+      check('对照：仅传 git 会命中工作区的同名程序', !/^git version /.test(bare.stdout ?? ''));
+      const snap = await gitStatus(repo);
+      check('快照用真正的 Git 并看见同名文件', snap?.changed_files === 1, JSON.stringify(snap));
+      let worktree;
+      try {
+        worktree = await createWorktree(repo, { root: join(root, 'isolated-worktrees') });
+      } catch (e) {
+        check('worktree 用真正的 Git', false, e.message);
+      }
+      if (worktree) check('worktree 用真正的 Git', existsSync(join(worktree.path, 'file.txt')));
+    } finally {
+      if (path === undefined) delete process.env.PATH;
+      else process.env.PATH = path;
+      if (cwdSearch !== undefined) process.env.NoDefaultCurrentDirectoryInExePath = cwdSearch;
+    }
   }
 } catch (e) {
   failed++;
