@@ -10,7 +10,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
-| Unreleased | `0.2.2-rc.3` (desktop app) | ✅ Verified (team mode) | Windows desktop DSH with a local simulated model endpoint retained subagents and exposed and executed a team task board tool when enabled |
+| 0.7.4 | `0.2.2-rc.3` (desktop app) | ✅ Verified (ACP, team mode) | Standard ACP dispatch and in-place upgrade from npm 0.7.3 on Windows. Desktop DSH with a local simulated model endpoint verified that team mode is off by default and that enabling it exposes both the native task board and standard subagents |
 | 0.7.3 | `0.2.2-rc.3` (desktop app) | ✅ Verified (standard ACP) | Full Windows regression and real-provider install and upgrade from 0.7.2 passed. IDA MCP acceptance skipped without a configured server. Using the newer team mode requires an MCP update |
 | 0.7.3 | `0.2.2-rc.1` (desktop app) | ✅ Verified (upgrade) | On Windows with a real provider, upgraded the installed npm 0.7.2 package to 0.7.3, retrieved the saved result, replayed the original key, and completed another turn in the existing session |
 | 0.7.2 | `0.2.2-rc.1` (desktop app) | ✅ Verified (installed package lifecycle) | Windows with the desktop app's bundled runtime and a real provider. Codex passed dispatch, wait cancellation, and result retrieval after reconnecting. [Release verification](https://github.com/xmtlzzz/dsh-any-agent/pull/27). [Hosted CI](https://github.com/xmtlzzz/dsh-any-agent/actions/runs/43357420994) exercised the installed package on Windows, Linux, and macOS with simulated ACP |
@@ -43,7 +43,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 - DSH installed and `~/.dsh` already has a working provider and credentials (the GUI can chat);
 - **DSH's own Node requirement** (`engines.node`, ≥ 24.9 from 0.2.2) is met by whatever runtime launches DSH:
   the desktop app's bundled runtime when DSH comes from the desktop app (no local Node 24 needed), or this server's node for npm/npx installs;
-- Team mode also requires DSH `>= 0.1.7-0` and a profile that actually mounts both team packages.
+- Team mode requires DSH `>= 0.1.7-0` and a compatible profile. DSH through `0.2.2-rc.1` uses the experimental team packages. DSH `0.2.2-rc.2` onward uses session team mode. See the [team mode guide](team.md).
 
 ## Where DSH comes from (auto-detected, no configuration)
 

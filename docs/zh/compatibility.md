@@ -9,7 +9,7 @@
 
 | dsh-any-agent | DSH | 状态 | 说明 |
 |---|---|---|---|
-| 未发布 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（团队） | Windows 使用桌面版 DSH 和本地模拟模型接口，验证默认模式下仍有子代理工具，开启后提供并能调用团队任务板工具 |
+| 0.7.4 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（ACP、团队） | Windows 实测常规派活与从 npm 0.7.3 原地升级。桌面版 DSH 配合本地模拟模型接口验证团队默认关闭，开启后可同时使用原生任务板与普通子代理 |
 | 0.7.3 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（常规 ACP） | Windows 全量回归通过，真实模型通过安装和从 0.7.2 升级；IDA MCP 验收因缺少配置跳过。此组合需更新 MCP 才能使用新版团队模式 |
 | 0.7.3 | `0.2.2-rc.1`（桌面版） | ✅ 已验证（升级） | Windows 使用真实模型，从 npm 已发布的 0.7.2 原地换装 0.7.3，验证了旧结果读回、幂等重试，以及在原会话完成新回合 |
 | 0.7.2 | `0.2.2-rc.1`（桌面版） | ✅ 已验证（安装包工作流） | Windows 使用桌面版自带运行时和真实模型。Codex 验证了派活、取消客户端等待和重连后取结果。[发版验收记录](https://github.com/xmtlzzz/dsh-any-agent/pull/27)。[托管 CI](https://github.com/xmtlzzz/dsh-any-agent/actions/runs/43357420994)在 Windows、Linux 和 macOS 上用模拟 ACP 验证安装包 |
@@ -71,7 +71,7 @@ dsh-any-agent team status        # 团队开关与 profile
 - `dsh_candidates`：发现的全部 DSH 来源，以及自动选中了哪一个；
 - `dsh_version`：`verified` 为 ok。体检说明引用的是全量套件记录，表中也列出了 0.7.2 安装包工作流等专项验证。`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
 - `profile`：是否存在、是否漂移、路由来源；
-- `team`：`on` / `off` / `requested but unavailable`（版本或 profile 不含 team 包）；
+- `team`：`on` / `off` / `requested but unavailable`（版本或 profile 缺少兼容的团队配置）；
 - `config`：当前 permission、空闲回收、共享进程等生效值；
 - `update`：本服务的版本和 npm 上的最新版比；有新版本时 **warn**（一天最多查一次，4 秒超时；离线算未知，不算问题；`DSH_MCP_UPDATE_CHECK=0` 不查）。
 
