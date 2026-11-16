@@ -21,7 +21,8 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
+import { isHostAbsolute, windowsSystemExecutable } from './host-executable.mjs';
 
 /** 相对 DSH 包根的入口与包描述。 */
 const DSH_PKG_PARTS = ['@deepseek-ai', 'dsh'];
@@ -250,12 +251,13 @@ function windowsRegistryInstalls() {
     'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
     'HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
   ];
-  const reg = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'reg.exe');
+  const reg = windowsSystemExecutable('reg.exe');
+  if (!reg || !existsSync(reg)) return [];
   const found = [];
   roots.forEach((root, i) => {
     const file = join(tmpdir(), `dsh-locate-${process.pid}-${Date.now()}-${i}.reg`);
     try {
-      execFileSync(existsSync(reg) ? reg : 'reg', ['export', root, file, '/y'], {
+      execFileSync(reg, ['export', root, file, '/y'], {
         stdio: 'ignore',
         windowsHide: true,
         timeout: 5000,
@@ -294,7 +296,7 @@ function defaultDesktopDirs() {
 
 /** 由 asar 路径推导桌面版可执行文件（显式 DSH_BIN 指进 asar 时也用它）。 */
 export function desktopExeForAsar(asarPath, exeHint = null) {
-  if (exeHint && existsSync(exeHint)) return exeHint;
+  if (exeHint && isHostAbsolute(exeHint) && existsSync(exeHint)) return exeHint;
   const resources = dirname(asarPath);
   if (process.platform === 'darwin' && basename(resources) === 'Resources') {
     const macos = join(dirname(resources), 'MacOS');
@@ -327,6 +329,7 @@ export function desktopExeForAsar(asarPath, exeHint = null) {
 
 /** 检查一个桌面版安装目录，返回候选（不是有效安装时返回 null）。导出供测试。 */
 export function desktopCandidate({ dir, exe = null, displayVersion = null, via }) {
+  if (!isHostAbsolute(dir)) return null;
   const asar =
     process.platform === 'darwin' && /\.app$/i.test(dir)
       ? join(dir, 'Contents', 'Resources', 'app.asar')
@@ -371,7 +374,7 @@ function desktopCandidates() {
 // ── npm 全局 / npx 缓存 ─────────────────────────────────────────
 
 function nodeCandidate(source, bin) {
-  if (!existsSync(bin)) return null;
+  if (!isHostAbsolute(bin) || !existsSync(bin)) return null;
   const pkg = readDshPackage(bin);
   return {
     source,
@@ -451,7 +454,7 @@ export function rankCandidates(list) {
 
 /** 自动发现到的全部候选（已排序，第一个就是默认选择）。结果缓存 60 秒。 */
 export function discoverDsh({ fresh = false } = {}) {
-  const runtime = process.env.DSH_RUNTIME || null;
+  const runtime = process.env.DSH_RUNTIME ? resolve(process.env.DSH_RUNTIME) : null;
   if (
     !fresh &&
     discoveryCache &&
@@ -528,7 +531,11 @@ function explicitDsh(binPath, runtimePath) {
  */
 export function resolveDsh({ fresh = false } = {}) {
   const explicit = process.env.DSH_BIN;
-  if (explicit) return explicitDsh(explicit, process.env.DSH_RUNTIME || null);
+  if (explicit) {
+    // The child may run in another workspace. Resolve configured paths in the server before spawning it.
+    const runtime = process.env.DSH_RUNTIME;
+    return explicitDsh(resolve(explicit), runtime ? resolve(runtime) : null);
+  }
   let [selected] = discoverDsh({ fresh });
   if (selected && !fresh) {
     // A desktop update or npm replacement can change the entry at the cached path.

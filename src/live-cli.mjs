@@ -6,6 +6,7 @@
  */
 
 import { LIVE_DIR, STATE_FILE } from './config.mjs';
+import { findPosixExecutable, hostPath, windowsSystemExecutable } from './host-executable.mjs';
 import { LiveTail, TEXT, detectLang, diffFrame, layoutFrame, renderText } from './live-view.mjs';
 import { readConversationMeta } from './titles.mjs';
 
@@ -134,15 +135,17 @@ const DASHBOARD_BANNER = {
  *   cmd 收到的就不是空标题了（实测）。
  */
 export function openInBrowser(url, { platform = process.platform, spawnFn } = {}) {
+  const { dirs, env } = hostPath(process.env, platform);
   const [cmd, args] =
     platform === 'win32'
-      ? ['cmd', ['/c', 'start', '', url]]
+      ? [windowsSystemExecutable('cmd.exe'), ['/d', '/c', 'start', '', url]]
       : platform === 'darwin'
-        ? ['open', [url]]
-        : ['xdg-open', [url]];
+        ? ['/usr/bin/open', [url]]
+        : [findPosixExecutable('xdg-open', dirs), [url]];
+  if (!cmd) return Promise.resolve(false);
   return import('node:child_process')
     .then(({ spawn }) => {
-      const child = (spawnFn ?? spawn)(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true });
+      const child = (spawnFn ?? spawn)(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true, env });
       child.on?.('error', () => {});
       child.unref?.();
       return true;

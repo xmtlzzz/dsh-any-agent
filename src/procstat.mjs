@@ -15,6 +15,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { processListExecutable, windowsSystemExecutable } from './host-executable.mjs';
 
 const CACHE_MS = 5000;
 let cache = { at: 0, map: new Map() };
@@ -49,9 +50,11 @@ const READ_TIMEOUT_MS = 15_000;
 
 function readProcessTable() {
   const win = process.platform === 'win32';
+  const command = win ? windowsSystemExecutable('tasklist.exe') : processListExecutable();
+  if (!command) return Promise.resolve(new Map());
   return new Promise((resolve) => {
     execFile(
-      win ? 'tasklist' : 'ps',
+      command,
       win ? ['/FO', 'CSV', '/NH'] : ['-axo', 'pid=,rss='],
       { encoding: 'utf8', timeout: READ_TIMEOUT_MS, windowsHide: true, maxBuffer: 8 << 20 },
       // 读不到就当作未知

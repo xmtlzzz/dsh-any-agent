@@ -28,6 +28,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, renameSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { processListExecutable, windowsSystemExecutable } from './host-executable.mjs';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { STATE_FILE, REAP_INTERVAL_MS, numEnv } from './config.mjs';
@@ -281,12 +282,16 @@ export function killHolderChild(pid, { expectedSpawnedAt } = {}) {
  */
 export function processStartTime(pid) {
   if (!pid) return null;
+  const win = process.platform === 'win32';
+  const command = win
+    ? windowsSystemExecutable('WindowsPowerShell', 'v1.0', 'powershell.exe')
+    : processListExecutable();
+  if (!command) return null;
   try {
-    const args =
-      process.platform === 'win32'
-        ? ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${Number(pid)} -ErrorAction SilentlyContinue).StartTime.ToUniversalTime().ToString('o')`]
-        : ['-o', 'lstart=', '-p', String(pid)];
-    const r = spawnSync(process.platform === 'win32' ? 'powershell' : 'ps', args, {
+    const args = win
+      ? ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${Number(pid)} -ErrorAction SilentlyContinue).StartTime.ToUniversalTime().ToString('o')`]
+      : ['-o', 'lstart=', '-p', String(pid)];
+    const r = spawnSync(command, args, {
       encoding: 'utf8',
       timeout: 3000,
       windowsHide: true,

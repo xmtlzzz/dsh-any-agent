@@ -13,7 +13,7 @@
  * 临时目录一律 os.tmpdir() + mkdtemp，收尾经 sandbox-home 的守卫删除。
  */
 
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, linkSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -265,6 +265,35 @@ try {
     } finally {
       if (path === undefined) delete process.env.PATH;
       else process.env.PATH = path;
+      if (cwdSearch !== undefined) process.env.NoDefaultCurrentDirectoryInExePath = cwdSearch;
+    }
+  }
+
+  console.log('\n[7] 宿主进程检测不从当前目录查找系统程序');
+  {
+    const fixture = join(root, 'untrusted-git');
+    const savedCwd = process.cwd();
+    const savedPath = process.env.PATH;
+    const cwdSearch = process.env.NoDefaultCurrentDirectoryInExePath;
+    const { processStartTime } = await import('../src/locks.mjs');
+    const { refreshRssMap } = await import('../src/procstat.mjs');
+    try {
+      if (process.platform === 'win32') {
+        for (const name of ['powershell.exe', 'tasklist.exe']) linkSync(join(fixture, 'git.exe'), join(fixture, name));
+        delete process.env.NoDefaultCurrentDirectoryInExePath;
+      } else {
+        writeFileSync(join(fixture, 'ps'), '#!/bin/sh\nexit 42\n', { mode: 0o755 });
+      }
+      process.chdir(fixture);
+      process.env.PATH = `.${delimiter}${savedPath ?? ''}`;
+      const start = processStartTime(process.pid);
+      check('启动时间查询使用系统程序', Number.isFinite(start) && start > Date.now() - 10 * 60_000, String(start));
+      const rss = (await refreshRssMap({ force: true })).get(process.pid);
+      check('RSS 查询使用系统程序', Number.isFinite(rss) && rss > 0, String(rss));
+    } finally {
+      process.chdir(savedCwd);
+      if (savedPath === undefined) delete process.env.PATH;
+      else process.env.PATH = savedPath;
       if (cwdSearch !== undefined) process.env.NoDefaultCurrentDirectoryInExePath = cwdSearch;
     }
   }
