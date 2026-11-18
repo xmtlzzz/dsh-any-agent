@@ -19,15 +19,15 @@ This is a small, volunteer-maintained project. Reports are acknowledged on a bes
 
 ## Supported versions · 支持的版本
 
-Only the **latest minor release line** (currently `0.6.x`) receives security fixes. Upgrade with `npm install -g dsh-any-agent@latest`.
+Only the **latest minor release line** receives security fixes. Upgrade with `npm install -g dsh-any-agent@latest`.
 
-只有**最新的次版本线**（目前是 `0.6.x`）会收到安全修复。
+只有**最新的次版本线**会收到安全修复。使用 `npm install -g dsh-any-agent@latest` 升级。
 
 ## In scope · 属于本项目的安全问题
 
 dsh-any-agent sits between an MCP client and DeepSeek Harness. Issues in what *this server* promises are in scope, for example:
 
-- **Permission tiers**: a `read-only` session that can write, or an approval from a read-only session that gets allowed; `danger-full-access` reachable without `DSH_MCP_ALLOW_FULL_ACCESS=1`.
+- **Permission tiers**: a `read-only` session that can write or receives an approval, or a per-session request for `danger-full-access` that bypasses the machine-side permission settings.
 - **Path handling**: a `conversation_id` / `run_id` / `cwd` that escapes its directory (traversal into sentinel, review, lock, tombstone or live-event paths); a writable `cwd` at a filesystem root or home directory.
 - **Disk hygiene**: reasoning text written to this server's own files (sentinels, reviews, live events, registry, logs) without `DSH_MCP_SENTINEL_INCLUDE_REASONING=1`; credentials that survive redaction in sentinels, approval context or live-event previews.
 - **Write-lock handling**: `dsh_takeover` killing a process it could not prove it owns (the GUI, an unrelated process).
@@ -38,7 +38,7 @@ dsh-any-agent sits between an MCP client and DeepSeek Harness. Issues in what *t
 
 - **DeepSeek Harness itself** (its sandbox, model behaviour, its own session logs, which do contain reasoning) — report to the DSH project.
 - **Side effects of external MCP tools** that DSH is configured to use — they are not constrained by DSH's sandbox; see the usage notes.
-- **Documented behaviour**: under `on_approval=auto-allow`, DSH may request and be granted `sandbox_permissions: danger-full-access`. This is the documented default and is reported on every result (`auto_escalations_total`); use `on_approval=ask` to gate it.
+- **Documented behaviour**. The default tier is `workspace-write` with `auto-deny`. Explicitly enabling `DSH_MCP_APPROVAL=auto-allow` can grant DSH requests for `sandbox_permissions: danger-full-access`. Results report those grants in `auto_escalations_total`. Set `DSH_MCP_APPROVAL=ask` to review requests individually. 默认档是 `workspace-write`，越界审批默认拒绝。可设置 `DSH_MCP_APPROVAL=ask` 逐条裁决。
 - Anything that requires an attacker who can already write to your `~/.dsh` directory or run code as your user.
 
 ## More · 更多
