@@ -59,8 +59,8 @@ The server finds DSH on its own, in this order — **no need to set `DSH_BIN`**:
 3. **npx cache** (can vanish at any time; lowest priority when otherwise equal).
 
 When several exist: candidates whose runtime satisfies `engines.node` first → higher version →
-desktop > global > npx. `DSH_BIN` (may point inside an `.asar`) and `DSH_RUNTIME` (the executable
-that launches DSH) are explicit overrides only.
+desktop > global > npx. `DSH_BIN` specifies the DSH entry file, which can be inside an `.asar`.
+`DSH_RUNTIME` specifies the executable used to launch DSH. Both overrides require files.
 
 ## How to check
 

@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Report known runtime incompatibility and missing workspace directories before spawning DSH. An invalid explicit DSH path includes instructions for restoring automatic discovery.
-- Report invalid runtime paths and process launch failures without waiting for an ACP timeout.
+- Reject directories supplied as DSH CLI or runtime paths, and report process launch failures without waiting for an ACP timeout.
 - Discover on-disk sessions even when the first registered session refers to a missing workspace.
 
 ## [0.7.5] — 2026-11-16
