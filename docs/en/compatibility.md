@@ -71,7 +71,7 @@ dsh-any-agent team status        # team switch and profile
 In an MCP client, call `dsh_doctor` and look at:
 
 - `dsh_bin`: DSH entry point, version, source (desktop / npm global / npx cache / DSH_BIN) and runtime; **warn** when it resolves from an npx cache (`_npx/<hash>/`), which disappears on cache cleanup;
-- `dsh_runtime`: whether the launching runtime's Node satisfies DSH's `engines.node`; **warn** if not;
+- `dsh_runtime`: whether the Node runtime used to launch DSH satisfies `engines.node`. When the development version detects an incompatibility, the check reports **fail** and startup reports how to update the runtime or set `DSH_RUNTIME`;
 - `dsh_desktop`: the desktop app's version; **warn** when it differs from the DSH this server uses (both share the `~/.dsh` session store);
 - `dsh_candidates`: every DSH found and which one was picked;
 - `dsh_version`: `verified` is ok. The note refers to full-suite testing; the table also records narrower checks such as the 0.7.2 installed package lifecycle. `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
@@ -88,3 +88,5 @@ In an MCP client, call `dsh_doctor` and look at:
    `team` check, then review the [team profile configuration](team.md);
 4. By default the server follows the desktop app: after the app updates, the next DSH launch picks
    up the new version (discovery is cached for 60 s). Set `DSH_BIN` only to pin a specific version.
+
+Resuming an old session on another machine also requires the original workspace path. If it is missing, the development version reports the path before launching DSH. Restore that directory, or call `dsh_start` with the new path to start a fresh session.

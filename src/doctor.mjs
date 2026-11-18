@@ -148,11 +148,11 @@ export async function runDoctor(hub) {
     const engOk = satisfiesNodeRange(dsh.enginesNode, runtimeNode);
     add(
       'dsh_runtime',
-      engOk === false ? 'warn' : 'ok',
+      engOk === false ? 'fail' : 'ok',
       L(
         `运行时 Node ${runtimeNode ?? '未知'}，DSH 要求 ${dsh.enginesNode ?? '未声明'}`,
         `runtime Node ${runtimeNode ?? 'unknown'}, DSH requires ${dsh.enginesNode ?? 'nothing declared'}`,
-      ) + (engOk === false ? L(' —— 不满足，部分能力可能异常', ' -- not satisfied, some features may misbehave') : ''),
+      ) + (engOk === false ? L('，该运行时无法启动 DSH', ', this runtime cannot start DSH') : ''),
       engOk === false
         ? dsh.runtime === 'node'
           ? L(

@@ -504,7 +504,9 @@ export function applyRuntimeOverride(list, runtime) {
 
 /** 显式 DSH_BIN（可选 DSH_RUNTIME）。 */
 function explicitDsh(binPath, runtimePath) {
-  if (!existsMaybeAsar(binPath)) throw new Error(`DSH_BIN 指向的文件不存在: ${binPath}`);
+  if (!existsMaybeAsar(binPath)) {
+    throw new Error(`DSH_BIN 指向的文件不存在: ${binPath}。请更新路径，或删除 DSH_BIN 后重连以恢复自动探测。`);
+  }
   const pkg = readDshPackage(binPath);
   const split = splitAsarPath(binPath);
   let command = process.execPath;
@@ -563,19 +565,21 @@ const runtimeNodeCache = new Map();
 export function probeRuntimeNode(c) {
   if (c.command === process.execPath) return process.versions.node;
   const key = `${c.command}|${JSON.stringify(c.env)}`;
-  if (runtimeNodeCache.has(key)) return runtimeNodeCache.get(key);
-  let v = null;
   try {
+    const stat = statSync(c.command, { throwIfNoEntry: false });
+    if (!stat?.isFile()) return null;
+    const cached = runtimeNodeCache.get(key);
+    if (cached && cached.modified === stat.mtimeMs && cached.size === stat.size) return cached.version;
     const r = spawnSync(c.command, ['-e', 'process.stdout.write(process.versions.node)'], {
       env: { ...process.env, ...c.env },
       encoding: 'utf8',
       timeout: 15_000,
       windowsHide: true,
     });
-    v = /^\d+\.\d+\.\d+/.test(r.stdout ?? '') ? r.stdout.trim() : null;
+    const version = /^\d+\.\d+\.\d+/.test(r.stdout ?? '') ? r.stdout.trim() : null;
+    if (version) runtimeNodeCache.set(key, { modified: stat.mtimeMs, size: stat.size, version });
+    return version;
   } catch {
-    v = null;
+    return null;
   }
-  runtimeNodeCache.set(key, v);
-  return v;
 }

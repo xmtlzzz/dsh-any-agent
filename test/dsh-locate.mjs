@@ -7,9 +7,11 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   applyRuntimeOverride,
   cmpVersion,
@@ -264,7 +266,36 @@ try {
     }
   });
 
-  console.log('\n[6] 注册表导出解析');
+  console.log('\n[6] ACP 启动前检查运行时和工作区');
+  const launchRoot = join(root, 'launch-preflight');
+  const entryDir = join(launchRoot, 'lib');
+  const entry = join(entryDir, 'bin.js');
+  const dshHome = join(launchRoot, 'dsh-home');
+  mkdirSync(entryDir, { recursive: true });
+  writeFileSync(join(launchRoot, 'package.json'), JSON.stringify({ engines: { node: '>=999.0.0' } }));
+  writeFileSync(entry, 'process.exit(98);');
+  const acpUrl = new URL('../src/acp.mjs', import.meta.url);
+  const tryStart = (cwd) => spawnSync(process.execPath, [
+    '--input-type=module', '-e',
+    'import { AcpProcess } from ' + JSON.stringify(acpUrl.href) + '; new AcpProcess({ cwd: process.argv[1] }).start();',
+    cwd,
+  ], {
+    env: { ...process.env, DSH_BIN: entry, DSH_RUNTIME: '', DSH_HOME: dshHome, DSH_MCP_LANG: 'en' },
+    encoding: 'utf8', timeout: 10_000, cwd: fileURLToPath(new URL('..', import.meta.url)),
+  });
+  check('节点版本明确不兼容时，在拉起 DSH 前报出要求和 DSH_RUNTIME', () => {
+    const result = tryStart(launchRoot);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /DSH runtime Node .* does not satisfy >=999\.0\.0.*DSH_RUNTIME/);
+    assert.equal(existsMaybeAsar(dshHome), false, 'profile bootstrap must not run');
+  });
+  check('旧会话目录不存在时说明如何恢复工作区', () => {
+    const result = tryStart(join(launchRoot, 'old-workspace'));
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Workspace directory is missing .*old-workspace.*dsh_start/);
+  });
+
+  console.log('\n[7] 注册表导出解析');
   check('★ 解析 .reg：转义的反斜杠/引号还原、按 section 分组', () => {
     const reg =
       '\uFEFFWindows Registry Editor Version 5.00\r\n\r\n' +

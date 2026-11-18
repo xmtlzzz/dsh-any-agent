@@ -10,6 +10,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { statSync } from 'node:fs';
 import { ensureProfile } from './bootstrap.mjs';
 import {
   CHILD_MAX_OLD_SPACE_MB,
@@ -18,6 +19,8 @@ import {
   resolveDsh,
   resolveTeamProfile,
 } from './config.mjs';
+import { probeRuntimeNode, satisfiesNodeRange } from './dsh-locate.mjs';
+import { L } from './lang.mjs';
 import { LineDecoder } from './line-decoder.mjs';
 import { readProcessStartTime } from './locks.mjs';
 
@@ -99,8 +102,23 @@ export class AcpProcess {
   /** 拉起进程。注意 ACP 没有"就绪"握手信号，spawn 后即可发请求。 */
   start() {
     if (this.#child) throw new Error('AcpProcess 已经启动过了');
+    if (!statSync(this.cwd, { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error(L(
+        '工作区目录不存在或不是目录：' + this.cwd + '。恢复原目录，或用新工作区的绝对路径调用 dsh_start。',
+        'Workspace directory is missing or is not a directory: ' + this.cwd + '. Restore the original directory or pass the new absolute path to dsh_start.',
+      ));
+    }
     // 桌面版用 Electron 运行 asar 内的 CLI，npm/npx 一般用本进程的 node。
     const dsh = resolveDsh();
+    const runtimeNode = dsh.enginesNode ? probeRuntimeNode(dsh) : null;
+    if (satisfiesNodeRange(dsh.enginesNode, runtimeNode) === false) {
+      throw new Error(L(
+        'DSH 运行时 Node ' + runtimeNode + ' 不满足 ' + dsh.enginesNode +
+          '。请更新所选运行时，或在 MCP 配置中用 DSH_RUNTIME 指定兼容的可执行文件后重连。',
+        'DSH runtime Node ' + runtimeNode + ' does not satisfy ' + dsh.enginesNode +
+          '. Update the selected runtime or set DSH_RUNTIME to a compatible executable in the MCP config, then reconnect.',
+      ));
+    }
     const teamProfile = resolveTeamProfile(dsh.version ?? null);
     this.#teamProfile = teamProfile;
     // ★ 拉进程前确保 profile 就绪：首次使用会自动按本机已有路由建一份。

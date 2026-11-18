@@ -67,7 +67,7 @@ dsh-any-agent team status        # 团队开关与 profile
 在 MCP 客户端里调用 `dsh_doctor`，重点看：
 
 - `dsh_bin`：DSH 入口、版本、来源（桌面版 / npm 全局 / npx 缓存 / DSH_BIN）与运行时；入口落在 npx 缓存（`_npx/<hash>/`）时 **warn** —— 清缓存就会失效；
-- `dsh_runtime`：拉起 DSH 的运行时的 Node 版本是否满足 DSH 的 `engines.node`，不满足时 **warn**；
+- `dsh_runtime`：实际拉起 DSH 的 Node 版本是否满足 `engines.node`。开发版明确检测到不兼容时会报告 **fail**，并在拉起 DSH 前返回升级或设置 `DSH_RUNTIME` 的提示；
 - `dsh_desktop`：桌面版版本，与本服务所用 DSH 不一致时 **warn**（两边共用 `~/.dsh` 会话存储）；
 - `dsh_candidates`：发现的全部 DSH 来源，以及自动选中了哪一个；
 - `dsh_version`：`verified` 为 ok。体检说明引用的是全量套件记录，表中也列出了 0.7.2 安装包工作流等专项验证。`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
@@ -83,3 +83,5 @@ dsh-any-agent team status        # 团队开关与 profile
 3. 如果团队模式打不开，先看 `dsh-any-agent team status` 和 `dsh_doctor` 的 `team` 检查，再对照[团队 profile 配置](team.md)；
 4. 默认跟随桌面版：桌面版升级后服务会在下次拉起 DSH 时自动用上新版本（发现结果缓存 60 秒）。
    确实需要固定某个版本时才显式设置 `DSH_BIN`。
+
+换机恢复旧会话时，原工作区路径也要可用。开发版在目录不存在时会给出路径和恢复提示。可以恢复原目录，或在新路径调用 `dsh_start` 开新会话。
