@@ -67,7 +67,7 @@ dsh-any-agent team status        # 团队开关与 profile
 在 MCP 客户端里调用 `dsh_doctor`，重点看：
 
 - `dsh_bin`：DSH 入口、版本、来源（桌面版 / npm 全局 / npx 缓存 / DSH_BIN）与运行时；入口落在 npx 缓存（`_npx/<hash>/`）时 **warn** —— 清缓存就会失效；
-- `dsh_runtime`：实际拉起 DSH 的 Node 版本是否满足 `engines.node`。开发版明确检测到不兼容时会报告 **fail**，并在拉起 DSH 前返回升级或设置 `DSH_RUNTIME` 的提示；
+- `dsh_runtime`：实际拉起 DSH 的 Node 版本是否满足 `engines.node`。开发版遇到无效的 `DSH_RUNTIME` 路径或确认版本不兼容时报告 **fail**。读不到版本时报告 **warn**；
 - `dsh_desktop`：桌面版版本，与本服务所用 DSH 不一致时 **warn**（两边共用 `~/.dsh` 会话存储）；
 - `dsh_candidates`：发现的全部 DSH 来源，以及自动选中了哪一个；
 - `dsh_version`：`verified` 为 ok。体检说明引用的是全量套件记录，表中也列出了 0.7.2 安装包工作流等专项验证。`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；

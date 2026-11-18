@@ -136,32 +136,48 @@ export class AcpProcess {
       const prev = String(env.NODE_OPTIONS ?? '').trim();
       env.NODE_OPTIONS = `${prev} --max-old-space-size=${CHILD_MAX_OLD_SPACE_MB}`.trim();
     }
-    this.#child = spawn(dsh.command, [...dsh.args, '--profile', teamProfile.profile], {
-      cwd: this.cwd,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
+    const launchError = (cause) => new Error(
+      L(
+        `无法启动 DSH 运行时 ${dsh.command}（${cause.code ?? 'spawn failed'}）。请检查可执行文件或 DSH_RUNTIME。`,
+        `Unable to launch DSH runtime ${dsh.command} (${cause.code ?? 'spawn failed'}). Check the executable or DSH_RUNTIME.`,
+      ),
+      { cause },
+    );
+    let child;
+    try {
+      child = spawn(dsh.command, [...dsh.args, '--profile', teamProfile.profile], {
+        cwd: this.cwd,
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+    } catch (e) {
+      throw launchError(e);
+    }
 
-    this.#child.stdout.on('data', (d) => this.#onData(d));
-    // ★ stdio 的 'error' 必须常驻监听：子进程退出与下一次写入之间存在竞态，
-    //   未监听的 EPIPE 会以未处理错误终止**整个 MCP 进程**（连带所有会话）。
-    const streamError = (e) => {
-      this.#log.info(`[acp] 子进程 stdio 错误: ${e.message}`);
-      const err = new Error(`DSH 进程 stdio 不可用: ${e.message}`);
-      for (const [, p] of this.#pending) {
-        clearTimeout(p.timer);
-        p.reject(err);
+    this.#child = child;
+    const failChild = (error) => {
+      if (this.#child !== child) return;
+      for (const pending of this.#pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(error);
       }
       this.#pending.clear();
       this.#child = null;
       this.initialized = false;
-      this.#notifyExit(`DSH stdio 不可用: ${e.message}`);
+      this.#notifyExit(error.message);
     };
-    this.#child.stdin.on('error', streamError);
-    this.#child.stdout.on('error', streamError);
-    this.#child.stderr.on('error', streamError);
-    this.#child.stderr.on('data', (d) => {
+    child.stdout.on('data', (d) => this.#onData(d));
+    // ★ stdio 的 'error' 必须常驻监听：子进程退出与下一次写入之间存在竞态，
+    //   未监听的 EPIPE 会以未处理错误终止**整个 MCP 进程**（连带所有会话）。
+    const streamError = (e) => {
+      this.#log.info(`[acp] 子进程 stdio 错误: ${e.message}`);
+      failChild(new Error(`DSH 进程 stdio 不可用: ${e.message}`, { cause: e }));
+    };
+    child.stdin.on('error', streamError);
+    child.stdout.on('error', streamError);
+    child.stderr.on('error', streamError);
+    child.stderr.on('data', (d) => {
       for (const line of this.#errDecoder.push(d)) {
         if (!line.trim()) continue;
         this.#stderrTail.push(line.trim());
@@ -170,20 +186,15 @@ export class AcpProcess {
         this.#log.dshStderr(`[dsh stderr] ${line.trim()}`);
       }
     });
-    this.#child.on('exit', (code) => {
-      const err = new Error(`DSH 进程退出（code=${code}）`);
-      for (const [, p] of this.#pending) {
-        clearTimeout(p.timer);
-        p.reject(err);
-      }
-      this.#pending.clear();
-      this.#child = null;
-      this.initialized = false;
-      this.#notifyExit(`DSH 进程退出（code=${code}）`);
+    child.on('exit', (code) => {
+      failChild(new Error(`DSH 进程退出（code=${code}）`));
       this.#log.debug(`[acp] 进程退出 code=${code}`);
     });
-    this.#child.on('error', (e) => this.#log.info(`[acp] spawn 失败: ${e.message}`));
-    const child = this.#child;
+    child.on('error', (e) => {
+      this.#log.info(`[acp] 子进程操作失败: ${e.message}`);
+      // A failed kill can emit 'error' too. A child with a PID still owns its state until exit.
+      if (child.pid === undefined) failChild(launchError(e));
+    });
     this.#startTime = readProcessStartTime(child.pid).then((time) => this.#child === child && this.alive ? time : null);
     return this;
   }

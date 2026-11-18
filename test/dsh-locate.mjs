@@ -275,24 +275,50 @@ try {
   writeFileSync(join(launchRoot, 'package.json'), JSON.stringify({ engines: { node: '>=999.0.0' } }));
   writeFileSync(entry, 'process.exit(98);');
   const acpUrl = new URL('../src/acp.mjs', import.meta.url);
-  const tryStart = (cwd) => spawnSync(process.execPath, [
-    '--input-type=module', '-e',
-    'import { AcpProcess } from ' + JSON.stringify(acpUrl.href) + '; new AcpProcess({ cwd: process.argv[1] }).start();',
-    cwd,
+  const spawnAcp = 'import { AcpProcess } from ' + JSON.stringify(acpUrl.href) + ';' +
+    'const acp = new AcpProcess({ cwd: process.argv[1] }); acp.start();';
+  const runLaunchScript = (script, cwd, runtime = '') => spawnSync(process.execPath, [
+    '--input-type=module', '-e', script, cwd,
   ], {
-    env: { ...process.env, DSH_BIN: entry, DSH_RUNTIME: '', DSH_HOME: dshHome, DSH_MCP_LANG: 'en' },
+    env: {
+      ...process.env, DSH_BIN: entry, DSH_RUNTIME: runtime, DSH_HOME: dshHome,
+      DSH_MCP_LANG: 'en', DSH_MCP_UPDATE_CHECK: '0',
+    },
     encoding: 'utf8', timeout: 10_000, cwd: fileURLToPath(new URL('..', import.meta.url)),
   });
   check('节点版本明确不兼容时，在拉起 DSH 前报出要求和 DSH_RUNTIME', () => {
-    const result = tryStart(launchRoot);
+    const result = runLaunchScript(spawnAcp, launchRoot);
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /DSH runtime Node .* does not satisfy >=999\.0\.0.*DSH_RUNTIME/);
     assert.equal(existsMaybeAsar(dshHome), false, 'profile bootstrap must not run');
   });
   check('旧会话目录不存在时说明如何恢复工作区', () => {
-    const result = tryStart(join(launchRoot, 'old-workspace'));
+    const result = runLaunchScript(spawnAcp, join(launchRoot, 'old-workspace'));
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /Workspace directory is missing .*old-workspace.*dsh_start/);
+  });
+  check('目录形式的 DSH_RUNTIME 在 ACP 启动和体检中均明确失败', () => {
+    const result = runLaunchScript(spawnAcp, launchRoot, launchRoot);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /DSH_RUNTIME_INVALID/);
+    const doctorUrl = new URL('../src/doctor.mjs', import.meta.url);
+    const doctor = runLaunchScript(
+      'import { runDoctor } from ' + JSON.stringify(doctorUrl.href) + ';' +
+      'const { structured } = await runDoctor({ conversations: new Map() });' +
+      'console.log(JSON.stringify(structured.checks.find(c => c.id === "dsh_runtime")));',
+      launchRoot, launchRoot,
+    );
+    assert.equal(doctor.status, 0, doctor.stderr);
+    const runtime = JSON.parse(doctor.stdout);
+    assert.equal(runtime.status, 'fail');
+    assert.match(runtime.detail, /DSH_RUNTIME/);
+  });
+  check('不可执行的 DSH_RUNTIME 返回启动失败而不是 ACP 超时', () => {
+    const invalid = join(launchRoot, 'not-an-executable.txt');
+    writeFileSync(invalid, 'This file is not an executable.');
+    const result = runLaunchScript(spawnAcp + 'await acp.request("initialize", {}, 500);', launchRoot, invalid);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Unable to launch DSH runtime .*not-an-executable\.txt/);
   });
 
   console.log('\n[7] 注册表导出解析');

@@ -459,9 +459,24 @@ export function rankCandidates(list) {
   );
 }
 
+function assertRuntimeFile(path) {
+  let isFile = false;
+  try {
+    isFile = statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    // Invalid or inaccessible path.
+  }
+  if (!isFile) {
+    const error = new Error(`DSH_RUNTIME 指向的文件不存在、不可访问或不是文件: ${path}`);
+    error.code = 'DSH_RUNTIME_INVALID';
+    throw error;
+  }
+}
+
 /** 自动发现到的全部候选（已排序，第一个就是默认选择）。结果缓存 60 秒。 */
 export function discoverDsh({ fresh = false } = {}) {
   const runtime = process.env.DSH_RUNTIME ? resolve(process.env.DSH_RUNTIME) : null;
+  if (runtime) assertRuntimeFile(runtime);
   if (
     !fresh &&
     discoveryCache &&
@@ -470,7 +485,6 @@ export function discoverDsh({ fresh = false } = {}) {
   ) {
     return discoveryCache.list;
   }
-  if (runtime && !existsSync(runtime)) throw new Error(`DSH_RUNTIME 指向的文件不存在: ${runtime}`);
   const raw = [...desktopCandidates(), ...globalCandidates(), ...npxCandidates()];
   const list = rankCandidates(runtime ? applyRuntimeOverride(raw, runtime) : raw);
   discoveryCache = { at: Date.now(), runtime, list };
@@ -511,7 +525,7 @@ function explicitDsh(binPath, runtimePath) {
   const split = splitAsarPath(binPath);
   let command = process.execPath;
   if (runtimePath) {
-    if (!existsSync(runtimePath)) throw new Error(`DSH_RUNTIME 指向的文件不存在: ${runtimePath}`);
+    assertRuntimeFile(runtimePath);
     command = runtimePath;
   } else if (split) {
     command = desktopExeForAsar(split.asar);

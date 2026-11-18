@@ -148,7 +148,7 @@ export async function runDoctor(hub) {
     const engOk = satisfiesNodeRange(dsh.enginesNode, runtimeNode);
     add(
       'dsh_runtime',
-      engOk === false ? 'fail' : 'ok',
+      engOk === false ? 'fail' : runtimeNode ? 'ok' : 'warn',
       L(
         `运行时 Node ${runtimeNode ?? '未知'}，DSH 要求 ${dsh.enginesNode ?? '未声明'}`,
         `runtime Node ${runtimeNode ?? 'unknown'}, DSH requires ${dsh.enginesNode ?? 'nothing declared'}`,
@@ -160,7 +160,7 @@ export async function runDoctor(hub) {
               'install the desktop app (it bundles a runtime that qualifies and is preferred), upgrade the local Node, or point DSH_RUNTIME at a node that qualifies',
             )
           : L('更新桌面版，或用 DSH_RUNTIME 指定一个满足要求的 node', 'update the desktop app, or point DSH_RUNTIME at a node that qualifies')
-        : null,
+        : runtimeNode ? null : L('检查运行时是否可执行，并能报告 Node 版本', 'check that the runtime is executable and can report its Node version'),
     );
 
     // GUI（桌面版）与本服务是不是同一份 DSH：两边共用 ~/.dsh 会话存储。
@@ -210,14 +210,17 @@ export async function runDoctor(hub) {
           : L('升级到 DSH 0.1.7-rc.1 及以上', 'upgrade to DSH 0.1.7-rc.1 or newer'),
     );
   } catch (e) {
+    const runtimeInvalid = e.code === 'DSH_RUNTIME_INVALID';
     add(
-      'dsh_bin',
+      runtimeInvalid ? 'dsh_runtime' : 'dsh_bin',
       'fail',
       e.message,
-      L(
-        '安装 DeepSeek Harness 桌面版（自动识别），或设置 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js',
-        'install the DeepSeek Harness desktop app (detected automatically), or point DSH_BIN at @deepseek-ai/dsh/lib/bin.js',
-      ),
+      runtimeInvalid
+        ? L('让 DSH_RUNTIME 指向 Node 可执行文件，或移除覆盖以使用默认运行时', 'point DSH_RUNTIME at a Node executable, or remove the override to use the default runtime')
+        : L(
+          '安装 DeepSeek Harness 桌面版（自动识别），或设置 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js',
+          'install the DeepSeek Harness desktop app (detected automatically), or point DSH_BIN at @deepseek-ai/dsh/lib/bin.js',
+        ),
     );
   }
 
