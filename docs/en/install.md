@@ -258,7 +258,7 @@ For a local checkout, use `"command": "node"` and `"args": ["/absolute/path/to/s
 1. Reconnect the MCP server in your client and call `dsh_doctor`. If it returns, the MCP connection works. Check `dsh_bin` and `dsh_runtime` for the selected DSH and its runtime, and `profile` for the route configuration. This step makes no model request.
 2. To test the model too, open an empty folder in your client and send the prompt below. This makes one short DSH model request. A completed turn with `OK` confirms that dispatch and result retrieval work.
 
-> Start a DSH session in the current folder with `dsh_start` in `read-only` mode. Use `dsh_send` with `wait=true`, `client_run_id="install-check"`, and the prompt “Reply with exactly OK. Do not use tools.” Show me the answer, `conversation_id`, and `run_id`.
+> Start a `read-only` session with `dsh_start`. Pass the absolute path of the current project folder as `cwd`. Use `dsh_send` with `wait=true`, `client_run_id="install-check"`, and the prompt “Reply with exactly OK. Do not use tools.” Show me the answer, `conversation_id`, and `run_id`.
 
 If the health check works but the short task fails, check the DSH model route and provider credentials. If your client times out waiting, use `dsh_get` with the conversation ID and `client_run_id="install-check"` to check the turn before dispatching again.
 
