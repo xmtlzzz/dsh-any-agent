@@ -1,7 +1,7 @@
 /** Exercise the installed tarball over stdio. --upgrade starts on npm latest; --real uses the configured provider. */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -14,7 +14,9 @@ const real = process.argv.includes('--real');
 const upgrade = process.argv.includes('--upgrade');
 const npm = process.env.npm_execpath;
 assert.ok(npm, 'Run this suite with npm run test:packed');
-const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-package-lifecycle-'));
+// macOS can return a temp path under /var rather than its canonical /private/var path.
+// Give npm the canonical path so its prefix and package-lock refer to the same consumer.
+const root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-any-agent-package-lifecycle-')));
 const install = join(root, 'consumer');
 const project = join(root, 'workspace');
 const second = join(root, 'other-workspace');
@@ -38,7 +40,7 @@ function installTarball({ file, integrity }) {
   const lock = JSON.parse(readFileSync(join(install, 'package-lock.json'), 'utf8'));
   // The candidate may still carry the published version before the release bump.
   assert.ok(integrity, 'missing tarball integrity');
-  assert.equal(lock.packages['node_modules/dsh-any-agent'].integrity, integrity, 'npm must install the selected tarball');
+  assert.equal(lock.packages?.['node_modules/dsh-any-agent']?.integrity, integrity, 'npm must install the selected tarball as a dependency of the consumer');
 }
 
 async function until(check, ms = 120_000) {
@@ -81,6 +83,8 @@ function connect() {
 
 try {
   const runtime = real ? resolveDsh() : null;
+  mkdirSync(install);
+  writeFileSync(join(install, 'package.json'), JSON.stringify({ name: 'dsh-any-agent-test-consumer', private: true }));
   mkdirSync(project);
   mkdirSync(second);
   const candidate = pack(root);
