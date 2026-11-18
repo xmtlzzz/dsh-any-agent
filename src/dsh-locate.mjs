@@ -209,6 +209,21 @@ export function existsMaybeAsar(p) {
   return asarEntry(split.asar, split.inner) !== null;
 }
 
+function isRegularFile(path) {
+  try {
+    return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    return false;
+  }
+}
+
+function isDshEntry(path) {
+  const split = splitAsarPath(path);
+  if (!split) return isRegularFile(path);
+  const entry = asarEntry(split.asar, split.inner);
+  return entry !== null && !entry.node.files;
+}
+
 /** 读 bin.js 所在包的 version / engines.node（asar 感知）。 */
 export function readDshPackage(bin) {
   const txt = readMaybeAsar(join(dirname(bin), '..', 'package.json'));
@@ -343,7 +358,7 @@ export function desktopCandidate({ dir, exe = null, displayVersion = null, via }
       : join(dir, 'resources', 'app.asar');
   if (!existsSync(asar)) return null;
   const bin = join(asar, ...ASAR_DSH_ROOT, 'lib', 'bin.js');
-  if (!existsMaybeAsar(bin)) return null;
+  if (!isDshEntry(bin)) return null;
   const runtime = desktopExeForAsar(asar, exe);
   if (!runtime) return null;
   const pkg = readDshPackage(bin);
@@ -381,7 +396,7 @@ function desktopCandidates() {
 // ── npm 全局 / npx 缓存 ─────────────────────────────────────────
 
 function nodeCandidate(source, bin) {
-  if (!isHostAbsolute(bin) || !existsSync(bin)) return null;
+  if (!isHostAbsolute(bin) || !isDshEntry(bin)) return null;
   const pkg = readDshPackage(bin);
   return {
     source,
@@ -460,13 +475,7 @@ export function rankCandidates(list) {
 }
 
 function assertRuntimeFile(path) {
-  let isFile = false;
-  try {
-    isFile = statSync(path, { throwIfNoEntry: false })?.isFile() === true;
-  } catch {
-    // Invalid or inaccessible path.
-  }
-  if (!isFile) {
+  if (!isRegularFile(path)) {
     const error = new Error(`DSH_RUNTIME 指向的文件不存在、不可访问或不是文件: ${path}`);
     error.code = 'DSH_RUNTIME_INVALID';
     throw error;
@@ -518,8 +527,8 @@ export function applyRuntimeOverride(list, runtime) {
 
 /** 显式 DSH_BIN（可选 DSH_RUNTIME）。 */
 function explicitDsh(binPath, runtimePath) {
-  if (!existsMaybeAsar(binPath)) {
-    throw new Error(`DSH_BIN 指向的文件不存在: ${binPath}。请更新路径，或删除 DSH_BIN 后重连以恢复自动探测。`);
+  if (!isDshEntry(binPath)) {
+    throw new Error(`DSH_BIN 指向的文件不存在、不可访问或不是文件: ${binPath}。请更新路径，或删除 DSH_BIN 后重连以恢复自动探测。`);
   }
   const pkg = readDshPackage(binPath);
   const split = splitAsarPath(binPath);
@@ -563,7 +572,7 @@ export function resolveDsh({ fresh = false } = {}) {
   if (selected && !fresh) {
     // A desktop update or npm replacement can change the entry at the cached path.
     const { version, enginesNode } = readDshPackage(selected.bin);
-    if (version !== selected.version || enginesNode !== selected.enginesNode || !existsMaybeAsar(selected.bin)) {
+    if (version !== selected.version || enginesNode !== selected.enginesNode || !isDshEntry(selected.bin)) {
       [selected] = discoverDsh({ fresh: true });
     }
   }

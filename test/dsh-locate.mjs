@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   applyRuntimeOverride,
@@ -212,9 +212,11 @@ try {
     assert.equal(d.runtimeOk, true);
     assert.deepEqual(d.env, {});
   });
-  check('DSH_BIN 指向不存在的文件 → 清晰报错', () => {
-    process.env.DSH_BIN = join(root, 'missing', 'bin.js');
-    assert.throws(() => resolveDsh(), /DSH_BIN 指向的文件不存在/);
+  check('DSH_BIN 指向不存在的路径或目录（含 asar）→ 清晰报错', () => {
+    for (const path of [join(root, 'missing', 'bin.js'), root, dirname(asarBin)]) {
+      process.env.DSH_BIN = path;
+      assert.throws(() => resolveDsh(), /DSH_BIN 指向的文件不存在.*不是文件.*恢复自动探测/);
+    }
   });
 
   console.log('\n[5b] ★ 只设 DSH_RUNTIME（不设 DSH_BIN）也作用于自动发现的候选（PR #11 评审）');
