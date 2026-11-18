@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] — 2026-11-18
+
+### Added
+
+- Use `dsh-any-agent-setup --repair` to preview refreshed launch paths in existing client entries. Add `--yes` to apply while keeping permission, approval, daemon and other settings.
+
+### Fixed
+
+- Report known runtime incompatibility and missing workspace directories before spawning DSH. An invalid explicit DSH path includes instructions for restoring automatic discovery.
+- Reject directories supplied as DSH CLI or runtime paths, and report process launch failures without waiting for an ACP timeout.
+- Discover on-disk sessions even when the first registered session refers to a missing workspace.
+
 ## [0.7.5] — 2026-11-16
 
 ### Fixed
@@ -1723,7 +1735,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...HEAD
+[0.7.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...v0.7.3

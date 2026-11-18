@@ -58,6 +58,7 @@ const cleanEnv = {
   DSH_MCP_PERMISSION: '',
   DSH_MCP_ALLOW_FULL_ACCESS: '',
   DSH_MCP_TEAM: '',
+  DSH_MCP_PROFILE: '',
 };
 for (const k of Object.keys(cleanEnv)) delete process.env[k];
 

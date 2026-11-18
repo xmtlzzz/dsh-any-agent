@@ -954,14 +954,14 @@ export class Hub {
         ? this.#probeCache.sessions
         : null;
 
-    const probeCwd = cwd ?? [...this.conversations.values()][0]?.cwd ?? process.cwd();
     let sessions = cached;
     if (cached) {
       this.lastProbe = { ok: true, error: null, cached: true, at: this.#probeCache.at };
     } else if (!sessions) {
       let proc = null;
       try {
-        proc = new AcpProcess({ cwd: probeCwd, permission: 'read-only' });
+        // A persisted session may refer to a removed directory. Unfiltered discovery runs from the server's own cwd.
+        proc = new AcpProcess({ cwd: cwd ?? process.cwd(), permission: 'read-only' });
         proc.start();
         await proc.initialize();
         const res = await proc.request('session/list', cwd ? { cwd } : {});

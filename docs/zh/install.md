@@ -185,6 +185,7 @@ DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `
 | 就地改权限档 | `dsh-any-agent-setup --yes --permission read-only` |
 | 开常驻进程模式（`DSH_MCP_DAEMON=1`） | `dsh-any-agent-setup --yes --daemon`（和 `--permission` 一样按本次参数整条重写，不带它重跑就关掉） |
 | 升级包之后更新配置 | `dsh-any-agent-setup --yes`（幂等，只重写有差异的条目） |
+| 仅更新已有条目的启动路径（0.7.6 起） | `dsh-any-agent-setup --repair --yes` |
 | 从所有客户端移除 | `dsh-any-agent-setup --remove --yes` |
 | 只从某几个移除 | `dsh-any-agent-setup --remove --yes --only codex` |
 | 彻底卸载 | 先 `dsh-any-agent-setup --remove --yes`，再 `npm uninstall -g dsh-any-agent`；`$DSH_HOME/profiles/dsh-mcp/` 可删可留（留着无害）。你的 DSH 凭据和会话历史本服务从不写入，不受影响 |
@@ -219,6 +220,8 @@ Codex        我们的两个 TOML 段        ->  已移除
 **记录的是绝对路径**
 
 `setup` 写进去的是它运行时所处安装目录的**绝对路径**。**如果你移动或删除了那个目录，所有客户端都会报 `CONNECTION_CLOSED`**，直到你在新位置重新跑一遍 `setup`，或者用 `--remove` 把失效条目清掉。
+
+从 0.7.6 起，升级或移动安装目录后，可以先运行 `dsh-any-agent-setup --repair` 预览，再加 `--yes` 更新已有条目的启动命令和参数。权限档、常驻进程模式、审批策略、手工环境变量和客户端超时等设置会保留。若配置里的 `DSH_BIN` 或 `DSH_RUNTIME` 也指向旧机器，请更新对应路径，或删除覆盖以恢复自动探测。注册到新客户端仍用 `dsh-any-agent-setup --yes`。
 
 最容易踩到的情况：装到临时目录里试用，然后清理掉 —— 配置还指着那个已经不存在的路径。
 

@@ -10,6 +10,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { statSync } from 'node:fs';
 import { ensureProfile } from './bootstrap.mjs';
 import {
   CHILD_MAX_OLD_SPACE_MB,
@@ -18,6 +19,8 @@ import {
   resolveDsh,
   resolveTeamProfile,
 } from './config.mjs';
+import { probeRuntimeNode, satisfiesNodeRange } from './dsh-locate.mjs';
+import { L } from './lang.mjs';
 import { LineDecoder } from './line-decoder.mjs';
 import { readProcessStartTime } from './locks.mjs';
 
@@ -99,8 +102,23 @@ export class AcpProcess {
   /** 拉起进程。注意 ACP 没有"就绪"握手信号，spawn 后即可发请求。 */
   start() {
     if (this.#child) throw new Error('AcpProcess 已经启动过了');
+    if (!statSync(this.cwd, { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error(L(
+        '工作区目录不存在或不是目录：' + this.cwd + '。恢复原目录，或用新工作区的绝对路径调用 dsh_start。',
+        'Workspace directory is missing or is not a directory: ' + this.cwd + '. Restore the original directory or pass the new absolute path to dsh_start.',
+      ));
+    }
     // 桌面版用 Electron 运行 asar 内的 CLI，npm/npx 一般用本进程的 node。
     const dsh = resolveDsh();
+    const runtimeNode = dsh.enginesNode ? probeRuntimeNode(dsh) : null;
+    if (satisfiesNodeRange(dsh.enginesNode, runtimeNode) === false) {
+      throw new Error(L(
+        'DSH 运行时 Node ' + runtimeNode + ' 不满足 ' + dsh.enginesNode +
+          '。请更新所选运行时，或在 MCP 配置中用 DSH_RUNTIME 指定兼容的可执行文件后重连。',
+        'DSH runtime Node ' + runtimeNode + ' does not satisfy ' + dsh.enginesNode +
+          '. Update the selected runtime or set DSH_RUNTIME to a compatible executable in the MCP config, then reconnect.',
+      ));
+    }
     const teamProfile = resolveTeamProfile(dsh.version ?? null);
     this.#teamProfile = teamProfile;
     // ★ 拉进程前确保 profile 就绪：首次使用会自动按本机已有路由建一份。
@@ -118,32 +136,48 @@ export class AcpProcess {
       const prev = String(env.NODE_OPTIONS ?? '').trim();
       env.NODE_OPTIONS = `${prev} --max-old-space-size=${CHILD_MAX_OLD_SPACE_MB}`.trim();
     }
-    this.#child = spawn(dsh.command, [...dsh.args, '--profile', teamProfile.profile], {
-      cwd: this.cwd,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
+    const launchError = (cause) => new Error(
+      L(
+        `无法启动 DSH 运行时 ${dsh.command}（${cause.code ?? 'spawn failed'}）。请检查可执行文件或 DSH_RUNTIME。`,
+        `Unable to launch DSH runtime ${dsh.command} (${cause.code ?? 'spawn failed'}). Check the executable or DSH_RUNTIME.`,
+      ),
+      { cause },
+    );
+    let child;
+    try {
+      child = spawn(dsh.command, [...dsh.args, '--profile', teamProfile.profile], {
+        cwd: this.cwd,
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+    } catch (e) {
+      throw launchError(e);
+    }
 
-    this.#child.stdout.on('data', (d) => this.#onData(d));
-    // ★ stdio 的 'error' 必须常驻监听：子进程退出与下一次写入之间存在竞态，
-    //   未监听的 EPIPE 会以未处理错误终止**整个 MCP 进程**（连带所有会话）。
-    const streamError = (e) => {
-      this.#log.info(`[acp] 子进程 stdio 错误: ${e.message}`);
-      const err = new Error(`DSH 进程 stdio 不可用: ${e.message}`);
-      for (const [, p] of this.#pending) {
-        clearTimeout(p.timer);
-        p.reject(err);
+    this.#child = child;
+    const failChild = (error) => {
+      if (this.#child !== child) return;
+      for (const pending of this.#pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(error);
       }
       this.#pending.clear();
       this.#child = null;
       this.initialized = false;
-      this.#notifyExit(`DSH stdio 不可用: ${e.message}`);
+      this.#notifyExit(error.message);
     };
-    this.#child.stdin.on('error', streamError);
-    this.#child.stdout.on('error', streamError);
-    this.#child.stderr.on('error', streamError);
-    this.#child.stderr.on('data', (d) => {
+    child.stdout.on('data', (d) => this.#onData(d));
+    // ★ stdio 的 'error' 必须常驻监听：子进程退出与下一次写入之间存在竞态，
+    //   未监听的 EPIPE 会以未处理错误终止**整个 MCP 进程**（连带所有会话）。
+    const streamError = (e) => {
+      this.#log.info(`[acp] 子进程 stdio 错误: ${e.message}`);
+      failChild(new Error(`DSH 进程 stdio 不可用: ${e.message}`, { cause: e }));
+    };
+    child.stdin.on('error', streamError);
+    child.stdout.on('error', streamError);
+    child.stderr.on('error', streamError);
+    child.stderr.on('data', (d) => {
       for (const line of this.#errDecoder.push(d)) {
         if (!line.trim()) continue;
         this.#stderrTail.push(line.trim());
@@ -152,20 +186,15 @@ export class AcpProcess {
         this.#log.dshStderr(`[dsh stderr] ${line.trim()}`);
       }
     });
-    this.#child.on('exit', (code) => {
-      const err = new Error(`DSH 进程退出（code=${code}）`);
-      for (const [, p] of this.#pending) {
-        clearTimeout(p.timer);
-        p.reject(err);
-      }
-      this.#pending.clear();
-      this.#child = null;
-      this.initialized = false;
-      this.#notifyExit(`DSH 进程退出（code=${code}）`);
+    child.on('exit', (code) => {
+      failChild(new Error(`DSH 进程退出（code=${code}）`));
       this.#log.debug(`[acp] 进程退出 code=${code}`);
     });
-    this.#child.on('error', (e) => this.#log.info(`[acp] spawn 失败: ${e.message}`));
-    const child = this.#child;
+    child.on('error', (e) => {
+      this.#log.info(`[acp] 子进程操作失败: ${e.message}`);
+      // A failed kill can emit 'error' too. A child with a PID still owns its state until exit.
+      if (child.pid === undefined) failChild(launchError(e));
+    });
     this.#startTime = readProcessStartTime(child.pid).then((time) => this.#child === child && this.alive ? time : null);
     return this;
   }

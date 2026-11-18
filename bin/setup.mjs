@@ -4,6 +4,7 @@
  *
  *   dsh-any-agent-setup                       检测并预览；一个字节都不写
  *   dsh-any-agent-setup --yes                 真正写入（先备份）
+ *   dsh-any-agent-setup --repair --yes        更新已有条目的启动命令和参数
  *   dsh-any-agent-setup --yes --only cursor,zed
  *   dsh-any-agent-setup --yes --permission read-only
  *   dsh-any-agent-setup --yes --daemon        回合跑在常驻进程里（写 DSH_MCP_DAEMON=1）
@@ -72,6 +73,7 @@ if (has('--help') || has('-h')) {
     'Usage:\n' +
     '  dsh-any-agent-setup                     preview (writes nothing)\n' +
     '  dsh-any-agent-setup --yes               apply\n' +
+    '  dsh-any-agent-setup --repair [--yes]    update the existing launch command and arguments\n' +
     '  dsh-any-agent-setup --yes --only a,b    only these clients\n' +
     '  dsh-any-agent-setup --yes --permission read-only\n' +
     '  dsh-any-agent-setup --yes --daemon      run turns in a resident process that\n' +
@@ -95,8 +97,8 @@ if (has('--help') || has('-h')) {
     '    only in case, so it is never re-serialised from a parsed object;\n' +
     '  * every write is preceded by <file>.bak-dsh-<timestamp>.\n\n' +
     'The path recorded in each client is absolute. If you move or delete this\n' +
-    'installation those clients report CONNECTION_CLOSED until setup is re-run\n' +
-    'from the new location (or --remove to clean up).\n',
+    'installation, run setup --repair from the new location to preview the\n' +
+    'updated launch paths. Add --yes to apply and preserve existing settings.\n',
   );
   process.exit(0);
 }
@@ -104,6 +106,7 @@ if (has('--help') || has('-h')) {
 
 const WRITE = (has('--yes') || has('-y')) && !has('--dry-run') && !has('--preview');
 const REMOVE = has('--remove');
+const REPAIR = has('--repair');
 const ONLY = (val('--only', '') || val('--clients', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
 const PERMISSION = val('--permission', 'workspace-write');
 const HOME_OVERRIDE = val('--home');
@@ -121,6 +124,13 @@ const log = (s = '') => {
 const tick = (s) => log('  OK   ' + s);
 const dash = (s) => log('  ---  ' + s);
 const bang = (s) => log('  FAIL ' + s);
+
+if (REPAIR && (REMOVE || has('--permission') || DAEMON)) {
+  const error = '--repair updates the launch command and arguments; run --remove, --permission or --daemon separately';
+  if (JSON_OUT) process.stdout.write(JSON.stringify({ ok: false, mode: 'error', error, clients: [] }) + '\n');
+  else bang(error);
+  process.exit(2);
+}
 
 if (!PERMISSION_TIERS.includes(PERMISSION)) {
   log(`--permission 必须是 ${PERMISSION_TIERS.join(' | ')} 之一；收到: ${JSON.stringify(PERMISSION)}`);
@@ -148,7 +158,7 @@ if (unknown.length) {
 
 const launch = defaultLaunch();
 const env = desiredEnv(PERMISSION, DAEMON ? { DSH_MCP_DAEMON: '1' } : {});
-const ctx = { dirs, remove: REMOVE, write: WRITE, launch, env, byId, force: FORCE };
+const ctx = { dirs, remove: REMOVE, repair: REPAIR, write: WRITE, launch, env, byId, force: FORCE };
 
 if (!JSON_OUT) {
   log('');
@@ -156,10 +166,12 @@ if (!JSON_OUT) {
     ? (REMOVE ? 'Removing ' + ENTRY_NAME + ' from MCP clients' : 'Installing ' + ENTRY_NAME + ' into MCP clients')
     : 'Preview only -- nothing is written. Re-run with --yes to apply.');
   log('  home       : ' + dirs.home);
-  log('  permission : ' + PERMISSION);
-  log('  daemon     : ' + (DAEMON ? 'on (DSH_MCP_DAEMON=1)' : 'off'));
+  if (!REPAIR) {
+    log('  permission : ' + PERMISSION);
+    log('  daemon     : ' + (DAEMON ? 'on (DSH_MCP_DAEMON=1)' : 'off'));
+    log('  DSH_BIN    : ' + (process.env.DSH_BIN || '(unset -- auto-detect at runtime)'));
+  }
   log('  launch     : ' + launch.command + (launch.args.length ? ' ' + launch.args.join(' ') : '') + '   (' + launch.style + ')');
-  log('  DSH_BIN    : ' + (process.env.DSH_BIN || '(unset -- auto-detect at runtime)'));
   log('');
 }
 

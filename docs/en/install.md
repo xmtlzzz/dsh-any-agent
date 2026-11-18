@@ -172,6 +172,7 @@ A restore is itself destructive, so it copies the **current** file aside as `.ba
 | Change the permission tier in place | `dsh-any-agent-setup --yes --permission read-only` |
 | Turn on resident process mode (`DSH_MCP_DAEMON=1`) | `dsh-any-agent-setup --yes --daemon` (rewritten from this run's flags like `--permission`; re-running without it turns it off) |
 | Update after upgrading the package | `dsh-any-agent-setup --yes` (idempotent; only differing entries are rewritten) |
+| Refresh launch paths in existing entries (0.7.6 and later) | `dsh-any-agent-setup --repair --yes` |
 | Unregister from every client | `dsh-any-agent-setup --remove --yes` |
 | Unregister from just some | `dsh-any-agent-setup --remove --yes --only codex` |
 | Uninstall completely | `dsh-any-agent-setup --remove --yes`, then `npm uninstall -g dsh-any-agent`; `$DSH_HOME/profiles/dsh-mcp/` can stay or go (leaving it is harmless). This server never writes your DSH credentials or session history, so they are untouched |
@@ -204,6 +205,8 @@ To verify by hand afterwards: `claude mcp list`, `codex mcp list`, and inspect `
 **The recorded path is absolute**
 
 `setup` writes the absolute path of the installation it ran from. **If you move or delete that directory, every client will fail with `CONNECTION_CLOSED`** until you either re-run `setup` from the new location or `--remove` the stale entries. This bites when you install into a temporary folder to try things out, then clean it up: the configs still point into the void.
+
+From 0.7.6 onwards, run `dsh-any-agent-setup --repair` after upgrading or moving an installation. Add `--yes` to update the launch command and arguments in existing entries. Permission, daemon, approval, environment and client timeouts are preserved. Update any `DSH_BIN` or `DSH_RUNTIME` paths left over from the old machine, or remove the overrides to use automatic discovery. Use `dsh-any-agent-setup --yes` to register a new client.
 
 <details>
 <summary>Manual client configuration: Claude Code, Codex and generic MCP</summary>

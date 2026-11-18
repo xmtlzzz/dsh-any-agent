@@ -9,13 +9,13 @@ name: tests
 #     line-decoder      UTF-8 chunk boundaries          4 checks
 #     progress          MCP progress notifications     16 checks
 #     guards            env-var edge cases            43 checks
-#     dsh-locate        DSH auto-discovery (asar)     23 checks
+#     dsh-locate        DSH auto-discovery (asar)     27 checks
 #     prune             sentinel retention            11 checks
 #     approval-details  credential redaction          40 checks
 #     failure-terminal  terminal state on failure     10 checks
 #     shared-host       shared process host           44 checks
 #     resume-retry      cold-resume timeout retry     65 checks (fake ACP server)
-#     dispatch-tools    dispatch surface              85 checks (82 off Windows)
+#     dispatch-tools    dispatch surface              87 checks (84 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        26 checks
 #     live-events       live event stream, write side  47 checks
@@ -40,7 +40,7 @@ name: tests
 #     test-counts       report parser + docs sync     92 checks
 #     roots             cwd from MCP roots            18 checks
 #     workspace-titles  home/root cwd guard, title_hint 19 checks (17 off Windows)
-#     setup             client config writer          49 checks
+#     setup             client config writer          56 checks
 #     removal-scope     --remove only touches its own   61 checks
 #     config-safety     in-place edits, format        449 checks
 #     real-configs      real config round-trip        skips without client fixtures
@@ -361,7 +361,7 @@ jobs:
       - name: package.json and bin sanity
         run: node test/package-check.mjs
 
-      - name: upgrade from the published 0.7.4 package
+      - name: upgrade from the current npm latest package
         run: npm run test:packed -- --upgrade
 
       - name: pack, install into a scratch project, run it

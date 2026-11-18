@@ -9,6 +9,7 @@
 
 | dsh-any-agent | DSH | 状态 | 说明 |
 |---|---|---|---|
+| 0.7.6 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（ACP、升级） | Windows 使用真实模型从 npm 0.7.5 原地升级，验证了重连取结果、幂等重试和继续原会话 |
 | 0.7.5 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（ACP、升级） | Windows 使用真实模型从 npm 0.7.4 原地升级，验证了旧结果读回、幂等重试和原会话继续派活 |
 | 0.7.4 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（ACP、团队） | Windows 实测常规派活与从 npm 0.7.3 原地升级。桌面版 DSH 配合本地模拟模型接口验证团队默认关闭，开启后可同时使用原生任务板与普通子代理 |
 | 0.7.3 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（常规 ACP） | Windows 全量回归通过，真实模型通过安装和从 0.7.2 升级；IDA MCP 验收因缺少配置跳过。此组合需更新 MCP 才能使用新版团队模式 |
@@ -54,7 +55,7 @@
 3. **npx 缓存**（随时可能被清掉，同等条件下最低优先）。
 
 多个来源同时存在时：当前运行时能满足 `engines.node` 的优先 → 版本高的优先 → 桌面版 > 全局 > npx。
-`DSH_BIN`（可指进 `.asar` 内部）与 `DSH_RUNTIME`（指定拉起 DSH 的可执行文件）只作显式覆盖。
+`DSH_BIN` 指定 DSH 入口文件，可指向 `.asar` 内部。`DSH_RUNTIME` 指定拉起 DSH 的可执行文件。两者都不能指向目录。
 - `0.1.7-rc.1` 至 `0.2.2-rc.1` 使用实验版团队包。从 `0.2.2-rc.2` 起使用 DSH 的会话团队模式，详见[团队模式](team.md)。
 
 ## 怎么确认
@@ -67,7 +68,7 @@ dsh-any-agent team status        # 团队开关与 profile
 在 MCP 客户端里调用 `dsh_doctor`，重点看：
 
 - `dsh_bin`：DSH 入口、版本、来源（桌面版 / npm 全局 / npx 缓存 / DSH_BIN）与运行时；入口落在 npx 缓存（`_npx/<hash>/`）时 **warn** —— 清缓存就会失效；
-- `dsh_runtime`：拉起 DSH 的运行时的 Node 版本是否满足 DSH 的 `engines.node`，不满足时 **warn**；
+- `dsh_runtime`：实际拉起 DSH 的 Node 版本是否满足 `engines.node`。从 0.7.6 起，遇到无效的 `DSH_RUNTIME` 路径或确认版本不兼容时报告 **fail**。读不到版本时报告 **warn**；
 - `dsh_desktop`：桌面版版本，与本服务所用 DSH 不一致时 **warn**（两边共用 `~/.dsh` 会话存储）；
 - `dsh_candidates`：发现的全部 DSH 来源，以及自动选中了哪一个；
 - `dsh_version`：`verified` 为 ok。体检说明引用的是全量套件记录，表中也列出了 0.7.2 安装包工作流等专项验证。`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
@@ -83,3 +84,5 @@ dsh-any-agent team status        # 团队开关与 profile
 3. 如果团队模式打不开，先看 `dsh-any-agent team status` 和 `dsh_doctor` 的 `team` 检查，再对照[团队 profile 配置](team.md)；
 4. 默认跟随桌面版：桌面版升级后服务会在下次拉起 DSH 时自动用上新版本（发现结果缓存 60 秒）。
    确实需要固定某个版本时才显式设置 `DSH_BIN`。
+
+换机恢复旧会话时，原工作区路径也要可用。从 0.7.6 起，目录不存在时会给出路径和恢复提示。可以恢复原目录，或在新路径调用 `dsh_start` 开新会话。

@@ -7,9 +7,11 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   applyRuntimeOverride,
   cmpVersion,
@@ -210,9 +212,11 @@ try {
     assert.equal(d.runtimeOk, true);
     assert.deepEqual(d.env, {});
   });
-  check('DSH_BIN 指向不存在的文件 → 清晰报错', () => {
-    process.env.DSH_BIN = join(root, 'missing', 'bin.js');
-    assert.throws(() => resolveDsh(), /DSH_BIN 指向的文件不存在/);
+  check('DSH_BIN 指向不存在的路径或目录（含 asar）→ 清晰报错', () => {
+    for (const path of [join(root, 'missing', 'bin.js'), root, dirname(asarBin)]) {
+      process.env.DSH_BIN = path;
+      assert.throws(() => resolveDsh(), /DSH_BIN 指向的文件不存在.*不是文件.*恢复自动探测/);
+    }
   });
 
   console.log('\n[5b] ★ 只设 DSH_RUNTIME（不设 DSH_BIN）也作用于自动发现的候选（PR #11 评审）');
@@ -264,7 +268,62 @@ try {
     }
   });
 
-  console.log('\n[6] 注册表导出解析');
+  console.log('\n[6] ACP 启动前检查运行时和工作区');
+  const launchRoot = join(root, 'launch-preflight');
+  const entryDir = join(launchRoot, 'lib');
+  const entry = join(entryDir, 'bin.js');
+  const dshHome = join(launchRoot, 'dsh-home');
+  mkdirSync(entryDir, { recursive: true });
+  writeFileSync(join(launchRoot, 'package.json'), JSON.stringify({ engines: { node: '>=999.0.0' } }));
+  writeFileSync(entry, 'process.exit(98);');
+  const acpUrl = new URL('../src/acp.mjs', import.meta.url);
+  const spawnAcp = 'import { AcpProcess } from ' + JSON.stringify(acpUrl.href) + ';' +
+    'const acp = new AcpProcess({ cwd: process.argv[1] }); acp.start();';
+  const runLaunchScript = (script, cwd, runtime = '') => spawnSync(process.execPath, [
+    '--input-type=module', '-e', script, cwd,
+  ], {
+    env: {
+      ...process.env, DSH_BIN: entry, DSH_RUNTIME: runtime, DSH_HOME: dshHome,
+      DSH_MCP_LANG: 'en', DSH_MCP_UPDATE_CHECK: '0',
+    },
+    encoding: 'utf8', timeout: 10_000, cwd: fileURLToPath(new URL('..', import.meta.url)),
+  });
+  check('节点版本明确不兼容时，在拉起 DSH 前报出要求和 DSH_RUNTIME', () => {
+    const result = runLaunchScript(spawnAcp, launchRoot);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /DSH runtime Node .* does not satisfy >=999\.0\.0.*DSH_RUNTIME/);
+    assert.equal(existsMaybeAsar(dshHome), false, 'profile bootstrap must not run');
+  });
+  check('旧会话目录不存在时说明如何恢复工作区', () => {
+    const result = runLaunchScript(spawnAcp, join(launchRoot, 'old-workspace'));
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Workspace directory is missing .*old-workspace.*dsh_start/);
+  });
+  check('目录形式的 DSH_RUNTIME 在 ACP 启动和体检中均明确失败', () => {
+    const result = runLaunchScript(spawnAcp, launchRoot, launchRoot);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /DSH_RUNTIME_INVALID/);
+    const doctorUrl = new URL('../src/doctor.mjs', import.meta.url);
+    const doctor = runLaunchScript(
+      'import { runDoctor } from ' + JSON.stringify(doctorUrl.href) + ';' +
+      'const { structured } = await runDoctor({ conversations: new Map() });' +
+      'console.log(JSON.stringify(structured.checks.find(c => c.id === "dsh_runtime")));',
+      launchRoot, launchRoot,
+    );
+    assert.equal(doctor.status, 0, doctor.stderr);
+    const runtime = JSON.parse(doctor.stdout);
+    assert.equal(runtime.status, 'fail');
+    assert.match(runtime.detail, /DSH_RUNTIME/);
+  });
+  check('不可执行的 DSH_RUNTIME 返回启动失败而不是 ACP 超时', () => {
+    const invalid = join(launchRoot, 'not-an-executable.txt');
+    writeFileSync(invalid, 'This file is not an executable.');
+    const result = runLaunchScript(spawnAcp + 'await acp.request("initialize", {}, 500);', launchRoot, invalid);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Unable to launch DSH runtime .*not-an-executable\.txt/);
+  });
+
+  console.log('\n[7] 注册表导出解析');
   check('★ 解析 .reg：转义的反斜杠/引号还原、按 section 分组', () => {
     const reg =
       '\uFEFFWindows Registry Editor Version 5.00\r\n\r\n' +

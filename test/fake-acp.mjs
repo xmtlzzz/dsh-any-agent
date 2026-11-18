@@ -14,6 +14,7 @@
  *                      lease         立刻回"写锁被占用"（DSH 真实的措辞，被 ACP 包成 -32603）
  *                      invalid       立刻回 invalid params（-32602）
  *   FAKE_ACP_NOISE   =1 时每条应答前先输出 null / 数字 / 数组 / 字符串这类非对象 JSON 行
+ *   FAKE_ACP_SESSIONS  JSON 数组，用作 session/list 返回的磁盘会话
  *
  * stdin EOF → 立刻退出：和真实 DSH "stdin 关闭 → 有界退出" 一致，所以 AcpProcess.stop() 走优雅路径。
  */
@@ -60,6 +61,12 @@ function handle(msg) {
       });
     case 'session/new':
       return ok(msg.id, { sessionId: 'fake-session', configOptions: [] });
+    case 'session/list': {
+      if (!process.env.FAKE_ACP_SESSIONS) return fail(msg.id, -32601, 'Method not found');
+      const sessions = JSON.parse(process.env.FAKE_ACP_SESSIONS);
+      const cwd = msg.params?.cwd;
+      return ok(msg.id, { sessions: cwd ? sessions.filter((session) => session.cwd === cwd) : sessions });
+    }
     case 'session/resume':
       if (MODE === 'hang-always' || (MODE === 'hang-first' && priorResumes === 0)) return; // 沉默
       if (MODE === 'hang-session' && msg.params?.sessionId === process.env.FAKE_ACP_HANG_SESSION) return;

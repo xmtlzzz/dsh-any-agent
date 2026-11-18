@@ -10,6 +10,7 @@ import assert from 'node:assert';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 const auditDir = mkdtempSync(join(tmpdir(), 'dsh-any-agent-audit-'));
 process.env.DSH_MCP_AUDIT_FILE = join(auditDir, 'audit.jsonl');
 process.env.DSH_HOME = join(auditDir, 'home');
@@ -341,6 +342,40 @@ check('找到 DSH 时才附带 dsh_version 检查', () => {
   const dshFound = doc.structured.checks.find((c) => c.id === 'dsh_bin')?.status !== 'fail';
   assert.equal(ids.includes('dsh_version'), dshFound);
 });
+
+console.log('\n[6a] 磁盘会话探测与失效工作区');
+{
+  const missing = join(auditDir, 'old-workspace');
+  const probeHub = new Hub();
+  const stale = new Conversation({ id: 'old-first', cwd: missing, permission: 'workspace-write' }, probeHub);
+  probeHub.conversations.set(stale.id, stale);
+  const fixtureEnv = {
+    DSH_BIN: fileURLToPath(new URL('./fake-acp.mjs', import.meta.url)),
+    DSH_RUNTIME: process.execPath,
+    FAKE_ACP_DIR: auditDir,
+    FAKE_ACP_SESSIONS: JSON.stringify([{ sessionId: 'other-disk-session', cwd: auditDir }]),
+  };
+  const before = Object.entries(fixtureEnv).map(([key]) => [key, process.env[key]]);
+  try {
+    Object.assign(process.env, fixtureEnv);
+    const all = await probeHub.list({});
+    check('首个已登记会话目录丢失时，全局列表仍能发现其它磁盘会话', () => {
+      assert.equal(probeHub.lastProbe.ok, true);
+      assert.ok(all.some((session) => session.conversation_id === 'other-disk-session'));
+    });
+    const filtered = await probeHub.list({ cwd: missing });
+    check('显式指定失效 cwd 时仍返回对应的探测错误', () => {
+      assert.equal(probeHub.lastProbe.ok, false);
+      assert.ok(probeHub.lastProbe.error.includes(missing));
+      assert.ok(filtered.every((session) => session.cwd === missing));
+    });
+  } finally {
+    for (const [key, value] of before) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
 
 console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
 {

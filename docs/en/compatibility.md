@@ -10,6 +10,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
+| 0.7.6 | `0.2.2-rc.3` (desktop app) | ✅ Verified (ACP, upgrade) | Upgraded from npm 0.7.5 on Windows with a real provider. Verified result retrieval after a reconnect, idempotent replay, and a new turn in the original session |
 | 0.7.5 | `0.2.2-rc.3` (desktop app) | ✅ Verified (ACP, upgrade) | Upgraded the installed npm 0.7.4 package on Windows with a real provider. Verified result retrieval, idempotent replay, and a new turn in the original session |
 | 0.7.4 | `0.2.2-rc.3` (desktop app) | ✅ Verified (ACP, team mode) | Standard ACP dispatch and in-place upgrade from npm 0.7.3 on Windows. Desktop DSH with a local simulated model endpoint verified that team mode is off by default and that enabling it exposes both the native task board and standard subagents |
 | 0.7.3 | `0.2.2-rc.3` (desktop app) | ✅ Verified (standard ACP) | Full Windows regression and real-provider install and upgrade from 0.7.2 passed. IDA MCP acceptance skipped without a configured server. Using the newer team mode requires an MCP update |
@@ -58,8 +59,8 @@ The server finds DSH on its own, in this order — **no need to set `DSH_BIN`**:
 3. **npx cache** (can vanish at any time; lowest priority when otherwise equal).
 
 When several exist: candidates whose runtime satisfies `engines.node` first → higher version →
-desktop > global > npx. `DSH_BIN` (may point inside an `.asar`) and `DSH_RUNTIME` (the executable
-that launches DSH) are explicit overrides only.
+desktop > global > npx. `DSH_BIN` specifies the DSH entry file, which can be inside an `.asar`.
+`DSH_RUNTIME` specifies the executable used to launch DSH. Both overrides require files.
 
 ## How to check
 
@@ -71,7 +72,7 @@ dsh-any-agent team status        # team switch and profile
 In an MCP client, call `dsh_doctor` and look at:
 
 - `dsh_bin`: DSH entry point, version, source (desktop / npm global / npx cache / DSH_BIN) and runtime; **warn** when it resolves from an npx cache (`_npx/<hash>/`), which disappears on cache cleanup;
-- `dsh_runtime`: whether the launching runtime's Node satisfies DSH's `engines.node`; **warn** if not;
+- `dsh_runtime`: whether the Node runtime used to launch DSH satisfies `engines.node`. From 0.7.6 onwards, an invalid `DSH_RUNTIME` path or confirmed incompatibility reports **fail**. A version that cannot be read reports **warn**;
 - `dsh_desktop`: the desktop app's version; **warn** when it differs from the DSH this server uses (both share the `~/.dsh` session store);
 - `dsh_candidates`: every DSH found and which one was picked;
 - `dsh_version`: `verified` is ok. The note refers to full-suite testing; the table also records narrower checks such as the 0.7.2 installed package lifecycle. `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
@@ -88,3 +89,5 @@ In an MCP client, call `dsh_doctor` and look at:
    `team` check, then review the [team profile configuration](team.md);
 4. By default the server follows the desktop app: after the app updates, the next DSH launch picks
    up the new version (discovery is cached for 60 s). Set `DSH_BIN` only to pin a specific version.
+
+Resuming an old session on another machine also requires the original workspace path. From 0.7.6 onwards, a missing directory is reported before DSH starts. Restore that directory, or call `dsh_start` with the new path to start a fresh session.

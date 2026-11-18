@@ -209,6 +209,21 @@ export function existsMaybeAsar(p) {
   return asarEntry(split.asar, split.inner) !== null;
 }
 
+function isRegularFile(path) {
+  try {
+    return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    return false;
+  }
+}
+
+function isDshEntry(path) {
+  const split = splitAsarPath(path);
+  if (!split) return isRegularFile(path);
+  const entry = asarEntry(split.asar, split.inner);
+  return entry !== null && !entry.node.files;
+}
+
 /** 读 bin.js 所在包的 version / engines.node（asar 感知）。 */
 export function readDshPackage(bin) {
   const txt = readMaybeAsar(join(dirname(bin), '..', 'package.json'));
@@ -343,7 +358,7 @@ export function desktopCandidate({ dir, exe = null, displayVersion = null, via }
       : join(dir, 'resources', 'app.asar');
   if (!existsSync(asar)) return null;
   const bin = join(asar, ...ASAR_DSH_ROOT, 'lib', 'bin.js');
-  if (!existsMaybeAsar(bin)) return null;
+  if (!isDshEntry(bin)) return null;
   const runtime = desktopExeForAsar(asar, exe);
   if (!runtime) return null;
   const pkg = readDshPackage(bin);
@@ -381,7 +396,7 @@ function desktopCandidates() {
 // ── npm 全局 / npx 缓存 ─────────────────────────────────────────
 
 function nodeCandidate(source, bin) {
-  if (!isHostAbsolute(bin) || !existsSync(bin)) return null;
+  if (!isHostAbsolute(bin) || !isDshEntry(bin)) return null;
   const pkg = readDshPackage(bin);
   return {
     source,
@@ -459,9 +474,18 @@ export function rankCandidates(list) {
   );
 }
 
+function assertRuntimeFile(path) {
+  if (!isRegularFile(path)) {
+    const error = new Error(`DSH_RUNTIME 指向的文件不存在、不可访问或不是文件: ${path}`);
+    error.code = 'DSH_RUNTIME_INVALID';
+    throw error;
+  }
+}
+
 /** 自动发现到的全部候选（已排序，第一个就是默认选择）。结果缓存 60 秒。 */
 export function discoverDsh({ fresh = false } = {}) {
   const runtime = process.env.DSH_RUNTIME ? resolve(process.env.DSH_RUNTIME) : null;
+  if (runtime) assertRuntimeFile(runtime);
   if (
     !fresh &&
     discoveryCache &&
@@ -470,7 +494,6 @@ export function discoverDsh({ fresh = false } = {}) {
   ) {
     return discoveryCache.list;
   }
-  if (runtime && !existsSync(runtime)) throw new Error(`DSH_RUNTIME 指向的文件不存在: ${runtime}`);
   const raw = [...desktopCandidates(), ...globalCandidates(), ...npxCandidates()];
   const list = rankCandidates(runtime ? applyRuntimeOverride(raw, runtime) : raw);
   discoveryCache = { at: Date.now(), runtime, list };
@@ -504,12 +527,14 @@ export function applyRuntimeOverride(list, runtime) {
 
 /** 显式 DSH_BIN（可选 DSH_RUNTIME）。 */
 function explicitDsh(binPath, runtimePath) {
-  if (!existsMaybeAsar(binPath)) throw new Error(`DSH_BIN 指向的文件不存在: ${binPath}`);
+  if (!isDshEntry(binPath)) {
+    throw new Error(`DSH_BIN 指向的文件不存在、不可访问或不是文件: ${binPath}。请更新路径，或删除 DSH_BIN 后重连以恢复自动探测。`);
+  }
   const pkg = readDshPackage(binPath);
   const split = splitAsarPath(binPath);
   let command = process.execPath;
   if (runtimePath) {
-    if (!existsSync(runtimePath)) throw new Error(`DSH_RUNTIME 指向的文件不存在: ${runtimePath}`);
+    assertRuntimeFile(runtimePath);
     command = runtimePath;
   } else if (split) {
     command = desktopExeForAsar(split.asar);
@@ -547,7 +572,7 @@ export function resolveDsh({ fresh = false } = {}) {
   if (selected && !fresh) {
     // A desktop update or npm replacement can change the entry at the cached path.
     const { version, enginesNode } = readDshPackage(selected.bin);
-    if (version !== selected.version || enginesNode !== selected.enginesNode || !existsMaybeAsar(selected.bin)) {
+    if (version !== selected.version || enginesNode !== selected.enginesNode || !isDshEntry(selected.bin)) {
       [selected] = discoverDsh({ fresh: true });
     }
   }
@@ -563,19 +588,21 @@ const runtimeNodeCache = new Map();
 export function probeRuntimeNode(c) {
   if (c.command === process.execPath) return process.versions.node;
   const key = `${c.command}|${JSON.stringify(c.env)}`;
-  if (runtimeNodeCache.has(key)) return runtimeNodeCache.get(key);
-  let v = null;
   try {
+    const stat = statSync(c.command, { throwIfNoEntry: false });
+    if (!stat?.isFile()) return null;
+    const cached = runtimeNodeCache.get(key);
+    if (cached && cached.modified === stat.mtimeMs && cached.size === stat.size) return cached.version;
     const r = spawnSync(c.command, ['-e', 'process.stdout.write(process.versions.node)'], {
       env: { ...process.env, ...c.env },
       encoding: 'utf8',
       timeout: 15_000,
       windowsHide: true,
     });
-    v = /^\d+\.\d+\.\d+/.test(r.stdout ?? '') ? r.stdout.trim() : null;
+    const version = /^\d+\.\d+\.\d+/.test(r.stdout ?? '') ? r.stdout.trim() : null;
+    if (version) runtimeNodeCache.set(key, { modified: stat.mtimeMs, size: stat.size, version });
+    return version;
   } catch {
-    v = null;
+    return null;
   }
-  runtimeNodeCache.set(key, v);
-  return v;
 }
