@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Use `dsh-any-agent-setup --repair` to preview refreshed launch paths in existing client entries. Add `--yes` to apply while keeping permission, approval, daemon and other settings.
+
+### Fixed
+
+- Report known runtime incompatibility and missing workspace directories before spawning DSH. An invalid explicit DSH path includes instructions for restoring automatic discovery.
+
 ## [0.7.5] — 2026-11-16
 
 ### Fixed
