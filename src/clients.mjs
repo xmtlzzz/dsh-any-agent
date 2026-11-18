@@ -881,10 +881,106 @@ function settleRemoval(file, dropped, kept, isBare) {
 
 const DELETES_FILE = '; nothing else is in the file, so the file itself would be deleted';
 
+function jsonProperty(object, key) {
+  if (object.type !== 'object') throw new Error('expected an object containing ' + key);
+  assertUniqueKey(object, key);
+  return object.entries[indexOfEntry(object, key)];
+}
+
+function sameJsonArgs(node, args) {
+  return node.items.length === args.length && node.items.every((item, i) => item.value === args[i]);
+}
+
+/** Refresh just the launch fields, retaining comments and existing client-specific settings. */
+function repairJsonLaunch(text, client, launch) {
+  const root = scanJson(text);
+  const container = jsonProperty(root, client.containerKey)?.value;
+  const entry = container && jsonProperty(container, ENTRY_NAME)?.value;
+  if (!entry) return null;
+  const topCommand = jsonProperty(entry, 'command');
+  const nested = client.shape === 'zed' && topCommand?.value.type === 'object';
+  const owner = nested ? topCommand.value : entry;
+  const command = nested ? jsonProperty(owner, 'path') : topCommand;
+  if (client.shape === 'opencode') {
+    if (command?.value.type !== 'array' || command.value.items[0]?.type !== 'string') {
+      throw new Error('an existing local command array is required');
+    }
+    const argv = [launch.command, ...launch.args];
+    return sameJsonArgs(command.value, argv) ? text : replaceValue(text, command, JSON.stringify(argv));
+  }
+  if (command?.value.type !== 'string') throw new Error('an existing stdio command is required');
+  const args = jsonProperty(owner, 'args');
+  if (args && args.value.type !== 'array') throw new Error('the existing args must be an array');
+  let next = text;
+  if (!args && launch.args.length) {
+    // insertKey appends after all existing values, so their offsets still apply.
+    next = insertKey(text, owner, 'args', JSON.stringify(launch.args), {
+      eol: detectEol(text),
+      unit: detectIndentUnit(text, root) ?? '  ',
+    });
+  }
+  const fields = [];
+  if (command.value.value !== launch.command) fields.push([command, launch.command]);
+  if (args && !sameJsonArgs(args.value, launch.args)) fields.push([args, launch.args]);
+  for (const [field, value] of fields.sort((a, b) => b[0].value.start - a[0].value.start)) {
+    next = replaceValue(next, field, JSON.stringify(value));
+  }
+  return next;
+}
+
+const TOML_LAUNCH_FIELD = /^(\s*(?:"(command|args)"|'(command|args)'|(command|args))\s*=\s*)(.*)$/;
+const TOML_STRING = String.raw`(?:"(?:[^"\\]|\\.)*"|'[^']*')`;
+const TOML_LAUNCH_VALUE = {
+  command: new RegExp('^(' + TOML_STRING + ')(\\s*(?:#.*)?)$'),
+  args: new RegExp('^(\\[\\s*(?:' + TOML_STRING + '\\s*,\\s*)*(?:' + TOML_STRING + '\\s*)?\\])(\\s*(?:#.*)?)$'),
+};
+
+function repairTomlLaunch(text, launch) {
+  const lines = text.split(/\r?\n/);
+  const eols = text.match(/\r?\n/g) ?? [];
+  const { ranges, unsupported } = findTomlRanges(lines);
+  if (!ranges.length && !unsupported) return null;
+  const tables = ranges.filter(({ start, inline }) => !inline &&
+    /^mcp_servers\s*\.\s*(?:dsh-any-agent|"dsh-any-agent"|'dsh-any-agent')\s*$/.test(TOML_HEADER.exec(lines[start])?.[1] ?? ''));
+  if (unsupported || ranges.some((r) => r.inline) || tables.length !== 1) {
+    throw new Error('repair requires one [mcp_servers.dsh-any-agent] table; update custom TOML forms by hand');
+  }
+  const { start, end } = tables[0];
+  const mask = multilineMask(lines);
+  const fields = new Map();
+  for (let i = start + 1; i < end; i++) {
+    if (mask[i]) continue;
+    const match = TOML_LAUNCH_FIELD.exec(lines[i]);
+    if (!match) continue;
+    const [, prefix, quoted, literal, bare, raw] = match;
+    const key = quoted ?? literal ?? bare;
+    const value = TOML_LAUNCH_VALUE[key].exec(raw);
+    if (!value || fields.has(key)) throw new Error('repair requires a single-line ' + key + ' setting with a unique key');
+    fields.set(key, i);
+    const encoded = JSON.stringify(launch[key]);
+    if (stripWs(value[1]) !== encoded) lines[i] = prefix + encoded + value[2];
+  }
+  if (!fields.has('command')) throw new Error('an existing stdio command is required');
+  if (!fields.has('args') && launch.args.length) {
+    const row = fields.get('command');
+    lines[row] += (eols[row] ?? detectEol(text)) + 'args = ' + JSON.stringify(launch.args);
+  }
+  return lines.map((line, i) => line + (eols[i] ?? '')).join('');
+}
+
 export function planClient(client, ctx) {
-  const { dirs, remove, launch, env } = ctx;
+  const { dirs, remove, repair, launch, env } = ctx;
   const file = client.pathOf(dirs);
   const base = { id: client.id, label: client.label, path: file, sourceHash: sourceHashOf(file) };
+
+  if (repair) {
+    if (!existsSync(file)) return { ...base, status: 'absent', changed: false, summary: 'config file does not exist' };
+    const { text, bom } = readConfigFile(file);
+    const next = client.kind === 'toml' ? repairTomlLaunch(text, launch) : repairJsonLaunch(text, client, launch);
+    if (next === null) return { ...base, status: 'absent', changed: false, summary: 'entry does not exist; use setup --yes to register it' };
+    if (next === text) return { ...base, status: 'unchanged', changed: false, summary: 'launch paths already up to date' };
+    return { ...base, status: 'planned', changed: true, next: bom + next, summary: 'launch command and arguments would be updated' };
+  }
 
   if (client.kind === 'toml') {
     const block = remove ? null : codexBlock(launch, env);

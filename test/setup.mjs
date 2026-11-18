@@ -285,5 +285,53 @@ console.log('\n[10] invalid --permission is rejected; file mode is preserved');
   removeSandbox(home);
 }
 
+console.log('\n[11] repair refreshes the launch fields without replacing existing settings');
+{
+  const previousNode = JSON.stringify('/old machine/node');
+  const previousArgs = JSON.stringify(['/old machine/dsh-any-agent.mjs']);
+  const env = '{"DSH_MCP_PERMISSION":"read-only","DSH_MCP_DAEMON":"1","DSH_RUNTIME":"/custom/runtime"}';
+  const cursor = '.cursor/mcp.json';
+  const codex = '.codex/config.toml';
+  const opencode = '.config/opencode/opencode.json';
+  const zed = ['win32', 'darwin'].includes(platform()) ? 'Zed/settings.json' : '.config/zed/settings.json';
+  const rows = {
+    [cursor]: '{"mcpServers":{"dsh-any-agent":{"command":' + previousNode + ',"args":' + previousArgs + ',"env":' + env + '}}}',
+    [codex]: '\uFEFF[mcp_servers.dsh-any-agent]\r\ncommand = ' + previousNode + ' # retain\r\nargs = ' + previousArgs +
+      '\r\ntool_timeout_sec = 240.0\n\n[mcp_servers.dsh-any-agent.env]\nDSH_MCP_DAEMON = "1"\nDSH_MCP_APPROVAL = "ask"\n',
+    [opencode]: '{"mcp":{"dsh-any-agent":{"type":"local","command":[' + previousNode + ',' + previousArgs.slice(1) +
+      ',"enabled":false,"environment":' + env + '}}}',
+    [zed]: '{"context_servers":{"dsh-any-agent":{"command":{"path":' + previousNode + ',"env":' + env + '}}}}',
+    '.gemini/settings.json': '{"mcpServers":{}}',
+  };
+  const home = sandbox(rows);
+  try {
+    const read = (file) => readFileSync(join(home, file), 'utf8');
+    const selected = ['--only', 'codex,cursor,opencode,zed,gemini'];
+    const preview = runSetup(home, ['--repair', ...selected]);
+    check('repair preview leaves every config unchanged', preview.code === 0 &&
+      Object.entries(rows).every(([file, current]) => read(file) === current), preview.out);
+    const applied = runSetup(home, ['--repair', '--yes', ...selected]);
+    const currentNode = JSON.stringify(NODE);
+    const currentArgs = JSON.stringify([join(HERE, '..', 'bin', 'dsh-any-agent.mjs')]);
+    check('repair updates paths and preserves JSON settings, including an explicitly disabled entry',
+      applied.code === 0 && read(cursor) === rows[cursor].replace(previousNode, currentNode).replace(previousArgs, currentArgs) &&
+      read(opencode) === rows[opencode].replace(previousNode, currentNode).replace(previousArgs.slice(1), currentArgs.slice(1)), applied.out);
+    check('repair preserves TOML env, comments, BOM, timeout and line endings',
+      read(codex) === rows[codex].replace(previousNode, currentNode).replace(previousArgs, currentArgs), read(codex));
+    check('repair adds args to an existing nested Zed command while preserving its env',
+      read(zed) === rows[zed].replace(previousNode, currentNode).replace(env + '}', env + ', "args": ' + currentArgs + '}'), read(zed));
+    check('repair skips clients without an existing entry', read('.gemini/settings.json') === rows['.gemini/settings.json']);
+    const backups = backupsIn(join(home, '.cursor'));
+    const again = runSetup(home, ['--repair', '--yes', ...selected]);
+    check('repair backs up the original and is idempotent', again.code === 0 && backups.length === 1 &&
+      readFileSync(join(home, '.cursor', backups[0]), 'utf8') === rows[cursor] &&
+      backupsIn(join(home, '.cursor')).length === 1, again.out);
+    const conflict = runSetup(home, ['--repair', '--yes', '--daemon', ...selected]);
+    check('repair rejects flags that would rewrite existing settings', conflict.code === 2);
+  } finally {
+    removeSandbox(home);
+  }
+}
+
 console.log('\n===== setup regression: passed ' + passed + ', failed ' + failed + ' =====');
 process.exit(failed ? 1 : 0);
