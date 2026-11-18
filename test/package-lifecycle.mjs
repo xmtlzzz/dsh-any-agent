@@ -1,4 +1,4 @@
-/** Exercise the installed tarball over stdio. --upgrade starts on npm 0.7.4; --real uses the configured provider. */
+/** Exercise the installed tarball over stdio. --upgrade starts on npm latest; --real uses the configured provider. */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -12,7 +12,6 @@ import { resolveDsh } from '../src/dsh-locate.mjs';
 
 const real = process.argv.includes('--real');
 const upgrade = process.argv.includes('--upgrade');
-const baseline = '0.7.4';
 const npm = process.env.npm_execpath;
 assert.ok(npm, 'Run this suite with npm run test:packed');
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-package-lifecycle-'));
@@ -28,12 +27,18 @@ function npmRun(args) {
 }
 
 function pack(destination, ...specs) {
-  const [{ filename }] = JSON.parse(npmRun(['pack', '--ignore-scripts', '--json', '--pack-destination', destination, ...specs]));
-  return join(destination, filename);
+  const [{ filename, version, integrity }] = JSON.parse(npmRun([
+    'pack', '--ignore-scripts', '--json', '--pack-destination', destination, ...specs,
+  ]));
+  return { file: join(destination, filename), version, integrity };
 }
 
-function installTarball(tarball) {
-  npmRun(['install', '--prefix', install, '--ignore-scripts', '--offline', '--no-audit', '--no-fund', tarball]);
+function installTarball({ file, integrity }) {
+  npmRun(['install', '--prefix', install, '--ignore-scripts', '--offline', '--package-lock', '--no-audit', '--no-fund', file]);
+  const lock = JSON.parse(readFileSync(join(install, 'package-lock.json'), 'utf8'));
+  // The candidate may still carry the published version before the release bump.
+  assert.ok(integrity, 'missing tarball integrity');
+  assert.equal(lock.packages['node_modules/dsh-any-agent'].integrity, integrity, 'npm must install the selected tarball');
 }
 
 async function until(check, ms = 120_000) {
@@ -79,10 +84,13 @@ try {
   mkdirSync(project);
   mkdirSync(second);
   const candidate = pack(root);
+  let baseline;
   if (upgrade) {
     const published = join(root, 'published');
     mkdirSync(published);
-    installTarball(pack(published, `dsh-any-agent@${baseline}`));
+    const previous = pack(published, '--prefer-online', 'dsh-any-agent@latest');
+    baseline = previous.version;
+    installTarball(previous);
   } else {
     installTarball(candidate);
   }
@@ -142,7 +150,7 @@ try {
     installTarball(candidate);
   }
   const reopened = connect();
-  await reopened.initialize();
+  assert.equal((await reopened.initialize()).serverInfo.version, candidate.version);
   const readBack = (await reopened.callTool('dsh_get', args)).structuredContent?.run;
   assert.equal(readBack?.run_id, finished.run_id);
   assert.equal(readBack.status, finished.status);
