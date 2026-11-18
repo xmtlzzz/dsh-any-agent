@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] — 2026-11-18
+
 ### Added
 
 - Use `dsh-any-agent-setup --repair` to preview refreshed launch paths in existing client entries. Add `--yes` to apply while keeping permission, approval, daemon and other settings.
@@ -1733,7 +1735,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...HEAD
+[0.7.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...v0.7.3

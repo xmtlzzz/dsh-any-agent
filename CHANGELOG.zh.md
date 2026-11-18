@@ -12,6 +12,8 @@
 
 ## [Unreleased]
 
+## [0.7.6] — 2026-11-18
+
 ### 新增
 
 - 用 `dsh-any-agent-setup --repair` 预览已有客户端条目的启动路径更新。加 `--yes` 应用更新，并保留权限、审批、常驻模式等设置。
@@ -1260,7 +1262,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...HEAD
+[0.7.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.2...v0.7.3
