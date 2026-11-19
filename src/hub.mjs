@@ -31,7 +31,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, extname, isAbsolute, join } from 'node:path';
 import {
   ALLOW_FULL_ACCESS,
   APPROVAL_POLICIES,
@@ -365,21 +365,33 @@ export class Hub {
     }
     let latest = null;
     for (const entry of files) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
-      const runId = entry.name.slice(0, -'.json'.length);
+      if (!entry.isFile()) continue;
+      const ext = extname(entry.name);
+      if (ext !== '.json' && ext !== '.running') continue;
+      const runId = entry.name.slice(0, -ext.length);
       try { assertSafeId(runId, 'run_id'); } catch { continue; }
       const file = join(dir, entry.name);
       let saved;
       try {
         saved = JSON.parse(await readFile(file, 'utf8'));
       } catch (e) {
-        if (e.code === 'ENOENT' || e instanceof SyntaxError) continue;
-        throw e;
+        if (e.code === 'ENOENT' && ext === '.running') {
+          // It may have finished since readdir and published its sentinel.
+          saved = this.readStoredRun(conversationId, runId);
+        } else if (e.code === 'ENOENT' || e instanceof SyntaxError) continue;
+        else throw e;
       }
-      if (saved?.conversation_id !== conversationId || saved.run_id !== runId || !saved.result ||
-          !Number.isFinite(saved.ended_at)) continue;
-      latest = laterStartedRun(latest, saved);
+      if (saved?.conversation_id !== conversationId || saved.run_id !== runId) continue;
+      if (ext === '.running' && !saved.result) {
+        if (saved.status !== 'running' || !Number.isFinite(saved.started_at)) continue;
+        const { checkpoint: _checkpoint, ...receipt } = saved;
+        saved = { ...receipt, source: 'receipt', result: null };
+      } else if (!saved.result || !Number.isFinite(saved.ended_at)) continue;
+      if (latest?.run_id === runId) {
+        if (saved.result) latest = saved;
+      } else latest = laterStartedRun(latest, saved);
     }
+    if (latest?.source === 'receipt') return latest;
     return latest ? storedSentinel(latest, this.runSentinelPath(conversationId, latest.run_id)) : null;
   }
 
@@ -427,7 +439,7 @@ export class Hub {
       } catch {
         continue;
       }
-      backfillRunKeys(join(RUNS_DIR, dir.name), files);
+      backfillRunKeys(join(RUNS_DIR, dir.name), files, this.log);
       for (const f of files.filter(name => name.endsWith('.running'))) {
         const markerFile = join(RUNS_DIR, dir.name, f);
         let m;
@@ -1240,7 +1252,6 @@ function storedSentinel(saved, file) {
   return {
     ...saved,
     source: 'sentinel',
-    started_at: saved.started_at ?? null,
     elapsed_ms: saved.result?.elapsed_ms ?? null,
     prompt_preview: saved.prompt_preview ?? null,
     result: saved.result ? { ...saved.result, sentinel_file: file } : null,
@@ -1260,23 +1271,27 @@ function retainRunKey(dir, keyId, runId, mtime) {
 
 // On upgrade protect retained sentinels, including those read directly from disk.
 // Preserve their age so restarting never extends the retention period.
-function backfillRunKeys(dir, files) {
+function backfillRunKeys(dir, files, log) {
   const known = new Set(files);
   for (const name of files) {
     if (!name.endsWith('.json')) continue;
     const runId = name.slice(0, -5);
     if (known.has(runId + '.key')) continue;
     const file = join(dir, name);
-    let keyId = runId;
-    if (!KEYED_RUN.test(runId)) {
-      if (!LEGACY_RUN.test(runId)) continue;
-      const saved = readRunJson(file);
-      if (typeof saved?.client_run_id !== 'string' || !saved.client_run_id || saved.run_id !== runId) continue;
-      keyId = keyedRunId(saved.client_run_id);
-      if (known.has(keyId + '.key')) continue;
+    try {
+      let keyId = runId;
+      if (!KEYED_RUN.test(runId)) {
+        if (!LEGACY_RUN.test(runId)) continue;
+        const saved = readRunJson(file);
+        if (typeof saved?.client_run_id !== 'string' || !saved.client_run_id || saved.run_id !== runId) continue;
+        keyId = keyedRunId(saved.client_run_id);
+        if (known.has(keyId + '.key')) continue;
+      }
+      const stat = statSync(file, { throwIfNoEntry: false });
+      if (stat?.isFile()) retainRunKey(dir, keyId, runId, stat.mtime);
+    } catch (error) {
+      log.info(`[hub] Could not migrate the idempotency receipt for ${file}: ${error.message}. Keep the result file and retry on restart.`);
     }
-    const stat = statSync(file, { throwIfNoEntry: false });
-    if (stat?.isFile()) retainRunKey(dir, keyId, runId, stat.mtime);
   }
 }
 

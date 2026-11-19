@@ -11,6 +11,9 @@
  *   5. ★ 端到端：服务进程在回合中途被强杀，下一个服务进程启动时补出哨兵，dsh_get 也查得到。
  */
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { mock } from 'node:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -113,6 +116,37 @@ try {
     if (receipt?.run_id !== oldId || receipt.result_available !== false || receipt.result !== null) return false;
     hub.pruneSentinels({ ttlMs: 3_600_000 });
     return hub.findRunByClientId(conv, clientKey) === null;
+  });
+
+  await check('a failed receipt migration preserves its result, starts the hub and retries on restart', async () => {
+    const { startHub } = await import('../src/boot.mjs');
+    const { keyedRunId } = await import('../src/run-ledger.mjs');
+    const id = randomUUID();
+    const keys = ['denied', 'accessible'].map(keyedRunId);
+    mkdirSync(join(runsDir, id), { recursive: true });
+    for (const run_id of keys) {
+      writeFileSync(sentinelOf(id, run_id), JSON.stringify({ conversation_id: id, run_id, result: { answer: 'saved' } }));
+    }
+    const receipt = (key) => join(runsDir, id, key + '.key');
+    const link = fs.linkSync;
+    const failure = mock.method(fs, 'linkSync', (from, to) => {
+      if (to === receipt(keys[0])) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      return link(from, to);
+    });
+    syncBuiltinESMExports();
+    const messages = [];
+    let started;
+    try {
+      started = await startHub({ ...log, info: (message) => messages.push(message) });
+      if (!messages.some((s) => s.includes('EACCES')) || existsSync(receipt(keys[0])) || !existsSync(receipt(keys[1])) ||
+          started.findRunByClientId(id, 'denied')?.result?.answer !== 'saved') return false;
+    } finally {
+      failure.mock.restore();
+      syncBuiltinESMExports();
+      await started?.shutdown();
+    }
+    hub.recoverInterruptedRuns();
+    return readJson(receipt(keys[0])).run_id === keys[0];
   });
 
   console.log('\n[1] 标记随回合开始写出、随哨兵写出删掉');
@@ -274,6 +308,29 @@ try {
   }
 
   console.log('\n[6] 旧哨兵与按开始时间排序');
+  {
+    const handoff = { ...env, DSH_MCP_STATE: join(root, 'handoff', 'registry.json'),
+      DSH_MCP_RUNS_DIR: join(root, 'handoff', 'runs'), FAKE_ACP_PROMPT_MS: '1200' };
+    const a = new McpClient({ env: handoff }).start();
+    const b = new McpClient({ env: handoff }).start();
+    allClients.push(a, b);
+    await Promise.all([a.initialize(), b.initialize()]);
+    const started = await a.callTool('dsh_start', { cwd: root, permission: 'workspace-write' });
+    const args = { conversation_id: started.structuredContent.conversation_id };
+    await a.callTool('dsh_send', { ...args, prompt: 'first', wait: true });
+    await a.callTool('dsh_release', args);
+    const sent = await b.callTool('dsh_send', { ...args, prompt: 'second', client_run_id: 'handoff', wait: false });
+    const runId = sent.structuredContent.run_id;
+    const running = (await a.callTool('dsh_get', args)).structuredContent?.run;
+    await check('旧客户端能看到接手实例正在执行的回合', () =>
+      running?.run_id === runId && running.status === 'running' && running.result === null);
+    for (let i = 0; i < 150 && !existsSync(sent.structuredContent.sentinel_file); i++) await sleep(50);
+    const got = (await a.callTool('dsh_get', args)).structuredContent?.run;
+    const status = (await a.callTool('dsh_status', args)).structuredContent?.run;
+    await check('旧客户端的 get 和 status 均按启动时间取接手实例的新结果', () =>
+      got?.run_id === runId && got.status === 'done' && got.result?.answer && status?.run_id === runId);
+    await Promise.all([a.close(), b.close()]);
+  }
   {
     const id = randomUUID();
     mkdirSync(join(runsDir, id), { recursive: true });
