@@ -26,7 +26,7 @@
 | `DSH_MCP_SHARED_PROCESS` | `1` (on) | **On by default**: sessions with the same `(cwd, permission)` share one ACP process. Large memory and cold-start win (measured: second `session/new` ≈300 ms vs ≈4 s standalone), and `dsh_doctor` de-dupes RSS by PID. Trade-off: a process crash takes down the whole group (error sentinels are written; each session resumes on the next call), so `dsh_takeover` requires `force=true` to kill such a process. Set `0` for one process per conversation |
 | `DSH_MCP_AUDIT_FILE` | empty (off) | Metadata audit JSONL path. Records events, conversation/run ids, decisions and counts; **never** prompts, answers, thinking or tool input. Rotates at 10 MB |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | Cache lifetime for `dsh_list`'s on-disk probe (the probe spawns a DSH process and takes ~1 s) |
-| `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels **and review records**; `0` disables pruning |
+| `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels, idempotency receipts and review records. `0` disables pruning |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**); answer/error/title/tool inputs are still credential-redacted |
 | `DSH_MCP_UPDATE_CHECK` | `1` | Whether `dsh_doctor` asks npm for a newer version (only when doctor is called; requests this package's latest only; 4 s at most; cached 24 hours). `0` = no network |
 | `DSH_MCP_SENTINEL_TOOL_INPUTS` | `1` | `0` = sentinels carry no tool inputs (commands, paths, written file contents); each tool keeps its name, status and `input_chars`, and auto-approval summaries drop `command_preview`. `dsh_get` from memory is unaffected |

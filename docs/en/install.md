@@ -150,7 +150,7 @@ Both registering and removing snapshot the file first: `<config>.bak-dsh-<timest
 
 After every real write, each client entry in `--json` carries a `backup` field, and the human-readable output prints `backup: <path>` under each written entry.
 
-The copies live next to each client's config, so picking the right one by hand is error-prone. There is a companion command:
+The restore command looks for backups beside each client configuration. For Antigravity it searches both the current and legacy directories and restores each file to its original path.
 
 | What | Command |
 |---|---|

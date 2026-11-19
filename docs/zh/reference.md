@@ -26,7 +26,7 @@
 | `DSH_MCP_SHARED_PROCESS` | `1`（开启） | **默认开启**：同 `(cwd, permission)` 的会话共享一个 ACP 进程。显著省内存与冷启动（实测第二个会话 `session/new` 约 300ms，独立进程约 4s），`dsh_doctor` 的 RSS 也按 PID 去重。代价：进程崩溃会连坐同组会话（统一写 error 哨兵，之后各自 resume），所以 `dsh_takeover` 杀这类进程时要求 `force=true`。设 `0` 回到"一会话一进程" |
 | `DSH_MCP_AUDIT_FILE` | 空（关闭） | 元数据审计 JSONL 路径。只记事件、会话/回合 ID、决定与计数；**不记** prompt、正文、思考、工具输入。10MB 滚动到 `.1` |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | `dsh_list` 磁盘探测结果的缓存时长（探测要 spawn 一个 DSH 进程，实测约 1 秒） |
-| `DSH_MCP_SENTINEL_TTL_MS` | `604800000`（7 天） | 启动时清理超过此时长的哨兵**与审核记录**；`0` 关闭清理 |
+| `DSH_MCP_SENTINEL_TTL_MS` | `604800000`（7 天） | 启动时清理超过此时长的哨兵、幂等收据和审核记录。`0` 关闭清理 |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | 未设置 | `1` 会把 `result.thinking` 一并写进哨兵（**打破"思考不落盘"的保证**）；answer/error/title/工具输入仍会脱敏 |
 | `DSH_MCP_UPDATE_CHECK` | `1` | `dsh_doctor` 是否去 npm 查新版本（只在调用 doctor 时、只请求本包的 latest、最多 4 秒、缓存 24 小时）。`0` = 不联网 |
 | `DSH_MCP_SENTINEL_TOOL_INPUTS` | `1` | `0` = 哨兵里不写工具输入（命令、路径、写入的文件内容），每个工具只留名字、状态与 `input_chars`，自动放行审批摘要也去掉 `command_preview`。内存里的 `dsh_get` 不受影响 |

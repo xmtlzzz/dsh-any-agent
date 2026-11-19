@@ -67,7 +67,7 @@ while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit
 - **审核不随哨兵消失**：`result.review` 随结果一起写入，所以只读文件的调用方也能看到清单。之后 `dsh_review` 会**原子重写**这个审核块（`status` → `pass`/`partial`/`fail`，并写入 `notes`、`reviewed_at`、`review_file`），闩锁文件本身始终存在。审核记录在 `<状态目录>/reviews/` 下，和哨兵一样按 7 天 TTL 清理。
 - **★ 哨兵里没有思考内容**：载荷含正文、思考**统计**、用量与（已脱敏的）工具输入，但没有思考正文；`result.thinking` 会被剥掉，并始终给出布尔 `thinking_omitted`（剥离了为 `true`，本来没有为 `false`）——本服务自己的落盘物里不写思考。`dsh_get(run_id)` 在内存里仍能看到它（记录还在时）。设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 可以故意打破这条保证。注意：**DSH 自己的会话日志仍含思考**，见“日志与隐私”。
 
-> 服务启动时默认清理超过 7 天的哨兵和审核记录。`DSH_MCP_SENTINEL_TTL_MS` 可调整保留期，设为 `0` 可关闭清理。仍需查询历史结果或按原幂等键重试时，请保留对应的哨兵。
+> 服务启动时默认清理超过 7 天的哨兵和审核记录。`DSH_MCP_SENTINEL_TTL_MS` 可调整保留期，设为 `0` 可关闭清理。需要读取正文时请保留哨兵。独立的 `.key` 收据按相同保留期保存原回合 ID。仅剩收据时，用原键重试会返回 `replayed: true` 和 `result_available: false`。升级时会为仍保留的结果补建收据，沿用原文件时间。
 
 ## 🧵 用法：同时控制多个会话
 

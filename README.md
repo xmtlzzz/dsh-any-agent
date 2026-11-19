@@ -99,7 +99,7 @@ dsh-any-agent-setup --yes
 
 The second command previews the changes; `--yes` applies them. Reconnect your client's MCP server and run the [installation check](docs/en/install.md#3-verify-the-installation). The [dispatch workflow](docs/en/usage.md) shows how to send a task in your project and collect the result.
 
-**Collect results after reconnecting.** Call `dsh_get` with the conversation ID and the original `run_id` or `client_run_id`. With only the conversation ID, it can find the most recently started turn. On startup the server prunes result files older than seven days by default. Keep the result file while you still need its idempotency key for retries.
+**Collect results after reconnecting.** Call `dsh_get` with the conversation ID and the original `run_id` or `client_run_id`. With only the conversation ID, it can find the most recently started turn. On startup the server prunes result files older than seven days by default. Keep the result file to retrieve the answer. During retention, a retry with the same key returns the original run ID even after the result file is deleted.
 
 Only using Cursor or VS Code? Add it in one click instead (runs `npx -y dsh-any-agent@latest`; DSH still has to be installed):
 
