@@ -12,7 +12,7 @@
 | `DSH_HOME` | `~/.dsh` | DSH 主目录。**默认就用本机用户自己的**，凭据与会话历史因此与 GUI 共用。指向别处即隔离环境（那就得自己准备那个目录的凭据与 profile） |
 | `DSH_MCP_BOOTSTRAP` | 开 | `0` 关闭首启 profile 自动创建/同步（关掉后只驱动已存在的 profile，不写任何文件） |
 | `DSH_MCP_ROUTE_SOURCE` | 自动 | 复制模型路由的来源 profile 名；`__home__` 表示只认 `$DSH_HOME/cordis.patch.yml` |
-| `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | 会话注册表，跨重启存活。旧版 `<仓库>/.state` 会在首次启动时自动迁移一次 |
+| `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | 会话注册表，跨重启存活。同一台机器上的多个服务进程共用该文件时会依次合并写入。支持带 BOM 的 UTF-8。读取失败时会保留原件并报告路径，可修复文件或从备份恢复后重连。旧版 `<仓库>/.state` 会在首次启动时自动迁移一次 |
 | `DSH_MCP_RUNS_DIR` | `<状态文件同目录>/runs` | 异步完成哨兵的根目录（`<此目录>/<会话id>/<run_id>.json`） |
 | `DSH_MCP_LOCKS_DIR` | `<状态文件同目录>/locks` | 写锁"持有者登记"的目录。⚠️ **多个实例必须指向同一个值**，否则彼此看不见对方的持锁登记、会把对方误判成"无法识别的持有者（GUI）"而拒绝抢占 |
 | `DSH_MCP_APPROVAL` | `workspace-write` 和 `read-only` 为 `auto-deny` | 本机审批默认值和上限。设成 `ask` 可逐条裁决越界请求。只读始终拒绝审批。 |
@@ -26,7 +26,7 @@
 | `DSH_MCP_SHARED_PROCESS` | `1`（开启） | **默认开启**：同 `(cwd, permission)` 的会话共享一个 ACP 进程。显著省内存与冷启动（实测第二个会话 `session/new` 约 300ms，独立进程约 4s），`dsh_doctor` 的 RSS 也按 PID 去重。代价：进程崩溃会连坐同组会话（统一写 error 哨兵，之后各自 resume），所以 `dsh_takeover` 杀这类进程时要求 `force=true`。设 `0` 回到"一会话一进程" |
 | `DSH_MCP_AUDIT_FILE` | 空（关闭） | 元数据审计 JSONL 路径。只记事件、会话/回合 ID、决定与计数；**不记** prompt、正文、思考、工具输入。10MB 滚动到 `.1` |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | `dsh_list` 磁盘探测结果的缓存时长（探测要 spawn 一个 DSH 进程，实测约 1 秒） |
-| `DSH_MCP_SENTINEL_TTL_MS` | `604800000`（7 天） | 启动时清理超过此时长的哨兵**与审核记录**；`0` 关闭清理 |
+| `DSH_MCP_SENTINEL_TTL_MS` | `604800000`（7 天） | 启动时清理超过此时长的哨兵、幂等收据和审核记录。`0` 关闭清理 |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | 未设置 | `1` 会把 `result.thinking` 一并写进哨兵（**打破"思考不落盘"的保证**）；answer/error/title/工具输入仍会脱敏 |
 | `DSH_MCP_UPDATE_CHECK` | `1` | `dsh_doctor` 是否去 npm 查新版本（只在调用 doctor 时、只请求本包的 latest、最多 4 秒、缓存 24 小时）。`0` = 不联网 |
 | `DSH_MCP_SENTINEL_TOOL_INPUTS` | `1` | `0` = 哨兵里不写工具输入（命令、路径、写入的文件内容），每个工具只留名字、状态与 `input_chars`，自动放行审批摘要也去掉 `command_preview`。内存里的 `dsh_get` 不受影响 |

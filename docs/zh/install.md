@@ -82,7 +82,7 @@ dsh-any-agent-setup --remove --yes               # 全部移除，只摘自己�
 |---|---|---|---|---|---|
 | Claude Code（`claude-code`） | `~/.claude.json` | `mcpServers` | 只增 / 改自己那条，且带 `type: "stdio"` | 删掉自己那条 | 把备份复制回去 |
 | Claude Desktop（`claude-desktop`） | Windows `%APPDATA%\Claude\claude_desktop_config.json`；macOS `~/Library/Application Support/Claude/claude_desktop_config.json`；Linux `~/.config/Claude/claude_desktop_config.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
-| Codex（`codex`） | `~/.codex/config.toml` | `[mcp_servers.dsh-any-agent]` | 按行追加自己那两段 TOML | 只删这两段 | 把备份复制回去 |
+| Codex（`codex`） | `~/.codex/config.toml` | `[mcp_servers.dsh-any-agent]` | 更新服务表和环境变量表，支持带引号的表名 | 移除本服务的配置表 | 把备份复制回去 |
 | Cursor（`cursor`） | `~/.cursor/mcp.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
 | Windsurf（`windsurf`） | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
 | Zed（`zed`） | Windows `%APPDATA%\Zed\settings.json`；其他平台 `~/.config/zed/settings.json` | `context_servers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
@@ -163,7 +163,7 @@ DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `
 
 每次实际写入后，`--json` 的每个客户端条目里都带 `backup` 字段，直接告诉你备份在哪；人类可读的输出也会在每条下面打印 `backup: <路径>`。
 
-备份散落在各客户端目录里，手动翻文件容易挑错，所以附带一个还原命令：
+还原命令在各客户端配置文件旁查找备份。对于 Antigravity，它会同时检查新旧配置目录，并将每份备份还原到原路径。
 
 | 要做的事 | 命令 |
 |---|---|
@@ -173,7 +173,7 @@ DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `
 | 退回指定的一份 | `dsh-any-agent-restore --file <备份路径>` |
 | 先看会做什么 | 任意命令加 `--dry-run` |
 
-还原本身也是破坏性操作，所以覆盖之前会把**当前**状态另存为 `.bak-dsh-pre-restore-<时间戳>`——退错了还能再退回来。
+还原前会把**当前**配置另存为 `.bak-dsh-pre-restore-<时间戳>`，方便撤销。即使备份数量已达上限，也会等该配置文件的还原操作全部成功后再清理旧备份。
 
 **安装 / 更新 / 删除**
 

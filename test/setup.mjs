@@ -296,8 +296,8 @@ console.log('\n[11] repair refreshes the launch fields without replacing existin
   const zed = ['win32', 'darwin'].includes(platform()) ? 'Zed/settings.json' : '.config/zed/settings.json';
   const rows = {
     [cursor]: '{"mcpServers":{"dsh-any-agent":{"command":' + previousNode + ',"args":' + previousArgs + ',"env":' + env + '}}}',
-    [codex]: '\uFEFF[mcp_servers.dsh-any-agent]\r\ncommand = ' + previousNode + ' # retain\r\nargs = ' + previousArgs +
-      '\r\ntool_timeout_sec = 240.0\n\n[mcp_servers.dsh-any-agent.env]\nDSH_MCP_DAEMON = "1"\nDSH_MCP_APPROVAL = "ask"\n',
+    [codex]: '\uFEFF["mcp_servers"."dsh-any-agent"]\r\ncommand = ' + previousNode + ' # retain\r\nargs = ' + previousArgs +
+      '\r\ntool_timeout_sec = 240.0\n\n["mcp_servers".\'dsh-any-agent\'.env]\nDSH_MCP_DAEMON = "1"\nDSH_MCP_APPROVAL = "ask"\n',
     [opencode]: '{"mcp":{"dsh-any-agent":{"type":"local","command":[' + previousNode + ',' + previousArgs.slice(1) +
       ',"enabled":false,"environment":' + env + '}}}',
     [zed]: '{"context_servers":{"dsh-any-agent":{"command":{"path":' + previousNode + ',"env":' + env + '}}}}',
@@ -331,6 +331,85 @@ console.log('\n[11] repair refreshes the launch fields without replacing existin
   } finally {
     removeSandbox(home);
   }
+}
+
+{
+  const file = '.codex/config.toml';
+  const neighbor = '["mcp_servers.dsh-any-agent"]\nkeep = true\n';
+  const quoted = '["mcp_servers"."dsh-any-agent"]\ncommand = "old"\n';
+  const home = sandbox({ [file]: quoted + neighbor });
+  try {
+    const installed = runSetup(home, ['--yes', '--only', 'codex']);
+    const contents = readFileSync(join(home, file), 'utf8');
+    check('setup replaces the quoted Codex table exactly once and preserves literal dots',
+      installed.code === 0 && !contents.includes(quoted) && contents.includes(neighbor) &&
+      contents.split('[mcp_servers.dsh-any-agent]').length === 2);
+    const removed = runSetup(home, ['--yes', '--remove', '--only', 'codex']);
+    check('uninstall leaves the unrelated table intact', removed.code === 0 && readFileSync(join(home, file), 'utf8') === neighbor);
+  } finally { removeSandbox(home); }
+}
+
+for (const header of ['[projects."D:/app/[slug]"]', "[[projects.'D:/app/[slug]']]"]) {
+  const neighbor = header + ' # project settings\r\ntrust_level = "trusted"\r\n';
+  const file = '.codex/config.toml';
+  const home = sandbox({ [file]: '[mcp_servers.dsh-any-agent]\r\ncommand = "old"\r\n' + neighbor });
+  try {
+    const removed = runSetup(home, ['--remove', '--yes', '--only', 'codex']);
+    check('uninstall preserves the adjacent quoted table ' + header,
+      removed.code === 0 && readFileSync(join(home, file), 'utf8') === neighbor);
+  } finally { removeSandbox(home); }
+}
+
+{
+  const file = '.cursor/mcp.json';
+  const oldest = file + '.bak-dsh-2026-10-01';
+  const configs = { [file]: '{"current":true}' };
+  for (let day = 1; day <= 20; day++) {
+    configs[file + '.bak-dsh-2026-10-' + String(day).padStart(2, '0')] = JSON.stringify({ day });
+  }
+  const home = sandbox(configs);
+  try {
+    const restore = spawnSync(NODE, [join(HERE, '../bin/restore.mjs'), '--home', home,
+      '--file', join(home, oldest), '--json'], { encoding: 'utf8', env: { ...process.env, DSH_MCP_BACKUP_KEEP: '20' } });
+    const safety = JSON.parse(restore.stdout).results[0].safety;
+    check('restore reads the oldest selected backup before rotating a full set', restore.status === 0 &&
+      readFileSync(join(home, file), 'utf8') === configs[oldest], restore.stderr);
+    check('successful restore keeps a safety copy and respects the retention limit',
+      readFileSync(safety, 'utf8') === configs[file] && backupsIn(dirname(safety)).length === 20);
+  } finally { removeSandbox(home); }
+}
+
+{
+  const oldPath = '.gemini/antigravity/mcp_config.json';
+  const original = '{"mcpServers":{"dsh-any-agent":{"command":"old"}}}';
+  const home = sandbox({ [oldPath]: original });
+  try {
+    const removed = runSetup(home, ['--home', home, '--only', 'antigravity', '--remove', '--yes', '--json']);
+    const backup = JSON.parse(removed.out).clients.find(c => c.id === 'antigravity').backup;
+    const restore = (...args) => spawnSync(NODE, [join(HERE, '../bin/restore.mjs'), '--home', home, '--json', ...args], { encoding: 'utf8' });
+    const target = join(home, oldPath);
+    check('restore discovers the legacy Antigravity backup after uninstall removes its target',
+      !existsSync(target) && JSON.parse(restore('--list').stdout).backups.some(b => b.file === backup && b.target === target));
+    check('--latest selects the original Antigravity path', JSON.parse(restore('--latest', '--dry-run').stdout).results[0].target === target);
+    check('--file restores the legacy config in place', restore('--file', backup).status === 0 && readFileSync(target, 'utf8') === original);
+  } finally { removeSandbox(home); }
+}
+
+for (const text of [
+  '{"mcpServers":{"dsh-any-agent":{} /* keep comment */, "other":{"command":"ok"}}}',
+  '{"mcpServers":{"other":{"command":"ok"}, // keep comment\n "dsh-any-agent":{}}}',
+  '{"mcpServers":{"other":{"command":"ok"}, /* keep comment */ "dsh-any-agent":{}, "last":{}}}',
+]) {
+  const file = '.cursor/mcp.json';
+  const home = sandbox({ [file]: text });
+  try {
+    const result = runSetup(home, ['--remove', '--yes', '--only', 'cursor']);
+    const after = readFileSync(join(home, file), 'utf8');
+    const parsed = JSON.parse(after.replace(/\/\*[^*]*\*\/|\/\/[^\n]*/g, ''));
+    check('removal preserves comments and the remaining JSONC properties', result.code === 0 &&
+      after.includes('keep comment') && parsed.mcpServers.other.command === 'ok' &&
+      !('dsh-any-agent' in parsed.mcpServers) && ('last' in parsed.mcpServers) === text.includes('"last"'));
+  } finally { removeSandbox(home); }
 }
 
 console.log('\n===== setup regression: passed ' + passed + ', failed ' + failed + ' =====');

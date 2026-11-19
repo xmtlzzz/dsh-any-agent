@@ -97,6 +97,10 @@ host.attach(a);
 host.attach(b);
 await host.initialize();
 const proc = host.proc;
+proc.teamProfile = { profile: 'dsh-team', backend: 'native' };
+check('共享宿主转发生效的团队 profile', () => assert.deepEqual(host.teamProfile, proc.teamProfile));
+proc.teamProfile = { profile: 'dsh-team', backend: 'experimental' };
+check('实验版团队模式也跟随底层进程', () => assert.equal(host.teamProfile.backend, 'experimental'));
 
 console.log('\n[1] 通知与审批按 sessionId 路由');
 

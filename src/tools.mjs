@@ -15,6 +15,7 @@ import { audit } from './audit.mjs';
 import { L } from './lang.mjs';
 import { listOrphans } from './locks.mjs';
 import { normalizeReviewMode } from './review.mjs';
+import { laterStartedRun } from './run-ledger.mjs';
 import { runDoctor } from './doctor.mjs';
 import {
   backgroundReceipt,
@@ -28,6 +29,15 @@ import {
 // 外部（mcp.mjs、测试）一直从 tools.mjs 取这些名字；拆出去之后导入路径保持不变。
 export { TOOL_DEFS } from './tool-defs.mjs';
 export { compactResultForBudget, psReadCommand, psWaitCommand } from './tool-render.mjs';
+
+async function latestRun(hub, conv) {
+  if (conv.currentRun) return conv.currentRun;
+  const saved = await hub.readLatestStoredRun?.(conv.id);
+  // A local turn can start while the directory is being read.
+  const local = conv.getRun();
+  if (!saved || conv.currentRun || local?.run_id === saved.run_id) return local;
+  return local ? laterStartedRun(saved, local) : saved;
+}
 
 /**
  * timeout_ms 校验：只接受 >= 0 的有限数字（0 = 一直等）。
@@ -393,13 +403,7 @@ export function createHandlers(hub, opts = {}) {
           run = null;
         }
       } else {
-        run = conv.getRun();
-        if (!run?.started_at && run?.status !== 'running') {
-          run = (await hub.readLatestStoredRun?.(args.conversation_id)) ?? run;
-          // 磁盘查询期间可能刚有一个新回合开跑。
-          const current = conv.getRun();
-          if (current?.started_at || current?.status === 'running') run = current;
-        }
+        run = await latestRun(hub, conv);
       }
       if (run && !runSource) runSource = run.source ?? 'memory';
       if (args.run_id && !run) {
@@ -452,7 +456,7 @@ export function createHandlers(hub, opts = {}) {
           meta.push(renderReviewSection(review));
         }
       }
-      const sentinelFile = run ? hub.runSentinelPath(args.conversation_id, run.run_id) : null;
+      const sentinelFile = run && run.result_available !== false ? hub.runSentinelPath(args.conversation_id, run.run_id) : null;
       const runView = run
         ? {
             run_id: run.run_id,
@@ -468,6 +472,7 @@ export function createHandlers(hub, opts = {}) {
             next_offset: truncated ? cap : null,
             review: run.review ?? run.result?.review ?? null,
             result: cap > 0 ? compactResultForBudget(run.result, cap) : run.result,
+            ...(run.result_available === false ? { result_available: false } : {}),
             ...(cap > 0 ? { result_compacted: true } : {}),
           }
         : null;
@@ -690,8 +695,8 @@ export function createHandlers(hub, opts = {}) {
 
     async dsh_status(args) {
       const conv = await hub.get(args.conversation_id);
+      const run = await latestRun(hub, conv);
       const snap = conv.snapshot();
-      const run = conv.getRun();
       const review = run ? (run.review ?? run.result?.review ?? null) : null;
       const bits = [L(`状态=${snap.state}`, `state=${snap.state}`), L(`轮数=${snap.turns}`, `turns=${snap.turns}`)];
       if (snap.state === 'running') {

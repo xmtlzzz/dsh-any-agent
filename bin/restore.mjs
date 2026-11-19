@@ -19,7 +19,7 @@
 import { chmodSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
-import { atomicWrite, backupFile, clientList, resolveDirs } from '../src/clients.mjs';
+import { atomicWrite, backupFile, clientList, pruneBackups, resolveDirs } from '../src/clients.mjs';
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -50,8 +50,9 @@ function backupsOf(path) {
 
 const all = [];
 for (const c of clients) {
-  const path = c.pathOf(dirs);
-  for (const b of backupsOf(path)) all.push({ client: c.id, target: path, ...b });
+  for (const target of c.backupTargets ?? [c.pathOf(dirs)]) {
+    for (const b of backupsOf(target)) all.push({ client: c.id, target, ...b });
+  }
 }
 
 if (has('--help') || has('-h') || argv.length === 0) {
@@ -130,11 +131,12 @@ for (const b of chosen) {
   if (!dryRun) {
     try {
       // 还原也是破坏性操作：先把「现在」也存一份。
-      if (existsSync(b.target)) row.safety = backupFile(b.target, 'pre-restore-' + stamp);
+      const contents = readFileSync(b.file);
+      if (existsSync(b.target)) row.safety = backupFile(b.target, 'pre-restore-' + stamp, { prune: false });
       // tmp + rename：崩溃时不会留下半截配置；还原后保留原文件的权限位。
       let mode = null;
       try { mode = statSync(b.target).mode; } catch {}
-      atomicWrite(b.target, readFileSync(b.file, 'utf8'));
+      atomicWrite(b.target, contents);
       if (mode !== null) { try { chmodSync(b.target, mode); } catch {} }
     } catch (e) {
       row.action = 'failed';
@@ -145,6 +147,12 @@ for (const b of chosen) {
 }
 
 const failed = results.filter((r) => r.action === 'failed').length;
+// A stamp prefix can select several backups of the same file. Keep every
+// selected input and safety copy until all restores for that file succeed.
+const failedTargets = new Set(results.filter((r) => r.action === 'failed').map((r) => r.target));
+for (const target of new Set(results.filter((r) => r.safety).map((r) => r.target))) {
+  if (!failedTargets.has(target)) pruneBackups(target);
+}
 if (JSON_OUT) {
   process.stdout.write(JSON.stringify({ ok: failed === 0, dryRun, results }, null, 2) + '\n');
 } else {

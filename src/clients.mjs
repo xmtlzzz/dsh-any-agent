@@ -54,13 +54,19 @@ export function backupSuffix(stamp = new Date().toISOString().replace(/[:.]/g, '
  * 同一毫秒内对同一文件备份两次会撞名：撞了就加序号，绝不覆盖已有备份 ——
  * 覆盖掉的那一份可能正是用户唯一能回滚到的状态。
  */
-export function backupFile(file, stamp) {
+export function backupFile(file, stamp, { prune = true } = {}) {
   const base = file + backupSuffix(stamp);
-  let dst = base;
-  for (let i = 2; existsSync(dst); i++) dst = base + '-' + i;
-  copyFileSync(file, dst);
-  pruneBackups(file);
-  return dst;
+  for (let i = 1; ; i++) {
+    const dst = i === 1 ? base : base + '-' + i;
+    try {
+      copyFileSync(file, dst, fsConstants.COPYFILE_EXCL);
+    } catch (error) {
+      if (error.code === 'EEXIST') continue;
+      throw error;
+    }
+    if (prune) pruneBackups(file);
+    return dst;
+  }
 }
 
 /**
@@ -75,7 +81,8 @@ export function pruneBackups(file) {
     const prefix = basename(file) + '.bak-dsh-';
     const backups = readdirSync(dir)
       .filter((name) => name.startsWith(prefix))
-      .sort();
+      .sort((a, b) => a.slice(prefix.length).replace(/^pre-restore-/, '')
+        .localeCompare(b.slice(prefix.length).replace(/^pre-restore-/, ''), 'en', { numeric: true }));
     for (const name of backups.slice(0, Math.max(0, backups.length - keep))) {
       try { unlinkSync(join(dir, name)); } catch {}
     }
@@ -203,7 +210,7 @@ export function scanJson(text) {
     if (c === '[') return scanArray();
     if (c === '"') return scanString();
     const start = i;
-    while (i < n && !isWs(text[i]) && text[i] !== ',' && text[i] !== '}' && text[i] !== ']') i++;
+    while (i < n && !isWs(text[i]) && !',}]/'.includes(text[i])) i++;
     if (i === start) fail('unexpected character ' + JSON.stringify(c));
     return { type: 'literal', start, end: i, raw: text.slice(start, i) };
   }
@@ -222,8 +229,8 @@ export function scanJson(text) {
       if (text[i] !== ':') fail('expected ":"');
       i++;
       const value = scanValue();
-      entries.push({ key: key.value, keyStart: key.start, keyEnd: key.end, value });
       skipTrivia();
+      entries.push({ key: key.value, keyStart: key.start, keyEnd: key.end, value, comma: text[i] === ',' ? i : null });
       if (text[i] === ',') { i++; continue; }
       if (text[i] === '}') { i++; return { type: 'object', start, end: i, entries }; }
       fail('expected "," or "}"');
@@ -347,6 +354,13 @@ function removeKey(text, obj, key) {
   // 只有这一个条目：还原成空对象，保留它原本的写法（单行/多行）。
   if (obj.entries.length === 1) {
     const slice = text.slice(obj.start, obj.end);
+    const before = text.slice(obj.start + 1, entry.keyStart);
+    const after = text.slice(entry.value.end, obj.end - 1);
+    if (/\/[/*]/.test(before + after)) {
+      const tail = entry.comma === null ? text.slice(entry.value.end)
+        : text.slice(entry.value.end, entry.comma) + text.slice(entry.comma + 1);
+      return text.slice(0, entry.keyStart) + tail;
+    }
     const eol = detectEol(text);
     if (!slice.includes('\n')) return text.slice(0, obj.start) + '{}' + text.slice(obj.end);
     const baseIndent = leadingWsOfLine(text, obj.start);
@@ -355,24 +369,19 @@ function removeKey(text, obj, key) {
 
   // 优先吃掉自己前面那个逗号（后面条目的缩进保持不动）。
   const start = entry.keyStart;
-  let p = start - 1;
-  while (p >= obj.start && isWs(text[p])) p--;
-  if (text[p] === ',') {
+  if (idx > 0) {
+    const p = obj.entries[idx - 1].comma;
+    const trivia = text.slice(p + 1, start);
     let e = entry.value.end;
     while (e < obj.end && (text[e] === ' ' || text[e] === '\t')) e++;
-    return text.slice(0, p) + text.slice(e);
+    return text.slice(0, p) + (trivia.trim() ? trivia : '') + text.slice(e);
   }
 
   // 自己是第一个条目：吃掉后面那个逗号与随后的空白。
-  let e = entry.value.end;
-  let q = e;
-  while (q < obj.end && isWs(text[q])) q++;
-  if (text[q] === ',') {
-    e = q + 1;
-    while (e < obj.end && (text[e] === ' ' || text[e] === '\t')) e++;
-    return text.slice(0, start) + text.slice(e);
-  }
-  return text.slice(0, start) + text.slice(e);
+  const trivia = text.slice(entry.value.end, entry.comma);
+  let end = entry.comma + 1;
+  while (end < obj.end && (text[end] === ' ' || text[end] === '\t')) end++;
+  return text.slice(0, start) + (trivia.trim() ? trivia : '') + text.slice(end);
 }
 
 /**
@@ -384,6 +393,7 @@ export function editJsonEntry(rawText, containerKey, entryKey, value, options = 
   const bom = rawText.startsWith('\uFEFF') ? '\uFEFF' : '';
   const text = bom ? rawText.slice(1) : rawText;
   const result = editJsonEntryBody(text, containerKey, entryKey, value, options);
+  if (result.changed) scanJson(result.text);
   return { changed: result.changed, text: bom + result.text };
 }
 
@@ -399,6 +409,7 @@ function dropContainerIfEmpty(text, containerKey) {
   if (idx < 0) return text;
   const cont = root.entries[idx];
   if (cont.value.type !== 'object' || cont.value.entries.length !== 0) return text;
+  if (/\/[/*]/.test(text.slice(cont.value.start, cont.value.end))) return text;
   const without = removeKey(text, root, containerKey);
   if (without === null) return text;
   // 丢容器只允许让文件更短，且必须仍然可解析；否则宁可留着空容器。
@@ -491,16 +502,14 @@ export function stripWs(text) {
 }
 // ── TOML（Codex）：按行编辑，保留注释/顶层键/CRLF ────────────────────
 
-const TOML_HEADER = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/;
+const TOML_STRING = String.raw`(?:"(?:[^"\\]|\\.)*"|'[^']*')`;
+const TOML_KEY = `(?:[A-Za-z0-9_-]+|${TOML_STRING})`;
+const TOML_TABLE_NAME = String.raw`${TOML_KEY}(?:\s*\.\s*${TOML_KEY})*`;
+const TOML_HEADER = new RegExp(String.raw`^\s*\[\s*(${TOML_TABLE_NAME})\s*\]\s*(?:#.*)?$`);
 // ★ 数组表 `[[name]]` 也是表边界：只认 `[...]` 时它会被当成上一张表的内容，
 //   卸载我们的表时连带删掉紧随其后的数组表（审计 B01）。
-const TOML_ARRAY_HEADER = /^\s*\[\[([^\]]+)\]\]\s*(?:#.*)?$/;
-const INLINE_OURS = /^\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*=/;
-// ★ 我们的条目也可能被手写成点号键或根上的内联表。按行编辑改不动这些写法：
-//   以前删除时它原样留下，添加时又追加一张同名表，Codex 因"重复定义"读不了配置。现在一律拒绝。
-const DOTTED_OURS = /^\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*\./;
-const ROOT_DOTTED_OURS = /^\s*mcp_servers\s*\.\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*[.=]/;
-const ROOT_INLINE_SERVERS = /^\s*mcp_servers\s*=/;
+const TOML_ARRAY_HEADER = new RegExp(String.raw`^\s*\[\[\s*(${TOML_TABLE_NAME})\s*\]\]\s*(?:#.*)?$`);
+const TOML_ASSIGNMENT = new RegExp('^\\s*(' + TOML_TABLE_NAME + ')\\s*=');
 const COMMENT_OR_BLANK = /^\s*(?:#.*)?$/;
 
 /**
@@ -543,11 +552,18 @@ function multilineMask(lines) {
   return mask;
 }
 
-/** 这个表头是不是我们的（[mcp_servers.dsh-any-agent] 及其子表）。 */
-function isOurTable(name) {
-  const bare = name.trim();
-  const m = /^mcp_servers\s*\.\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)(?:\s*\.\s*.+)?$/.exec(bare);
-  return Boolean(m);
+// Compare key components, keeping dots inside quoted keys literal.
+function tomlKeys(name) {
+  return name.match(new RegExp(TOML_KEY, 'g')).map((key) => {
+    if (key.startsWith("'")) return key.slice(1, -1);
+    if (!key.startsWith('"')) return key;
+    return key.slice(1, -1).replace(/\\(?:u([\da-fA-F]{4})|U([\da-fA-F]{8})|(.))/g,
+      (escape, short, long, char) => {
+        if (char) return char === '\\' || char === '"' ? char : escape;
+        const code = parseInt(short ?? long, 16);
+        return code <= 0x10ffff ? String.fromCodePoint(code) : escape;
+      });
+  });
 }
 
 /**
@@ -559,8 +575,7 @@ function findTomlRanges(lines) {
   const mask = multilineMask(lines);
   let cur = null;
   let unsupported = null;
-  // 当前所在的表（'' = 根，已 trim）；数组表记为 null，里面的键一律不是我们的。
-  let table = '';
+  let table = [];
   // 关闭区间时必须把 end 定在「这张表的最后一行」，而不是文件末尾 —— 否则我们这段会一路吞掉后面所有的表。
   // ★ 表尾的注释和空行也不算我们的：它们通常是下一张表的说明，或用户注释掉的设置，删掉就找不回来了。
   const close = (k) => {
@@ -576,16 +591,25 @@ function findTomlRanges(lines) {
     const m = arr ? null : TOML_HEADER.exec(lines[k]);
     if (arr || m) {
       if (cur) close(k);
-      table = arr ? null : m[1].trim();
-      if (m && isOurTable(m[1])) cur = { start: k, end: lines.length };
+      table = tomlKeys((arr ?? m)[1]);
+      if (table[0] === 'mcp_servers' && table[1] === ENTRY_NAME) {
+        if (arr) unsupported ??= 'array table on line ' + (k + 1);
+        else cur = { start: k, end: lines.length, main: table.length === 2 };
+      }
+      if (arr) table = null;
       continue;
     }
     // ★ 内联条目只认 `[mcp_servers]` 表里的 `dsh-any-agent = {...}`。别的表里恰好同名的键
     //   （例如 [projects] 下）是用户的，不能删（审计 B01）。
-    if (table === 'mcp_servers' && INLINE_OURS.test(lines[k])) ranges.push({ start: k, end: k + 1, inline: true });
-    else if (table === 'mcp_servers' && DOTTED_OURS.test(lines[k])) unsupported ??= 'dotted key on line ' + (k + 1);
-    else if (table === '' && ROOT_DOTTED_OURS.test(lines[k])) unsupported ??= 'dotted key on line ' + (k + 1);
-    else if (table === '' && ROOT_INLINE_SERVERS.test(lines[k]) && lines[k].includes(ENTRY_NAME)) {
+    if (!table || table.length > 1 || (table.length && table[0] !== 'mcp_servers')) continue;
+    const field = TOML_ASSIGNMENT.exec(lines[k]);
+    if (!field) continue;
+    const path = [...table, ...tomlKeys(field[1])];
+    if (path[0] !== 'mcp_servers') continue;
+    if (table.length === 1 && path.length === 2 && path[1] === ENTRY_NAME) {
+      ranges.push({ start: k, end: k + 1, inline: true });
+    } else if (path[1] === ENTRY_NAME) unsupported ??= 'dotted key on line ' + (k + 1);
+    else if (path.length === 1) {
       unsupported ??= 'inline mcp_servers table on line ' + (k + 1);
     }
   }
@@ -768,6 +792,7 @@ export function existingShapeMode(client, file) {
 }
 
 export function clientList(dirs) {
+  const antigravityPaths = ['config', 'antigravity'].map(dir => join(dirs.home, '.gemini', dir, 'mcp_config.json'));
   const { home, appData } = dirs;
   return [
     jsonClient('claude-code', 'Claude Code', 'vscode', 'mcpServers', () => join(home, '.claude.json')),
@@ -789,10 +814,10 @@ export function clientList(dirs) {
     // 没加过任何 MCP 服务器时两个文件都还不存在，所以另外按它的数据目录判断是否已安装。
     {
       ...jsonClient('antigravity', 'Antigravity', 'default', 'mcpServers', () => {
-        const current = join(home, '.gemini', 'config', 'mcp_config.json');
-        const legacy = join(home, '.gemini', 'antigravity', 'mcp_config.json');
+        const [current, legacy] = antigravityPaths;
         return !existsSync(current) && existsSync(legacy) ? legacy : current;
       }),
+      backupTargets: antigravityPaths,
       detectPaths: [join(home, '.gemini', 'antigravity'), join(home, '.gemini', 'antigravity-cli')],
     },
     jsonClient('opencode', 'opencode', 'opencode', 'mcp', () => join(home, '.config', 'opencode', 'opencode.json')),
@@ -929,7 +954,6 @@ function repairJsonLaunch(text, client, launch) {
 }
 
 const TOML_LAUNCH_FIELD = /^(\s*(?:"(command|args)"|'(command|args)'|(command|args))\s*=\s*)(.*)$/;
-const TOML_STRING = String.raw`(?:"(?:[^"\\]|\\.)*"|'[^']*')`;
 const TOML_LAUNCH_VALUE = {
   command: new RegExp('^(' + TOML_STRING + ')(\\s*(?:#.*)?)$'),
   args: new RegExp('^(\\[\\s*(?:' + TOML_STRING + '\\s*,\\s*)*(?:' + TOML_STRING + '\\s*)?\\])(\\s*(?:#.*)?)$'),
@@ -940,8 +964,7 @@ function repairTomlLaunch(text, launch) {
   const eols = text.match(/\r?\n/g) ?? [];
   const { ranges, unsupported } = findTomlRanges(lines);
   if (!ranges.length && !unsupported) return null;
-  const tables = ranges.filter(({ start, inline }) => !inline &&
-    /^mcp_servers\s*\.\s*(?:dsh-any-agent|"dsh-any-agent"|'dsh-any-agent')\s*$/.test(TOML_HEADER.exec(lines[start])?.[1] ?? ''));
+  const tables = ranges.filter((range) => range.main);
   if (unsupported || ranges.some((r) => r.inline) || tables.length !== 1) {
     throw new Error('repair requires one [mcp_servers.dsh-any-agent] table; update custom TOML forms by hand');
   }

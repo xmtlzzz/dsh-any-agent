@@ -9,7 +9,8 @@
  * 读取是按字节偏移的增量 tail：只消费到最后一个换行，末尾写到一半的行留到下一次。
  */
 
-import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
+import { readRegistry } from './registry.mjs';
 import { join } from 'node:path';
 import { LIVE_FILE } from './live.mjs';
 
@@ -513,7 +514,7 @@ export class LiveTail {
     const hints = new Map();
     if (this.stateFile) {
       try {
-        const doc = JSON.parse(readFileSync(this.stateFile, 'utf8'));
+        const doc = readRegistry(this.stateFile);
         for (const c of doc?.conversations ?? []) if (c?.id && typeof c.titleHint === 'string') hints.set(c.id, c.titleHint);
       } catch {
         /* 注册表读不了就算了 */

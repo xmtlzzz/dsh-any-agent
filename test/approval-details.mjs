@@ -51,7 +51,7 @@ try {
   });
   check('dsh_status returns the same actionable details', () => assert.deepEqual(status.structured.pending_approval_details, get.structured.pending_approval_details));
   check('readable summary avoids dumping the whole command input', () => assert.ok(!get.text.includes('node ./probe.cjs')));
-  hub.save();
+  await hub.save();
   const persisted = readFileSync(process.env.DSH_MCP_STATE, 'utf8');
   check('approval context is absent from the saved registry', () => {
     assert.ok(!persisted.includes('pending_approval'));

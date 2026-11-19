@@ -12,7 +12,7 @@
 | `DSH_MCP_SETTINGS` | `$DSH_HOME/.dsh-any-agent/settings.json` | Settings file written by `dsh-any-agent team on/off` |
 | `DSH_MCP_BOOTSTRAP` | on | Whether this server may create/sync the DSH profile on first start. `0` makes it drive an existing profile only and never write a file |
 | `DSH_MCP_ROUTE_SOURCE` | unset | Pin where model routes are copied from during bootstrap: a profile name (`desktop`, `web`, …) or `__home__` for `$DSH_HOME/cordis.patch.yml`. Unset = try home → desktop → web → headless → acp |
-| `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | Conversation registry, survives restarts. The old `<repo>/.state` location is migrated once on startup |
+| `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | Persistent conversation registry. Server processes sharing this file on one machine take turns merging their updates. UTF-8 BOM files are supported. A read error preserves the file and reports its path. Repair it or restore a backup, then reconnect. The old `<repo>/.state` location is migrated once on startup |
 | `DSH_MCP_APPROVAL` | `auto-deny` for `workspace-write` and `read-only` | Machine approval default and ceiling. Set `ask` to decide escalations individually. Read-only always denies. |
 | `DSH_MCP_APPROVAL_TIMEOUT_MS` | `300000` | How long a pending `ask` approval waits before being cancelled |
 | `DSH_MCP_FORGOTTEN_DIR` | `$DSH_HOME/.dsh-any-agent-forgotten` | Tombstones written by `dsh_release(forget=true)` |
@@ -26,7 +26,7 @@
 | `DSH_MCP_SHARED_PROCESS` | `1` (on) | **On by default**: sessions with the same `(cwd, permission)` share one ACP process. Large memory and cold-start win (measured: second `session/new` ≈300 ms vs ≈4 s standalone), and `dsh_doctor` de-dupes RSS by PID. Trade-off: a process crash takes down the whole group (error sentinels are written; each session resumes on the next call), so `dsh_takeover` requires `force=true` to kill such a process. Set `0` for one process per conversation |
 | `DSH_MCP_AUDIT_FILE` | empty (off) | Metadata audit JSONL path. Records events, conversation/run ids, decisions and counts; **never** prompts, answers, thinking or tool input. Rotates at 10 MB |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | Cache lifetime for `dsh_list`'s on-disk probe (the probe spawns a DSH process and takes ~1 s) |
-| `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels **and review records**; `0` disables pruning |
+| `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels, idempotency receipts and review records. `0` disables pruning |
 | `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**); answer/error/title/tool inputs are still credential-redacted |
 | `DSH_MCP_UPDATE_CHECK` | `1` | Whether `dsh_doctor` asks npm for a newer version (only when doctor is called; requests this package's latest only; 4 s at most; cached 24 hours). `0` = no network |
 | `DSH_MCP_SENTINEL_TOOL_INPUTS` | `1` | `0` = sentinels carry no tool inputs (commands, paths, written file contents); each tool keeps its name, status and `input_chars`, and auto-approval summaries drop `command_preview`. `dsh_get` from memory is unaffected |

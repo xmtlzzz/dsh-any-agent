@@ -26,7 +26,8 @@
  * 与全局 `test/cleanup.mjs` 也要用，而且要能在沙箱 DSH_HOME 里做离线回归。
  */
 
-import { existsSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync, rmdirSync } from 'node:fs';
+import { readRegistry, withRegistryLockSync, writeRegistry } from './registry.mjs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { LIVE_DIR, REVIEWS_DIR, RUNS_DIR, STATE_FILE } from './config.mjs';
@@ -67,14 +68,6 @@ const readJson = (file) => {
   }
 };
 
-/** 读注册表；文件不存在 → null；坏了 → 抛错（调用方 fail-closed，绝不覆盖）。 */
-function readRegistry(stateFile) {
-  if (!existsSync(stateFile)) return null;
-  const doc = JSON.parse(readFileSync(stateFile, 'utf8'));
-  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) throw new Error('注册表结构异常');
-  return doc;
-}
-
 /** 这个 id 在这份状态目录里的 cwd 证据（元数据侧车 + 注册表条目）。 */
 function stateCwds(st, id, registry) {
   const out = [];
@@ -110,11 +103,11 @@ export function purgeProjectState({ ids, states, headerCwds = new Map(), trusted
   const res = { removed: { registry: 0, meta: 0, runs: 0, reviews: 0, locks: 0, live: 0 }, refused: [], errors: [] };
   const wanted = [...new Set((ids ?? []).filter((x) => typeof x === 'string' && SAFE_ID.test(x)))];
 
-  for (const st of specs) {
+  function purgeState(st, readState) {
     let registry = null;
     let registryBroken = false;
     try {
-      registry = readRegistry(st.stateFile);
+      if (readState) registry = readRegistry(st.stateFile);
     } catch (e) {
       registryBroken = true;
       res.errors.push(`${st.stateFile}: ${e.message}（注册表不动；其余产物仍按元数据证据清理）`);
@@ -154,18 +147,18 @@ export function purgeProjectState({ ids, states, headerCwds = new Map(), trusted
       const kept = registry.conversations.filter((c) => !drop.has(c?.id));
       const n = registry.conversations.length - kept.length;
       if (n > 0) {
+        if (!dryRun) writeRegistry(st.stateFile, { ...registry, conversations: kept });
         res.removed.registry += n;
-        if (!dryRun) {
-          const tmp = `${st.stateFile}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-          try {
-            writeFileSync(tmp, JSON.stringify({ ...registry, conversations: kept }, null, 2), 'utf8');
-            renameSync(tmp, st.stateFile);
-          } catch (e) {
-            rmSync(tmp, { force: true });
-            res.errors.push(`${st.stateFile}: 写注册表失败: ${e.message}`);
-          }
-        }
       }
+    }
+  }
+  for (const st of specs) {
+    try {
+      if (dryRun) purgeState(st, true);
+      else if (!existsSync(dirname(st.stateFile))) purgeState(st, false);
+      else withRegistryLockSync(st.stateFile, () => purgeState(st, true));
+    } catch (error) {
+      res.errors.push(`${st.stateFile}: ${error.message}`);
     }
   }
   return res;

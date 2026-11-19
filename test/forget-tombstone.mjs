@@ -24,7 +24,7 @@ const conv = new Conversation(
   hub,
 );
 hub.conversations.set(conv.id, conv);
-hub.save();
+await hub.save();
 
 let pass = 0;
 let fail = 0;
@@ -172,7 +172,7 @@ console.log('\n[7] ★ 两个实例共用注册表：后保存的不覆盖对方
   const seeded = mk(seedHub, 'multi-x');
   seeded.lastUsedAt = 1000;
   seedHub.conversations.set(seeded.id, seeded);
-  seedHub.save();
+  await seedHub.save();
   const A = new Hub({ log: { info() {}, debug() {} } });
   await A.load();
   const B = new Hub({ log: { info() {}, debug() {} } });
@@ -181,9 +181,9 @@ console.log('\n[7] ★ 两个实例共用注册表：后保存的不覆盖对方
   const bx = B.conversations.get('multi-x');
   bx.turnCount = 5;
   bx.lastUsedAt = Date.now();
-  B.save();
+  await B.save();
   A.conversations.set('multi-z', mk(A, 'multi-z'));
-  A.save(); // A 内存里的 multi-x 还是 0 轮
+  await A.save(); // A 内存里的 multi-x 还是 0 轮
   const doc = JSON.parse(readFileSync(process.env.DSH_MCP_STATE, 'utf8'));
   const ids = doc.conversations.map((c) => c.id);
   check('★ B 新增的条目还在', ids.includes('multi-y'), ids.join(','));
@@ -192,7 +192,7 @@ console.log('\n[7] ★ 两个实例共用注册表：后保存的不覆盖对方
   const meta = JSON.parse(readFileSync(join(dirname(process.env.DSH_MCP_STATE), 'meta', 'multi-x.json'), 'utf8'));
   check('★ 侧车里的轮数也没有被写回 0', meta.turnCount === 5, String(meta.turnCount));
 
-  A.remove('multi-z');
+  await A.remove('multi-z');
   check('本实例主动移除的条目不会被合并回来', !JSON.parse(readFileSync(process.env.DSH_MCP_STATE, 'utf8')).conversations.some((c) => c.id === 'multi-z'));
 
   console.log('\n[8] ★ 另一个活着的实例握着写锁时，这边不能 forget（审计 C03）');

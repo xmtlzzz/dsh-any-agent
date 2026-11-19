@@ -130,7 +130,7 @@ export const TOOL_DEFS = [
   {
     name: 'dsh_send',
     outputSchema: OUT(
-      { conversation_id: { type: 'string' }, run_id: { type: 'string' }, sentinel_file: { type: 'string' }, status: { type: 'string' }, background: { type: 'boolean' }, queued: { type: 'boolean' }, replayed: { type: 'boolean' } },
+      { conversation_id: { type: 'string' }, run_id: { type: 'string' }, sentinel_file: { type: 'string' }, status: { type: 'string' }, background: { type: 'boolean' }, queued: { type: 'boolean' }, replayed: { type: 'boolean' }, result_available: { type: 'boolean' } },
       ['conversation_id', 'run_id', 'sentinel_file'],
     ),
     title: '派发任务',
@@ -186,8 +186,8 @@ export const TOOL_DEFS = [
           type: 'string',
           maxLength: 128,
           description:
-            '调用方生成的幂等键（≤128 字符，作用域=本会话，保留期跟随哨兵）。重复提交同一个键会返回原回合，' +
-            '而是返回首次 run 的结果或收据（replayed=true）。用于"响应在传输层丢了、想安全重发"的场景。',
+            '调用方生成的幂等键（≤128 字符，作用域=本会话）。保留期内重试返回原回合的结果或收据（replayed=true）。' +
+            '删除结果文件并重连后，仅剩收据时会返回 result_available=false。',
         },
         team: {
           type: 'boolean',
@@ -262,7 +262,7 @@ export const TOOL_DEFS = [
         conversation_id: { type: 'string' },
         run: {
           type: ['object', 'null'],
-          properties: { run_id: { type: 'string' }, status: { type: 'string' }, result: { type: ['object', 'null'] } },
+          properties: { run_id: { type: 'string' }, status: { type: 'string' }, result: { type: ['object', 'null'] }, result_available: { type: 'boolean' } },
           required: ['run_id', 'status', 'result'],
         },
         sentinel_file: { type: 'string' },

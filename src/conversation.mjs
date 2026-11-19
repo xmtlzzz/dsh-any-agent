@@ -871,7 +871,7 @@ export class Conversation {
    *   - 只写哨兵救不了 `dsh_interject`——它等的是 idleWaiters，不是文件；
    *   - 只唤醒不写哨兵，调用方事后 `dsh_get(run_id)` 就永远找不到这次失败。
    */
-  #settleFailedRun(runRecord, error, { status = 'error' } = {}) {
+  async #settleFailedRun(runRecord, error, { status = 'error' } = {}) {
     const stopReason = status === 'cancelled' ? 'cancelled' : 'error';
     const waiters = this.idleWaiters;
     this.idleWaiters = [];
@@ -907,7 +907,7 @@ export class Conversation {
       runRecord.result.sentinel_error = `写完成哨兵失败: ${e.message}`;
     }
     try {
-      this.#hub.save?.();
+      await this.#hub.save?.();
     } catch {}
     return runRecord.result;
   }
@@ -956,8 +956,7 @@ export class Conversation {
     }
     const reviewMode = runRecord.review_mode ?? normalizeReviewMode(review ?? this.review);
     runRecord.review_mode = reviewMode;
-    runRecord.status = 'running';
-    runRecord.started_at = now();
+    this.ledger.start(runRecord);
     this.currentRun = runRecord;
     let before = null;
     let proc;
@@ -993,7 +992,7 @@ export class Conversation {
       // ★ 与 finalize 对齐：失败也必须给等待者一个终态——唤醒插话队列 + 落 error 哨兵。
       //   只写哨兵救不了 dsh_interject：它等的是 idleWaiters，不是文件（默认 timeout=0 无 timer）。
       this.busy = false;
-      this.#settleFailedRun(runRecord, e);
+      await this.#settleFailedRun(runRecord, e);
       e.runId = runRecord.run_id;
       e.status = 'error';
       e.sentinelFile = runRecord.result?.sentinel_file ?? null;
@@ -1133,7 +1132,7 @@ export class Conversation {
           );
           this.turnCount += 1;
           this.lastUsedAt = now();
-          this.#hub.save();
+          await this.#hub.save();
           // 唤醒所有"等本轮结束"的插话请求（busy 已置 false，它们可以安全地发下一轮）
           const waiters = this.idleWaiters;
           this.idleWaiters = [];
@@ -1781,10 +1780,10 @@ export class Conversation {
       // ★ 墓碑写不进去就不能报“已 forget”，也不从注册表移除（审计 B04）。
       const tombErr = writeTombstone(this.id);
       if (tombErr) {
-        this.#hub.save();
+        await this.#hub.save();
         return { closed: stopped, forgotten: false, error: `forget 墓碑写入失败（会话未移除，可修复后重试）：${tombErr}` };
       }
-      this.#hub.remove(this.id);
+      await this.#hub.remove(this.id);
       // forget 是"永久移除"：事件流也一并删掉，查看器里不再出现这个会话。
       removeLive(this.id);
       // 会话自己的 worktree：干净就删目录（分支保留），有未提交改动就留着并说明。
@@ -1793,7 +1792,7 @@ export class Conversation {
         return { closed: stopped, forgotten: true, worktree };
       }
     } else {
-      this.#hub.save();
+      await this.#hub.save();
       this.#live('conv.close', { stopped });
     }
     return { closed: stopped, forgotten: forget, ...(stopped ? {} : { error: '进程未能确认退出，登记已保留' }) };

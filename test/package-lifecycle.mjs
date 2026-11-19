@@ -201,6 +201,27 @@ try {
       ]);
     }
   }
+  for (const client of clients) await client.close();
+  rmSync(finished.result.sentinel_file);
+  const afterRemoval = connect();
+  await afterRemoval.initialize();
+  const countPrompts = () => readFileSync(join(root, 'events.jsonl'), 'utf8').split('\n')
+    .filter(line => line && JSON.parse(line).method === 'session/prompt').length;
+  const beforeRetry = real ? null : countPrompts();
+  for (const [tool, input] of [['dsh_send', { prompt: 'This retry must not run.', wait: true }],
+    ['dsh_interject', { message: 'This retry must not interrupt a turn.' }]]) {
+    const receipt = (await afterRemoval.callTool(tool, { ...args, ...input })).structuredContent;
+    assert.equal(receipt?.replayed, true);
+    assert.equal(receipt.run_id, finished.run_id);
+    assert.equal(receipt.result_available, false);
+    assert.equal(receipt.sentinel_file, finished.result.sentinel_file);
+  }
+  const retained = (await afterRemoval.callTool('dsh_get', args)).structuredContent;
+  assert.equal(retained.run.result, null);
+  assert.equal(retained.run.client_run_id, key);
+  assert.equal(retained.run.result_available, false);
+  assert.equal(retained.sentinel_file, undefined);
+  if (!real) assert.equal(countPrompts(), beforeRetry);
   const backend = runtime ? `DSH ${runtime.version ?? 'unknown version'} via ${runtime.source}, real provider` : 'simulated ACP';
   const scenario = upgrade ? `upgrade from npm ${baseline}` : 'lifecycle';
   console.log(`Packaged MCP ${scenario} passed (${backend}; ${process.platform}, Node ${process.versions.node}).`);
