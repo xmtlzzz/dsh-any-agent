@@ -82,7 +82,7 @@ dsh-any-agent-setup --remove --yes               # 全部移除，只摘自己�
 |---|---|---|---|---|---|
 | Claude Code（`claude-code`） | `~/.claude.json` | `mcpServers` | 只增 / 改自己那条，且带 `type: "stdio"` | 删掉自己那条 | 把备份复制回去 |
 | Claude Desktop（`claude-desktop`） | Windows `%APPDATA%\Claude\claude_desktop_config.json`；macOS `~/Library/Application Support/Claude/claude_desktop_config.json`；Linux `~/.config/Claude/claude_desktop_config.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
-| Codex（`codex`） | `~/.codex/config.toml` | `[mcp_servers.dsh-any-agent]` | 按行追加自己那两段 TOML | 只删这两段 | 把备份复制回去 |
+| Codex（`codex`） | `~/.codex/config.toml` | `[mcp_servers.dsh-any-agent]` | 更新服务表和环境变量表，支持带引号的表名 | 移除本服务的配置表 | 把备份复制回去 |
 | Cursor（`cursor`） | `~/.cursor/mcp.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
 | Windsurf（`windsurf`） | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |
 | Zed（`zed`） | Windows `%APPDATA%\Zed\settings.json`；其他平台 `~/.config/zed/settings.json` | `context_servers` | 只增 / 改自己那条 | 删掉自己那条 | 把备份复制回去 |

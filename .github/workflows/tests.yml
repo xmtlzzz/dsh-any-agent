@@ -32,7 +32,7 @@ name: tests
 #     watchdog          turn watchdog (stall / max duration)  33 checks
 #     worktree          isolation=worktree sessions      30 checks
 #     daemon            DSH_MCP_DAEMON=1 resident process  23 checks
-#     run-recovery      interrupted-turn sentinels   30 checks
+#     run-recovery      interrupted-turn sentinels   33 checks
 #     contract          tool surface + sentinel shape snapshot  13 checks
 #     update-check      dsh_doctor npm version check (fake fetch)  22 checks
 #     sandbox-guard     real HOME is never a sandbox   21 checks
@@ -40,7 +40,7 @@ name: tests
 #     test-counts       report parser + docs sync     92 checks
 #     roots             cwd from MCP roots            18 checks
 #     workspace-titles  home/root cwd guard, title_hint 19 checks (17 off Windows)
-#     setup             client config writer          66 checks
+#     setup             client config writer          68 checks
 #     removal-scope     --remove only touches its own   61 checks
 #     config-safety     in-place edits, format        449 checks
 #     real-configs      real config round-trip        skips without client fixtures

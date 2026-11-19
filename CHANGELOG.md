@@ -9,14 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] — 2026-11-19
+
 ### Fixed
 
+- Recognize quoted Codex table names during installation, repair and removal. Existing entries such as `["mcp_servers"."dsh-any-agent"]` can be updated safely.
+- Continue starting the MCP server if a historical idempotency receipt cannot be created. The original result stays readable and migration retries on the next startup.
+- After a handoff between MCP clients, `dsh_get` and `dsh_status` identify the most recently started turn, including a turn running in another instance that shares the same state directory.
 - A retained idempotency receipt prevents a second dispatch after the caller deletes a result file and reconnects. Retries return the original run ID with `result_available: false` when only the receipt remains.
-
 - Select the most recently started turn after queue promotion. Shared ACP sessions now report their active team profile and use the matching team prompt behavior.
-
 - Keep commented JSONC client configurations valid on removal. Restore Antigravity backups to the directory where the original configuration lived, including the legacy directory.
-
 - Preserve adjacent Codex tables with brackets in quoted project names during setup and removal.
 - Finish restoring selected client backups before rotating the backup history.
 - Serialize concurrent conversation registry updates and report write failures. Read UTF-8 BOM files and preserve unreadable registries for recovery.
@@ -1747,7 +1749,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...HEAD
+[0.7.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.3...v0.7.4

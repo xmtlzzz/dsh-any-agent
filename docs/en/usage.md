@@ -30,6 +30,8 @@ MCP tool calls **block**, so `dsh_send` **does not block by default** (`wait=fal
 
 The server saves receipt metadata before accepting a run. On restart, it marks unstarted queued runs as cancelled and turns that did not return an ACP result as interrupted. If the ACP result was already saved, recovery preserves its original outcome and redacted answer. A recovered result with `git_snapshot_incomplete: true` needs a manual workspace check. Reuse the original key to retrieve the result and use a new key when you intend to execute the task again.
 
+On upgrade, the server creates separate idempotency receipts for retained results. If a result directory is read-only, keep the original result file, restore write access, and restart the server to retry the migration. Other conversations remain available.
+
 If the host cancels a blocking MCP request, the server stops waiting and sending progress. A dispatched turn continues to its sentinel. Use `dsh_interrupt` to stop a running turn.
 
 ## 🔔 Workflow: get notified on completion (no polling)

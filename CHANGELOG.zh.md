@@ -12,14 +12,16 @@
 
 ## [Unreleased]
 
+## [0.7.7] — 2026-11-19
+
 ### 修复
 
+- 安装、修复和卸载时识别 Codex 配置中带引号的表名，例如 `["mcp_servers"."dsh-any-agent"]`，避免重复定义导致配置无法加载。
+- 单个历史回合补写幂等收据失败时，MCP 仍可启动，旧结果保留并可读取，下次启动时重试迁移。
+- 多个 MCP 客户端接力时，`dsh_get` 和 `dsh_status` 可找到共用状态目录的其他实例最近启动的回合，包括仍在执行的回合。
 - 删除结果文件并重连后，保留期内重试同一幂等键仍会返回原回合 ID。仅剩收据时，返回值会标明 `result_available: false`。
-
 - 队列调整顺序后按实际启动时间查询最近回合。共享 ACP 进程会报告生效的团队模式，并按对应模式发送团队提示。
-
 - 卸载时保留 JSONC 注释和其余配置的有效语法。还原 Antigravity 配置时识别当前和旧版目录，并将备份写回原路径。
-
 - 安装和卸载时保留相邻的 Codex 配置表，包括引号内项目名带方括号的表。
 - 客户端配置还原成功后再轮转备份，避免提前删除选中的历史副本。
 - 多个进程同时更新会话注册表时串行保存，写入失败会报告错误。支持带 UTF-8 BOM 的文件，读取失败时保留原文件供恢复。
@@ -1274,7 +1276,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...HEAD
+[0.7.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.3...v0.7.4

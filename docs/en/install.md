@@ -69,7 +69,7 @@ A `.bak-dsh-<timestamp>` backup lands beside every file before it is written. Pa
 |---|---|---|---|---|---|
 | Claude Code (`claude-code`) | `~/.claude.json` | `mcpServers` | its own entry only, with `type: "stdio"` | deletes its own entry only | copy the backup back |
 | Claude Desktop (`claude-desktop`) | Windows `%APPDATA%\Claude\claude_desktop_config.json`; macOS `~/Library/Application Support/Claude/claude_desktop_config.json`; Linux `~/.config/Claude/claude_desktop_config.json` | `mcpServers` | adds or rewrites its own entry only | deletes its own entry only | copy the backup back |
-| Codex (`codex`) | `~/.codex/config.toml` | `[mcp_servers.dsh-any-agent]` | appends its two TOML sections line-wise | deletes those two sections and nothing else | copy the backup back |
+| Codex (`codex`) | `~/.codex/config.toml` | `[mcp_servers.dsh-any-agent]` | updates the server and environment tables, including quoted table names | removes the server tables | copy the backup back |
 | Cursor (`cursor`) | `~/.cursor/mcp.json` | `mcpServers` | its own entry only | its own entry only | copy the backup back |
 | Windsurf (`windsurf`) | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` | its own entry only | its own entry only | copy the backup back |
 | Zed (`zed`) | Windows `%APPDATA%\Zed\settings.json`; elsewhere `~/.config/zed/settings.json` | `context_servers` | its own entry only | its own entry only | copy the backup back |
