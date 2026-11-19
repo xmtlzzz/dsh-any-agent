@@ -333,5 +333,35 @@ console.log('\n[11] repair refreshes the launch fields without replacing existin
   }
 }
 
+for (const header of ['[projects."D:/app/[slug]"]', "[[projects.'D:/app/[slug]']]"]) {
+  const neighbor = header + ' # project settings\r\ntrust_level = "trusted"\r\n';
+  const file = '.codex/config.toml';
+  const home = sandbox({ [file]: '[mcp_servers.dsh-any-agent]\r\ncommand = "old"\r\n' + neighbor });
+  try {
+    const removed = runSetup(home, ['--remove', '--yes', '--only', 'codex']);
+    check('uninstall preserves the adjacent quoted table ' + header,
+      removed.code === 0 && readFileSync(join(home, file), 'utf8') === neighbor);
+  } finally { removeSandbox(home); }
+}
+
+{
+  const file = '.cursor/mcp.json';
+  const oldest = file + '.bak-dsh-2026-10-01';
+  const configs = { [file]: '{"current":true}' };
+  for (let day = 1; day <= 20; day++) {
+    configs[file + '.bak-dsh-2026-10-' + String(day).padStart(2, '0')] = JSON.stringify({ day });
+  }
+  const home = sandbox(configs);
+  try {
+    const restore = spawnSync(NODE, [join(HERE, '../bin/restore.mjs'), '--home', home,
+      '--file', join(home, oldest), '--json'], { encoding: 'utf8', env: { ...process.env, DSH_MCP_BACKUP_KEEP: '20' } });
+    const safety = JSON.parse(restore.stdout).results[0].safety;
+    check('restore reads the oldest selected backup before rotating a full set', restore.status === 0 &&
+      readFileSync(join(home, file), 'utf8') === configs[oldest], restore.stderr);
+    check('successful restore keeps a safety copy and respects the retention limit',
+      readFileSync(safety, 'utf8') === configs[file] && backupsIn(dirname(safety)).length === 20);
+  } finally { removeSandbox(home); }
+}
+
 console.log('\n===== setup regression: passed ' + passed + ', failed ' + failed + ' =====');
 process.exit(failed ? 1 : 0);

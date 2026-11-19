@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve adjacent Codex tables with brackets in quoted project names during setup and removal.
+- Finish restoring selected client backups before rotating the backup history.
+
 ## [0.7.6] — 2026-11-18
 
 ### Added

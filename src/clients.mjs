@@ -54,13 +54,19 @@ export function backupSuffix(stamp = new Date().toISOString().replace(/[:.]/g, '
  * 同一毫秒内对同一文件备份两次会撞名：撞了就加序号，绝不覆盖已有备份 ——
  * 覆盖掉的那一份可能正是用户唯一能回滚到的状态。
  */
-export function backupFile(file, stamp) {
+export function backupFile(file, stamp, { prune = true } = {}) {
   const base = file + backupSuffix(stamp);
-  let dst = base;
-  for (let i = 2; existsSync(dst); i++) dst = base + '-' + i;
-  copyFileSync(file, dst);
-  pruneBackups(file);
-  return dst;
+  for (let i = 1; ; i++) {
+    const dst = i === 1 ? base : base + '-' + i;
+    try {
+      copyFileSync(file, dst, fsConstants.COPYFILE_EXCL);
+    } catch (error) {
+      if (error.code === 'EEXIST') continue;
+      throw error;
+    }
+    if (prune) pruneBackups(file);
+    return dst;
+  }
 }
 
 /**
@@ -75,7 +81,8 @@ export function pruneBackups(file) {
     const prefix = basename(file) + '.bak-dsh-';
     const backups = readdirSync(dir)
       .filter((name) => name.startsWith(prefix))
-      .sort();
+      .sort((a, b) => a.slice(prefix.length).replace(/^pre-restore-/, '')
+        .localeCompare(b.slice(prefix.length).replace(/^pre-restore-/, ''), 'en', { numeric: true }));
     for (const name of backups.slice(0, Math.max(0, backups.length - keep))) {
       try { unlinkSync(join(dir, name)); } catch {}
     }
@@ -491,10 +498,13 @@ export function stripWs(text) {
 }
 // ── TOML（Codex）：按行编辑，保留注释/顶层键/CRLF ────────────────────
 
-const TOML_HEADER = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/;
+const TOML_STRING = String.raw`(?:"(?:[^"\\]|\\.)*"|'[^']*')`;
+const TOML_KEY = `(?:[A-Za-z0-9_-]+|${TOML_STRING})`;
+const TOML_TABLE_NAME = String.raw`${TOML_KEY}(?:\s*\.\s*${TOML_KEY})*`;
+const TOML_HEADER = new RegExp(String.raw`^\s*\[\s*(${TOML_TABLE_NAME})\s*\]\s*(?:#.*)?$`);
 // ★ 数组表 `[[name]]` 也是表边界：只认 `[...]` 时它会被当成上一张表的内容，
 //   卸载我们的表时连带删掉紧随其后的数组表（审计 B01）。
-const TOML_ARRAY_HEADER = /^\s*\[\[([^\]]+)\]\]\s*(?:#.*)?$/;
+const TOML_ARRAY_HEADER = new RegExp(String.raw`^\s*\[\[\s*(${TOML_TABLE_NAME})\s*\]\]\s*(?:#.*)?$`);
 const INLINE_OURS = /^\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*=/;
 // ★ 我们的条目也可能被手写成点号键或根上的内联表。按行编辑改不动这些写法：
 //   以前删除时它原样留下，添加时又追加一张同名表，Codex 因"重复定义"读不了配置。现在一律拒绝。
@@ -929,7 +939,6 @@ function repairJsonLaunch(text, client, launch) {
 }
 
 const TOML_LAUNCH_FIELD = /^(\s*(?:"(command|args)"|'(command|args)'|(command|args))\s*=\s*)(.*)$/;
-const TOML_STRING = String.raw`(?:"(?:[^"\\]|\\.)*"|'[^']*')`;
 const TOML_LAUNCH_VALUE = {
   command: new RegExp('^(' + TOML_STRING + ')(\\s*(?:#.*)?)$'),
   args: new RegExp('^(\\[\\s*(?:' + TOML_STRING + '\\s*,\\s*)*(?:' + TOML_STRING + '\\s*)?\\])(\\s*(?:#.*)?)$'),
