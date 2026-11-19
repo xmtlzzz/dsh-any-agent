@@ -277,11 +277,12 @@ export async function runDaemon({ log }) {
     try {
       await hub.shutdown();
     } catch (e) {
-      log.info(`[dsh-any-agent] 收尾异常: ${e.message}`);
+      process.stderr.write(`[dsh-any-agent] 收尾异常: ${e.message}\n`);
+      process.exitCode = 1;
     }
     // 只删自己的信息文件：期间如果另一个常驻进程接了班，别把它的删了。
     if (readInfo(ep)?.pid === process.pid) rmSync(ep.infoFile, { force: true });
-    process.exit(0);
+    process.exit(process.exitCode ?? 0);
   }
   process.on('SIGINT', () => stop('SIGINT'));
   process.on('SIGTERM', () => stop('SIGTERM'));

@@ -8,7 +8,8 @@
  * `{ structured: { ok, verdict, checks }, text }`。
  */
 
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readRegistry } from './registry.mjs';
 import { join } from 'node:path';
 import {
   DEFAULT_PERMISSION,
@@ -238,14 +239,15 @@ export async function runDoctor(hub) {
   }
 
   try {
-    const raw = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
-    add(
+    const raw = readRegistry(STATE_FILE);
+    if (!raw) add('state', 'warn', STATE_FILE, L('首次保存时自动创建', 'created on first save'));
+    else add(
       'state',
       raw.version === 1 ? 'ok' : 'warn',
       `${STATE_FILE} version=${raw.version} conversations=${raw.conversations?.length ?? 0}`,
     );
   } catch (e) {
-    add('state', 'warn', `${STATE_FILE}: ${e.message}`, L('首次启动会自动创建', 'created automatically on first start'));
+    add('state', 'fail', e.message, L('检查文件或从备份恢复', 'check the file or restore a backup'));
   }
 
   for (const [id, dir] of [

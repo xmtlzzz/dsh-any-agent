@@ -74,6 +74,60 @@ try {
   check('哨兵目录已创建', existsSync(cfg.RUNS_DIR));
   check('锁登记目录已创建', existsSync(join(dirname(cfg.STATE_FILE), 'locks')));
 
+  const entry = { id: 'legacy-session', cwd: root };
+  writeFileSync(cfg.STATE_FILE, '\uFEFF' + JSON.stringify({ version: 1, conversations: [entry] }));
+  await hub.load();
+  await hub.shutdown();
+  check('带 BOM 的注册表重启后保留原会话', JSON.parse(readFileSync(cfg.STATE_FILE, 'utf8')).conversations[0]?.id === entry.id);
+
+  const corrupt = '{"conversations":[';
+  writeFileSync(cfg.STATE_FILE, corrupt);
+  let loadError, saveError;
+  try { await new Hub().load(); } catch (error) { loadError = error; }
+  try { await hub.save(); } catch (error) { saveError = error; }
+  check('启动时明确报告损坏注册表的位置', loadError?.message.includes(cfg.STATE_FILE));
+  check('运行中读到坏注册表时保存失败且原件完整', saveError?.message.includes(cfg.STATE_FILE) &&
+    readFileSync(cfg.STATE_FILE, 'utf8') === corrupt);
+  rmSync(cfg.STATE_FILE);
+
+  const registryModule = new URL('../src/registry.mjs', import.meta.url).href;
+  const crash = runNode(`import { withRegistryLock } from ${JSON.stringify(registryModule)};
+    await withRegistryLock(process.env.REGISTRY, () => process.exit(17));`, { REGISTRY: cfg.STATE_FILE });
+  await hub.save();
+  check('持锁进程退出后仍可保存注册表', crash.code === 17 && !existsSync(cfg.STATE_FILE + '.lock'));
+
+  // All four processes load the same snapshot before any writer can proceed.
+  const writer = `import { Hub, Conversation } from ${JSON.stringify(HUB)};
+    const hub = new Hub();
+    await hub.load();
+    process.once('message', async () => {
+      const id = 'writer-' + process.pid;
+      hub.conversations.set(id, new Conversation({ id, cwd: process.cwd() }, hub));
+      await hub.save();
+      process.disconnect();
+    });
+    process.send('ready');`;
+  let ready = 0;
+  const children = [];
+  try {
+    const exits = Array.from({ length: 4 }, () => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', writer], {
+        stdio: ['ignore', 'ignore', 'inherit', 'ipc'], timeout: 15_000, windowsHide: true,
+      });
+      children.push(child);
+      child.once('message', () => {
+        if (++ready === 4) for (const peer of children) peer.send('save');
+      });
+      return once(child, 'exit');
+    });
+    const statuses = await Promise.all(exits);
+    const persisted = new Set(JSON.parse(readFileSync(cfg.STATE_FILE, 'utf8')).conversations.map((c) => c.id));
+    check('四个进程同时新增会话时保留每一条登记', statuses.every(([code]) => code === 0) &&
+      persisted.has(entry.id) && children.every(({ pid }) => persisted.has('writer-' + pid)));
+  } finally {
+    for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill();
+  }
+
   console.log('\n[4] 哨兵写成功/失败都可见');
   const run = { run_id: 'run-sentinel-test', status: 'done', ended_at: Date.now(), result: { answer: 'ok' } };
   const sentinel = hub.writeRunSentinel('conv-sentinel-test', run);

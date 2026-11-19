@@ -18,7 +18,6 @@
  */
 
 import {
-  copyFileSync,
   cpSync,
   mkdirSync,
   linkSync,
@@ -69,6 +68,7 @@ import { refreshRssMap, rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { Conversation } from './conversation.mjs';
 import { keyedRunId } from './run-ledger.mjs';
+import { readRegistry, withRegistryLock, writeRegistry } from './registry.mjs';
 import { SENTINEL_SCHEMA, pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
 import { emitLive, livePreview } from './live.mjs';
 import { homeWorkspaceProblem } from './workspace-guard.mjs';
@@ -142,9 +142,10 @@ export class Hub {
     // 旧版本的默认状态文件在包安装目录里；一次性迁移到新的用户可写目录。
     // 只在没有显式设置 DSH_MCP_STATE 时做，避免覆盖用户指定的路径。
     if (USING_DEFAULT_STATE && !existsSync(STATE_FILE) && existsSync(LEGACY_STATE_FILE)) {
-      try {
-        copyFileSync(LEGACY_STATE_FILE, STATE_FILE);
-        this.log.info(`[hub] 已迁移旧状态文件: ${LEGACY_STATE_FILE} → ${STATE_FILE}`);
+      await withRegistryLock(STATE_FILE, () => {
+        if (readRegistry(STATE_FILE)) return;
+        const legacy = readRegistry(LEGACY_STATE_FILE);
+        if (!legacy) return;
         // 侧车元数据（审批策略/思考深度/标题/轮数）也一并搬过来；
         // 否则旧会话按 id 重建时会悄悄回落到默认值。
         const legacyMeta = join(dirname(LEGACY_STATE_FILE), 'meta');
@@ -152,46 +153,31 @@ export class Hub {
           cpSync(legacyMeta, META_DIR, { recursive: true });
           this.log.info(`[hub] 已迁移旧元数据侧车: ${legacyMeta} → ${META_DIR}`);
         }
-      } catch (e) {
-        this.log.info(`[hub] 旧状态文件迁移失败（继续用新路径）: ${e.message}`);
-      }
+        writeRegistry(STATE_FILE, legacy);
+        this.log.info(`[hub] 已迁移旧状态文件: ${LEGACY_STATE_FILE} → ${STATE_FILE}`);
+      });
     }
 
     const stale = await pruneStaleTombstones(this.log);
     if (stale) this.log.info(`[hub] 清理 ${stale} 个失效的 forget 墓碑`);
-    if (!existsSync(STATE_FILE)) return;
-    try {
-      const doc = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
-      for (const s of doc.conversations ?? []) {
-        if (!s?.id || !s?.cwd) continue;
-        if (isForgotten(s.id)) continue;
-        this.conversations.set(s.id, new Conversation(s, this));
-      }
-      this.log.info(`[hub] 载入 ${this.conversations.size} 个会话`);
-    } catch (e) {
-      this.log.info(`[hub] 状态文件读取失败: ${e.message}`);
-    }
+    this.adoptNewFromDisk();
+    this.log.info(`[hub] 载入 ${this.conversations.size} 个会话`);
   }
 
   /** 原子保存。**tmp 名必须唯一**：多个 dsh-any-agent 实例共用同一份注册表时，
    * 固定名（`<STATE_FILE>.tmp`）会让并发保存互相踩踏 —— 先写的被后写的覆盖，
    * rename 甚至可能发布出别人的内容或半截文件。哨兵那边早就是这么做的。 */
-  save() {
-    try {
-      mkdirSync(dirname(STATE_FILE), { recursive: true });
+  async save() {
+    mkdirSync(dirname(STATE_FILE), { recursive: true });
+    await withRegistryLock(STATE_FILE, () => {
       // ★ 多实例共用一份注册表：只写自己内存里的会话，会把另一个实例刚加进去的条目覆盖掉，
       //   并把它跑出来的轮数写回旧值（审计 C03）。所以先读盘上的版本合并：
       //   - 盘上有、内存里没有、也没被 forget 的条目原样保留；
       //   - 轮数与最近使用时间只增不减。
-      let onDisk = [];
-      try {
-        onDisk = JSON.parse(readFileSync(STATE_FILE, 'utf8')).conversations ?? [];
-      } catch {
-        /* 还没有注册表 / 读不出来：只写自己的 */
-      }
+      const previous = readRegistry(STATE_FILE);
+      const onDisk = previous?.conversations ?? [];
       const extra = [];
       for (const s of onDisk) {
-        if (!s?.id || !s?.cwd) continue;
         const mine = this.conversations.get(s.id);
         if (mine) {
           if (Number.isFinite(s.turnCount) && s.turnCount > mine.turnCount) mine.turnCount = s.turnCount;
@@ -200,20 +186,18 @@ export class Hub {
           extra.push(s);
         }
       }
+      const registered = [...this.conversations.values()].filter((c) => !isForgotten(c.id));
       const doc = {
+        ...previous,
         version: 1,
         savedAt: new Date().toISOString(),
-        conversations: [...[...this.conversations.values()].map((c) => c.toState()), ...extra],
+        conversations: [...registered.map((c) => c.toState()), ...extra],
       };
-      const tmp = `${STATE_FILE}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-      writeFileSync(tmp, JSON.stringify(doc, null, 2), 'utf8');
-      renameSync(tmp, STATE_FILE);
+      writeRegistry(STATE_FILE, doc);
       // 侧车元数据独立于注册表：forget 移除注册表条目后仍然保留，
       // 让按 id 重建的会话不会丢掉审批策略/思考深度/标题/轮数。
-      for (const c of this.conversations.values()) writeConversationMeta(c);
-    } catch (e) {
-      this.log.info(`[hub] 状态保存失败: ${e.message}`);
-    }
+      for (const c of registered) writeConversationMeta(c);
+    });
   }
 
   // ── 异步完成哨兵 ────────────────────────────────────────────────
@@ -650,7 +634,12 @@ export class Hub {
           this,
         );
         this.conversations.set(id, c);
-        this.save();
+        try {
+          await this.save();
+        } catch (error) {
+          this.conversations.delete(id);
+          throw error;
+        }
         this.log.info(`[hub] 从会话存储吸收了 ${id}（注册表里没有，但磁盘上有；权限档沿用 ${permission}）`);
       }
       } finally {
@@ -673,31 +662,24 @@ export class Hub {
    * @returns {number} 新吸收的数量
    */
   adoptNewFromDisk() {
-    if (!existsSync(STATE_FILE)) return 0;
+    const doc = readRegistry(STATE_FILE);
+    if (!doc) return 0;
     let added = 0;
-    try {
-      const doc = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
-      for (const s of doc.conversations ?? []) {
-        if (!s?.id || !s?.cwd) continue;
-        if (isForgotten(s.id)) continue;
-        if (this.conversations.has(s.id)) continue;
-        this.conversations.set(s.id, new Conversation(s, this));
-        added++;
-      }
-      if (added) this.log.info(`[hub] 从磁盘吸收了 ${added} 个别的实例新建的会话`);
-    } catch (e) {
-      this.log.info(`[hub] 吸收磁盘会话失败: ${e.message}`);
+    for (const s of doc.conversations) {
+      if (isForgotten(s.id) || this.conversations.has(s.id)) continue;
+      this.conversations.set(s.id, new Conversation(s, this));
+      added++;
     }
     return added;
   }
 
-  remove(id) {
+  async remove(id) {
     this.conversations.delete(id);
     // save() 会合并盘上的条目；本实例主动移除的不能被合并回来。
     this.#removed.add(id);
     // 注意：**不删侧车元数据**。forget 的语义是“从注册表移除”，
     // 之后按 id 重建（多实例恢复）时，侧车让审批策略/思考深度/标题/轮数不漂移。
-    this.save();
+    await this.save();
   }
 
   /** 取（或建）同 `(cwd, permission)` 的共享 ACP 进程宿主。 */
@@ -905,7 +887,7 @@ export class Hub {
         this.log.info(`[hub] 工作区登记失败（不影响会话可用）: ${e.message}`);
       }
       this.conversations.set(conv.id, conv);
-      this.save();
+      await this.save();
       emitLive(
         conv.id,
         'conv.open',
@@ -921,6 +903,7 @@ export class Hub {
       // 失败路径也要清掉写锁登记：session/new 可能已经成功、登记已写入，
       // 但会话最终没有注册（例如无效 provider/model 被 fail-fast）。留下 marker
       // 会被 dsh_list/dsh_takeover 误报成“孤儿持有者”，也会在 locks 目录里积垃圾。
+      if (conv && this.conversations.get(conv.id) === conv) this.conversations.delete(conv.id);
       const stopped = shared
         ? conv
           ? await proc.detach(conv).catch(() => false)
@@ -1173,7 +1156,7 @@ export class Hub {
         this.log.info(`[hub] 释放 ${c.id} 时进程未确认退出，保留写锁登记`);
       }
     }
-    this.save();
+    await this.save();
     return { released: released.length, conversations: released, skipped_busy: skippedBusy, failed };
   }
 
@@ -1217,7 +1200,7 @@ export class Hub {
       }
     } finally {
       await finalizing;
-      this.save();
+      await this.save();
     }
   }
 }

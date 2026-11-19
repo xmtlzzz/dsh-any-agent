@@ -190,7 +190,7 @@ try {
         const w = conv.snapshot().worktree;
         return w?.branch?.startsWith('dsh/') && w.repo === repoB && w.path && existsSync(w.path);
       });
-      hub.save();
+      await hub.save();
       const saved = JSON.parse(readFileSync(process.env.DSH_MCP_STATE, 'utf8'));
       await check('worktree 记进注册表（重启后还知道它在哪）', () =>
         saved.conversations.find((c) => c.id === conv.id)?.worktree?.branch === conv.worktree.branch);

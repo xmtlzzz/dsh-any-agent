@@ -31,6 +31,8 @@ import { execFile, spawnSync } from 'node:child_process';
 import { processListExecutable, windowsSystemExecutable } from './host-executable.mjs';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { isPidAlive, validPid } from './procstat.mjs';
+export { isPidAlive } from './procstat.mjs';
 import { STATE_FILE, REAP_INTERVAL_MS, numEnv } from './config.mjs';
 import { L } from './lang.mjs';
 
@@ -52,19 +54,7 @@ export const LOCKS_DIR = process.env.DSH_MCP_LOCKS_DIR ?? join(dirname(STATE_FIL
 /** 某个会话的持有者登记文件路径。 */
 export const markerPath = (conversationId) => join(LOCKS_DIR, `${conversationId}.json`);
 
-const validPid = (pid) => Number.isSafeInteger(pid) && pid > 0 && pid <= 0x7fffffff;
 const validStartTime = (time) => Number.isSafeInteger(time) && time > 0 && time <= 8.64e15;
-
-/** 判断 PID 是否还活着（同用户下可靠；EPERM 表示存在但无权限，也算活着）。 */
-export function isPidAlive(pid) {
-  if (!validPid(pid)) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e?.code === 'EPERM';
-  }
-}
 
 function readJson(file) {
   try {

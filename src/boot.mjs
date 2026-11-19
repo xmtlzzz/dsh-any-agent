@@ -80,7 +80,8 @@ export async function runStdioServer(log) {
     try {
       await hub.shutdown();
     } catch (e) {
-      log.info(`[dsh-any-agent] 收尾异常: ${e.message}`);
+      process.stderr.write(`[dsh-any-agent] 收尾异常: ${e.message}\n`);
+      process.exit(1);
     }
     process.exit(0);
   }

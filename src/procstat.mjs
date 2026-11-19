@@ -18,6 +18,17 @@ import { execFile } from 'node:child_process';
 import { processListExecutable, windowsSystemExecutable } from './host-executable.mjs';
 
 const CACHE_MS = 5000;
+export const validPid = (pid) => Number.isSafeInteger(pid) && pid > 0 && pid <= 0x7fffffff;
+
+export function isPidAlive(pid) {
+  if (!validPid(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
 let cache = { at: 0, map: new Map() };
 let inflight = null;
 
