@@ -10,6 +10,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
+| 0.7.6 | `0.2.2-rc.5` (desktop app) | ✅ Verified (standard ACP) | Windows with the published npm package and the desktop app's bundled Node 24.21.0. Real-provider dispatch, writes in a temporary workspace, result retrieval after reconnecting, idempotent replay, and resuming the original test session all passed. The offline regression suite passed. |
 | 0.7.6 | `0.2.2-rc.3` (desktop app) | ✅ Verified (ACP, upgrade) | Upgraded from npm 0.7.5 on Windows with a real provider. Verified result retrieval after a reconnect, idempotent replay, and a new turn in the original session |
 | 0.7.5 | `0.2.2-rc.3` (desktop app) | ✅ Verified (ACP, upgrade) | Upgraded the installed npm 0.7.4 package on Windows with a real provider. Verified result retrieval, idempotent replay, and a new turn in the original session |
 | 0.7.4 | `0.2.2-rc.3` (desktop app) | ✅ Verified (ACP, team mode) | Standard ACP dispatch and in-place upgrade from npm 0.7.3 on Windows. Desktop DSH with a local simulated model endpoint verified that team mode is off by default and that enabling it exposes both the native task board and standard subagents |
