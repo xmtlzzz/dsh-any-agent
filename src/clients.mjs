@@ -509,12 +509,7 @@ const TOML_HEADER = new RegExp(String.raw`^\s*\[\s*(${TOML_TABLE_NAME})\s*\]\s*(
 // ★ 数组表 `[[name]]` 也是表边界：只认 `[...]` 时它会被当成上一张表的内容，
 //   卸载我们的表时连带删掉紧随其后的数组表（审计 B01）。
 const TOML_ARRAY_HEADER = new RegExp(String.raw`^\s*\[\[\s*(${TOML_TABLE_NAME})\s*\]\]\s*(?:#.*)?$`);
-const INLINE_OURS = /^\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*=/;
-// ★ 我们的条目也可能被手写成点号键或根上的内联表。按行编辑改不动这些写法：
-//   以前删除时它原样留下，添加时又追加一张同名表，Codex 因"重复定义"读不了配置。现在一律拒绝。
-const DOTTED_OURS = /^\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*\./;
-const ROOT_DOTTED_OURS = /^\s*mcp_servers\s*\.\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)\s*[.=]/;
-const ROOT_INLINE_SERVERS = /^\s*mcp_servers\s*=/;
+const TOML_ASSIGNMENT = new RegExp('^\\s*(' + TOML_TABLE_NAME + ')\\s*=');
 const COMMENT_OR_BLANK = /^\s*(?:#.*)?$/;
 
 /**
@@ -557,11 +552,18 @@ function multilineMask(lines) {
   return mask;
 }
 
-/** 这个表头是不是我们的（[mcp_servers.dsh-any-agent] 及其子表）。 */
-function isOurTable(name) {
-  const bare = name.trim();
-  const m = /^mcp_servers\s*\.\s*(?:"dsh-any-agent"|'dsh-any-agent'|dsh-any-agent)(?:\s*\.\s*.+)?$/.exec(bare);
-  return Boolean(m);
+// Compare key components, keeping dots inside quoted keys literal.
+function tomlKeys(name) {
+  return name.match(new RegExp(TOML_KEY, 'g')).map((key) => {
+    if (key.startsWith("'")) return key.slice(1, -1);
+    if (!key.startsWith('"')) return key;
+    return key.slice(1, -1).replace(/\\(?:u([\da-fA-F]{4})|U([\da-fA-F]{8})|(.))/g,
+      (escape, short, long, char) => {
+        if (char) return char === '\\' || char === '"' ? char : escape;
+        const code = parseInt(short ?? long, 16);
+        return code <= 0x10ffff ? String.fromCodePoint(code) : escape;
+      });
+  });
 }
 
 /**
@@ -573,8 +575,7 @@ function findTomlRanges(lines) {
   const mask = multilineMask(lines);
   let cur = null;
   let unsupported = null;
-  // 当前所在的表（'' = 根，已 trim）；数组表记为 null，里面的键一律不是我们的。
-  let table = '';
+  let table = [];
   // 关闭区间时必须把 end 定在「这张表的最后一行」，而不是文件末尾 —— 否则我们这段会一路吞掉后面所有的表。
   // ★ 表尾的注释和空行也不算我们的：它们通常是下一张表的说明，或用户注释掉的设置，删掉就找不回来了。
   const close = (k) => {
@@ -590,16 +591,25 @@ function findTomlRanges(lines) {
     const m = arr ? null : TOML_HEADER.exec(lines[k]);
     if (arr || m) {
       if (cur) close(k);
-      table = arr ? null : m[1].trim();
-      if (m && isOurTable(m[1])) cur = { start: k, end: lines.length };
+      table = tomlKeys((arr ?? m)[1]);
+      if (table[0] === 'mcp_servers' && table[1] === ENTRY_NAME) {
+        if (arr) unsupported ??= 'array table on line ' + (k + 1);
+        else cur = { start: k, end: lines.length, main: table.length === 2 };
+      }
+      if (arr) table = null;
       continue;
     }
     // ★ 内联条目只认 `[mcp_servers]` 表里的 `dsh-any-agent = {...}`。别的表里恰好同名的键
     //   （例如 [projects] 下）是用户的，不能删（审计 B01）。
-    if (table === 'mcp_servers' && INLINE_OURS.test(lines[k])) ranges.push({ start: k, end: k + 1, inline: true });
-    else if (table === 'mcp_servers' && DOTTED_OURS.test(lines[k])) unsupported ??= 'dotted key on line ' + (k + 1);
-    else if (table === '' && ROOT_DOTTED_OURS.test(lines[k])) unsupported ??= 'dotted key on line ' + (k + 1);
-    else if (table === '' && ROOT_INLINE_SERVERS.test(lines[k]) && lines[k].includes(ENTRY_NAME)) {
+    if (!table || table.length > 1 || (table.length && table[0] !== 'mcp_servers')) continue;
+    const field = TOML_ASSIGNMENT.exec(lines[k]);
+    if (!field) continue;
+    const path = [...table, ...tomlKeys(field[1])];
+    if (path[0] !== 'mcp_servers') continue;
+    if (table.length === 1 && path.length === 2 && path[1] === ENTRY_NAME) {
+      ranges.push({ start: k, end: k + 1, inline: true });
+    } else if (path[1] === ENTRY_NAME) unsupported ??= 'dotted key on line ' + (k + 1);
+    else if (path.length === 1) {
       unsupported ??= 'inline mcp_servers table on line ' + (k + 1);
     }
   }
@@ -954,8 +964,7 @@ function repairTomlLaunch(text, launch) {
   const eols = text.match(/\r?\n/g) ?? [];
   const { ranges, unsupported } = findTomlRanges(lines);
   if (!ranges.length && !unsupported) return null;
-  const tables = ranges.filter(({ start, inline }) => !inline &&
-    /^mcp_servers\s*\.\s*(?:dsh-any-agent|"dsh-any-agent"|'dsh-any-agent')\s*$/.test(TOML_HEADER.exec(lines[start])?.[1] ?? ''));
+  const tables = ranges.filter((range) => range.main);
   if (unsupported || ranges.some((r) => r.inline) || tables.length !== 1) {
     throw new Error('repair requires one [mcp_servers.dsh-any-agent] table; update custom TOML forms by hand');
   }

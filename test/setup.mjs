@@ -296,8 +296,8 @@ console.log('\n[11] repair refreshes the launch fields without replacing existin
   const zed = ['win32', 'darwin'].includes(platform()) ? 'Zed/settings.json' : '.config/zed/settings.json';
   const rows = {
     [cursor]: '{"mcpServers":{"dsh-any-agent":{"command":' + previousNode + ',"args":' + previousArgs + ',"env":' + env + '}}}',
-    [codex]: '\uFEFF[mcp_servers.dsh-any-agent]\r\ncommand = ' + previousNode + ' # retain\r\nargs = ' + previousArgs +
-      '\r\ntool_timeout_sec = 240.0\n\n[mcp_servers.dsh-any-agent.env]\nDSH_MCP_DAEMON = "1"\nDSH_MCP_APPROVAL = "ask"\n',
+    [codex]: '\uFEFF["mcp_servers"."dsh-any-agent"]\r\ncommand = ' + previousNode + ' # retain\r\nargs = ' + previousArgs +
+      '\r\ntool_timeout_sec = 240.0\n\n["mcp_servers".\'dsh-any-agent\'.env]\nDSH_MCP_DAEMON = "1"\nDSH_MCP_APPROVAL = "ask"\n',
     [opencode]: '{"mcp":{"dsh-any-agent":{"type":"local","command":[' + previousNode + ',' + previousArgs.slice(1) +
       ',"enabled":false,"environment":' + env + '}}}',
     [zed]: '{"context_servers":{"dsh-any-agent":{"command":{"path":' + previousNode + ',"env":' + env + '}}}}',
@@ -331,6 +331,22 @@ console.log('\n[11] repair refreshes the launch fields without replacing existin
   } finally {
     removeSandbox(home);
   }
+}
+
+{
+  const file = '.codex/config.toml';
+  const neighbor = '["mcp_servers.dsh-any-agent"]\nkeep = true\n';
+  const quoted = '["mcp_servers"."dsh-any-agent"]\ncommand = "old"\n';
+  const home = sandbox({ [file]: quoted + neighbor });
+  try {
+    const installed = runSetup(home, ['--yes', '--only', 'codex']);
+    const contents = readFileSync(join(home, file), 'utf8');
+    check('setup replaces the quoted Codex table exactly once and preserves literal dots',
+      installed.code === 0 && !contents.includes(quoted) && contents.includes(neighbor) &&
+      contents.split('[mcp_servers.dsh-any-agent]').length === 2);
+    const removed = runSetup(home, ['--yes', '--remove', '--only', 'codex']);
+    check('uninstall leaves the unrelated table intact', removed.code === 0 && readFileSync(join(home, file), 'utf8') === neighbor);
+  } finally { removeSandbox(home); }
 }
 
 for (const header of ['[projects."D:/app/[slug]"]', "[[projects.'D:/app/[slug]']]"]) {
