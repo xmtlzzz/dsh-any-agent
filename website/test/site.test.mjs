@@ -141,7 +141,7 @@ test('Website docs alignment: compatibility range, 15 tools, dashboard showcase,
   assert.match(enHtml, /dsh_send\(team=false\)<\/code> suppresses the experimental team hint/);
   for (const page of [html, enHtml]) {
     assert.match(page, /0\.1\.7 ~ 0\.2\.2/);
-    assert.match(page, /0\.2\.2-rc\.3/);
+    assert.match(page, /0\.2\.2-rc\.5/);
     assert.match(page, /0\.2\.2-rc\.2/);
     assert.match(page, /0\.2\.3\+/);
     assert.doesNotMatch(page, /0\.2\.x 尚未验证|0\.2\.x is unverified/);
