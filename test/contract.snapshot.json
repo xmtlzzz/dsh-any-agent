@@ -222,6 +222,7 @@
       "result.workspace_changed": "boolean",
       "run_id": "string",
       "schema": "number",
+      "start_order": "number",
       "started_at": "number",
       "status": "string"
     },
@@ -267,6 +268,7 @@
       "result.workspace_changed": "boolean",
       "run_id": "string",
       "schema": "number",
+      "start_order": "null",
       "started_at": "number",
       "status": "string"
     }

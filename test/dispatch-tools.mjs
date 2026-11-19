@@ -239,19 +239,23 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
   check('跑完以后：run 是刚跑完的那个，不是更晚建、没开跑就取消的排队回合', () =>
     assert.deepEqual([st3.structured.run?.run_id, st3.structured.run?.status], [running.run_id, 'done']));
   check('按 run_id 仍能取到被取消的排队回合', () => assert.equal(c.getRun(queued.run_id).status, 'cancelled'));
+  await c.prompt('block the queue', { wait: false });
   const a = c.enqueue('A').run;
   const b = c.enqueue('B').run;
   c.queuePromote(b.run_id);
-  const first = c.ledger.shift().run;
-  const second = c.ledger.shift().run;
-  first.started_at = Date.now() + 1;
-  second.started_at = first.started_at + 1;
-  first.status = second.status = 'done';
+  for (const text of ['block the queue', 'B', 'A']) {
+    for (let i = 0; i < 300 && proc.promptTexts.at(-1) !== text; i++) await tick(10);
+    assert.equal(proc.promptTexts.at(-1), text);
+    proc.end();
+  }
+  for (let i = 0; i < 300 && a.status !== 'done'; i++) await tick(10);
+  // Reordering must also work for backends that finish multiple turns in one clock tick.
+  b.started_at = a.started_at;
+  b.ended_at = a.ended_at;
   const latestGet = await handlers.dsh_get({ conversation_id: c.id });
   const latestStatus = await handlers.dsh_status({ conversation_id: c.id });
   check('队列提升后，get 和 status 都返回最后开跑的回合', () => {
-    assert.equal(first.run_id, b.run_id);
-    assert.equal(second.run_id, a.run_id);
+    assert.ok(a.start_order > b.start_order);
     assert.equal(latestGet.structured.run.run_id, a.run_id);
     assert.equal(latestStatus.structured.run.run_id, a.run_id);
   });

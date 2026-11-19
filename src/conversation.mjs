@@ -956,8 +956,7 @@ export class Conversation {
     }
     const reviewMode = runRecord.review_mode ?? normalizeReviewMode(review ?? this.review);
     runRecord.review_mode = reviewMode;
-    runRecord.status = 'running';
-    runRecord.started_at = now();
+    this.ledger.start(runRecord);
     this.currentRun = runRecord;
     let before = null;
     let proc;

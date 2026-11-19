@@ -111,9 +111,8 @@ export const TOOL_TEXT_EN = {
         'when it is queued. Queued prompts stay in memory. After restart, unstarted receipts resolve as cancelled. Manage the queue with dsh_queue. ' +
         "(dsh_interject(mode='queue') also runs after the current turn, but it blocks until the new turn ends and does not use this queue.)",
       client_run_id:
-        'Caller-generated idempotency key (up to 128 characters, scoped to this conversation and retained with the sentinel). Submitting the same key again ' +
-        'does not create a second run: it returns the first run\'s result or receipt (replayed=true). For safely resending ' +
-        'after a response was lost in transport.',
+          'Caller-generated idempotency key (up to 128 characters, scoped to this conversation). During retention a retry returns the original result or receipt ' +
+          '(replayed=true). After the result file is deleted and the client reconnects, a receipt alone returns result_available=false.',
       team:
         'Controls the experimental team hint for this dispatch. Pass false to suppress it for this call. ' +
         'From DSH 0.2.2-rc.2, DSH manages team tools and guidance per session.',

@@ -11,7 +11,7 @@
  *   5. ★ 端到端：服务进程在回合中途被强杀，下一个服务进程启动时补出哨兵，dsh_get 也查得到。
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -90,6 +90,30 @@ const allClients = [];
 try {
   const hub = new Hub({ log });
   const conv = randomUUID();
+
+  await check('同毫秒启动时，重连按实际启动顺序选最近回合', async () => {
+    const id = randomUUID();
+    for (const [run_id, start_order] of [['run-z', 1], ['run-a', 2]]) {
+      hub.writeRunSentinel(id, { run_id, start_order, started_at: 10, ended_at: 10, status: 'done', result: {} });
+    }
+    return (await hub.readLatestStoredRun(id))?.run_id === 'run-a';
+  });
+
+  await check('旧版幂等回合升级后可删除正文，收据沿用原保留期', () => {
+    const oldId = 'run-old-3', clientKey = 'older-client';
+    const file = sentinelOf(conv, oldId);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ conversation_id: conv, run_id: oldId,
+      client_run_id: clientKey, status: 'done', result: { answer: 'private answer' } }));
+    const yesterday = new Date(Date.now() - 86_400_000);
+    utimesSync(file, yesterday, yesterday);
+    hub.recoverInterruptedRuns();
+    rmSync(file);
+    const receipt = hub.findRunByClientId(conv, clientKey);
+    if (receipt?.run_id !== oldId || receipt.result_available !== false || receipt.result !== null) return false;
+    hub.pruneSentinels({ ttlMs: 3_600_000 });
+    return hub.findRunByClientId(conv, clientKey) === null;
+  });
 
   console.log('\n[1] 标记随回合开始写出、随哨兵写出删掉');
   hub.markRunStarted(conv, { run_id: 'run-1', prompt_preview: '做点事', review_mode: 'advisory', started_at: Date.now() });

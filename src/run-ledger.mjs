@@ -39,6 +39,9 @@ export function laterStartedRun(latest, candidate) {
   if (!latest) return candidate;
   const previous = startTime(latest);
   if (started !== previous) return started > previous ? candidate : latest;
+  if (Number.isFinite(candidate.start_order) && Number.isFinite(latest.start_order) && candidate.start_order !== latest.start_order) {
+    return candidate.start_order > latest.start_order ? candidate : latest;
+  }
   if (candidate.ended_at !== latest.ended_at) return candidate.ended_at > latest.ended_at ? candidate : latest;
   return candidate.run_id > latest.run_id ? candidate : latest;
 }
@@ -47,6 +50,7 @@ export class RunLedger {
   constructor() {
     this.runs = [];
     this.runSeq = 0;
+    this.startOrder = 0;
     /** 调用方提供的幂等键 → run_id（与 runs 同步淘汰）。 */
     this.clientRuns = new Map();
     /** 忙时入队的待执行任务：{run, text, reasoning, clientRunId, enqueued_at}。 */
@@ -108,6 +112,12 @@ export class RunLedger {
    */
   latestStarted() {
     return this.runs.reduce(laterStartedRun, null) ?? this.latest();
+  }
+
+  start(run) {
+    run.status = 'running';
+    run.started_at = Date.now();
+    run.start_order = ++this.startOrder;
   }
 
   // ── 队列 ────────────────────────────────────────────────────────

@@ -452,7 +452,7 @@ export function createHandlers(hub, opts = {}) {
           meta.push(renderReviewSection(review));
         }
       }
-      const sentinelFile = run ? hub.runSentinelPath(args.conversation_id, run.run_id) : null;
+      const sentinelFile = run && run.result_available !== false ? hub.runSentinelPath(args.conversation_id, run.run_id) : null;
       const runView = run
         ? {
             run_id: run.run_id,
@@ -468,6 +468,7 @@ export function createHandlers(hub, opts = {}) {
             next_offset: truncated ? cap : null,
             review: run.review ?? run.result?.review ?? null,
             result: cap > 0 ? compactResultForBudget(run.result, cap) : run.result,
+            ...(run.result_available === false ? { result_available: false } : {}),
             ...(cap > 0 ? { result_compacted: true } : {}),
           }
         : null;

@@ -255,9 +255,9 @@ export function backgroundReceipt(hub, conv, res) {
           )) +
       L(
         `文件出现后：直接读它拿结果（推荐——不受内存窗口限制、还扛服务重启），或 dsh_get(conversation_id, run_id) 验收。\n` +
-          `消费完可以 rm 掉它。其它随时可用：dsh_status（是否在跑）、dsh_read（增量看输出）。`,
+          `重连后仍需读取正文时，请保留结果文件。幂等收据在保留期内阻止重复派发。`,
         `Once the file exists: read it for the result (recommended: it is not limited by the in-memory window and survives a server restart), or collect with dsh_get(conversation_id, run_id).\n` +
-          `You may delete it after reading. Available at any time: dsh_status (is it running), dsh_read (incremental output).`,
+          `Keep the result file to retrieve the answer after reconnecting. The idempotency receipt prevents another dispatch during its retention period.`,
       ) +
       (review ? `\n\n${renderReviewSection(review)}` : '') +
       (res.waited_ms
@@ -275,6 +275,14 @@ export function backgroundReceipt(hub, conv, res) {
  */
 export function replayRun(hub, conv, run, wantResult) {
   const sentinel = hub.runSentinelPath(conv.id, run.run_id);
+  if (run.result_available === false) {
+    return {
+      structured: { conversation_id: conv.id, run_id: run.run_id, status: run.status, replayed: true,
+        sentinel_file: sentinel, result_available: false },
+      text: L(`回合 ${run.run_id} 已接收。结果文件不可用，本次返回原回执。`,
+        `Run ${run.run_id} was already accepted. Its result file is unavailable. Returning the original receipt.`),
+    };
+  }
   const sentinelPosix = toPosixPath(sentinel);
   const terminal = run.status === 'done' || run.status === 'error' || run.status === 'cancelled';
   const sentinelLine = L(`哨兵文件: ${sentinel}`, `Sentinel file: ${sentinel}`);

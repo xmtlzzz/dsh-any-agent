@@ -27,6 +27,7 @@ import {
   existsSync,
   renameSync,
   statSync,
+  utimesSync,
   rmSync,
 } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
@@ -243,6 +244,10 @@ export class Hub {
   }
 
   #publishRunSentinel(file, marker, payload) {
+    // Keep the key before the result becomes visible and before releasing the running marker.
+    if (payload.client_run_id) {
+      retainRunKey(dirname(file), keyedRunId(payload.client_run_id), payload.run_id);
+    }
     try {
       writeRunJson(file, payload, { exclusive: true });
     } catch (e) {
@@ -271,7 +276,9 @@ export class Hub {
       `回合 ${run.run_id} 已被接收，请用原 client_run_id 重试或用 dsh_get 查询。`,
       `Run ${run.run_id} was already accepted. Retry with the same client_run_id or look it up with dsh_get.`,
     ));
-    if (existsSync(sentinel)) throw duplicate();
+    const keyFile = run.client_run_id ? join(dirname(sentinel), keyedRunId(run.client_run_id) + '.key') : null;
+    const completed = () => existsSync(sentinel) || (keyFile && existsSync(keyFile));
+    if (completed()) throw duplicate();
     try {
       this.#writeRunMarker(marker, conversationId, run, { exclusive: true });
     } catch (e) {
@@ -279,7 +286,7 @@ export class Hub {
       throw e;
     }
     // 旧主人可能在第一次检查后写完哨兵并释放了占位。
-    if (existsSync(sentinel)) {
+    if (completed()) {
       rmSync(marker, { force: true });
       throw duplicate();
     }
@@ -295,6 +302,7 @@ export class Hub {
       review_mode: run.review_mode ?? null,
       status: run.status,
       started_at: run.started_at ?? null,
+      start_order: run.start_order ?? null,
       owner_pid: process.pid,
       owner_started_at: PROCESS_STARTED_AT,
       ...(checkpoint ? { checkpoint } : {}),
@@ -329,7 +337,19 @@ export class Hub {
     const saved = terminal();
     if (saved) return saved;
     const pending = readRunJson(marker);
-    if (!pending) return terminal();
+    if (!pending) {
+      const completed = terminal();
+      if (completed || !KEYED_RUN.test(runId)) return completed;
+      const key = readRunJson(join(dirname(sentinel), runId + '.key'));
+      if (!key) return null;
+      // Older versions used an unkeyed filename. Its result may still be present.
+      if (LEGACY_RUN.test(key.run_id)) {
+        const legacy = this.readStoredRun(conversationId, key.run_id);
+        if (legacy) return legacy;
+      }
+      return { conversation_id: conversationId, run_id: key.run_id, source: 'receipt',
+        status: 'result_unavailable', result_available: false, result: null };
+    }
     const { checkpoint: _checkpoint, ...receipt } = pending;
     return { ...receipt, status: receipt.status ?? 'running', source: 'receipt', result: null };
   }
@@ -366,7 +386,7 @@ export class Hub {
   findRunByClientId(conversationId, clientRunId) {
     if (!clientRunId) return null;
     const exact = this.readStoredRun(conversationId, keyedRunId(clientRunId));
-    if (exact) return exact;
+    if (exact) return exact.result_available === false ? { ...exact, client_run_id: clientRunId } : exact;
     // 0.7.0 及以前的哨兵和活跃标记已存幂等键，但文件名是普通 run_id。
     const dir = dirname(this.runSentinelPath(conversationId, 'run'));
     if (!existsSync(dir)) return null;
@@ -403,11 +423,12 @@ export class Hub {
     for (const dir of convDirs) {
       let files = [];
       try {
-        files = readdirSync(join(RUNS_DIR, dir.name)).filter((f) => f.endsWith('.running'));
+        files = readdirSync(join(RUNS_DIR, dir.name));
       } catch {
         continue;
       }
-      for (const f of files) {
+      backfillRunKeys(join(RUNS_DIR, dir.name), files);
+      for (const f of files.filter(name => name.endsWith('.running'))) {
         const markerFile = join(RUNS_DIR, dir.name, f);
         let m;
         try {
@@ -471,6 +492,7 @@ export class Hub {
       status: queued ? 'cancelled' : 'error',
       error,
       started_at: run.started_at ?? null,
+      start_order: run.start_order ?? null,
       ended_at: now(),
     };
     record.result = attachReview(
@@ -1207,6 +1229,7 @@ function runSentinelPayload(conversationId, run) {
     client_run_id: run.client_run_id ?? null,
     status: run.status ?? 'unknown',
     started_at: run.started_at ?? null,
+    start_order: run.start_order ?? null,
     ended_at: run.ended_at ?? Date.now(),
     error: sanitizeApprovalContext(run.error ?? run.result?.error ?? null, 'error'),
     result: sanitizeResultForSentinel(run.result ?? null),
@@ -1224,10 +1247,44 @@ function storedSentinel(saved, file) {
   };
 }
 
-function writeRunJson(file, value, { exclusive = false } = {}) {
+const KEYED_RUN = /^run-key-[a-f0-9]{64}$/;
+const LEGACY_RUN = /^run-[a-z0-9]+-\d+$/;
+
+function retainRunKey(dir, keyId, runId, mtime) {
+  try {
+    writeRunJson(join(dir, keyId + '.key'), { run_id: runId }, { exclusive: true, mtime });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+  }
+}
+
+// On upgrade protect retained sentinels, including those read directly from disk.
+// Preserve their age so restarting never extends the retention period.
+function backfillRunKeys(dir, files) {
+  const known = new Set(files);
+  for (const name of files) {
+    if (!name.endsWith('.json')) continue;
+    const runId = name.slice(0, -5);
+    if (known.has(runId + '.key')) continue;
+    const file = join(dir, name);
+    let keyId = runId;
+    if (!KEYED_RUN.test(runId)) {
+      if (!LEGACY_RUN.test(runId)) continue;
+      const saved = readRunJson(file);
+      if (typeof saved?.client_run_id !== 'string' || !saved.client_run_id || saved.run_id !== runId) continue;
+      keyId = keyedRunId(saved.client_run_id);
+      if (known.has(keyId + '.key')) continue;
+    }
+    const stat = statSync(file, { throwIfNoEntry: false });
+    if (stat?.isFile()) retainRunKey(dir, keyId, runId, stat.mtime);
+  }
+}
+
+function writeRunJson(file, value, { exclusive = false, mtime } = {}) {
   const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
   try {
     writeFileSync(tmp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });
+    if (mtime) utimesSync(tmp, mtime, mtime);
     if (exclusive) linkSync(tmp, file);
     else renameSync(tmp, file);
   } finally {
