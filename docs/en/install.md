@@ -160,7 +160,7 @@ The copies live next to each client's config, so picking the right one by hand i
 | Restore one specific copy | `dsh-any-agent-restore --file <backup path>` |
 | See what would happen | add `--dry-run` |
 
-A restore is itself destructive, so it copies the **current** file aside as `.bak-dsh-pre-restore-<timestamp>` before overwriting — a restore can be undone.
+A restore saves the **current** file as `.bak-dsh-pre-restore-<timestamp>` so you can undo it. Even at the retention limit, old backups are pruned only after all selected restores for that file succeed.
 
 **Install / update / remove**
 

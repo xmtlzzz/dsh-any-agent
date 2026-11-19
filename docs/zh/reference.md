@@ -12,7 +12,7 @@
 | `DSH_HOME` | `~/.dsh` | DSH 主目录。**默认就用本机用户自己的**，凭据与会话历史因此与 GUI 共用。指向别处即隔离环境（那就得自己准备那个目录的凭据与 profile） |
 | `DSH_MCP_BOOTSTRAP` | 开 | `0` 关闭首启 profile 自动创建/同步（关掉后只驱动已存在的 profile，不写任何文件） |
 | `DSH_MCP_ROUTE_SOURCE` | 自动 | 复制模型路由的来源 profile 名；`__home__` 表示只认 `$DSH_HOME/cordis.patch.yml` |
-| `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | 会话注册表，跨重启存活。旧版 `<仓库>/.state` 会在首次启动时自动迁移一次 |
+| `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | 会话注册表，跨重启存活。同一台机器上的多个服务进程共用该文件时会依次合并写入。支持带 BOM 的 UTF-8。读取失败时会保留原件并报告路径，可修复文件或从备份恢复后重连。旧版 `<仓库>/.state` 会在首次启动时自动迁移一次 |
 | `DSH_MCP_RUNS_DIR` | `<状态文件同目录>/runs` | 异步完成哨兵的根目录（`<此目录>/<会话id>/<run_id>.json`） |
 | `DSH_MCP_LOCKS_DIR` | `<状态文件同目录>/locks` | 写锁"持有者登记"的目录。⚠️ **多个实例必须指向同一个值**，否则彼此看不见对方的持锁登记、会把对方误判成"无法识别的持有者（GUI）"而拒绝抢占 |
 | `DSH_MCP_APPROVAL` | `workspace-write` 和 `read-only` 为 `auto-deny` | 本机审批默认值和上限。设成 `ask` 可逐条裁决越界请求。只读始终拒绝审批。 |

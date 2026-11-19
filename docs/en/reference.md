@@ -12,7 +12,7 @@
 | `DSH_MCP_SETTINGS` | `$DSH_HOME/.dsh-any-agent/settings.json` | Settings file written by `dsh-any-agent team on/off` |
 | `DSH_MCP_BOOTSTRAP` | on | Whether this server may create/sync the DSH profile on first start. `0` makes it drive an existing profile only and never write a file |
 | `DSH_MCP_ROUTE_SOURCE` | unset | Pin where model routes are copied from during bootstrap: a profile name (`desktop`, `web`, …) or `__home__` for `$DSH_HOME/cordis.patch.yml`. Unset = try home → desktop → web → headless → acp |
-| `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | Conversation registry, survives restarts. The old `<repo>/.state` location is migrated once on startup |
+| `DSH_MCP_STATE` | `$DSH_HOME/.dsh-any-agent/conversations.json` | Persistent conversation registry. Server processes sharing this file on one machine take turns merging their updates. UTF-8 BOM files are supported. A read error preserves the file and reports its path. Repair it or restore a backup, then reconnect. The old `<repo>/.state` location is migrated once on startup |
 | `DSH_MCP_APPROVAL` | `auto-deny` for `workspace-write` and `read-only` | Machine approval default and ceiling. Set `ask` to decide escalations individually. Read-only always denies. |
 | `DSH_MCP_APPROVAL_TIMEOUT_MS` | `300000` | How long a pending `ask` approval waits before being cancelled |
 | `DSH_MCP_FORGOTTEN_DIR` | `$DSH_HOME/.dsh-any-agent-forgotten` | Tombstones written by `dsh_release(forget=true)` |
