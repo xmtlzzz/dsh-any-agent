@@ -210,7 +210,7 @@ export function scanJson(text) {
     if (c === '[') return scanArray();
     if (c === '"') return scanString();
     const start = i;
-    while (i < n && !isWs(text[i]) && text[i] !== ',' && text[i] !== '}' && text[i] !== ']') i++;
+    while (i < n && !isWs(text[i]) && !',}]/'.includes(text[i])) i++;
     if (i === start) fail('unexpected character ' + JSON.stringify(c));
     return { type: 'literal', start, end: i, raw: text.slice(start, i) };
   }
@@ -229,8 +229,8 @@ export function scanJson(text) {
       if (text[i] !== ':') fail('expected ":"');
       i++;
       const value = scanValue();
-      entries.push({ key: key.value, keyStart: key.start, keyEnd: key.end, value });
       skipTrivia();
+      entries.push({ key: key.value, keyStart: key.start, keyEnd: key.end, value, comma: text[i] === ',' ? i : null });
       if (text[i] === ',') { i++; continue; }
       if (text[i] === '}') { i++; return { type: 'object', start, end: i, entries }; }
       fail('expected "," or "}"');
@@ -354,6 +354,13 @@ function removeKey(text, obj, key) {
   // 只有这一个条目：还原成空对象，保留它原本的写法（单行/多行）。
   if (obj.entries.length === 1) {
     const slice = text.slice(obj.start, obj.end);
+    const before = text.slice(obj.start + 1, entry.keyStart);
+    const after = text.slice(entry.value.end, obj.end - 1);
+    if (/\/[/*]/.test(before + after)) {
+      const tail = entry.comma === null ? text.slice(entry.value.end)
+        : text.slice(entry.value.end, entry.comma) + text.slice(entry.comma + 1);
+      return text.slice(0, entry.keyStart) + tail;
+    }
     const eol = detectEol(text);
     if (!slice.includes('\n')) return text.slice(0, obj.start) + '{}' + text.slice(obj.end);
     const baseIndent = leadingWsOfLine(text, obj.start);
@@ -362,24 +369,19 @@ function removeKey(text, obj, key) {
 
   // 优先吃掉自己前面那个逗号（后面条目的缩进保持不动）。
   const start = entry.keyStart;
-  let p = start - 1;
-  while (p >= obj.start && isWs(text[p])) p--;
-  if (text[p] === ',') {
+  if (idx > 0) {
+    const p = obj.entries[idx - 1].comma;
+    const trivia = text.slice(p + 1, start);
     let e = entry.value.end;
     while (e < obj.end && (text[e] === ' ' || text[e] === '\t')) e++;
-    return text.slice(0, p) + text.slice(e);
+    return text.slice(0, p) + (trivia.trim() ? trivia : '') + text.slice(e);
   }
 
   // 自己是第一个条目：吃掉后面那个逗号与随后的空白。
-  let e = entry.value.end;
-  let q = e;
-  while (q < obj.end && isWs(text[q])) q++;
-  if (text[q] === ',') {
-    e = q + 1;
-    while (e < obj.end && (text[e] === ' ' || text[e] === '\t')) e++;
-    return text.slice(0, start) + text.slice(e);
-  }
-  return text.slice(0, start) + text.slice(e);
+  const trivia = text.slice(entry.value.end, entry.comma);
+  let end = entry.comma + 1;
+  while (end < obj.end && (text[end] === ' ' || text[end] === '\t')) end++;
+  return text.slice(0, start) + (trivia.trim() ? trivia : '') + text.slice(end);
 }
 
 /**
@@ -391,6 +393,7 @@ export function editJsonEntry(rawText, containerKey, entryKey, value, options = 
   const bom = rawText.startsWith('\uFEFF') ? '\uFEFF' : '';
   const text = bom ? rawText.slice(1) : rawText;
   const result = editJsonEntryBody(text, containerKey, entryKey, value, options);
+  if (result.changed) scanJson(result.text);
   return { changed: result.changed, text: bom + result.text };
 }
 
@@ -406,6 +409,7 @@ function dropContainerIfEmpty(text, containerKey) {
   if (idx < 0) return text;
   const cont = root.entries[idx];
   if (cont.value.type !== 'object' || cont.value.entries.length !== 0) return text;
+  if (/\/[/*]/.test(text.slice(cont.value.start, cont.value.end))) return text;
   const without = removeKey(text, root, containerKey);
   if (without === null) return text;
   // 丢容器只允许让文件更短，且必须仍然可解析；否则宁可留着空容器。
@@ -778,6 +782,7 @@ export function existingShapeMode(client, file) {
 }
 
 export function clientList(dirs) {
+  const antigravityPaths = ['config', 'antigravity'].map(dir => join(dirs.home, '.gemini', dir, 'mcp_config.json'));
   const { home, appData } = dirs;
   return [
     jsonClient('claude-code', 'Claude Code', 'vscode', 'mcpServers', () => join(home, '.claude.json')),
@@ -799,10 +804,10 @@ export function clientList(dirs) {
     // 没加过任何 MCP 服务器时两个文件都还不存在，所以另外按它的数据目录判断是否已安装。
     {
       ...jsonClient('antigravity', 'Antigravity', 'default', 'mcpServers', () => {
-        const current = join(home, '.gemini', 'config', 'mcp_config.json');
-        const legacy = join(home, '.gemini', 'antigravity', 'mcp_config.json');
+        const [current, legacy] = antigravityPaths;
         return !existsSync(current) && existsSync(legacy) ? legacy : current;
       }),
+      backupTargets: antigravityPaths,
       detectPaths: [join(home, '.gemini', 'antigravity'), join(home, '.gemini', 'antigravity-cli')],
     },
     jsonClient('opencode', 'opencode', 'opencode', 'mcp', () => join(home, '.config', 'opencode', 'opencode.json')),

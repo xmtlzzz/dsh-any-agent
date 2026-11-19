@@ -363,5 +363,38 @@ for (const header of ['[projects."D:/app/[slug]"]', "[[projects.'D:/app/[slug]']
   } finally { removeSandbox(home); }
 }
 
+{
+  const oldPath = '.gemini/antigravity/mcp_config.json';
+  const original = '{"mcpServers":{"dsh-any-agent":{"command":"old"}}}';
+  const home = sandbox({ [oldPath]: original });
+  try {
+    const removed = runSetup(home, ['--home', home, '--only', 'antigravity', '--remove', '--yes', '--json']);
+    const backup = JSON.parse(removed.out).clients.find(c => c.id === 'antigravity').backup;
+    const restore = (...args) => spawnSync(NODE, [join(HERE, '../bin/restore.mjs'), '--home', home, '--json', ...args], { encoding: 'utf8' });
+    const target = join(home, oldPath);
+    check('restore discovers the legacy Antigravity backup after uninstall removes its target',
+      !existsSync(target) && JSON.parse(restore('--list').stdout).backups.some(b => b.file === backup && b.target === target));
+    check('--latest selects the original Antigravity path', JSON.parse(restore('--latest', '--dry-run').stdout).results[0].target === target);
+    check('--file restores the legacy config in place', restore('--file', backup).status === 0 && readFileSync(target, 'utf8') === original);
+  } finally { removeSandbox(home); }
+}
+
+for (const text of [
+  '{"mcpServers":{"dsh-any-agent":{} /* keep comment */, "other":{"command":"ok"}}}',
+  '{"mcpServers":{"other":{"command":"ok"}, // keep comment\n "dsh-any-agent":{}}}',
+  '{"mcpServers":{"other":{"command":"ok"}, /* keep comment */ "dsh-any-agent":{}, "last":{}}}',
+]) {
+  const file = '.cursor/mcp.json';
+  const home = sandbox({ [file]: text });
+  try {
+    const result = runSetup(home, ['--remove', '--yes', '--only', 'cursor']);
+    const after = readFileSync(join(home, file), 'utf8');
+    const parsed = JSON.parse(after.replace(/\/\*[^*]*\*\/|\/\/[^\n]*/g, ''));
+    check('removal preserves comments and the remaining JSONC properties', result.code === 0 &&
+      after.includes('keep comment') && parsed.mcpServers.other.command === 'ok' &&
+      !('dsh-any-agent' in parsed.mcpServers) && ('last' in parsed.mcpServers) === text.includes('"last"'));
+  } finally { removeSandbox(home); }
+}
+
 console.log('\n===== setup regression: passed ' + passed + ', failed ' + failed + ' =====');
 process.exit(failed ? 1 : 0);

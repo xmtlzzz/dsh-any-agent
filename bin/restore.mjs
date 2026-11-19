@@ -50,8 +50,9 @@ function backupsOf(path) {
 
 const all = [];
 for (const c of clients) {
-  const path = c.pathOf(dirs);
-  for (const b of backupsOf(path)) all.push({ client: c.id, target: path, ...b });
+  for (const target of c.backupTargets ?? [c.pathOf(dirs)]) {
+    for (const b of backupsOf(target)) all.push({ client: c.id, target, ...b });
+  }
 }
 
 if (has('--help') || has('-h') || argv.length === 0) {
