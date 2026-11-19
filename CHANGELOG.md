@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Select the most recently started turn after queue promotion. Shared ACP sessions now report their active team profile and use the matching team prompt behavior.
+
 - Keep commented JSONC client configurations valid on removal. Restore Antigravity backups to the directory where the original configuration lived, including the legacy directory.
 
 - Preserve adjacent Codex tables with brackets in quoted project names during setup and removal.

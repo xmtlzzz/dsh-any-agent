@@ -46,6 +46,10 @@ export class SessionHost {
     return this.proc?.startTime ?? null;
   }
 
+  get teamProfile() {
+    return this.proc?.teamProfile ?? null;
+  }
+
   get stderrTail() {
     return this.proc?.stderrTail ?? '';
   }

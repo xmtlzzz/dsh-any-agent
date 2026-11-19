@@ -67,7 +67,7 @@ import { SessionHost } from './host.mjs';
 import { refreshRssMap, rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { Conversation } from './conversation.mjs';
-import { keyedRunId } from './run-ledger.mjs';
+import { keyedRunId, laterStartedRun } from './run-ledger.mjs';
 import { readRegistry, withRegistryLock, writeRegistry } from './registry.mjs';
 import { SENTINEL_SCHEMA, pruneDirTree, sanitizeResultForSentinel } from './sentinel.mjs';
 import { emitLive, livePreview } from './live.mjs';
@@ -344,7 +344,6 @@ export class Hub {
       throw e;
     }
     let latest = null;
-    let latestStartedAt = -Infinity;
     for (const entry of files) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
       const runId = entry.name.slice(0, -'.json'.length);
@@ -359,12 +358,7 @@ export class Hub {
       }
       if (saved?.conversation_id !== conversationId || saved.run_id !== runId || !saved.result ||
           !Number.isFinite(saved.ended_at)) continue;
-      const startedAt = sentinelStartTime(saved);
-      if (startedAt === null || startedAt < latestStartedAt) continue;
-      if (startedAt === latestStartedAt && saved.ended_at < latest.ended_at) continue;
-      if (startedAt === latestStartedAt && saved.ended_at === latest.ended_at && saved.run_id <= latest.run_id) continue;
-      latest = saved;
-      latestStartedAt = startedAt;
+      latest = laterStartedRun(latest, saved);
     }
     return latest ? storedSentinel(latest, this.runSentinelPath(conversationId, latest.run_id)) : null;
   }
@@ -1228,14 +1222,6 @@ function storedSentinel(saved, file) {
     prompt_preview: saved.prompt_preview ?? null,
     result: saved.result ? { ...saved.result, sentinel_file: file } : null,
   };
-}
-
-function sentinelStartTime(saved) {
-  if (Object.hasOwn(saved, 'started_at')) return Number.isFinite(saved.started_at) ? saved.started_at : null;
-  // 旧哨兵没有开始时间。未开始即取消的回合耗时为 0。
-  const elapsed = saved.result.elapsed_ms;
-  if (!Number.isFinite(saved.ended_at) || (saved.status === 'cancelled' && !(elapsed > 0))) return null;
-  return saved.ended_at - (Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : 0);
 }
 
 function writeRunJson(file, value, { exclusive = false } = {}) {

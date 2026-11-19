@@ -25,6 +25,24 @@ export function keyedRunId(clientRunId) {
   return `run-key-${createHash('sha256').update(clientRunId).digest('hex')}`;
 }
 
+function startTime(run) {
+  if (Object.hasOwn(run, 'started_at')) return Number.isFinite(run.started_at) ? run.started_at : null;
+  // Old sentinels have no start time. A queued cancellation never started.
+  const elapsed = run.result?.elapsed_ms;
+  if (!Number.isFinite(run.ended_at) || (run.status === 'cancelled' && !(elapsed > 0))) return null;
+  return run.ended_at - (Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : 0);
+}
+
+export function laterStartedRun(latest, candidate) {
+  const started = startTime(candidate);
+  if (started === null) return latest;
+  if (!latest) return candidate;
+  const previous = startTime(latest);
+  if (started !== previous) return started > previous ? candidate : latest;
+  if (candidate.ended_at !== latest.ended_at) return candidate.ended_at > latest.ended_at ? candidate : latest;
+  return candidate.run_id > latest.run_id ? candidate : latest;
+}
+
 export class RunLedger {
   constructor() {
     this.runs = [];
@@ -89,8 +107,7 @@ export class RunLedger {
    * 一条都没开跑过时退回 latest()。
    */
   latestStarted() {
-    for (let i = this.runs.length - 1; i >= 0; i--) if (this.runs[i].started_at) return this.runs[i];
-    return this.latest();
+    return this.runs.reduce(laterStartedRun, null) ?? this.latest();
   }
 
   // ── 队列 ────────────────────────────────────────────────────────
