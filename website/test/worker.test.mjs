@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { handleStars } from '../src/worker.mjs';
+import worker, { handleStars, handleVersion } from '../src/worker.mjs';
 
 /** Workers 的 caches.default 的最小替身：按 URL 存响应（TTL 不模拟，"过期"用删条目表示）。 */
 function fakeCache() {
@@ -111,4 +111,41 @@ test('worker: every other path goes to the static assets', async () => {
   const res = await worker.fetch(req('/en/'), env);
   assert.equal(await res.text(), 'asset');
   assert.deepEqual(seen, ['/en/']);
+});
+
+test('version: asks npm once, caches the version, and falls back to GitHub release', async () => {
+  const cache = fakeCache();
+  const calls = [];
+  const res = await handleVersion(req('/api/version'), {}, {
+    fetchImpl: async (url) => {
+      calls.push(url);
+      return new Response(JSON.stringify({ version: '0.7.7' }), { status: 200 });
+    },
+    cache,
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.version, '0.7.7');
+  assert.equal(body.source, 'npm');
+  assert.equal(calls.length, 1);
+
+  const cached = await handleVersion(req('/api/version'), {}, {
+    fetchImpl: async () => { throw new Error('should not fetch'); },
+    cache,
+  });
+  assert.equal((await cached.json()).version, '0.7.7');
+
+  const fallbackCache = fakeCache();
+  const fbRes = await handleVersion(req('/api/version'), { GITHUB_TOKEN: 'tok' }, {
+    fetchImpl: async (url, init) => {
+      if (url.includes('npmjs.org')) return new Response('{}', { status: 502 });
+      assert.equal(init.headers.authorization, 'Bearer tok');
+      return new Response(JSON.stringify({ tag_name: 'v0.7.7' }), { status: 200 });
+    },
+    cache: fallbackCache,
+  });
+  assert.equal(fbRes.status, 200);
+  const fbBody = await fbRes.json();
+  assert.equal(fbBody.version, '0.7.7');
+  assert.equal(fbBody.source, 'github-release');
 });

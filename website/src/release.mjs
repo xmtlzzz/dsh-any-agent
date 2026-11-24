@@ -1,9 +1,13 @@
 /**
  * 版本号运行时同步：页面不写死版本。
  *
- * 优先 npm 的 latest（发布后即时生效），失败时退回 GitHub 的 release/tag。
+ * 优先问官网自己的边缘缓存端点 `/api/version`（不受访客 IP 频控或国内直连超时影响），
+ * 纯静态托管 / 本地预览没有该端点时，再依次退回 npm latest 与 GitHub release/tag。
  * 所有端点都允许跨域；CSP 在 src/_headers 的 connect-src 中放行它们。
  */
+export const SITE_VERSION_URL = '/api/version';
+export const VERSION_CACHE_KEY = 'dsh_release_version_cache';
+
 export const VERSION_SOURCES = [
   {
     id: 'npm',
@@ -22,6 +26,15 @@ export const VERSION_SOURCES = [
   },
 ];
 
+const ALL_VERSION_SOURCES = [
+  {
+    id: 'site',
+    url: SITE_VERSION_URL,
+    pick: (payload) => payload?.version,
+  },
+  ...VERSION_SOURCES,
+];
+
 /** 接受 0.3.3 / v0.3.3 / 1.2.3-rc.1；其它一律视为无效。 */
 export function normalizeVersion(value) {
   const version = String(value ?? '').trim().replace(/^v/i, '');
@@ -29,11 +42,40 @@ export function normalizeVersion(value) {
 }
 
 /**
- * 依次尝试所有来源，返回第一个有效版本。
- * @param {typeof fetch} [fetchImpl] 便于测试注入
+ * 读取本地缓存的最新版本号（供首屏立即填充，网络完成后再静默更新）。
  */
-export async function fetchLatestVersion(fetchImpl = fetch) {
-  for (const source of VERSION_SOURCES) {
+export function readCachedVersion(storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
+  try {
+    const raw = storage?.getItem(VERSION_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const version = normalizeVersion(parsed?.version);
+    return version ? { version, ts: Number(parsed?.ts) || 0 } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 依次尝试所有来源，返回第一个有效版本；支持 10 分钟 localStorage 缓存与过期兜底。
+ * @param {typeof fetch} [fetchImpl] 便于测试注入
+ * @param {Storage | null} [storage] 便于测试注入
+ */
+export async function fetchLatestVersion(
+  fetchImpl = fetch,
+  storage = (typeof localStorage !== 'undefined' ? localStorage : null),
+) {
+  const CACHE_TTL_MS = 10 * 60 * 1000;
+  let staleVersion = null;
+  const cached = readCachedVersion(storage);
+  if (cached) {
+    if (Date.now() - cached.ts < CACHE_TTL_MS) {
+      return { version: cached.version, source: 'cache' };
+    }
+    staleVersion = cached.version;
+  }
+
+  for (const source of ALL_VERSION_SOURCES) {
     try {
       const response = await fetchImpl(source.url, {
         headers: { accept: 'application/json' },
@@ -43,11 +85,17 @@ export async function fetchLatestVersion(fetchImpl = fetch) {
       });
       if (!response?.ok) continue;
       const version = normalizeVersion(source.pick(await response.json()));
-      if (version) return { version, source: source.id };
+      if (version) {
+        try {
+          storage?.setItem(VERSION_CACHE_KEY, JSON.stringify({ version, ts: Date.now() }));
+        } catch {}
+        return { version, source: source.id };
+      }
     } catch {
       /* 换下一个来源 */
     }
   }
+  if (staleVersion) return { version: staleVersion, source: 'stale-cache' };
   return { version: null, source: 'unavailable' };
 }
 

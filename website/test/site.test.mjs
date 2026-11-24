@@ -152,7 +152,12 @@ test('Website docs alignment: compatibility range, 15 tools, dashboard showcase,
   }
 });
 
-test('Single-client setup (--only) and repair commands are surfaced in both locales', async () => {
+test('Single-client setup (--only), interactive 15-tool inspector, and repair commands are surfaced in both locales', async () => {
+  const expectedTools = [
+    'dsh_start', 'dsh_send', 'dsh_interject', 'dsh_interrupt', 'dsh_queue',
+    'dsh_list', 'dsh_status', 'dsh_read', 'dsh_get', 'dsh_review',
+    'dsh_inbox', 'dsh_approval_decide', 'dsh_takeover', 'dsh_release', 'dsh_doctor',
+  ];
   const expectedClientIds = [
     'codex', 'claude-code', 'claude-desktop', 'cursor', 'windsurf',
     'zed', 'gemini', 'antigravity', 'opencode', 'vscode',
@@ -160,6 +165,13 @@ test('Single-client setup (--only) and repair commands are surfaced in both loca
   assert.match(html, /href="https:\/\/github\.com\/xmtlzzz\/dsh-any-agent\/blob\/main\/CHANGELOG\.zh\.md"/);
   assert.match(enHtml, /href="https:\/\/github\.com\/xmtlzzz\/dsh-any-agent\/blob\/main\/CHANGELOG\.md"/);
   for (const page of [html, enHtml]) {
+    assert.match(page, /id="tool-detail"/, 'interactive tool detail panel must exist');
+    assert.match(page, /id="copy-all-install"/, 'copy-all install button must exist');
+    assert.match(page, /id="copy-only-all"/, 'copy-both single-client button must exist');
+    assert.match(page, /id="image-lightbox"/, 'dashboard lightbox must exist');
+    for (const tool of expectedTools) {
+      assert.match(page, new RegExp(`class="tool-chip"[^>]*data-tool="${tool}"`), `interactive tool-chip ${tool}`);
+    }
     assert.match(page, /dsh-any-agent-setup --only codex<\/code>/);
     assert.match(page, /dsh-any-agent-setup --only codex --yes<\/code>/);
     assert.match(page, /dsh-any-agent-setup --help/);
@@ -171,4 +183,6 @@ test('Single-client setup (--only) and repair commands are surfaced in both loca
   const appName = assets.find((name) => /^app\.[a-f0-9]{10}\.mjs$/.test(name));
   const app = await readFile(resolve(dist, 'assets', appName), 'utf8');
   assert.match(app, /\[data-only-client\]/);
+  assert.match(app, /TOOL_INFO/);
+  assert.match(app, /\.tool-chip/);
 });

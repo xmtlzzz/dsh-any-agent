@@ -1,13 +1,15 @@
 /**
- * 官网 Worker 入口：只接管 `/api/stars`，其余请求一律交给静态资源
+ * 官网 Worker 入口：只接管 `/api/stars` 与 `/api/version`，其余请求一律交给静态资源
  * （wrangler.jsonc 里 `run_worker_first` 只列了 `/api/*`，别的路径根本不经过这里）。
  *
- * 为什么不让浏览器直接调 GitHub：未登录的 GitHub API 每个 IP 每小时只给 60 次，访客走共用的
- * 代理出口时很快被拒，页面只能一直显示本地缓存里的旧数字；国内直连 api.github.com 还常超时。
- * 改由边缘去取、缓存 10 分钟（每个机房 10 分钟最多问 GitHub 一次）；取不到时回最近一次成功的值
- * （留 7 天）。配了 `GITHUB_TOKEN`（`wrangler secret put GITHUB_TOKEN`，不需要任何权限）就带上它，
- * 额度变成每小时 5000 次；不配也能用。
+ * 为什么不让浏览器直接调 GitHub / npm：未登录的 GitHub API 每个 IP 每小时只给 60 次，访客走共用的
+ * 代理出口时很快被拒，页面只能一直显示本地缓存里的旧值；部分网络环境直连 api.github.com / registry.npmjs.org 还常超时。
+ * 改由边缘去取、缓存 10 分钟；取不到时回最近一次成功的值（留 7 天）并在后台刷新。
+ * 配了 `GITHUB_TOKEN`（`wrangler secret put GITHUB_TOKEN`，不需要任何权限）就带上它，
+ * GitHub 额度变成每小时 5000 次；不配也能用。
  */
+
+import { VERSION_SOURCES, normalizeVersion } from './release.mjs';
 
 const REPO_API = 'https://api.github.com/repos/xmtlzzz/dsh-any-agent';
 const FRESH_S = 600;
@@ -64,11 +66,60 @@ export async function handleStars(
   return body ? json(body, FRESH_S) : json(JSON.stringify({ stars: null }), 60, 503);
 }
 
+/**
+ * 边缘查询并缓存最新发布的版本号（npm latest → GitHub release → GitHub tag）。
+ */
+export async function handleVersion(
+  request,
+  env,
+  { fetchImpl = fetch, cache = caches.default, now = Date.now, waitUntil = () => {}, timeoutMs = 2000 } = {},
+) {
+  const origin = new URL(request.url).origin;
+  const freshKey = new Request(`${origin}/api/version`);
+  const lastGoodKey = new Request(`${origin}/api/version?last-good`);
+  const hit = await cache.match(freshKey);
+  if (hit) return hit;
+
+  const refresh = async () => {
+    for (const source of VERSION_SOURCES) {
+      try {
+        const isGitHub = source.url.startsWith('https://api.github.com/');
+        const headers = {
+          accept: isGitHub ? 'application/vnd.github+json' : 'application/json',
+          'user-agent': 'dsh-any-agent-site',
+        };
+        if (isGitHub && env?.GITHUB_TOKEN) headers.authorization = `Bearer ${env.GITHUB_TOKEN}`;
+        const res = await fetchImpl(source.url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+        if (!res?.ok) continue;
+        const version = normalizeVersion(source.pick(await res.json()));
+        if (!version) continue;
+        const body = JSON.stringify({ version, source: source.id, fetched_at: new Date(now()).toISOString() });
+        await Promise.all([cache.put(freshKey, json(body, FRESH_S)), cache.put(lastGoodKey, json(body, LAST_GOOD_S))]);
+        return body;
+      } catch {
+        /* 换下一个来源 */
+      }
+    }
+    return null;
+  };
+
+  const lastGood = await cache.match(lastGoodKey);
+  if (lastGood) {
+    waitUntil(refresh());
+    return json(await lastGood.text(), 60);
+  }
+  const body = await refresh();
+  return body ? json(body, FRESH_S) : json(JSON.stringify({ version: null }), 60, 503);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
     if (pathname === '/api/stars' && request.method === 'GET') {
       return handleStars(request, env, { waitUntil: (p) => ctx.waitUntil(p) });
+    }
+    if (pathname === '/api/version' && request.method === 'GET') {
+      return handleVersion(request, env, { waitUntil: (p) => ctx.waitUntil(p) });
     }
     return env.ASSETS.fetch(request);
   },
