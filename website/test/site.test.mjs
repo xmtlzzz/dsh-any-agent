@@ -182,7 +182,10 @@ test('Single-client setup (--only), interactive 15-tool inspector, and repair co
   }
   const appName = assets.find((name) => /^app\.[a-f0-9]{10}\.mjs$/.test(name));
   const app = await readFile(resolve(dist, 'assets', appName), 'utf8');
-  assert.match(app, /\[data-only-client\]/);
+  assert.match(app, /\$\$\('\[data-only-client\]'\)\.forEach/);
+  assert.match(app, /\$\$\('\[data-copy\]'\)\.forEach/);
+  assert.match(app, /\$\$\('\[data-jump-config\]'\)\.forEach/);
+  assert.doesNotMatch(app, /(?:^|[^$])\$\('\[data-(?:only-client|copy|jump-config|scenario|client|job|config)\]'\)\.forEach/m);
   assert.match(app, /TOOL_INFO/);
-  assert.match(app, /\.tool-chip/);
+  assert.match(app, /\$\$\('\.tool-chip'\)\.forEach/);
 });

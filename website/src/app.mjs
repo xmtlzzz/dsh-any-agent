@@ -622,10 +622,10 @@ function selectOnlyClient(id) {
   $('#copy-only-apply').dataset.copy = apply;
   const copyBoth = $('#copy-only-all');
   if (copyBoth) copyBoth.dataset.copy = `${preview}\n${apply}`;
-  $('[data-only-client]').forEach(btn => btn.setAttribute('aria-pressed', String(btn === chip)));
+  $$('[data-only-client]').forEach(btn => btn.setAttribute('aria-pressed', String(btn === chip)));
 }
-$('[data-only-client]').forEach(button => button.addEventListener('click', () => selectOnlyClient(button.dataset.onlyClient)));
-$('[data-copy]').forEach(button => button.addEventListener('click', () => copy(button.dataset.copy, button)));
+$$('[data-only-client]').forEach(button => button.addEventListener('click', () => selectOnlyClient(button.dataset.onlyClient)));
+$$('[data-copy]').forEach(button => button.addEventListener('click', () => copy(button.dataset.copy, button)));
 $('#copy-config').addEventListener('click', event => copy(configs[config].code, event.currentTarget));
 
 // Allow clicking anywhere on a command row (when not selecting text) to copy its command.
