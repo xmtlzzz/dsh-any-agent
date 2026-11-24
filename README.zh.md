@@ -95,6 +95,15 @@ dsh-any-agent-setup --yes
 
 第二条命令只预览，加 `--yes` 才会写入配置。重新连接客户端的 MCP 服务，按[安装自检](docs/zh/install.md#3-自检)确认能连通和取回结果。[先派活，回头验收](docs/zh/usage.md)展示了在项目里派活和收结果的完整流程。
 
+**只配置一个客户端。** 安装后，用下面两条命令替换上面的两条 setup 命令。第一条预览 Codex 的 MCP 配置变更，第二条写入配置。
+
+```bash
+dsh-any-agent-setup --only codex
+dsh-any-agent-setup --only codex --yes
+```
+
+将 `codex` 换成你要配置的客户端 ID，例如 `claude-code`、`cursor` 或 `vscode`。运行 `dsh-any-agent-setup --help` 可查看全部 ID。
+
 **重连后取结果**。用会话 ID 和原 `run_id` 或 `client_run_id` 调用 `dsh_get`。只记得会话 ID 时，`dsh_get` 也能查到最近一次已开始的回合。结果文件默认在服务启动时清理超过 7 天的记录。保留结果文件可在重连后读取正文。即使删除该文件，保留期内用原幂等键重试仍会返回原回合 ID。
 
 只用 Cursor 或 VS Code？也可以一键添加（运行的是 `npx -y dsh-any-agent@latest`；DSH 仍需先装好）：
