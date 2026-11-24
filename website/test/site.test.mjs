@@ -151,3 +151,24 @@ test('Website docs alignment: compatibility range, 15 tools, dashboard showcase,
     for (const tool of expectedTools) assert.ok(page.includes(tool), `page includes ${tool}`);
   }
 });
+
+test('Single-client setup (--only) and repair commands are surfaced in both locales', async () => {
+  const expectedClientIds = [
+    'codex', 'claude-code', 'claude-desktop', 'cursor', 'windsurf',
+    'zed', 'gemini', 'antigravity', 'opencode', 'vscode',
+  ];
+  assert.match(html, /href="https:\/\/github\.com\/xmtlzzz\/dsh-any-agent\/blob\/main\/CHANGELOG\.zh\.md"/);
+  assert.match(enHtml, /href="https:\/\/github\.com\/xmtlzzz\/dsh-any-agent\/blob\/main\/CHANGELOG\.md"/);
+  for (const page of [html, enHtml]) {
+    assert.match(page, /dsh-any-agent-setup --only codex<\/code>/);
+    assert.match(page, /dsh-any-agent-setup --only codex --yes<\/code>/);
+    assert.match(page, /dsh-any-agent-setup --help/);
+    assert.match(page, /dsh-any-agent-setup --repair --yes/);
+    for (const id of expectedClientIds) {
+      assert.match(page, new RegExp(`data-only-client="${id}"`), `page includes single-client chip ${id}`);
+    }
+  }
+  const appName = assets.find((name) => /^app\.[a-f0-9]{10}\.mjs$/.test(name));
+  const app = await readFile(resolve(dist, 'assets', appName), 'utf8');
+  assert.match(app, /\[data-only-client\]/);
+});

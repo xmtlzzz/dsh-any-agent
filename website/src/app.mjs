@@ -264,6 +264,16 @@ async function copy(text, button) {
     announce(t('selected'));
   }
 }
+$$('[data-only-client]').forEach(button => button.addEventListener('click', () => {
+  const id = button.dataset.onlyClient;
+  const preview = `dsh-any-agent-setup --only ${id}`;
+  const apply = `${preview} --yes`;
+  $('#only-preview-cmd').textContent = preview;
+  $('#only-apply-cmd').textContent = apply;
+  $('#copy-only-preview').dataset.copy = preview;
+  $('#copy-only-apply').dataset.copy = apply;
+  $$('[data-only-client]').forEach(chip => chip.setAttribute('aria-pressed', String(chip === button)));
+}));
 $$('[data-copy]').forEach(button => button.addEventListener('click', () => copy(button.dataset.copy, button)));
 $('#copy-config').addEventListener('click', event => copy(configs[config].code, event.currentTarget));
 render();
