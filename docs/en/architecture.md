@@ -53,3 +53,5 @@ Token numbers are read from DSH's own projection cache (`tokenUsage` / `contextP
 **MCP compatibility.** The server uses only `initialize`, `ping`, `tools/list` and `tools/call`. It has also been verified with a bare-bones client that negotiates an older protocol version and never sends `notifications/initialized`.
 
 </details>
+
+The [run store](../../src/run-store.mjs) writes receipts, checkpoints and completion files. It also reads older run formats during recovery. The [hub](../../src/hub.mjs) owns the live sessions and supplies their permission when an interrupted turn needs a review record.
