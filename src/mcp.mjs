@@ -68,7 +68,7 @@ export const INSTRUCTIONS = `本服务把 DeepSeek Harness (DSH) 当作可长期
 
 【流程】dsh_start(cwd?) → dsh_send(conversation_id, prompt) 默认不阻塞，立刻返回 run_id + sentinel_file → 等哨兵 → 读哨兵或 dsh_get 验收 → dsh_review。随时可用 dsh_status / dsh_read / dsh_list(only_running=true)。用完 dsh_release。
 
-【等结果：哨兵文件，不要轮询】每个回合结束（成功/失败/取消）都会原子写出哨兵 JSON。用你的**后台任务**等它出现（收据里给了现成命令：sentinel_file_posix 给 Bash，sentinel_wait_powershell 给 PowerShell），文件一到宿主就唤醒你；读它拿 status 与 result（Windows PowerShell 读取要 -Encoding UTF8，收据里有 sentinel_read_powershell）。wait=true 会原地阻塞，等超时只转后台、不取消回合。只有调用带 progressToken 时才发进度通知。
+【等结果】ask 模式用回执里的等待命令；CHECK_INBOX 时查 dsh_inbox、裁决后继续等。每个回合结束（成功/失败/取消）都会原子写出哨兵 JSON。用你的**后台任务**等它出现（收据里给了现成命令：sentinel_file_posix 给 Bash，sentinel_wait_powershell 给 PowerShell），文件一到宿主就唤醒你；读它拿 status 与 result（Windows PowerShell 读取要 -Encoding UTF8，收据里有 sentinel_read_powershell）。wait=true 会原地阻塞，等超时只转后台、不取消回合。只有调用带 progressToken 时才发进度通知。
 
 【写锁】一个会话同时只能有一个写者。撞上 "already owned by an active write handle"（或笼统的 Internal error）时别重试，先看 dsh_status 的 lock_holder：stale-mcp → dsh_takeover；live-mcp → 那边 dsh_release，确需再 dsh_takeover(force=true)；none 多半是 GUI 持有 → 请用户在 GUI 里关掉，本服务绝不杀 GUI。
 

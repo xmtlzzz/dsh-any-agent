@@ -697,6 +697,7 @@ export class Conversation {
         : { outcome: { outcome: 'cancelled' } };
     }
     const approvalId = `ap-${Math.random().toString(36).slice(2, 10)}`;
+    const runId = this.currentRun?.run_id;
     this.#hub.log.info(`[conv ${this.id}] 审批待裁决: ${approvalId}`);
     liveApproval('ask', { approval_id: approvalId });
     return await new Promise((resolve) => {
@@ -708,6 +709,7 @@ export class Conversation {
         }
       }, this.#hub.approvalTimeoutMs);
       this.pendingApprovals.set(approvalId, {
+        runId,
         params: { tool: desc, details: approvalContext(params, toolCall, desc, options) },
         createdAt: now(),
         allowId,
@@ -717,6 +719,11 @@ export class Conversation {
           resolve(outcome);
         },
       });
+      if (runId) this.#hub.setRunApprovalPending?.(this.id, runId, true);
+    }).finally(() => {
+      if (runId && ![...this.pendingApprovals.values()].some(p => p.runId === runId)) {
+        this.#hub.setRunApprovalPending?.(this.id, runId, false);
+      }
     });
   }
 

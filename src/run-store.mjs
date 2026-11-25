@@ -63,6 +63,16 @@ export function writeRunSentinel(paths, conversationId, run, log) {
   }
 }
 
+export function setRunApprovalPending(paths, conversationId, runId, pending, log) {
+  const file = paths.runSentinelPath(conversationId, runId) + '.approval';
+  try {
+    if (pending) writeFileSync(file, '', { flag: 'wx', mode: 0o600 });
+    else rmSync(file, { force: true });
+  } catch (error) {
+    if (!(pending && error.code === 'EEXIST')) log.info(`[hub] Approval wake-up file: ${error.message}`);
+  }
+}
+
 function publishRunSentinel(file, marker, payload) {
   // Keep the key before the result becomes visible and before releasing the running marker.
   if (payload.client_run_id) {
@@ -74,6 +84,7 @@ function publishRunSentinel(file, marker, payload) {
     // 正常收尾和并发恢复都保留第一个落地的终态。
     if (e.code !== 'EEXIST') throw e;
   }
+  try { rmSync(file + '.approval', { force: true }); } catch {}
   try { rmSync(marker, { force: true }); } catch {}
 }
 
@@ -279,6 +290,7 @@ export function recoverInterruptedRuns(paths, writeInterrupted, log, { alive = i
       }
       const sentinel = paths.runSentinelPath(m.conversation_id, m.run_id);
       if (existsSync(sentinel)) {
+        try { rmSync(sentinel + '.approval', { force: true }); } catch {}
         try { rmSync(markerFile, { force: true }); } catch {}
         continue;
       }

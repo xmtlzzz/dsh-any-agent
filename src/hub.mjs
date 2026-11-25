@@ -182,6 +182,10 @@ export class Hub {
     return runStore.runSentinelPath(conversationId, runId);
   }
 
+  setRunApprovalPending(conversationId, runId, pending) {
+    runStore.setRunApprovalPending(this, conversationId, runId, pending, this.log);
+  }
+
   writeRunSentinel(conversationId, run) {
     return runStore.writeRunSentinel(this, conversationId, run, this.log);
   }

@@ -36,7 +36,9 @@ MCP 工具调用是**阻塞**的，所以 `dsh_send` **默认就不阻塞**（`w
 
 ## 🔔 用法：跑完自动通知（不轮询）
 
-`wait=false` 除了 `run_id`，还会返回 **`sentinel_file`**（哨兵文件路径）以及 **`sentinel_file_posix`**（Bash/MSYS 形式，**直接用它，别无手工转换**——转错了等待任务会一直挂到超时）。回合结束时——**无论成功、失败还是被取消**——本服务都会往这个路径**原子写出**一个含最终 `status`、`result` 与**审核单**（`result.review`）的小文件。于是你不用轮询、也不用傻等：**用你自己宿主（Claude/Codex）的后台任务等这个文件出现即可，文件一到就会唤醒你。**
+`wait=false` **审批策略为 `ask` 时**，使用回执中的等待命令，同时监听完成文件和空的 `.approval` 提醒文件。收到 `CHECK_INBOX` 就查 `dsh_inbox`、用 `dsh_approval_decide` 裁决并继续等待；`DONE` 表示结果文件可读。排队回合也要留意当前执行回合的审批。
+
+除了 `run_id`，还会返回 **`sentinel_file`**（哨兵文件路径）以及 **`sentinel_file_posix`**（Bash/MSYS 形式，**直接用它，别无手工转换**——转错了等待任务会一直挂到超时）。回合结束时——**无论成功、失败还是被取消**——本服务都会往这个路径**原子写出**一个含最终 `status`、`result` 与**审核单**（`result.review`）的小文件。于是你不用轮询、也不用傻等：**用你自己宿主（Claude/Codex）的后台任务等这个文件出现即可，文件一到就会唤醒你。**
 
 ```bash
 # sent="$sentinel_file_posix"   ← 直接用工具返回里那个字段

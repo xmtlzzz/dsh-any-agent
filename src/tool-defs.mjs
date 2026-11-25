@@ -145,7 +145,7 @@ export const TOOL_DEFS = [
       '而是自动降级为后台：返回 run_id + sentinel_file，回合继续跑完，结果稍后由哨兵文件通知。' +
       '（timeout_ms=0 表示一直等。）所以任何时候你都能拿到结果，不用怕"超时了白干"。' +
       '等待模式与后台模式都在回合结束时原子落地一个含最终结果的小文件——' +
-      '**推荐用后台任务（Bash run_in_background + `until [ -f sentinel_file ]`；Windows/PowerShell 用 `Test-Path` 循环，收据里给出现成命令）等它，跑完自动通知你，无需轮询**；' +
+      '**推荐用后台任务（Bash run_in_background + `until [ -f sentinel_file ]`；Windows/PowerShell 用 `Test-Path` 循环，收据里给出现成命令）等它。ask 模式下，CHECK_INBOX 表示先查 dsh_inbox 并裁决审批，再继续等**；' +
       '文件出现后读它即得结果，或用 dsh_get(conversation_id, run_id) 验收，dsh_read 可中途看输出。' +
       '默认隐藏思考内容（只返回正文 + 思考统计）。' +
       '结果与后台收据都会带 `review` 审核单（默认 advisory）：调用方核验后用 dsh_review 提交裁决。' +

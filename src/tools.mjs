@@ -574,6 +574,10 @@ export function createHandlers(hub, opts = {}) {
               );
       // 插话这一轮同样会写哨兵（"一个回合 = 一个哨兵"），把路径一并交回，
       // 调用方就能用同一套"等文件出现"的逻辑收活 —— 之前这里没有哨兵，等待方会空等。
+      if (r.still_running && conv.onApproval === 'ask') {
+        const receipt = backgroundReceipt(hub, conv, r);
+        return { structured: { ...r, ...receipt.structured }, text: head + '\n\n' + receipt.text };
+      }
       const sentinel = r?.run_id ? hub.runSentinelPath(conv.id, r.run_id) : null;
       return {
         structured: sentinel ? { ...r, sentinel_file: sentinel, sentinel_file_posix: toPosixPath(sentinel) } : r,

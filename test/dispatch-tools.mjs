@@ -498,6 +498,13 @@ console.log('\n[6c] PowerShell 哨兵等待命令');
       check('★ 文件已存在（路径含单引号/$/方括号）→ DONE、退出 0', () => {
         assert.equal(ok.status, 0, ok.stderr);
         assert.match(ok.stdout, /DONE/);
+        const pending = join(dir, 'a $b [c]', 'pending.json');
+        writeFileSync(pending + '.approval', '');
+        const wake = ps(psWaitCommand(pending, 5, true));
+        assert.equal(wake.status, 0, wake.stderr);
+        assert.equal(wake.stdout.trim(), 'CHECK_INBOX');
+        writeFileSync(pending, '{}');
+        assert.equal(ps(psWaitCommand(pending, 5, true)).stdout.trim(), 'DONE');
       });
       const missing = ps(psWaitCommand(join(dir, 'never.json'), 1));
       check('★ 文件一直不出现 → TIMEOUT、退出 1', () => {
