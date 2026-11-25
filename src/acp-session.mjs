@@ -61,3 +61,9 @@ export async function applySessionConfig(proc, sessionId, cfg) {
   await set('reasoning_effort', effort, `思考深度=${effort}`);
   return { applied, failed };
 }
+
+/**
+ * 真实 DSH 的 tool_call 不带 name，工具名在 title 里（"read" / "pwsh"）。title 是纯标识符时才当名字；
+ * 带空格的描述性 title（可能含命令原文）不算。
+ */
+export const toolNameFromTitle = (title) => (typeof title === 'string' && /^[\w.:-]{1,40}$/.test(title) ? title : null);

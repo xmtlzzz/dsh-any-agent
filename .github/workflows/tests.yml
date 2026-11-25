@@ -18,7 +18,7 @@ name: tests
 #     dispatch-tools    dispatch surface              88 checks (85 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        26 checks
-#     live-events       live event stream, write side  47 checks
+#     live-events       live event stream, write side  48 checks
 #     live-view         watch / dashboard viewers      69 checks
 #     release-notes     Release notes from CHANGELOG   12 checks
 #     review            caller review tickets        70 checks

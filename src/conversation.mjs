@@ -43,12 +43,12 @@ import {
 import { sanitizeApprovalContext } from './redact.mjs';
 import { assertSafeId } from './ids.mjs';
 import { AcpProcess } from './acp.mjs';
-import { applySessionConfig, approvalContext, pickOption } from './acp-session.mjs';
+import { applySessionConfig, approvalContext, pickOption, toolNameFromTitle } from './acp-session.mjs';
 import { rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { gitStatus, sameWorkspaceSnapshot } from './git-snapshot.mjs';
 import { forgottenPath, isForgotten, writeTombstone } from './hub-store.mjs';
-import { emitLive, liveClient, livePreview, liveSettings, removeLive, summarizeToolInput, withLiveClient } from './live.mjs';
+import { liveClient, livePreview, removeLive, withLiveClient } from './live.mjs';
 import {
   classifyHolder,
   describeLeaseConflict,
@@ -61,6 +61,7 @@ import {
 import { attachReview, terminalResult } from './run-result.mjs';
 import { MAX_AUTO_APPROVALS_KEPT, approvalDecision, autoApprovalSummary, escalationOf } from './approval-policy.mjs';
 import { OutBuffer } from './out-buffer.mjs';
+import { ConversationLive } from './conversation-live.mjs';
 import { RunLedger } from './run-ledger.mjs';
 
 const now = () => Date.now();
@@ -74,12 +75,6 @@ const TEAM_PREFIX = L(
 
 /** 记录用户发话时的截断长度（避免一条把缓冲撑爆）。 */
 const MAX_PROMPT_ECHO = 4000;
-
-/**
- * 真实 DSH 的 tool_call 不带 name，工具名在 title 里（"read" / "pwsh"）。title 是纯标识符时才当名字；
- * 带空格的描述性 title（可能含命令原文）不算。
- */
-const toolNameFromTitle = (title) => (typeof title === 'string' && /^[\w.:-]{1,40}$/.test(title) ? title : null);
 
 export class Conversation {
   #lastChildStartedAt = null;
@@ -111,6 +106,9 @@ export class Conversation {
     /** isolation=worktree 时：{path, branch, base, repo, cwd, main_dirty, created_at}（见 worktree.mjs）。 */
     this.worktree = state.worktree ?? null;
     this.#hub = hub;
+    this.#activity = new ConversationLive(this.id, () => ({
+      run: this.currentRun?.run_id ?? null, turn: this.currentTurn,
+    }));
 
     this.proc = null;
     this.busy = false;
@@ -143,6 +141,7 @@ export class Conversation {
   }
 
   #hub;
+  #activity;
 
   /** 只有会话取得写锁之后才登记，失败的 resume 需保留上一代进程的身份。 */
   async recordChildProcess(proc) {
@@ -180,82 +179,6 @@ export class Conversation {
     if (isForgotten(this.id)) {
       throw new Error(`会话已被 forget（永久移除）: ${this.id}，不再派活。确实要恢复请删除墓碑 ${forgottenPath(this.id)}。`);
     }
-  }
-
-  /**
-   * live 事件流用的工具跟踪：tool_call_id → {at, status, hasInput}。
-   * 单独放在这里而不是回合收集器里：收集器的 tools 会原样进 tools_used，不能混入新字段。
-   */
-  #liveTools = new Map();
-
-  /** 当前 run_id（live 事件用；回合外为 null）。 */
-  #liveRunId() {
-    return this.currentRun?.run_id ?? null;
-  }
-
-  /** 写一条 live 事件（永不抛错，见 live.mjs）。 */
-  #live(type, fields = {}, detail = null) {
-    emitLive(this.id, type, { run: this.#liveRunId(), turn: this.currentTurn, ...fields }, detail);
-  }
-
-  /**
-   * live 事件流的 token 跟踪：`{runId, base, at, last}`。
-   * DSH 在投影缓存里维护**会话累计**的 tokenUsage.totals，并在回合中每个模型步之后更新
-   * （真机实测）；回合开始时记下基线，之后发的是"本回合增量"。
-   */
-  #liveUsage = null;
-
-  /** 读 DSH 投影缓存里的 token 累计与上下文压力；读不到返回 null。 */
-  #readTokenUsage() {
-    try {
-      const meta = readConversationMeta(this.id);
-      const t = meta?.usage?.totals;
-      const p = meta?.pressure;
-      if (!t && !p) return null;
-      const n = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
-      return {
-        totals: t
-          ? { input: n(t.uncachedInputTokens), output: n(t.outputTokens), cache_read: n(t.cacheReadTokens), cache_write: n(t.cacheWriteTokens) }
-          : null,
-        context: p && Number.isFinite(p.contextWindow) ? { used: n(p.pressureTokens ?? p.surfaceTokens), window: p.contextWindow } : null,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * 发一条 `usage` 事件（本回合 token 增量 + 会话累计 + 上下文占用）。
-   * 回合中节流到 2 秒一次、且只在数字变化时发；回合结束后 force 再发一次最终值。
-   */
-  #liveUsageTick({ force = false } = {}) {
-    const u = this.#liveUsage;
-    if (!u) return;
-    const t = now();
-    if (!force && t - u.at < 2000) return;
-    u.at = t;
-    const cur = this.#readTokenUsage();
-    if (!cur?.totals && !cur?.context) return;
-    const base = u.base ?? { input: 0, output: 0, cache_read: 0, cache_write: 0 };
-    const tokens = cur.totals
-      ? Object.fromEntries(Object.keys(base).map((k) => [k, Math.max(0, cur.totals[k] - base[k])]))
-      : null;
-    const sig = JSON.stringify([tokens, cur.context]);
-    if (!force && sig === u.last) return;
-    u.last = sig;
-    emitLive(this.id, 'usage', {
-      run: u.runId,
-      turn: u.turn,
-      tokens,
-      session_tokens: cur.totals,
-      context: cur.context,
-      final: force || undefined,
-    });
-  }
-
-  /** 审批裁决事件（decide / 超时 / 回合结束 / 关闭 统一走这里）。 */
-  #liveApprovalDecided(approvalId, by, decision = null, effective = null) {
-    this.#live('approval.decided', { approval_id: approvalId, by, decision, effective });
   }
 
   /** 序列化进注册表的最小状态——**只有元数据，没有对话内容**。 */
@@ -715,12 +638,12 @@ export class Conversation {
         if (u.title !== undefined || u.status !== undefined || u.name !== undefined) {
           this.pushOut('tool', `${label}${tag}`, { tool_call_id: id });
         }
-        this.#liveTool(id, merged);
+        this.#activity.tool(id, merged);
         break;
       }
       case 'usage_update':
         c.usage = u;
-        this.#liveUsageTick();
+        this.#activity.usageTick();
         break;
       case 'plan':
       case 'plan_update':
@@ -729,33 +652,6 @@ export class Conversation {
       default:
         c.otherUpdates.push(u.sessionUpdate);
     }
-  }
-
-  /**
-   * 工具状态 → live 事件。DSH 的工具更新是快照、会重复推同一状态，所以只在
-   * "第一次出现 / 状态变化 / 第一次拿到输入"时写，避免刷屏。
-   */
-  #liveTool(id, merged) {
-    const seen = this.#liveTools.get(id);
-    const hasInput = merged.input !== undefined && merged.input !== null;
-    const status = merged.status ?? null;
-    if (seen && seen.status === status && (seen.hasInput || !hasInput)) return;
-    const at = seen?.at ?? now();
-    this.#liveTools.set(id, { at, status, hasInput });
-    const terminal = status === 'completed' || status === 'failed';
-    // 带空格等可能含命令原文的 title 只进 detail；像标识符的才当名字写进 meta 级字段（见 toolNameFromTitle）。
-    this.#live(
-      'tool',
-      {
-        tool_call_id: id,
-        name: merged.name ?? toolNameFromTitle(merged.title),
-        kind: merged.kind ?? null,
-        status,
-        elapsed_ms: terminal ? now() - at : undefined,
-      },
-      { title: livePreview(merged.title, 200), input_preview: summarizeToolInput(merged.input) },
-    );
-    this.#liveUsageTick();
   }
 
   async onPermissionRequest(params) {
@@ -778,14 +674,7 @@ export class Conversation {
     const desc = sanitizeApprovalContext(String(toolCall.title ?? toolCall.name ?? toolCall.toolCallId ?? '未知操作'));
     const allowId = pickOption(options, 'allow');
     const rejectId = pickOption(options, 'reject');
-    const liveApproval = (mode, extra = {}) => {
-      const input = toolCall.rawInput ?? toolCall.input ?? null;
-      this.#live(
-        'approval',
-        { tool_call_id: toolCall.toolCallId ?? null, tool: toolCall.name ?? null, mode, escalation: escalationOf(input), ...extra },
-        { title: livePreview(desc, 200), command_preview: summarizeToolInput(input) },
-      );
-    };
+    const liveApproval = (mode, extra) => this.#activity.approvalRequested(toolCall, desc, mode, extra);
     const reject = () =>
       rejectId ? { outcome: { outcome: 'selected', optionId: rejectId } } : { outcome: { outcome: 'cancelled' } };
 
@@ -814,7 +703,7 @@ export class Conversation {
       const timer = setTimeout(() => {
         if (this.pendingApprovals.delete(approvalId)) {
           this.#hub.log.info(`[conv ${this.id}] 审批 ${approvalId} 超时，按拒绝处理`);
-          this.#liveApprovalDecided(approvalId, 'timeout', 'reject', 'cancelled');
+          this.#activity.approvalDecided(approvalId, 'timeout', 'reject', 'cancelled');
           resolve({ outcome: { outcome: 'cancelled' } });
         }
       }, this.#hub.approvalTimeoutMs);
@@ -855,7 +744,7 @@ export class Conversation {
     //   否则 dsh_approval_decide 会渲染成"已裁决为 allow"，而 DSH 收到的是取消（假成功）。
     const effective = chosen ? 'selected' : 'cancelled';
     p.resolve(chosen ? { outcome: { outcome: 'selected', optionId: chosen } } : { outcome: { outcome: 'cancelled' } });
-    this.#liveApprovalDecided(approvalId, 'caller', decision, effective);
+    this.#activity.approvalDecided(approvalId, 'caller', decision, effective);
     return {
       approval_id: approvalId,
       decision,
@@ -886,13 +775,8 @@ export class Conversation {
     runRecord.status = stopReason;
     runRecord.error = error?.message ?? String(error);
     runRecord.elapsed_ms = 0;
-    if (this.#liveUsage?.runId === runRecord.run_id) this.#liveUsage = null;
-    emitLive(
-      this.id,
-      'run.end',
-      { run: runRecord.run_id, turn: this.currentTurn, status: stopReason, stop_reason: stopReason },
-      { error: livePreview(runRecord.error, 300) },
-    );
+    this.#activity.finishUsage(runRecord.run_id, { flush: false });
+    this.#activity.endRun(runRecord.run_id, { status: stopReason, stop_reason: stopReason }, runRecord.error);
     runRecord.result = attachReview(
       terminalResult({ conversationId: this.id, runId: runRecord.run_id, stopReason, error: runRecord.error }),
       { conversationId: this.id, run: runRecord, mode: runRecord.review_mode ?? this.review, permission: this.permission },
@@ -1010,16 +894,7 @@ export class Conversation {
     this.currentTool = null;
     this.pushOut('user', text.length > MAX_PROMPT_ECHO ? `${text.slice(0, MAX_PROMPT_ECHO)}…（已截断）` : text);
     this.pushOut('turn', `第 ${this.currentTurn} 轮开始`, { phase: 'start' });
-    this.#liveTools.clear();
-    // live 关闭时不读投影缓存（emitLive 会直接丢弃，读了也白读）。
-    this.#liveUsage = liveSettings().level === 'off'
-      ? null
-      : { runId: runRecord.run_id, turn: this.currentTurn, base: this.#readTokenUsage()?.totals ?? null, at: 0, last: '' };
-    this.#live(
-      'run.start',
-      { via, permission: this.permission, on_approval: this.onApproval, cwd: this.cwd },
-      { prompt_preview: livePreview(text, 200) },
-    );
+    this.#activity.startTurn(runRecord.run_id, text, { via, permission: this.permission, on_approval: this.onApproval, cwd: this.cwd });
     const c = {
       answer: '',
       /** 上一段正文之后出现过工具调用：下一段正文前要补段落分隔（见 onUpdate）。 */
@@ -1106,7 +981,7 @@ export class Conversation {
             try {
               p.resolve({ outcome: { outcome: 'cancelled' } });
             } catch {}
-            this.#liveApprovalDecided(apId, 'turn_end', null, 'cancelled');
+            this.#activity.approvalDecided(apId, 'turn_end', null, 'cancelled');
           }
           this.pendingApprovals.clear();
           this.pushOut('turn', `第 ${this.currentTurn} 轮结束（${stopReason ?? 'unknown'}）`, {
@@ -1114,12 +989,9 @@ export class Conversation {
             stop_reason: stopReason,
             error: failure ?? undefined,
           });
-          emitLive(
-            this.id,
-            'run.end',
+          this.#activity.endRun(
+            runRecord.run_id,
             {
-              run: runRecord.run_id,
-              turn: this.currentTurn,
               status,
               stop_reason: stopReason ?? null,
               duration_ms: now() - t0,
@@ -1128,7 +1000,7 @@ export class Conversation {
               auto_escalations: c.autoEscalationTotal,
               watchdog: c.watchdog?.reason,
             },
-            { error: livePreview(failure, 300) },
+            failure,
           );
           this.turnCount += 1;
           this.lastUsedAt = now();
@@ -1140,12 +1012,7 @@ export class Conversation {
           this.#scheduleDrain();
           // 完整哨兵和审核单仍等 Git 快照，提前暂存的终态只用于进程崩溃恢复。
           const after = await afterPromise;
-          // 回合结束后 DSH 的 token 累计已经落盘（真机实测在哨兵之前）：发一次最终值。
-          // 只发给本回合自己的跟踪器——下一回合可能已经在 git 快照期间开始了。
-          if (this.#liveUsage?.runId === runRecord.run_id) {
-            this.#liveUsageTick({ force: true });
-            this.#liveUsage = null;
-          }
+          this.#activity.finishUsage(runRecord.run_id);
           result.workspace_changed = !sameWorkspaceSnapshot(before, after);
           result.diff_stat = after;
           result.elapsed_ms = now() - t0;
@@ -1317,7 +1184,7 @@ export class Conversation {
         `[conv ${this.id}] 看门狗中断回合 ${runRecord.run_id}：${verdict.reason}` +
           `（已跑 ${Math.round((t - t0) / 1000)}s，距上次进展 ${Math.round((t - this.lastProgressAt) / 1000)}s）`,
       );
-      this.#live('watchdog', {
+      this.#activity.emit('watchdog', {
         reason: verdict.reason,
         elapsed_ms: c.watchdog.elapsed_ms,
         since_progress_ms: c.watchdog.since_progress_ms,
@@ -1340,12 +1207,12 @@ export class Conversation {
     //   回合随后照常派发（审计 C02）。改为记一笔，由 prompt() 在发出前放弃这个回合。
     if (this.busy && this.#undispatched) {
       this.#cancelBeforeDispatch = true;
-      this.#live('interrupt', { busy: true, before_dispatch: true });
+      this.#activity.emit('interrupt', { busy: true, before_dispatch: true });
       return { interrupted: true, before_dispatch: true };
     }
     if (!this.proc?.alive) return { interrupted: false, reason: 'DSH 进程未运行' };
     this.proc.notify('session/cancel', { sessionId: this.id });
-    this.#live('interrupt', { busy: this.busy });
+    this.#activity.emit('interrupt', { busy: this.busy });
     if (!this.busy) {
       return { interrupted: false, reason: '当前没有进行中的回合（已发送 cancel，用于清空排队输入）' };
     }
@@ -1411,12 +1278,7 @@ export class Conversation {
       terminalResult({ conversationId: this.id, runId: run.run_id, stopReason: 'cancelled', error: message }),
       { conversationId: this.id, run, mode: run.review_mode, permission: this.permission },
     );
-    emitLive(
-      this.id,
-      'run.end',
-      { run: run.run_id, turn: this.currentTurn, status: 'cancelled', stop_reason: 'cancelled' },
-      { error: livePreview(message, 300) },
-    );
+    this.#activity.endRun(run.run_id, { status: 'cancelled', stop_reason: 'cancelled' }, message);
     const file = this.#hub.writeRunSentinel?.(this.id, run);
     run.result.sentinel_file = file ?? this.#hub.runSentinelPath?.(this.id, run.run_id) ?? null;
   }
@@ -1434,10 +1296,9 @@ export class Conversation {
     run.status = 'queued';
     // client：排队的客户端。出队时可能是另一个客户端的回合刚结束，run.start 要记回排队的那个。
     const position = this.ledger.enqueue({ run, text, reasoning, clientRunId, teamHint, enqueued_at: now(), client: liveClient() });
-    emitLive(
-      this.id,
+    this.#activity.emit(
       'run.queued',
-      { run: run.run_id, turn: this.currentTurn, position, cwd: this.cwd },
+      { run: run.run_id, position, cwd: this.cwd },
       { prompt_preview: livePreview(run.prompt_preview, 200) },
     );
     return { run, position, deduped: false };
@@ -1691,7 +1552,7 @@ export class Conversation {
       if (this.#undispatched) this.#cancelBeforeDispatch = true;
       else this.proc?.notify('session/cancel', { sessionId: this.id });
     }
-    this.#live('interject', { mode, pending_run: run.run_id }, { text_preview: livePreview(message, 200) });
+    this.#activity.emit('interject', { mode, pending_run: run.run_id }, { text_preview: livePreview(message, 200) });
     // 排队等待的时长跟随调用方的 timeoutMs（0 = 一直等），不再固定 30 分钟。
     // ★ 被唤醒时会话可能已被同时等待的另一条插话/队列抢先占住：继续等，而不是撞上
     //   “正在跑另一个回合”失败、留下一条永远 queued 且没有哨兵的 run（审计 C04）。
@@ -1762,7 +1623,7 @@ export class Conversation {
       try {
         p.resolve({ outcome: { outcome: 'cancelled' } });
       } catch {}
-      this.#liveApprovalDecided(apId, 'close', null, 'cancelled');
+      this.#activity.approvalDecided(apId, 'close', null, 'cancelled');
     }
     this.pendingApprovals.clear();
     // 只有确认进程退出后才删登记；否则把登记留着，让 takeover/classifyHolder
@@ -1793,7 +1654,7 @@ export class Conversation {
       }
     } else {
       await this.#hub.save();
-      this.#live('conv.close', { stopped });
+      this.#activity.emit('conv.close', { stopped });
     }
     return { closed: stopped, forgotten: forget, ...(stopped ? {} : { error: '进程未能确认退出，登记已保留' }) };
   }

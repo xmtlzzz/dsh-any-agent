@@ -84,8 +84,8 @@ function fakeProc() {
   return proc;
 }
 
-function makeConv(id, extra = {}) {
-  const conv = new Conversation({ id, cwd: root, permission: 'workspace-write', onApproval: 'auto-allow', ...extra }, hub);
+function makeConv(id, extra = {}, owner = hub) {
+  const conv = new Conversation({ id, cwd: root, permission: 'workspace-write', onApproval: 'auto-allow', ...extra }, owner);
   const proc = fakeProc();
   conv.ensureAlive = async () => {
     conv.proc = proc;
@@ -308,6 +308,32 @@ try {
       const ev2 = events(id);
       return ev2.findIndex((e) => e.type === 'run.end') < ev2.findIndex((e) => e.type === 'usage' && e.final);
     });
+    // 第二轮开始后才放行第一轮收尾，确保第一轮不能清空第二轮的用量基线。
+    const overlapId = 'live-events-overlap';
+    const saving = Promise.withResolvers();
+    const resume = Promise.withResolvers();
+    const overlap = makeConv(overlapId, {}, { ...hub, save() { saving.resolve(); return resume.promise; } });
+    writeProj(overlapId, { outputTokens: 10 }, {});
+    const first = overlap.conv.prompt('first', { wait: true });
+    await overlap.proc.ready();
+    overlap.proc.end();
+    await Promise.race([saving.promise, first.then(() => { throw new Error('first turn finished before save'); })]);
+    writeProj(overlapId, { outputTokens: 20 }, {});
+    const second = overlap.conv.prompt('second', { wait: true });
+    try {
+      await overlap.proc.ready();
+    } finally {
+      resume.resolve();
+    }
+    await first;
+    writeProj(overlapId, { outputTokens: 27 }, {});
+    overlap.proc.end();
+    const secondResult = await second;
+    const finalUsage = events(overlapId).filter((e) => e.type === 'usage' && e.final);
+    check('上一轮延迟收尾时，最终用量仍归第二轮并沿用其基线', () =>
+      finalUsage.length === 1 && finalUsage[0].run === secondResult.run_id &&
+      finalUsage[0].turn === 2 && finalUsage[0].tokens.output === 7);
+
     // 没有投影缓存（DSH 还没写）：不发 usage，也不报错
     const nk = makeConv('live-events-no-proj');
     const pn = nk.conv.prompt('x', { wait: true, timeoutMs: 0 });

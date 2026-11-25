@@ -55,3 +55,5 @@ Token numbers are read from DSH's own projection cache (`tokenUsage` / `contextP
 </details>
 
 The [run store](../../src/run-store.mjs) writes receipts, checkpoints and completion files. It also reads older run formats during recovery. The [hub](../../src/hub.mjs) owns the live sessions and supplies their permission when an interrupted turn needs a review record.
+
+[Conversation](../../src/conversation.mjs) controls dispatch, cancellation and finalization. Its [live event tracker](../../src/conversation-live.mjs) deduplicates tool updates and measures token use against each run’s starting values. A late finalization can flush usage only for its own run.
