@@ -2,7 +2,7 @@
 
 # 📦 前置要求
 
-- **Node.js ≥ 22.15** —— 服务用 `node:zlib` 的 `zstdDecompressSync` 读 DSH 会话头，这个 API 在 22.15 之前不存在
+- **Node.js ≥ 22.15** 用于运行本 MCP 服务。通过 npm 安装的 DSH 从 `0.2.2-rc.1` 起要求 Node.js ≥ 24.9。使用 DSH 桌面版时，服务会用桌面版自带的运行时启动 DSH。
 - **已安装 DSH**（`@deepseek-ai/dsh`），且 `~/.dsh` 下已有可用的 provider 与凭据（GUI 能正常聊天即可）
 
 > 本服务**不自带** provider 配置，也**从不**接收或保存 API 密钥。

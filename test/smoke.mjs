@@ -110,7 +110,9 @@ try {
       // 我们自己写的文字：标题行 + 每条检查去掉路径/异常原文之后不该剩中文标点或"体检"字样。
       const enDoc = await en.callTool('dsh_doctor', {});
       const enDocText = String(enDoc?.content?.[0]?.text ?? '');
-      check('★ 英文 dsh_doctor：标题行是英文', /^(All checks passed|Some checks failed)/.test(enDocText), enDocText.slice(0, 80));
+      const statuses = enDoc.structuredContent.checks.map((c) => c.status);
+      const title = statuses.includes('fail') ? 'Some checks failed' : statuses.includes('warn') ? 'Checks passed with warnings' : 'All checks passed';
+      check('★ 英文 dsh_doctor：标题反映检查项的状态', enDocText.split('\n')[0] === title, enDocText.slice(0, 80));
       const zhOnly = /体检|会话|孤儿|级别|运行时|来源|桌面版|目录|检查权限|首次启动|[，；（）：]/;
       // dsh_bin 找不到 DSH 时 detail 是 resolveDsh 的原始报错（另一处的文字，不在本次范围）。
       const enDocLeft = enDocText.split('\n').filter((l) => zhOnly.test(l) && !/^✗ dsh_bin:/.test(l));

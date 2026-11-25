@@ -53,3 +53,7 @@ token 数字取自 DSH 自己的投影缓存（`tokenUsage` / `contextPressure`�
 **MCP 兼容性。** 服务端只使用 `initialize`、`ping`、`tools/list`、`tools/call` 四个标准方法。已用一个协商旧版协议、从不发送 `notifications/initialized` 的原始客户端验证。
 
 </details>
+
+[回合存储模块](../../src/run-store.mjs)负责收据、结果检查点和完成文件的读写，并在恢复时识别旧格式。[Hub](../../src/hub.mjs) 管理活跃会话，在为中断回合生成审核记录时提供会话权限。
+
+[Conversation](../../src/conversation.mjs) 控制派发、中断和收尾顺序。[实时事件跟踪器](../../src/conversation-live.mjs)负责工具事件去重，并根据每个回合开始时的基线计算 token 用量。延迟收尾的回合只能结算自己的用量。

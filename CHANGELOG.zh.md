@@ -12,6 +12,12 @@
 
 ## [Unreleased]
 
+## [0.7.8] — 2026-11-25
+
+- `dsh_doctor` 会在摘要里提示警告项，并在显式配置 `DSH_BIN` 时标明实际使用的安装。启动和体检检查目录可写性时使用独占的临时文件，保留已有文件。
+- 回合收据和崩溃恢复由独立模块管理，实时事件和每轮 token 用量由会话跟踪器处理。升级后可继续使用既有会话、幂等键和完成文件。
+- 安装和隐私文档明确了运行时要求、团队模式的适用版本，以及本地保存的内容。
+
 ## [0.7.7] — 2026-11-19
 
 ### 修复
@@ -1276,7 +1282,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...HEAD
+[0.7.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.4...v0.7.5

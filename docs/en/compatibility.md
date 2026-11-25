@@ -10,6 +10,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
+| 0.7.8 | `0.2.2-rc.3` (desktop app) | ✅ Verified (standard ACP, upgrade) | On Windows, a roots-capable MCP client upgraded from npm 0.7.7 to the 0.7.8 tarball. With a real provider it retrieved the original answer after reconnecting, continued the same session, and replayed both send and interject requests with the original run ID after the old result file was removed. |
 | 0.7.7 | `0.2.2-rc.5` (desktop app) | ✅ Verified (standard ACP, upgrade) | On Windows, the roots-capable test client upgraded from npm 0.7.6 to the candidate tarball and verified real-provider dispatch, reconnect, idempotent retry after result deletion, and session resume with desktop Node 24.21.0. Codex CLI 0.162.0 also loaded the installed tarball and verified dispatch and replay across connections using simulated ACP. |
 | 0.7.6 | `0.2.2-rc.5` (desktop app) | ✅ Verified (standard ACP) | Windows with the published npm package and the desktop app's bundled Node 24.21.0. Real-provider dispatch, writes in a temporary workspace, result retrieval after reconnecting, idempotent replay, and resuming the original test session all passed. The offline regression suite passed. |
 | 0.7.6 | `0.2.2-rc.3` (desktop app) | ✅ Verified (ACP, upgrade) | Upgraded from npm 0.7.5 on Windows with a real provider. Verified result retrieval after a reconnect, idempotent replay, and a new turn in the original session |
@@ -71,12 +72,12 @@ dsh-any-agent --version          # this server
 dsh-any-agent team status        # team switch and profile
 ```
 
-In an MCP client, call `dsh_doctor` and look at:
+In an MCP client, call `dsh_doctor`. The heading distinguishes a clean result, warnings and failures. The structured `ok` field is `false` only when a check fails.
 
 - `dsh_bin`: DSH entry point, version, source (desktop / npm global / npx cache / DSH_BIN) and runtime; **warn** when it resolves from an npx cache (`_npx/<hash>/`), which disappears on cache cleanup;
 - `dsh_runtime`: whether the Node runtime used to launch DSH satisfies `engines.node`. From 0.7.6 onwards, an invalid `DSH_RUNTIME` path or confirmed incompatibility reports **fail**. A version that cannot be read reports **warn**;
 - `dsh_desktop`: the desktop app's version; **warn** when it differs from the DSH this server uses (both share the `~/.dsh` session store);
-- `dsh_candidates`: every DSH found and which one was picked;
+- `dsh_candidates` lists alternative installations found by automatic discovery. When `DSH_BIN` overrides discovery, it identifies the effective path.
 - `dsh_version`: `verified` is ok. The note refers to full-suite testing; the table also records narrower checks such as the 0.7.2 installed package lifecycle. `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
 - `profile`: exists, drift, route source;
 - `team`: `on` / `off` / `requested but unavailable` (the version or profile lacks compatible team configuration);

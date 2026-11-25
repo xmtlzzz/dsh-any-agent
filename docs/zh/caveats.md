@@ -185,22 +185,22 @@
 
 ### 4.1 服务端裸默认是 `workspace-write`；完全权限要机器侧显式开启
 - **现象**：一旦用上 `danger-full-access`，DSH 能碰你账户能碰的任何东西。
-- **原因**：0.5.0 起服务端裸默认已是 `workspace-write`（沙箱把写入限制在工作区内），`dsh-any-agent-setup --yes` 默认写入的也是它；`danger-full-access` 需要机器侧设置 `DSH_MCP_ALLOW_FULL_ACCESS=1` 才能新建或恢复。但 `auto-allow` 下 `workspace-write` 仍是软边界（DSH 申请的沙箱提权会被放行）。
+- 服务端和 setup 默认使用 `workspace-write`。把机器上的默认档设为 `danger-full-access` 即表示允许完全权限。保留其他默认档时，单个会话要使用完全权限需设置 `DSH_MCP_ALLOW_FULL_ACCESS=1`。显式启用 `auto-allow` 会放行 DSH 申请的沙箱提权。
 - **对策**：分析不信任的东西（恶意软件、来路不明的 dump、陌生仓库）时，用 `permission: "read-only"`（沙箱只读 + 审批一律拒绝）。
 
 ### 4.2 公开审批参数是 `on_approval`；DSH 内部 `approval: never` 对应 `auto-deny`
 - **现象**：以为关掉审批就万事大吉，结果某些操作还是失败。
 - **原因**：DSH 内部的 `approval: never` = 每次询问都返回拒绝（确定性拒绝），不是自动放行；公开参数应写 `on_approval: "auto-deny"`。它在 `danger-full-access` 下没有副作用，是因为沙箱根本不产生询问。
-- **对策**：需要"越界操作由调用方裁决"时，用 `permission: "workspace-write"` + `on_approval: "ask"`，再用 `dsh_approval_decide` 裁决。
+- 需要逐条裁决越界请求时，在客户端的 MCP 配置中设置 `DSH_MCP_APPROVAL=ask` 并重连，使用 `workspace-write` 会话和 `dsh_approval_decide` 裁决。
 
 ### 4.3 ★ MCP 工具的副作用**不受** DSH 沙箱约束
 - **现象**：以为设了 `read-only` 就绝对安全，结果 IDA 数据库被改了 / 外部系统被写了。
 - **原因**：DSH 的沙箱管的是它**自己**的文件与命令工具。挂在 DSH 下的**外部 MCP 工具**（例如 IDA Pro 的 `patch` / `rename` / `set_comments`）是在**那个 MCP 服务器**里执行的，DSH 的权限档管不到。
-- **对策**：只读场景要在**提示词里明确禁止**写类工具（例如"不要调用 patch/rename/set_comments/put_int/declare_type 等"），并在事后核对 `tools_used` 里没有写类工具。别只依赖 `permission`。
+- 要保证外部工具只读，请在 DSH profile 中移除可写工具服务，或为外部服务配置只读凭据。`tools_used` 可供事后核对。
 
 ### 4.4 会话日志里会出现明文内容
 - **现象**：DSH 的会话日志（`~/.dsh/sessions`）里可能记录到密钥、token 等。
-- **原因**：那是 DSH 自己的对话持久化，是 resume 的依据，不受本服务控制。本服务**不**把对话内容写进自己的任何文件。
+- DSH 用会话日志恢复对话。本 MCP 也会在完成哨兵中保存脱敏后的答复，并在默认的实时事件流中保存任务和工具预览。各文件的位置、保留期限和开关见[权限与隐私](security.md)。
 - **对策**：别让 agent 去读凭据文件；分享日志前先筛一遍。
 
 ---
@@ -249,7 +249,7 @@
 
 **例外：异步完成哨兵。** 它必须把**正文**写进文件（否则调用方无法离线收活），载荷还包含用量与（已脱敏的）工具输入，但 `result.thinking` 会被**剥掉**并给出布尔 `thinking_omitted`（剥离了为 true，本来没有为 false）—— 即使你请求了 `reasoning=full`，哨兵里也不会出现思考文本（有测试专门守着这一点），同一 run 在内存里仍能看到它。要刻意打破这条保证，设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1`。
 
-> ⚠️ **DSH 自己的会话日志 `~/.dsh/sessions/**/session.v4.jsonl.zstd` 含完整 reasoning**（即使 `reasoning=hide` 也照存）。那是 DSH 的存储、resume 的依据，不在本服务控制范围内；上面的“不落盘”只适用于本服务自己的日志/哨兵/注册表。
+> ⚠️ **DSH 自己的会话日志 `~/.dsh/sessions/**/session.v4.jsonl.zstd` 含完整 reasoning**（即使 `reasoning=hide` 也照存）。那是 DSH 的存储、resume 的依据，不在本服务控制范围内；本服务的完成哨兵和 `.running` 结果检查点默认省略思考正文，开启 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 时可随回合结果保存。
 
 ### 7.3 `DSH_MCP_LOG_STDERR=1` 要谨慎
 它会转发 DSH 子进程的原始 stderr，**其中可能包含思考内容**。只在本地排障时临时开。

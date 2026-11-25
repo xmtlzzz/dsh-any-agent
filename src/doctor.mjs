@@ -8,7 +8,7 @@
  * `{ structured: { ok, verdict, checks }, text }`。
  */
 
-import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { readRegistry } from './registry.mjs';
 import { join } from 'node:path';
 import {
@@ -26,6 +26,7 @@ import {
   TURN_MAX_MS,
   WATCHDOG_AFTER_MS,
   dshVersionStatus,
+  probeWritableDir,
   resolveTeamProfile,
 } from './config.mjs';
 import {
@@ -66,10 +67,7 @@ export function inspectLive({ dir = liveSettings().dir, level = liveSettings().l
     ];
   }
   try {
-    mkdirSync(dir, { recursive: true });
-    const probe = join(dir, `.doctor-${process.pid}`);
-    writeFileSync(probe, '');
-    rmSync(probe, { force: true });
+    probeWritableDir(dir);
   } catch (e) {
     return [
       'warn',
@@ -188,12 +186,13 @@ export async function runDoctor(hub) {
             : L('升级/统一两边的 DSH 版本', 'bring both DSH installs to the same version'),
       );
     }
-    if (all.length > 1) {
-      add(
-        'dsh_candidates',
-        'ok',
-        all.map((c) => `${sourceLabel(c.source)} ${c.version ?? '?'}${c === all[0] ? L('（自动选用）', ' (picked)') : ''}`).join(L('；', '; ')),
-      );
+    if (all.length > 1 || (dsh.source === 'env' && all.length > 0)) {
+      const candidates = all.map((c) => {
+        const picked = c.source === dsh.source && c.bin === bin;
+        return `${sourceLabel(c.source)} ${c.version ?? '?'}${picked ? L('（自动选用）', ' (picked)') : ''}`;
+      });
+      if (dsh.source === 'env') candidates.unshift(L(`已使用 DSH_BIN=${bin}`, `using DSH_BIN=${bin}`));
+      add('dsh_candidates', 'ok', candidates.join(L('；', '; ')));
     }
 
     const vs = dshVersionStatus(version);
@@ -256,10 +255,7 @@ export async function runDoctor(hub) {
     ['locks_dir', LOCKS_DIR],
   ]) {
     try {
-      mkdirSync(dir, { recursive: true });
-      const probe = join(dir, `.doctor-${process.pid}`);
-      writeFileSync(probe, '');
-      rmSync(probe, { force: true });
+      probeWritableDir(dir);
       add(id, 'ok', dir);
     } catch (e) {
       add(id, 'fail', `${dir}: ${e.message}`, L('检查权限，或用对应环境变量指向可写目录', 'check permissions, or point the matching environment variable at a writable directory'));
@@ -352,6 +348,9 @@ export async function runDoctor(hub) {
   }
 
   const ok = !checks.some((c) => c.status === 'fail');
+  let heading = L('体检通过', 'All checks passed');
+  if (!ok) heading = L('体检发现失败项', 'Some checks failed');
+  else if (checks.some((c) => c.status === 'warn')) heading = L('体检通过，有警告项', 'Checks passed with warnings');
   const lines = checks.map(
     (c) =>
       `${c.status === 'ok' ? '✓' : c.status === 'warn' ? '⚠' : '✗'} ${c.id}: ${c.detail}` +
@@ -359,6 +358,6 @@ export async function runDoctor(hub) {
   );
   return {
     structured: { ok, verdict: ok ? 'ok' : 'fail', checks },
-    text: `${ok ? L('体检通过', 'All checks passed') : L('体检发现失败项', 'Some checks failed')}\n${lines.join('\n')}`,
+    text: `${heading}\n${lines.join('\n')}`,
   };
 }

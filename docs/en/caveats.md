@@ -70,13 +70,13 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 
 ## 4. Permissions and safety
 
-**4.1 The raw server default is `workspace-write`; full access is opt-in per machine.** Since 0.5.0, with no `DSH_MCP_PERMISSION` the server uses `workspace-write` (DSH's sandbox limits writes to the workspace), and `dsh-any-agent-setup --yes` writes the same into the client config unless you pass `--permission`. `danger-full-access` — where DSH can touch anything your account can — is refused for new and resumed sessions unless the machine sets `DSH_MCP_ALLOW_FULL_ACCESS=1`. Under `auto-allow`, `workspace-write` is still a soft boundary (sandbox escalations DSH requests are granted). For untrusted material (malware, unknown dumps, unfamiliar repos) use `permission: "read-only"`.
+**4.1 Full access requires local opt-in.** The server and setup default to `workspace-write`. Setting the machine’s default permission to `danger-full-access` authorizes full access. With another default, a full-access session requires `DSH_MCP_ALLOW_FULL_ACCESS=1`. Explicitly enabling `auto-allow` permits sandbox escalations requested by DSH.
 
-**4.2 The public approval policy is `on_approval` (`auto-allow` / `auto-deny` / `ask`).** DSH's internal `approval: never` corresponds to `auto-deny`: it deterministically rejects prompts, it does not auto-allow. Under `danger-full-access` the sandbox produces no asks, so the distinction is invisible. To let the caller adjudicate escalation, use `workspace-write` + `on_approval: "ask"` + `dsh_approval_decide`.
+**4.2 The public approval policy is `on_approval` (`auto-allow` / `auto-deny` / `ask`).** For per-request decisions, set `DSH_MCP_APPROVAL=ask` in the MCP client configuration and reconnect. Use `dsh_approval_decide` to review requests from a `workspace-write` session.
 
-**4.3 ★ Side effects of *external MCP tools* are NOT covered by DSH's sandbox.** DSH's permission tiers govern DSH's own file and shell tools. Tools from an MCP server mounted into DSH (e.g. IDA Pro's `patch` / `rename` / `set_comments`) execute **inside that MCP server**, where DSH's tier has no effect. For read-only work, forbid write-class tools **in the prompt** and verify afterwards that `tools_used` contains none. Do not rely on `permission` alone.
+**4.3 External MCP tools run with their own permissions.** DSH’s sandbox governs its file and shell tools. For read-only work, remove write-capable external servers from the DSH profile or configure those servers with read-only credentials. Use `tools_used` to review calls afterwards.
 
-**4.4 Session logs contain plaintext.** DSH persists conversations under `~/.dsh/sessions` — that is what makes resume possible and it is outside this server's control (this server writes no conversation content to disk). Don't let the agent read credential files, and screen logs before sharing.
+**4.4 Session logs contain plaintext.** DSH keeps conversations under `~/.dsh/sessions` for resume. This MCP server also saves the redacted answer in the completion sentinel and includes task and tool previews in its default live event stream. Review these files before sharing them. See the paths, retention periods and settings in [Permissions and privacy](security.md).
 
 ## 5. Interaction limits
 
@@ -106,7 +106,7 @@ Practical gotchas and trade-offs you *will* hit when letting Claude / Codex driv
 
 **The exception: the async completion sentinel.** It must persist the *answer* (so a caller can collect offline), and it also carries usage and credential-redacted tool inputs, but `result.thinking` is **stripped** and replaced by a boolean `thinking_omitted` (`true` when removed, `false` when there was none) — even when `reasoning=full` was requested, no reasoning text appears in the file (a test guards this), while `dsh_get(run_id)` still returns it from memory. `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` breaks this on purpose.
 
-> ⚠️ **DSH's own session log (`~/.dsh/sessions/**/session.v4.jsonl.zstd`) contains the full reasoning text**, even with `reasoning=hide`. That is DSH's storage (what makes resume possible) and is outside this server's control; the guarantee above covers *this server's* logs, sentinels and registry only.
+> ⚠️ **DSH's own session log (`~/.dsh/sessions/**/session.v4.jsonl.zstd`) contains the full reasoning text**, even with `reasoning=hide`. That is DSH's storage (what makes resume possible) and is outside this server's control; the MCP completion sentinel and its temporary `.running` checkpoint omit reasoning by default. Both can retain it with `DSH_MCP_SENTINEL_INCLUDE_REASONING=1`.
 
 **7.3 Be careful with `DSH_MCP_LOG_STDERR=1`** — it forwards DSH's raw stderr, which may contain reasoning. Local debugging only.
 

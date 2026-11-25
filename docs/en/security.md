@@ -62,7 +62,7 @@ Silent by default — **not one byte is written**.
 | `debug` | more of our own events; still no DSH output |
 | `DSH_MCP_LOG_STDERR=1` | additionally forward DSH's raw stderr (**may contain reasoning**) |
 
-**This server never writes reasoning to disk** — it does persist the content a caller needs to collect or review a result offline, but never reasoning text:
+**Stored results omit reasoning by default.** The server keeps the answer and review evidence so callers can collect them after disconnecting.
 
 - Not in logs (silent by default). The state file and the per-conversation metadata sidecars under `<state dir>/meta/` hold metadata only (id, cwd, permissions, counters, title hint) — a smoke-test assertion guards the registry.
 - **The async completion sentinel persists the answer, usage and tool inputs** (it must, so a caller can collect offline) but **strips `result.thinking`** and always reports `thinking_omitted` (true when reasoning was removed, false when there was none). Tool inputs are passed through the same credential redaction as approvals, but the sentinel still contains commands and file contents — treat it as sensitive. A test asserts that even when `reasoning=full` is requested, no reasoning text appears in the sentinel — while `dsh_get(run_id)` still returns it from memory. Set `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` to break this on purpose.
@@ -70,11 +70,11 @@ Silent by default — **not one byte is written**.
 - Sentinels **and review records** are pruned after 7 days by default (`DSH_MCP_SENTINEL_TTL_MS`; `0` keeps them forever).
 - The live event stream (`<state dir>/live/`, read by `watch` / `dashboard`) carries **redacted** command, path and prompt previews by default — no more than the sentinels already hold — never reasoning, and is pruned on the same 7-day TTL. Set `DSH_MCP_LIVE=meta` to drop the previews or `off` to write nothing. `dashboard` binds `127.0.0.1` only, requires a one-time token, checks the Host header, and is read-only.
 
-> ⚠️ **DSH writes its own session log under `~/.dsh/sessions` and that log contains the full reasoning text** (even with `reasoning=hide`). It is what makes resume possible and is outside this server's control. The absolute "reasoning never reaches disk" claim applies to *this server's* artifacts only.
+> DSH stores its own session log under `~/.dsh/sessions` for resume. This log contains the full reasoning text even with `reasoning=hide`.
 
 ### 📁 What this server writes to disk
 
-`<state dir>` is `~/.dsh/.dsh-any-agent/` by default (it follows `DSH_MCP_STATE`). None of these holds reasoning text.
+`<state dir>` defaults to `~/.dsh/.dsh-any-agent/` and follows `DSH_MCP_STATE`. With `DSH_MCP_SENTINEL_INCLUDE_REASONING=1`, the completion sentinel and the temporary `.running` checkpoint can contain `result.thinking` when the turn returned it.
 
 | Path | Contents | Kept for | How to turn off / clean up |
 |---|---|---|---|

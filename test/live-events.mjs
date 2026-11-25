@@ -9,7 +9,7 @@
  *   5. 现有输出不变：tools_used 不混入 live 跟踪字段；
  *   6. 失败路径 / 审批裁决 / 排队 / forget 都有对应事件或清理。
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -84,8 +84,8 @@ function fakeProc() {
   return proc;
 }
 
-function makeConv(id, extra = {}) {
-  const conv = new Conversation({ id, cwd: root, permission: 'workspace-write', onApproval: 'auto-allow', ...extra }, hub);
+function makeConv(id, extra = {}, owner = hub) {
+  const conv = new Conversation({ id, cwd: root, permission: 'workspace-write', onApproval: 'auto-allow', ...extra }, owner);
   const proc = fakeProc();
   conv.ensureAlive = async () => {
     conv.proc = proc;
@@ -308,6 +308,32 @@ try {
       const ev2 = events(id);
       return ev2.findIndex((e) => e.type === 'run.end') < ev2.findIndex((e) => e.type === 'usage' && e.final);
     });
+    // 第二轮开始后才放行第一轮收尾，确保第一轮不能清空第二轮的用量基线。
+    const overlapId = 'live-events-overlap';
+    const saving = Promise.withResolvers();
+    const resume = Promise.withResolvers();
+    const overlap = makeConv(overlapId, {}, { ...hub, save() { saving.resolve(); return resume.promise; } });
+    writeProj(overlapId, { outputTokens: 10 }, {});
+    const first = overlap.conv.prompt('first', { wait: true });
+    await overlap.proc.ready();
+    overlap.proc.end();
+    await Promise.race([saving.promise, first.then(() => { throw new Error('first turn finished before save'); })]);
+    writeProj(overlapId, { outputTokens: 20 }, {});
+    const second = overlap.conv.prompt('second', { wait: true });
+    try {
+      await overlap.proc.ready();
+    } finally {
+      resume.resolve();
+    }
+    await first;
+    writeProj(overlapId, { outputTokens: 27 }, {});
+    overlap.proc.end();
+    const secondResult = await second;
+    const finalUsage = events(overlapId).filter((e) => e.type === 'usage' && e.final);
+    check('上一轮延迟收尾时，最终用量仍归第二轮并沿用其基线', () =>
+      finalUsage.length === 1 && finalUsage[0].run === secondResult.run_id &&
+      finalUsage[0].turn === 2 && finalUsage[0].tokens.output === 7);
+
     // 没有投影缓存（DSH 还没写）：不发 usage，也不报错
     const nk = makeConv('live-events-no-proj');
     const pn = nk.conv.prompt('x', { wait: true, timeoutMs: 0 });
@@ -325,8 +351,13 @@ try {
     const blocked = inspectLive({ dir: join(root, 'not-a-dir', 'live'), level: 'detail' });
     check('目录不可写只报 warn（不影响派活）并给出修复建议', () => blocked[0] === 'warn' && blocked[1].includes('不可写') && blocked[2]?.includes('DSH_MCP_LIVE_DIR'));
     const emptyDir = join(root, 'live-empty');
+    mkdirSync(emptyDir);
+    const existing = `.doctor-${process.pid}`;
+    writeFileSync(join(emptyDir, existing), 'keep');
     const empty = inspectLive({ dir: emptyDir, level: 'detail' });
-    check('空目录：ok，提示还没有事件', () => empty[0] === 'ok' && empty[1].includes('0 个会话') && empty[1].includes('还没有任何事件'));
+    check('无事件时提示空状态，并保留目录原有文件', () =>
+      empty[0] === 'ok' && empty[1].includes('0 个会话') && empty[1].includes('还没有任何事件') &&
+      readdirSync(emptyDir).length === 1 && readFileSync(join(emptyDir, existing), 'utf8') === 'keep');
     const normal = inspectLive({ dir: liveDir, level: 'detail' });
     check('有事件时报会话数、占用和最近事件时间', () => normal[0] === 'ok' && /\d+ 个会话/.test(normal[1]) && !normal[1].includes(' 0 个会话') && normal[1].includes('最近一条事件'));
   }

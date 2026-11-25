@@ -9,6 +9,7 @@
 
 | dsh-any-agent | DSH | 状态 | 说明 |
 |---|---|---|---|
+| 0.7.8 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（常规 ACP、升级） | Windows 上用支持 roots 的 MCP 客户端从 npm 0.7.7 原地升级至 0.7.8 安装包。使用真实模型验证了重连后取回旧回答、在同一会话继续下一轮，以及删除旧结果文件后用原幂等键调用 send 和 interject 均返回原回合 ID。 |
 | 0.7.7 | `0.2.2-rc.5`（桌面版） | ✅ 已验证（常规 ACP、升级） | Windows 上用支持 roots 的测试客户端从 npm 0.7.6 升级到候选包，在桌面版 Node 24.21.0 下验证真实模型派发、重连、删除结果后幂等重试和继续原会话。另用 Codex CLI 0.162.0 加载同一版本安装包，通过模拟 ACP 验证派发和重连重试。 |
 | 0.7.6 | `0.2.2-rc.5`（桌面版） | ✅ 已验证（常规 ACP） | Windows 使用 npm 已发布的 MCP 和桌面版自带的 Node 24.21.0。真实模型派发、临时工作区写入、重连取回结果、幂等重试和继续原测试会话均通过。离线回归通过。 |
 | 0.7.6 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（ACP、升级） | Windows 使用真实模型从 npm 0.7.5 原地升级，验证了重连取结果、幂等重试和继续原会话 |
@@ -67,12 +68,12 @@ dsh-any-agent --version          # 本服务版本
 dsh-any-agent team status        # 团队开关与 profile
 ```
 
-在 MCP 客户端里调用 `dsh_doctor`，重点看：
+在 MCP 客户端里调用 `dsh_doctor`。标题会区分全部通过、有警告和存在失败项。只有存在失败项时，结构化结果的 `ok` 才为 `false`。
 
 - `dsh_bin`：DSH 入口、版本、来源（桌面版 / npm 全局 / npx 缓存 / DSH_BIN）与运行时；入口落在 npx 缓存（`_npx/<hash>/`）时 **warn** —— 清缓存就会失效；
 - `dsh_runtime`：实际拉起 DSH 的 Node 版本是否满足 `engines.node`。从 0.7.6 起，遇到无效的 `DSH_RUNTIME` 路径或确认版本不兼容时报告 **fail**。读不到版本时报告 **warn**；
 - `dsh_desktop`：桌面版版本，与本服务所用 DSH 不一致时 **warn**（两边共用 `~/.dsh` 会话存储）；
-- `dsh_candidates`：发现的全部 DSH 来源，以及自动选中了哪一个；
+- `dsh_candidates`：列出自动发现的备选安装。设置了 `DSH_BIN` 时会标明实际生效的路径。
 - `dsh_version`：`verified` 为 ok。体检说明引用的是全量套件记录，表中也列出了 0.7.2 安装包工作流等专项验证。`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
 - `profile`：是否存在、是否漂移、路由来源；
 - `team`：`on` / `off` / `requested but unavailable`（版本或 profile 缺少兼容的团队配置）；
