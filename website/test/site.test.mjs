@@ -141,15 +141,23 @@ test('Website docs alignment: compatibility range, 15 tools, dashboard showcase,
   assert.match(enHtml, /dsh_send\(team=false\)<\/code> suppresses the experimental team hint/);
   for (const page of [html, enHtml]) {
     assert.match(page, /0\.1\.7 ~ 0\.2\.2/);
+    assert.match(page, /0\.7\.8/);
+    assert.match(page, /0\.2\.2-rc\.3/);
     assert.match(page, /0\.2\.2-rc\.5/);
     assert.match(page, /0\.2\.2-rc\.2/);
+    assert.match(page, /0\.1\.7-rc\.1 ~ 0\.2\.2-rc\.1/);
     assert.match(page, /0\.2\.3\+/);
+    assert.match(page, /tools_used/);
+    assert.match(page, /DSH_BIN/);
+    assert.match(page, /~\/\.dsh\/sessions/);
     assert.doesNotMatch(page, /0\.2\.x 尚未验证|0\.2\.x is unverified/);
+    assert.doesNotMatch(page, /思考内容永不写盘|never writes reasoning/);
     assert.match(page, /data-config="zed"/);
     assert.match(page, /data-config="opencode"/);
     assert.match(page, /src="\/assets\/dashboard-(?:zh|en)\.[a-f0-9]{10}\.png"/);
     for (const tool of expectedTools) assert.ok(page.includes(tool), `page includes ${tool}`);
   }
+  assert.match(app, /DSH_BIN/);
 });
 
 test('Single-client setup (--only), interactive 15-tool inspector, and repair commands are surfaced in both locales', async () => {
