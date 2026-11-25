@@ -128,7 +128,7 @@ const bang = (s) => log('  FAIL ' + s);
 
 if (has('--reset-env') && (REPAIR || REMOVE)) {
   const error = '--reset-env applies only to installation';
-  if (JSON_OUT) process.stdout.write(JSON.stringify({ ok: false, error, clients: [] }) + '\n');
+  if (JSON_OUT) process.stdout.write(JSON.stringify({ ok: false, mode: 'error', error, clients: [] }) + '\n');
   else bang(error);
   process.exit(2);
 }
@@ -176,7 +176,7 @@ if (!JSON_OUT) {
   if (!REPAIR) {
     log('  permission : ' + PERMISSION);
     log('  daemon     : ' + (DAEMON ? 'on (DSH_MCP_DAEMON=1)' : 'off'));
-    log('  DSH_BIN    : ' + (process.env.DSH_BIN || '(unset -- auto-detect at runtime)'));
+    log('  DSH_BIN    : ' + (process.env.DSH_BIN || '(unset in this shell)'));
   }
   log('  launch     : ' + launch.command + (launch.args.length ? ' ' + launch.args.join(' ') : '') + '   (' + launch.style + ')');
   log('');

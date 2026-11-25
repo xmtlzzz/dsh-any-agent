@@ -186,12 +186,13 @@ DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `
 | 开常驻进程模式（`DSH_MCP_DAEMON=1`） | `dsh-any-agent-setup --yes --daemon`（和 `--permission` 一样按本次参数整条重写，不带它重跑就关掉） |
 | 升级包之后更新配置 | `dsh-any-agent-setup --yes`（幂等，只重写有差异的条目） |
 | 仅更新已有条目的启动路径（0.7.6 起） | `dsh-any-agent-setup --repair --yes` |
-
-**重复注册。** 常规安装会保留手配的 `DSH_RUNTIME`、`DSH_MCP_APPROVAL`、`DSH_MCP_LANG` 等环境变量。`DSH_MCP_PERMISSION`、`DSH_MCP_LOG`、`DSH_MCP_DAEMON` 和 `DSH_BIN` 仍按本次安装参数生成。需要同时清除自定义变量时，先用 `dsh-any-agent-setup --reset-env` 预览，加 `--yes` 应用。
+| 重置自定义环境变量 | `dsh-any-agent-setup --reset-env` 预览，加 `--yes` 应用 |
 | 从所有客户端移除 | `dsh-any-agent-setup --remove --yes` |
 | 只从某几个移除 | `dsh-any-agent-setup --remove --yes --only codex` |
 | 彻底卸载 | 先 `dsh-any-agent-setup --remove --yes`，再 `npm uninstall -g dsh-any-agent`；`$DSH_HOME/profiles/dsh-mcp/` 可删可留（留着无害）。你的 DSH 凭据和会话历史本服务从不写入，不受影响 |
 | 撤销某次误写 | 把 `.bak-dsh-<时间戳>` 复制回原文件 |
+
+重复注册时会保留已有的 `DSH_BIN`、`DSH_RUNTIME`、`DSH_MCP_APPROVAL`、`DSH_MCP_LANG` 等自定义设置。在运行安装命令的终端显式设置 `DSH_BIN` 可以更新入口。安装器仍按本次选项生成 `DSH_MCP_PERMISSION`、`DSH_MCP_LOG` 和 `DSH_MCP_DAEMON`。
 
 <details>
 <summary>移除操作的实测记录</summary>

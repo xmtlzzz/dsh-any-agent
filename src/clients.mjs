@@ -464,7 +464,7 @@ function editJsonEntryBody(text, containerKey, entryKey, value, options) {
         const old = jsonProperty(owner, envKey)?.value ?? (shape === 'opencode' && jsonProperty(owner, 'env')?.value);
         if (old) {
           if (old.type !== 'object') throw new Error('expected an environment object; use --reset-env to replace it');
-          const custom = old.entries.filter(({ key }) => !managedEnvKey(key));
+          const custom = old.entries.filter(({ key }) => !managedEnvKey(key, options.replaceBin));
           const destination = shape === 'zed' && typeof value.command === 'object' ? value.command : value;
           for (const { key, value: item } of custom) {
             assertUniqueKey(old, key);
@@ -671,21 +671,29 @@ function inlineTomlFields(raw) {
   throw new Error('cannot preserve the inline TOML environment; use --repair or --reset-env');
 }
 
-function copyTomlEnv(block, lines, ranges) {
+function assertTomlEnvString(value, allowMultiline = false) {
+  if (allowMultiline && /^\s*(?:"""|''')/.test(value)) return;
+  if (!/^\s*(?:"(?:[^"\\]|\\.)*"|'[^']*')\s*(?:#.*)?$/.test(value)) {
+    throw new Error('expected a string for the TOML environment key; use --repair or --reset-env');
+  }
+}
+
+function copyTomlEnv(block, lines, ranges, replaceBin) {
   const mask = multilineMask(lines);
-  const copy = (key, raw) => { if (!managedEnvKey(key)) block.push(raw); };
+  const copy = (key, raw, value) => {
+    if (managedEnvKey(key, replaceBin)) return;
+    assertTomlEnvString(value);
+    block.push(raw);
+  };
   const copyField = ({ keys, value }) => {
     if (keys[0] !== 'env') return;
     if (keys.length === 2) {
-      if (!/^\s*(?:"(?:[^"\\]|\\.)*"|'[^']*')\s*(?:#.*)?$/.test(value)) {
-        throw new Error('expected a string for the dotted TOML environment key; use --repair or --reset-env');
-      }
-      return copy(keys[1], JSON.stringify(keys[1]) + ' = ' + value.trim());
+      return copy(keys[1], JSON.stringify(keys[1]) + ' = ' + value.trim(), value);
     }
     if (keys.length !== 1) throw new Error('nested TOML environment; use --repair or --reset-env');
     for (const entry of inlineTomlFields(value)) {
       if (entry.keys.length !== 1) throw new Error('nested TOML environment; use --repair or --reset-env');
-      copy(entry.keys[0], entry.raw);
+      copy(entry.keys[0], entry.raw, entry.value);
     }
   };
   for (const r of ranges) {
@@ -705,7 +713,8 @@ function copyTomlEnv(block, lines, ranges) {
           copyField({ keys, value: lines[i].slice(field[0].length) });
         }
         if (r.env && keys.length !== 1) throw new Error('nested TOML environment; use --repair or --reset-env');
-        keep = r.env && !managedEnvKey(keys[0]);
+        keep = r.env && !managedEnvKey(keys[0], replaceBin);
+        if (keep) assertTomlEnvString(lines[i].slice(field[0].length), true);
       }
       if (r.env && keep) block.push(lines[i]);
     }
@@ -717,7 +726,7 @@ function copyTomlEnv(block, lines, ranges) {
  * 只碰 [mcp_servers.dsh-any-agent] 与它的子表；顶层键、注释、其它表、
  * 行尾全部原样。block 为 null 表示删除。
  */
-export function editTomlBlock(text, block, { preserveEnv = false } = {}) {
+export function editTomlBlock(text, block, { preserveEnv = false, replaceBin = false } = {}) {
   const eol = detectEol(text);
   // 结尾的空行数量也是文件的一部分：记下来，删除时原样还回去。
   const trailing = (text.match(/(?:\r?\n)+$/) || [''])[0];
@@ -745,7 +754,7 @@ export function editTomlBlock(text, block, { preserveEnv = false } = {}) {
 
   const blockLines = block.split('\n');
   if (hadOurs) {
-    if (preserveEnv) copyTomlEnv(blockLines, lines, ranges);
+    if (preserveEnv) copyTomlEnv(blockLines, lines, ranges, replaceBin);
     // 已经一模一样就不动：幂等的关键。只比我们区间里的键值行（注释、空行不算），
     // 否则留在原处的用户注释会让每次 --yes 都重写一遍。
     const keyLines = (ls) => ls.filter((l) => !COMMENT_OR_BLANK.test(l));
@@ -951,9 +960,10 @@ export function desiredEnv(permission, extra = {}) {
   return { ...env, ...extra };
 }
 
-const SETUP_ENV_KEYS = new Set(['DSH_MCP_PERMISSION', 'DSH_MCP_LOG', 'DSH_MCP_DAEMON', 'DSH_BIN']);
-function managedEnvKey(key) {
-  return SETUP_ENV_KEYS.has(IS_WIN ? key.toUpperCase() : key);
+const SETUP_ENV_KEYS = new Set(['DSH_MCP_PERMISSION', 'DSH_MCP_LOG', 'DSH_MCP_DAEMON']);
+function managedEnvKey(key, replaceBin) {
+  const name = IS_WIN ? key.toUpperCase() : key;
+  return SETUP_ENV_KEYS.has(name) || (name === 'DSH_BIN' && replaceBin);
 }
 
 /**
@@ -1104,7 +1114,7 @@ export function planClient(client, ctx) {
     }
     // BOM 不属于 TOML 正文，但必须原样写回去。
     const { bom, text } = readConfigFile(file);
-    const edited = editTomlBlock(text, block, { preserveEnv: !ctx.resetEnv });
+    const edited = editTomlBlock(text, block, { preserveEnv: !ctx.resetEnv, replaceBin: Boolean(env?.DSH_BIN) });
     const r = { changed: edited.changed, text: bom + edited.text };
     if (!r.changed) {
       return { ...base, status: 'unchanged', changed: false, summary: remove ? 'not present' : 'already up to date' };
@@ -1128,7 +1138,7 @@ export function planClient(client, ctx) {
   let r;
   try {
     r = editJsonEntry(raw, client.containerKey, ENTRY_NAME, desired, {
-      dropEmptyContainer: remove === true, preserveEnvFor: !ctx.resetEnv && client.shape,
+      dropEmptyContainer: remove === true, preserveEnvFor: !ctx.resetEnv && client.shape, replaceBin: Boolean(env?.DSH_BIN),
     });
   } catch (e) {
     // 已经有了一个解析不了的文件：拒绝，并且说清楚是「文件本身坏了」，
