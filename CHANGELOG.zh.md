@@ -12,10 +12,12 @@
 
 ## [Unreleased]
 
-- 常驻进程在启动完成后公布连接信息。实时日志滚动失败后会在下次写入时重试。POSIX 上审核记录与回写后的结果文件均仅限所有者访问。
-- 排队和重试回执会向纯文本客户端提供审批等待命令。终端未指定新入口时，安装器会保留已配置的 `DSH_BIN`。工作区命令新增中英文帮助。
-- 常驻连接确认认证后才开始转发 MCP。后台回合遇到待审批请求会唤醒等待方，重新注册客户端时会保留自定义环境变量。
-- 体检新增注册表写锁、硬链接与工作树占用检查。全局安装提供 `dsh-any-agent-workspaces` 命令，团队模式 CLI 遵循语言设置。
+## [0.7.9] — 2026-11-25
+
+- 使用 `ask` 审批策略时，待审批请求会唤醒后台等待任务。排队和幂等重试的纯文本回执也会给出 Bash 或 PowerShell 等待命令。
+- 重跑安装会保留自定义环境变量和已配置的 `DSH_BIN`，可用 `--reset-env` 显式重置。全局安装新增 `dsh-any-agent-workspaces` 命令，支持中英文帮助。
+- 常驻进程启动成功后才公布连接地址，认证确认后才转发 MCP 请求。转发进程会关闭自己的日志句柄；实时日志滚动失败后会在下一次写入重试。
+- 注册表写入可回收遗留锁。`dsh_doctor` 新增注册表锁、硬链接支持和工作树占用检查。POSIX 上审核记录与回写后的结果文件仅限所有者访问。
 
 ## [0.7.8] — 2026-11-25
 
@@ -1287,7 +1289,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...HEAD
+[0.7.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...v0.7.9
 [0.7.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...v0.7.6

@@ -9,10 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- A resident process now advertises its endpoint once startup completes. Live logs retry rotation on the next write after a failure. Review records and updated completion files keep owner-only permissions on POSIX.
-- Queued and replayed runs include approval wait commands in the text receipt. Setup preserves a saved `DSH_BIN` when the shell supplies no replacement. The workspace CLI provides help in English and Chinese.
-- Resident connections wait for authentication before forwarding MCP. Pending approvals wake background waiters, and setup preserves custom environment variables on re-registration.
-- Doctor checks registry locks, hard links and worktree usage. Global installs now expose `dsh-any-agent-workspaces`. The team CLI follows the configured language.
+## [0.7.9] — 2026-11-25
+
+- In `ask` mode, pending approvals wake background runs. Queued and replayed receipts include the Bash or PowerShell wait command for text-only clients.
+- Re-running setup preserves custom environment variables and a saved `DSH_BIN`. Use `--reset-env` for an explicit reset. Global installs now include `dsh-any-agent-workspaces` with English and Chinese help.
+- Resident processes publish their endpoint after startup succeeds and acknowledge authentication before forwarding MCP traffic. The proxy closes its copy of the log handle. Live log rotation retries on the next write after a failure.
+- Registry writers recover abandoned locks. `dsh_doctor` checks registry locks, hard-link support and worktree space usage. Review records and updated result files retain owner-only permissions on POSIX.
 
 ## [0.7.8] — 2026-11-25
 
@@ -1760,7 +1762,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...HEAD
+[0.7.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...v0.7.9
 [0.7.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...v0.7.6
