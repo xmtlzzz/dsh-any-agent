@@ -330,9 +330,7 @@ export function updateRunSentinelReview(paths, conversationId, runId, review, lo
     };
     payload.result = result;
     payload.reviewed_at = review.reviewed_at ?? null;
-    const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-    writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
-    renameSync(tmp, file);
+    writeRunJson(file, payload);
     return true;
   } catch (e) {
     log.info(`[hub] 回写哨兵审核状态失败（${file}）: ${e.message}`);
