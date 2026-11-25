@@ -183,7 +183,7 @@ DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `
 | 注册到所有检测到的客户端 | `dsh-any-agent-setup --yes` |
 | 只注册某几个 | `dsh-any-agent-setup --yes --only cursor,zed` |
 | 就地改权限档 | `dsh-any-agent-setup --yes --permission read-only` |
-| 开常驻进程模式（`DSH_MCP_DAEMON=1`） | `dsh-any-agent-setup --yes --daemon`（和 `--permission` 一样按本次参数整条重写，不带它重跑就关掉） |
+| 开常驻进程模式（`DSH_MCP_DAEMON=1`） | `dsh-any-agent-setup --yes --daemon`（常规注册时按本次参数设置，省略 `--daemon` 会关闭常驻模式） |
 | 升级包之后更新配置 | `dsh-any-agent-setup --yes`（幂等，只重写有差异的条目） |
 | 仅更新已有条目的启动路径（0.7.6 起） | `dsh-any-agent-setup --repair --yes` |
 | 重置自定义环境变量 | `dsh-any-agent-setup --reset-env` 预览，加 `--yes` 应用 |

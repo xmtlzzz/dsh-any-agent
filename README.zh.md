@@ -44,7 +44,7 @@ DSH（DeepSeek Harness）本身**全都能做** —— 它有文件/shell 工具
 |---|---|
 | 🔄 **进程死了对话也不丢** | 对话身份在磁盘上。进程崩溃、被空闲回收、甚至整个服务重启，都不影响继续——下次调用自动 `resume`，记忆完整（跨进程实测）。 |
 | 🗣️ **不用傻等** | 回合跑偏了能**插话改口**（约 100ms 收敛到 idle，四次打断实测），或**排队**等这轮跑完再说；打断后会话不损坏。 |
-| 📡 **跑完自动通知** | 长任务用 `wait=false` 立刻返回 `run_id`。回合结束时**原子写出哨兵文件**，唤醒宿主的后台等待任务。看门狗会停下卡住或超过时限的回合。服务正常退出时会为未完成的回合写出 `interrupted` 哨兵，若被强制终止，则在下次启动时补写。 |
+| 📡 **跑完自动通知** | 长任务用 `wait=false` 立刻返回 `run_id`。`ask` 模式下后台等待命令会在需要审批时返回 `CHECK_INBOX`。回合结束时**原子写出哨兵文件**，唤醒宿主的后台等待任务。看门狗会停下卡住或超过时限的回合。服务正常退出时会为未完成的回合写出 `interrupted` 哨兵，若被强制终止，则在下次启动时补写。 |
 | 🌿 **可以同时改同一个仓库** | `dsh_start(isolation="worktree")` 给会话独立的 Git worktree 和分支，你可以继续编辑原目录。在 worktree 里审核改动，确认后合并提交。默认关闭。 |
 | 🪟 **多会话并发** | `dsh_list(only_running)` 看谁在跑，`dsh_read` 游标式增量读——像切窗口一样轮流盯。 |
 | 👀 **你自己就能看见** | `dsh-any-agent watch`（终端）或 `dsh-any-agent dashboard`（本地只读网页）把派出去的活展开成调用链：客户端 → 会话 → 回合 → 工具调用 / 审批，带每回合 token 与上下文占用，回合进行中实时更新。独立进程、不碰写锁，所有客户端派的活一起看。 |
@@ -151,7 +151,7 @@ dsh-any-agent-setup --only codex --yes
 | `dsh_status` | 轻量状态查询（单个会话），含写锁持有者 `lock_holder` |
 | `dsh_inbox` | **跨会话待决审批收件箱**：一次列出所有会话的审批、原因、输入与等待时长；裁决仍用 `dsh_approval_decide` |
 | `dsh_queue` | 查看和调整 `dsh_send(queue=true)` 的队列。服务重启后，未执行的回执会转为取消 |
-| `dsh_doctor` | 只读体检：DSH 版本、profile、状态/目录可写、孤儿锁、会话与 RSS、生效配置 |
+| `dsh_doctor` | 只读体检：DSH 版本、profile、注册表锁、结果目录硬链接、工作树占用、孤儿锁、会话与 RSS、生效配置 |
 
 每个工具都声明了全部四个 MCP 注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`）。只读取状态的六个标成只读：`dsh_list`、`dsh_read`、`dsh_get`、`dsh_status`、`dsh_inbox`、`dsh_doctor`。工具标题、描述与服务说明有中英文两份：默认跟随系统语言，也可以设 `DSH_MCP_LANG=zh|en`。工具返回的正文也跟这个设置走；少数不常见的报错目前只有中文。
 

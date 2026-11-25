@@ -9,6 +9,7 @@
 
 | dsh-any-agent | DSH | 状态 | 说明 |
 |---|---|---|---|
+| 0.7.9 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（常规 ACP、升级） | Windows 上用支持 roots 的 MCP 客户端从 npm 0.7.8 原地升级到 0.7.9 安装包。真实模型验证了重连后取回原结果、继续原会话，以及删除旧结果文件后用原键重试 send 和 interject。Codex CLI 使用候选安装包完成了真实模型派发、后台等待和跨连接幂等重试。 |
 | 0.7.8 | `0.2.2-rc.3`（桌面版） | ✅ 已验证（常规 ACP、升级） | Windows 上用支持 roots 的 MCP 客户端从 npm 0.7.7 原地升级至 0.7.8 安装包。使用真实模型验证了重连后取回旧回答、在同一会话继续下一轮，以及删除旧结果文件后用原幂等键调用 send 和 interject 均返回原回合 ID。 |
 | 0.7.7 | `0.2.2-rc.5`（桌面版） | ✅ 已验证（常规 ACP、升级） | Windows 上用支持 roots 的测试客户端从 npm 0.7.6 升级到候选包，在桌面版 Node 24.21.0 下验证真实模型派发、重连、删除结果后幂等重试和继续原会话。另用 Codex CLI 0.162.0 加载同一版本安装包，通过模拟 ACP 验证派发和重连重试。 |
 | 0.7.6 | `0.2.2-rc.5`（桌面版） | ✅ 已验证（常规 ACP） | Windows 使用 npm 已发布的 MCP 和桌面版自带的 Node 24.21.0。真实模型派发、临时工作区写入、重连取回结果、幂等重试和继续原测试会话均通过。离线回归通过。 |
@@ -75,6 +76,7 @@ dsh-any-agent team status        # 团队开关与 profile
 - `dsh_desktop`：桌面版版本，与本服务所用 DSH 不一致时 **warn**（两边共用 `~/.dsh` 会话存储）；
 - `dsh_candidates`：列出自动发现的备选安装。设置了 `DSH_BIN` 时会标明实际生效的路径。
 - `dsh_version`：`verified` 为 ok。体检说明引用的是全量套件记录，表中也列出了 0.7.2 安装包工作流等专项验证。`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
+- `registry_lock` 显示写锁状态和持有进程，`runs_dir` 检查结果目录能否写入和建立硬链接，`worktrees` 在占用超过 500 MiB 或扫描不完整时提示警告。
 - `profile`：是否存在、是否漂移、路由来源；
 - `team`：`on` / `off` / `requested but unavailable`（版本或 profile 缺少兼容的团队配置）；
 - `config`：当前 permission、空闲回收、共享进程等生效值；

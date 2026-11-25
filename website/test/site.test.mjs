@@ -184,6 +184,8 @@ test('Single-client setup (--only), interactive 15-tool inspector, and repair co
     assert.match(page, /dsh-any-agent-setup --only codex --yes<\/code>/);
     assert.match(page, /dsh-any-agent-setup --help/);
     assert.match(page, /dsh-any-agent-setup --repair --yes/);
+    assert.match(page, /dsh-any-agent-setup --reset-env/);
+    assert.match(page, /CHECK_INBOX/);
     for (const id of expectedClientIds) {
       assert.match(page, new RegExp(`data-only-client="${id}"`), `page includes single-client chip ${id}`);
     }
