@@ -80,6 +80,7 @@ if (argv[0] === 'watch' || argv[0] === 'dashboard') {
  * 优先级：环境变量 DSH_MCP_TEAM > 该文件 > 默认关。
  */
 if (argv[0] === 'team') {
+  const { L } = await import('../src/lang.mjs');
   const fs = await import('node:fs');
   const nodePath = await import('node:path');
   const cfg = await import('../src/config.mjs');
@@ -102,32 +103,34 @@ if (argv[0] === 'team') {
     const cur = readSettings();
     cur.team = action === 'on';
     writeSettings(cur);
-    process.stdout.write(
-      `团队模式已${action === 'on' ? '开启' : '关闭'}（${cfg.TEAM_SETTINGS_FILE}）。\n` +
-        `DSH 版本: ${cfg.resolveDshVersion() ?? '未检测到'}（团队需要 >= 0.1.7-0）。\n`,
-    );
+    const version = cfg.resolveDshVersion() ?? L('未检测到', 'not detected');
+    process.stdout.write(L(
+      `团队模式已${action === 'on' ? '开启' : '关闭'}（${cfg.TEAM_SETTINGS_FILE}）。\nDSH 版本: ${version}（团队需要 >= 0.1.7-0）。\n`,
+      `Team mode set to ${action} (${cfg.TEAM_SETTINGS_FILE}).\nDSH version: ${version} (team mode requires >= 0.1.7-0).\n`,
+    ));
     if (cfg.TEAM_MODE_SOURCE === 'env') {
       process.stdout.write(
-        '⚠️ 环境变量 DSH_MCP_TEAM 优先级更高；请同时删除它，否则本次设置不会生效。\n',
+        L('⚠️ 环境变量 DSH_MCP_TEAM 优先级更高；请同时删除它，否则本次设置不会生效。\n',
+          'DSH_MCP_TEAM overrides this setting. Unset it to use the saved setting.\n'),
       );
     }
-    process.stdout.write('重新连接 MCP 服务（或重启客户端）后生效。\n');
+    process.stdout.write(L('重新连接 MCP 服务（或重启客户端）后生效。\n', 'Reconnect the MCP server or restart the client to apply.\n'));
     process.exit(0);
   }
   if (action === 'status') {
     const file = readSettings();
     const { profile, backend } = cfg.resolveTeamProfile();
     process.stdout.write(
-      '团队模式状态：\n' +
-        `  环境变量 DSH_MCP_TEAM: ${process.env.DSH_MCP_TEAM ?? '(未设置)'}\n` +
-        `  设置文件: ${cfg.TEAM_SETTINGS_FILE}（team=${file.team === undefined ? '未设置' : file.team}）\n` +
-        `  生效值: ${cfg.TEAM_MODE ? '开' : '关'}（来源: ${cfg.TEAM_MODE_SOURCE}）\n` +
+      L('团队模式状态：\n', 'Team mode status\n') +
+        `  DSH_MCP_TEAM: ${process.env.DSH_MCP_TEAM ?? L('未设置', 'unset')}\n` +
+        `  ${L('设置文件', 'Settings file')}: ${cfg.TEAM_SETTINGS_FILE} (team=${file.team ?? L('未设置', 'unset')})\n` +
+        `  ${L('生效值', 'Effective')}: ${cfg.TEAM_MODE ? L('开', 'on') : L('关', 'off')} (${L('来源', 'source')}: ${cfg.TEAM_MODE_SOURCE})\n` +
         `  profile: ${profile}\n` +
-        `  团队能力可用: ${backend ? '是' : '否'}\n`,
+        `  ${L('团队能力可用', 'Team capabilities available')}: ${backend ? L('是', 'yes') : L('否', 'no')}\n`,
     );
     process.exit(0);
   }
-  process.stderr.write('用法: dsh-any-agent team on|off|status\n');
+  process.stderr.write(L('用法', 'Usage') + ': dsh-any-agent team on|off|status\n');
   process.exit(2);
 }
 

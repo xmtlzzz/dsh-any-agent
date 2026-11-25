@@ -17,6 +17,22 @@
       },
       "environmentVariables": [
         {
+          "name": "DSH_RUNTIME",
+          "description": "Executable used to launch DSH. Leave unset to use the runtime selected for the detected installation.",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "DSH_MCP_DAEMON",
+          "description": "Set to 1 to keep active turns running when the MCP client disconnects.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "0",
+          "choices": ["0", "1"]
+        },
+        {
           "name": "DSH_BIN",
           "description": "Path to @deepseek-ai/dsh/lib/bin.js. Leave unset to auto-detect the DeepSeek Harness desktop app, an npm global install, or the npx cache.",
           "format": "filepath",

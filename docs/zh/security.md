@@ -38,11 +38,11 @@ MCP 宿主在 Windows 上通过 `System32` 的绝对路径执行进程检测、�
 维护命令：
 
 ```bash
-node bin/dsh-any-agent-workspaces.mjs --list                  # 查看注册表
-node bin/dsh-any-agent-workspaces.mjs --backfill              # 扫描磁盘上的会话，全部补登记
-node bin/dsh-any-agent-workspaces.mjs --prune-temp            # 清掉临时目录条目
-node bin/dsh-any-agent-workspaces.mjs --prune-empty           # 清掉"无会话且路径已不存在"的工作区
-node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话（规则写得很死）
+dsh-any-agent-workspaces --list                  # 查看注册表
+dsh-any-agent-workspaces --backfill              # 扫描磁盘上的会话，全部补登记
+dsh-any-agent-workspaces --prune-temp            # 清掉临时目录条目
+dsh-any-agent-workspaces --prune-empty           # 清掉"无会话且路径已不存在"的工作区
+dsh-any-agent-workspaces --purge-test-sessions   # 删测试会话（规则写得很死）
 ```
 
 > ⚠️ 重启 DSH 之前**别在 GUI 里操作工作区**，否则服务会用内存状态把文件覆盖回去。
@@ -95,3 +95,5 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 联网：`dsh_doctor` 默认访问 `registry.npmjs.org` 查询本包最新版本，请求只带固定的包名和 `Accept` 头。响应和缓存的版本必须符合完整 SemVer，联网出错时显示固定的失败原因。可用 `DSH_MCP_UPDATE_CHECK=0` 关闭。模型请求由 DSH 发出，不经过本服务。
 
 DSH 那一侧（不归本服务管）：`~/.dsh/sessions` 里的会话日志（含完整思考，见上）；本服务还会把会话的工作区登记进 DSH 的 `workspace.json`，GUI 才看得到这些会话（`DSH_MCP_REGISTER_WORKSPACE=0` 关闭）。
+
+`registry_lock` 显示注册表写锁的持有进程与时长，活跃持有者的锁会保留。`runs_dir` 也会检查硬链接能力。`worktrees` 估算隔离工作树的文件总大小，大目录显示已扫描部分的下限。可用 `git worktree list` 与 `git status` 查看保留的改动。

@@ -289,7 +289,7 @@ export class AcpProcess {
    * 只会让我们丢掉结果、误判回合结束（进而让 reaper 杀掉正在干活的进程）。
    */
   request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
-    if (!this.alive) return Promise.reject(new Error('DSH 进程未运行'));
+    if (!this.alive) return Promise.reject(new Error(L('DSH 进程未运行', 'The DSH process is not running')));
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       const timer =
@@ -298,7 +298,7 @@ export class AcpProcess {
               if (!this.#pending.delete(id)) return;
               // 带上机器可读的 code/method：上层要区分"DSH 没回话（超时）"与"DSH 明确拒绝"，
               // 前者可能是瞬时卡顿（可重试），后者重试只会重复同一个错误，不能靠匹配中文报错文本来分。
-              const err = new Error(`ACP 请求超时: ${method}`);
+              const err = new Error(L(`ACP 请求超时: ${method}`, `ACP request timed out: ${method}`));
               err.code = 'ACP_TIMEOUT';
               err.method = method;
               err.timeoutMs = timeoutMs;

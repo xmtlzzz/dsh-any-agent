@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Resident connections wait for authentication before forwarding MCP. Pending approvals wake background waiters, and setup preserves custom environment variables on re-registration.
+- Doctor checks registry locks, hard links and worktree usage. Global installs now expose `dsh-any-agent-workspaces`. The team CLI follows the configured language.
+
 ## [0.7.8] — 2026-11-25
 
 - `dsh_doctor` now distinguishes warnings in its summary and identifies the active installation when `DSH_BIN` overrides discovery. Startup and diagnostic directory checks use exclusive temporary files to preserve existing files.
