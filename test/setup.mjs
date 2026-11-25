@@ -328,6 +328,16 @@ console.log('\n[11] repair refreshes the launch fields without replacing existin
       backupsIn(join(home, '.cursor')).length === 1, again.out);
     const conflict = runSetup(home, ['--repair', '--yes', '--daemon', ...selected]);
     check('repair rejects flags that would rewrite existing settings', conflict.code === 2);
+    const update = runSetup(home, ['--yes', '--daemon', ...selected]);
+    check('regular setup preserves custom environment in JSON, nested Zed, opencode and TOML', update.code === 0 &&
+      [cursor, zed, opencode].every(file => read(file).includes('/custom/runtime')) &&
+      read(codex).includes('DSH_MCP_APPROVAL = "ask"'), update.out);
+    const repeat = runSetup(home, ['--yes', '--daemon', ...selected]);
+    check('preserving environment is idempotent', repeat.code === 0 && /Summary: 0 changed/.test(repeat.out));
+    const reset = runSetup(home, ['--yes', '--reset-env', ...selected]);
+    check('explicit reset clears custom settings', reset.code === 0 &&
+      [cursor, zed, opencode].every(file => !read(file).includes('/custom/runtime')) &&
+      !read(codex).includes('DSH_MCP_APPROVAL'), reset.out);
   } finally {
     removeSandbox(home);
   }
@@ -335,6 +345,18 @@ console.log('\n[11] repair refreshes the launch fields without replacing existin
 
 {
   const file = '.codex/config.toml';
+  for (const original of [
+    '[mcp_servers]\ndsh-any-agent = { command = "old", args = ["a", "b"], env = { CUSTOM = "a,b}#", DSH_MCP_LOG = "debug" } }\n',
+    '[mcp_servers.dsh-any-agent]\ncommand = "old"\nenv.CUSTOM = "a,b}#"\nenv.DSH_MCP_LOG = "debug"\n',
+  ]) {
+    const home = sandbox({ [file]: original });
+    try {
+      const result = runSetup(home, ['--yes', '--only', 'codex']);
+      const contents = readFileSync(join(home, file), 'utf8');
+      check('inline and dotted TOML keep custom values with delimiters and refresh managed values',
+        result.code === 0 && contents.includes('"a,b}#"') && !contents.includes('"debug"'), result.out);
+    } finally { removeSandbox(home); }
+  }
   const neighbor = '["mcp_servers.dsh-any-agent"]\nkeep = true\n';
   const quoted = '["mcp_servers"."dsh-any-agent"]\ncommand = "old"\n';
   const home = sandbox({ [file]: quoted + neighbor });

@@ -173,6 +173,8 @@ A restore saves the **current** file as `.bak-dsh-pre-restore-<timestamp>` so yo
 | Turn on resident process mode (`DSH_MCP_DAEMON=1`) | `dsh-any-agent-setup --yes --daemon` (rewritten from this run's flags like `--permission`; re-running without it turns it off) |
 | Update after upgrading the package | `dsh-any-agent-setup --yes` (idempotent; only differing entries are rewritten) |
 | Refresh launch paths in existing entries (0.7.6 and later) | `dsh-any-agent-setup --repair --yes` |
+
+**Re-running setup.** Regular registration preserves custom environment variables such as `DSH_RUNTIME`, `DSH_MCP_APPROVAL` and `DSH_MCP_LANG`. Setup recalculates `DSH_MCP_PERMISSION`, `DSH_MCP_LOG`, `DSH_MCP_DAEMON` and `DSH_BIN` from the installation options. To remove custom environment variables too, preview `dsh-any-agent-setup --reset-env` and add `--yes` to apply.
 | Unregister from every client | `dsh-any-agent-setup --remove --yes` |
 | Unregister from just some | `dsh-any-agent-setup --remove --yes --only codex` |
 | Uninstall completely | `dsh-any-agent-setup --remove --yes`, then `npm uninstall -g dsh-any-agent`; `$DSH_HOME/profiles/dsh-mcp/` can stay or go (leaving it is harmless). This server never writes your DSH credentials or session history, so they are untouched |
