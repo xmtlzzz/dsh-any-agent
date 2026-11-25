@@ -39,7 +39,7 @@ npm run docs:counts:check # 只检查文档与报告是否一致，不一致 exi
 | `guards` | 43 | **环境变量守卫**：奇怪的数值一律压到安全侧 —— `IDLE_TTL_MS` 的 `-1` 当"永不回收"、非法值/空串回落默认 10 分钟、回收间隔过小压回默认（防空转紧循环）、**失联阈值下限 30 秒**（防别的实例"合法地"抢占并杀掉我们的回合）；以及团队模式的默认值与优先级（`DSH_MCP_TEAM` > `settings.json` > 默认关）（不花 token，每次必跑） |
 | `watchdog` | 33 | **回合看门狗**：开始 15 分钟内不打扰；没有任何进展才算卡住（有工具在跑时宽限放大 3 倍，工具重叠时短的先完成也不缩回；等调用方裁决审批时不判）；总时长上限不看进展；卡住时发 `session/cancel`，回合照常收尾，结果、审核单、哨兵都带 `watchdog`（假 ACP 进程 + 毫秒级阈值，不花 token） |
 | `worktree` | 31 | **会话级 worktree 隔离**：worktree 建在状态目录下、不在仓库里；分支 `dsh/…` 基于主检出 HEAD；子目录映射（cwd 经 junction / 符号链接这类别名路径进来也一样）；主检出有未提交改动时如实标出；不是 git 仓库 / 没有提交时明确报错；**不跑仓库自带的钩子和 filter 驱动**（检出时的 smudge、status 时的 clean；带对照：不屏蔽时会执行）；干净才删目录、分支保留；建会话失败时整个撤销；`Hub.create(isolation='worktree')` 用假 ACP 进程（临时 git 仓库，不花 token） |
-| `daemon` | 24 | **常驻进程模式**（`DSH_MCP_DAEMON=1`）：MCP 握手经转发进程到常驻进程；**转发进程被强杀后，常驻进程里正在跑的回合照常跑完、写出哨兵**；同一配置的第二个客户端连到同一个常驻进程，配置不同则另起一个；API 钥匙（`*_KEY`）不同的客户端各用各的常驻进程，只是会话级变量不同则照旧共用（带对照）；live 事件按连接记客户端名（后连上来的客户端不会顶掉先前连接派的活）；切换 `team on/off` 设置后重连会另起一个常驻进程；没带令牌 / 令牌不对的连接拿不到任何应答（带对照）；没有客户端也没有回合时空闲退出并删掉信息文件；超过 10 MB 的日志在下次启动时滚动成 `.1`（假 ACP 进程，不花 token） |
+| `daemon` | 25 | **常驻进程模式**（`DSH_MCP_DAEMON=1`）：MCP 握手经转发进程到常驻进程；**转发进程被强杀后，常驻进程里正在跑的回合照常跑完、写出哨兵**；同一配置的第二个客户端连到同一个常驻进程，配置不同则另起一个；API 钥匙（`*_KEY`）不同的客户端各用各的常驻进程，只是会话级变量不同则照旧共用（带对照）；live 事件按连接记客户端名（后连上来的客户端不会顶掉先前连接派的活）；切换 `team on/off` 设置后重连会另起一个常驻进程；没带令牌 / 令牌不对的连接拿不到任何应答（带对照）；没有客户端也没有回合时空闲退出并删掉信息文件；超过 10 MB 的日志在下次启动时滚动成 `.1`（假 ACP 进程，不花 token） |
 | `run-recovery` | 33 | **被中断回合的恢复**：回合开始写 `<run_id>.running` 标记、写出哨兵时删掉；启动恢复只认领主人 PID 已不在或被复用（启动时刻对不上）的标记，主人还活着 / 读不到启动时刻 / 看不懂的文件一律不碰，哨兵已在就只删标记；同一主人只查一次启动时刻；**关闭时在停任何子进程之前就写好中断哨兵**；**端到端：服务进程在回合中途被强杀，下一个服务进程启动时补出 `interrupted` 哨兵，dsh_get 也查得到**；ACP 已返回后强杀可恢复原正文与终态，注明 Git 快照未完成；无回合 ID 时按开始时间查盘，同毫秒开始的回合按记录的启动顺序排列；旧哨兵补建幂等收据时保留原到期时间（假 ACP 进程，不花 token） |
 | `contract` | 13 | **对外契约快照**：MCP 工具面（工具名、参数类型、是否必填、枚举值）与哨兵字段（完成的回合、补写的中断回合）对比 `test/contract.snapshot.json`；新增算兼容，删除 / 改类型 / 改成必填 / 删枚举值算破坏性，原来为空的值有了具体形状算细化；哨兵带 `schema`；判定规则自检；哨兵有破坏性改动而 `SENTINEL_SCHEMA` 没加一时 `--update` 拒绝重写快照（假 ACP 进程，不花 token） |
 | `update-check` | 22 | **`dsh_doctor` 的新版本检查**（假 fetch，不联网）：`DSH_MCP_UPDATE_CHECK=0` 时不调 fetch；只请求 npm registry 上本包的 latest、只带 accept 头；结果缓存 24 小时、过期重查、时钟倒退不信缓存；离线 / HTTP 错误 / 响应不对都报未知且不缓存；fetch 一直不回（也不理 abort）时按超时返回并 abort 请求；版本比较含预发布版 |
@@ -54,10 +54,10 @@ npm run docs:counts:check # 只检查文档与报告是否一致，不一致 exi
 | `line-decoder` | 4 | **UTF-8 行分帧**：MCP/ACP 的 chunk 边界不能把中文/emoji 截成 U+FFFD；覆盖逐字节、任意 chunk、CRLF 与 EOF 残留（不花 token） |
 | `progress` | 16 | **MCP 进度通知**：调用带 `progressToken` 时阻塞中的 `tools/call` 定时回报；不带 token 不发、progress 递增、响应之后不再发、工具抛错同样停下、消息只有时长/工具名/字数（不花 token） |
 | `sentinel-redaction` | 26 | **哨兵落盘卫生**：`result.thinking` 被剥掉、`thinking_omitted` 始终是布尔值、`answer`/`error`/`title`/`tools_used[].input` 都走与审批相同的凭据脱敏；`DSH_MCP_SENTINEL_TOOL_INPUTS=0` 时工具输入和自动放行的命令预览都不落盘（不花 token） |
-| `live-events` | 48 | **live 事件流写入侧**：假 hub + 假 ACP 进程跑完整回合；事件序列与字段、工具只在状态变化时写、思考内容不落盘、预览脱敏、`meta`/`off` 级别、写失败不影响派活、ask 审批裁决、失败/排队/取消/forget；一个进程服务几个客户端时事件记在发起调用的客户端名下，排队的回合由别的客户端的回合带起来时仍记在发起排队的客户端名下。上一轮延迟收尾时，下一轮的 token 仍按自己的基线统计（不花 token） |
+| `live-events` | 49 | **live 事件流写入侧**：假 hub + 假 ACP 进程跑完整回合；事件序列与字段、工具只在状态变化时写、思考内容不落盘、预览脱敏、`meta`/`off` 级别、写失败不影响派活、ask 审批裁决、失败/排队/取消/forget；一个进程服务几个客户端时事件记在发起调用的客户端名下，排队的回合由别的客户端的回合带起来时仍记在发起排队的客户端名下。上一轮延迟收尾时，下一轮的 token 仍按自己的基线统计（不花 token） |
 | `live-view` | 69 | **live 查看端**：按字节切行（不切坏中文）、调用链归并、写者退出显示中断、增量 tail（半行/滚动/删除）、`watch --once` 走 bin 入口、`dashboard` 的 token / Host / 只读校验与 SSE（不花 token） |
 | `release-notes` | 12 | **Release 说明**：从 CHANGELOG 取对应一节（`1.1.1` 不误匹配 `1.1.10`、到链接定义区为止）、空节与缺失版本直接报错、附安装命令与 compare 链接、命令行退出码（不花 token） |
-| `review` | 70 | **调用方审核**：默认 `advisory` 审核单带清单 + 证据 + `dsh_review` 入口；`dsh_review` 把裁决落盘并回写内存 run 与哨兵；`fail`/`partial` 必须给理由；未完成/未知 run 被拒绝；重启后仍可凭哨兵审核；队列与 `client_run_id` 重放收据也带审核单；审核记录与哨兵共享 TTL；理由、预览、证据**与清单项**都凭据脱敏；**路径穿越 id 在触盘前就被拒绝**（不花 token） |
+| `review` | 71 | **调用方审核**：默认 `advisory` 审核单带清单 + 证据 + `dsh_review` 入口；`dsh_review` 把裁决落盘并回写内存 run 与哨兵；`fail`/`partial` 必须给理由；未完成/未知 run 被拒绝；重启后仍可凭哨兵审核；队列与 `client_run_id` 重放收据也带审核单；审核记录与哨兵共享 TTL；理由、预览、证据**与清单项**都凭据脱敏；**路径穿越 id 在触盘前就被拒绝**（不花 token） |
 | `forget-tombstone` | 25 | **`forget` 是终态**：`release(forget=true)` 写墓碑，按 id 查询明确失败并给出恢复路径，列表不再展示；删除墓碑后回到常规“未知会话”路径（不花 token） |
 | `bootstrap-profile` | 39 | **首启 profile 在零依赖发布形态下可用**：内置 YAML 子集解析器复制路由、剥掉 `apiKey`/`headers`/字面密钥、绝不写 `defaultPreset`、幂等；覆盖新版原生团队 profile 迁移、旧版实验模式及手写文件保留（不花 token） |
 | `workspace-safety` | 23 | **数据丢失边界**：`isTempPath` 按路径分段（`tmpdir()+'Suffix'`、`/tmpfoo` 都不算临时目录）、坏 `workspace.json` 绝不覆盖、会话根不可读时绝不清空 `sessionIds`、自动清理只删测试造的会话（不花 token） |
@@ -65,7 +65,7 @@ npm run docs:counts:check # 只检查文档与报告是否一致，不一致 exi
 | `permission-adopt` | 26 | **不无声提权**：接管没有权限记录的外部会话时 fail-closed 到 `read-only`；记录为 `read-only` 的会话不能被侧车提升；运行期回读记录与请求不一致会失败（不花 token） |
 | `state-safety` | 41 | **状态/哨兵/锁目录**：默认在 `$DSH_HOME/.dsh-any-agent`、不可写时启动明确失败、哨兵写失败返回 `null` + `sentinel_error`、非法数值落安全侧（不花 token） |
 | `workspace-snapshot` | 32 | **工作区快照与宿主进程查询**：覆盖全量文件指纹、异步快照、快照和 worktree 跳过工作区同名 Git，以及启动时间和 RSS 查询跳过当前目录的同名程序（临时 Git 仓库，不花 token） |
-| `setup` | 73 | **注册 CLI**：预览不写盘、`--repair` 更新启动路径并保留原设置、`--remove` 只摘自己那条、没装客户端算跳过不算失败、Codex TOML 段往返、`--daemon` 写入 `DSH_MCP_DAEMON=1` 且不带它重跑就去掉、以及把写进配置里的命令真的拉起一次并要求应答 `initialize`（不花 token）。**不会调用 `claude mcp get`** —— 那个 CLI 会整体回写 `~/.claude.json` |
+| `setup` | 78 | **注册 CLI**：预览不写盘、`--repair` 更新启动路径并保留原设置、`--remove` 只摘自己那条、没装客户端算跳过不算失败、Codex TOML 段往返、`--daemon` 写入 `DSH_MCP_DAEMON=1` 且不带它重跑就去掉、以及把写进配置里的命令真的拉起一次并要求应答 `initialize`（不花 token）。**不会调用 `claude mcp get`** —— 那个 CLI 会整体回写 `~/.claude.json` |
 | `removal-scope` | 61 | **注销只动自己那条**：给一份装着别的 MCP 服务器、顶层 Codex 设置和 Zed 兄弟设置的配置，注册再注销，断言其余每个值逐字节不变；删一个从没写过的东西 = 无写入、无报错（不花 token） |
 | `config-safety` | 450（无客户端配置时 449） | **0.3 这条线的核心性质**，逐客户端验证：预览后文件逐字节不变且不产生 `.bak`；注册再注销后其余条目逐字节还原、键顺序不变、顶层键不丢；4 空格 / 2 空格缩进、单行 JSON、无末尾换行、CRLF、UTF-8 BOM 都能在写入后保留；坏 JSON 与只读文件被拒绝且原文件无损；第二次 `--yes` 空跑不新增备份；每个 `.bak-dsh-<时间戳>` 只出现一次且内容等于写入前字节；PATH 上有 `claude` 也绝不调用（不花 token） |
 | `real-configs` | 93（8/10 配置时 75，7/10 配置时 66，6/10 配置时 57，5/10 配置时 48） | **拿真家伙做往返**：把本机**真实**的客户端配置复制进临时目录（18 万字节、含几百个 `projects` 条目与大小写重复键的 `~/.claude.json`，238 行的 Codex TOML，Zed 的完整 `settings.json`），注册再撤销，要求每个文件**逐字节**还原；条目是否存在按**键**判断而不是裸子串；缺少 fixture 时明确打印 `skipped`，绝不假绿（不花 token） |
@@ -90,13 +90,13 @@ npm run docs:counts:check # 只检查文档与报告是否一致，不一致 exi
 > **2026-11-06**：`node test/run.mjs` 现在**跑完全部套件**再在末尾列出所有失败项（`--bail` 恢复遇错即停）—— 以前 `timeout.mjs` 一条过时断言就让后面 11 个真机套件全部没跑。需要模型的套件已对桌面版自带运行时上的 DSH 0.2.2-rc.1 全量重跑。
 
 <!-- counts:begin (generated by scripts/sync-test-counts.mjs; do not edit by hand) -->
-**`node test/run.mjs` 在本机（Windows，装了 DSH，6/10 个客户端配置 fixture）跑了 41 个离线套件、2016 项检查，全部通过。**表中带括号的数字随环境变化（有没有 DSH、哪个平台、文件系统是否区分大小写、本机装了几个客户端配置），套件总数也随之变化；这一行记录的是上次同步所用报告的环境。
+**`node test/run.mjs` 在本机（Windows，装了 DSH，6/10 个客户端配置 fixture）跑了 41 个离线套件、2024 项检查，全部通过。**表中带括号的数字随环境变化（有没有 DSH、哪个平台、文件系统是否区分大小写、本机装了几个客户端配置），套件总数也随之变化；这一行记录的是上次同步所用报告的环境。
 
-其中 **641 项属于客户端注册器套件**（`setup` 73、`removal-scope` 61、`config-safety` 450、`real-configs` 57）—— 0.3 的活其实都在这里。
+其中 **646 项属于客户端注册器套件**（`setup` 78、`removal-scope` 61、`config-safety` 450、`real-configs` 57）—— 0.3 的活其实都在这里。
 
 需要模型的套件（`boundary` 46、`integration` 30、`async` 21、`sentinel` 36、`timeout` 40、`lock` 80、`multi` 19、`list` 17、`permission` 11、`shared-process` 8、`cycle` 36、`concurrency` 31、`capability` 22、`workspace-effect` 24、`acceptance` 36、`reasoning-check` 8）名义合计 **465 项**；有 DSH 时 `smoke` 还会多跑 14 项会话段。它们要可用的 DSH 与 provider，发版前请自己重跑一遍：`node test/run.mjs --all`。`acceptance` 在没有 IDA MCP（`mcp__ida__*`）时会明确 **skip**；`shared-process` 没有 DSH 时也会 skip。
 
-> 三个总数是刻意分开的：本机 `node test/run.mjs`（2016）、CI 离线 job（名义 Linux/macOS 1939，Windows 1944；hosted runner 没有 DSH 也没有客户端 fixture，`smoke` 跳过会话段、`real-configs` 整体跳过）、需要模型的集合（名义 465）。数字取各套件自己打印的汇总，由 `npm run docs:counts` 从报告写回，不在这里手抄；不要把一个数字套到另一个 runner 上。
+> 三个总数是刻意分开的：本机 `node test/run.mjs`（2024）、CI 离线 job（名义 Linux/macOS 1947，Windows 1952；hosted runner 没有 DSH 也没有客户端 fixture，`smoke` 跳过会话段、`real-configs` 整体跳过）、需要模型的集合（名义 465）。数字取各套件自己打印的汇总，由 `npm run docs:counts` 从报告写回，不在这里手抄；不要把一个数字套到另一个 runner 上。
 <!-- counts:end -->
 
 ### 🔢 改了测试之后：检查数是算出来的

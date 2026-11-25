@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- A resident process now advertises its endpoint once startup completes. Live logs retry rotation on the next write after a failure. Review records and updated completion files keep owner-only permissions on POSIX.
+- Queued and replayed runs include approval wait commands in the text receipt. Setup preserves a saved `DSH_BIN` when the shell supplies no replacement. The workspace CLI provides help in English and Chinese.
 - Resident connections wait for authentication before forwarding MCP. Pending approvals wake background waiters, and setup preserves custom environment variables on re-registration.
 - Doctor checks registry locks, hard links and worktree usage. Global installs now expose `dsh-any-agent-workspaces`. The team CLI follows the configured language.
 
