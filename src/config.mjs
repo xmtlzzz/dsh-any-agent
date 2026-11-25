@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, linkSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -242,16 +242,28 @@ export const LEGACY_STATE_FILE = join(PKG_ROOT, '.state', 'conversations.json');
 export const USING_DEFAULT_STATE = !process.env.DSH_MCP_STATE;
 
 /** 创建并清理本次检查专用的探测文件，保留原始文件系统错误供体检展示。 */
-export function probeWritableDir(dir) {
+export function probeWritableDir(dir, { hardlink = false } = {}) {
   mkdirSync(dir, { recursive: true });
   const probe = join(dir, `.write-probe-${randomUUID()}`);
   const fd = openSync(probe, 'wx', 0o600);
+  let linked = false;
+  let failure;
+  const link = probe + '.link';
   try {
     writeFileSync(fd, 'ok');
-  } finally {
-    closeSync(fd);
-    rmSync(probe);
+    if (hardlink) {
+      linkSync(probe, link);
+      linked = true;
+    }
+  } catch (error) {
+    failure = error;
   }
+  try { closeSync(fd); } catch (error) { failure ??= error; }
+  if (linked) {
+    try { rmSync(link); } catch (error) { failure ??= error; }
+  }
+  try { rmSync(probe); } catch (error) { failure ??= error; }
+  if (failure) throw failure;
 }
 
 /**
@@ -260,9 +272,9 @@ export function probeWritableDir(dir) {
  * 在 Hub.load() 启动时调用：宁可服务明确起不来，也不要"看起来正常、
  * 哨兵永远不出现、锁也无法归因"的静默降级。
  */
-export function assertWritableDir(dir, label = '目录') {
+export function assertWritableDir(dir, label = '目录', options) {
   try {
-    probeWritableDir(dir);
+    probeWritableDir(dir, options);
   } catch (e) {
     throw new Error(
       `${label}不可写: ${dir}\n` +

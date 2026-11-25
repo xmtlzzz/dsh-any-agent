@@ -3,7 +3,7 @@
   "name": "dsh-any-agent-site",
   "compatibility_date": "2026-11-02",
   "workers_dev": true,
-  // The worker only answers /api/stars (see src/worker.mjs); every other path is served
+  // The worker answers /api/stars and /api/version (see src/worker.mjs). Other paths are served
   // straight from the static assets without running it.
   "main": "src/worker.mjs",
   "assets": {

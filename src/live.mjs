@@ -179,10 +179,10 @@ export function emitLive(convId, type, fields = {}, detail = null) {
     if (size + bytes > MAX_FILE_BYTES && size > 0) {
       try {
         renameSync(file, `${file}.1`);
+        size = 0;
       } catch {
         /* 被占用就继续往原文件写，下次再滚 */
       }
-      size = 0;
     }
     appendFileSync(file, line, 'utf8');
     sizes.set(file, size + bytes);

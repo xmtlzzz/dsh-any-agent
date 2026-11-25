@@ -10,6 +10,7 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -176,16 +177,44 @@ try {
   await check('没带令牌：拿不到任何应答', async () => (await rawProbe(path, null)) === '');
   await check('令牌不对：拿不到任何应答', async () => (await rawProbe(path, JSON.stringify({ dsh_any_agent_auth: 'wrong' }))) === '');
   const token = readInfo(info).token;
-  await check('令牌对：正常应答（对照）', async () => /dsh-any-agent/.test(await rawProbe(path, JSON.stringify({ dsh_any_agent_auth: token }))));
+  await check('令牌对：先确认握手，再返回 MCP 应答', async () => /^OK\n.*dsh-any-agent/.test(await rawProbe(path, JSON.stringify({ dsh_any_agent_auth: token }))));
+  const { daemonEndpoint } = await import('../src/daemon.mjs');
+  await check('credentials and platform environment casing determine the endpoint', () => {
+    for (const key of ['SERVICE_TOKEN', 'SERVICE_SECRET']) {
+      if (daemonEndpoint({ [key]: 'a' }).id === daemonEndpoint({ [key]: 'b' }).id) return false;
+    }
+    const same = daemonEndpoint({ HTTP_PROXY: 'proxy' }).id === daemonEndpoint({ http_proxy: 'proxy' }).id;
+    return same === (process.platform === 'win32');
+  });
 
   console.log('\n[5] 空闲退出');
+  const pendingHandshake = net.connect(path);
+  pendingHandshake.on('error', () => {});
+  await new Promise(resolve => pendingHandshake.once('connect', resolve));
   for (const cl of clients.splice(0)) await cl.close();
   const pids = daemonPids();
   for (let i = 0; i < 100 && pids.some(alive); i++) await sleep(100);
   await check('没有客户端、没有回合：空闲后常驻进程退出', () => !pids.some(alive), JSON.stringify(pids.filter(alive)));
+  pendingHandshake.destroy();
   await check('信息文件随之删除', () => infoFiles().length === 0, JSON.stringify(infoFiles()));
 
   console.log('\n[6] 日志滚动');
+  await check('failed startup releases its endpoint and the proxy falls back promptly', () => {
+    const state = join(root, 'startup-failure');
+    const blocked = join(root, 'runs-is-a-file');
+    writeFileSync(blocked, '');
+    const env = { ...process.env, ...baseEnv, DSH_MCP_STATE: join(state, 'state.json'), DSH_MCP_RUNS_DIR: blocked };
+    const probe = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `import { daemonEndpoint } from ${JSON.stringify(new URL('../src/daemon.mjs', import.meta.url).href)}; console.log(JSON.stringify(daemonEndpoint()))`],
+      { encoding: 'utf8', env });
+    const endpoint = JSON.parse(probe.stdout);
+    const cli = join(HERE, '..', 'bin', 'dsh-any-agent.mjs');
+    for (const args of [['--daemon'], []]) {
+      const child = spawnSync(process.execPath, [cli, ...args], { env, encoding: 'utf8', timeout: 12_000 });
+      if (child.status !== 1 || existsSync(endpoint.infoFile) || existsSync(endpoint.path)) return false;
+    }
+    return true;
+  });
   // 常驻进程的 stderr 每次启动都追加到 daemon-<id>.log：超过 10 MB 时下次启动先滚动成 .1。
   const logFile = join(stateDir, `daemon-${id}.log`);
   writeFileSync(logFile, Buffer.alloc(10 * 1024 * 1024 + 1, 0x41));

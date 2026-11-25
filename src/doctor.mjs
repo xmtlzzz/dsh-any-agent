@@ -9,7 +9,7 @@
  */
 
 import { readdirSync, statSync } from 'node:fs';
-import { readRegistry } from './registry.mjs';
+import { inspectRegistryLock, readRegistry } from './registry.mjs';
 import { join } from 'node:path';
 import {
   DEFAULT_PERMISSION,
@@ -43,13 +43,14 @@ import { refreshRssMap, rssMb } from './procstat.mjs';
 import { liveSettings } from './live.mjs';
 import { L } from './lang.mjs';
 import { checkForUpdate } from './update-check.mjs';
+import { inspectWorktrees, WORKTREES_DIR } from './worktree.mjs';
 
 /** DSH 来源的英文叫法（中文用 dsh-locate 的 SOURCE_LABEL）。 */
 const SOURCE_LABEL_EN = { env: 'DSH_BIN', desktop: 'desktop app', global: 'npm global', npx: 'npx cache' };
 const sourceLabel = (source) => L(SOURCE_LABEL[source] ?? source, SOURCE_LABEL_EN[source] ?? source);
 
 /** live 目录占用超过这个值就提醒（TTL 正常时远到不了）。 */
-const LIVE_WARN_BYTES = 500 * 1024 * 1024;
+const STORAGE_WARN_BYTES = 500 * 1024 * 1024;
 
 /**
  * 体检 live 事件流：级别、目录可写、会话数、占用、最近一条事件的时间。
@@ -102,7 +103,7 @@ export function inspectLive({ dir = liveSettings().dir, level = liveSettings().l
       ? L('最近一条事件：刚刚', 'last event: just now')
       : L(`最近一条事件：${age} 分钟前`, `last event: ${age} min ago`)
     : L('还没有任何事件', 'no events yet');
-  const big = bytes > LIVE_WARN_BYTES;
+  const big = bytes > STORAGE_WARN_BYTES;
   return [
     big ? 'warn' : 'ok',
     L(`级别=${level}，${dir}，${convs} 个会话，${mb}MB；${last}`, `level=${level}, ${dir}, ${convs} conversation(s), ${mb}MB; ${last}`),
@@ -249,16 +250,31 @@ export async function runDoctor(hub) {
     add('state', 'fail', e.message, L('检查文件或从备份恢复', 'check the file or restore a backup'));
   }
 
+  try {
+    const lock = inspectRegistryLock(STATE_FILE);
+    const healthy = lock.state === 'absent' || (lock.state === 'held' && lock.ageMs < 5000);
+    const fix = ['empty', 'dead', 'reused'].includes(lock.state)
+      ? L('下次写注册表时会重新获取这把锁', 'The next registry write will reclaim this lock')
+      : L('检查锁目录和持有进程，等待正在进行的写入完成', 'Inspect the lock directory and owner process, and allow active writes to finish');
+    add('registry_lock', healthy ? 'ok' : 'warn', [STATE_FILE + '.lock', lock.state,
+      lock.pid && `PID ${lock.pid}`, lock.ageMs != null && `${Math.round(lock.ageMs / 1000)}s`].filter(Boolean).join(' · '), healthy ? null : fix);
+  } catch (e) {
+    add('registry_lock', 'warn', e.message, L('检查锁目录的访问权限', 'Check access to the registry lock directory'));
+  }
+
   for (const [id, dir] of [
     ['runs_dir', RUNS_DIR],
     ['reviews_dir', REVIEWS_DIR],
     ['locks_dir', LOCKS_DIR],
   ]) {
     try {
-      probeWritableDir(dir);
+      probeWritableDir(dir, { hardlink: id === 'runs_dir' });
       add(id, 'ok', dir);
     } catch (e) {
-      add(id, 'fail', `${dir}: ${e.message}`, L('检查权限，或用对应环境变量指向可写目录', 'check permissions, or point the matching environment variable at a writable directory'));
+      const hint = id === 'runs_dir'
+        ? L('将 DSH_MCP_RUNS_DIR 指向可写且支持硬链接的目录', 'set DSH_MCP_RUNS_DIR to a writable directory that supports hard links')
+        : L('检查权限，或用对应环境变量指向可写目录', 'check permissions, or point the matching environment variable at a writable directory');
+      add(id, 'fail', `${dir}: ${e.message}`, hint);
     }
   }
 
@@ -284,6 +300,16 @@ export async function runDoctor(hub) {
   }
 
   const all = [...hub.conversations.values()];
+  try {
+    const { count, bytes, complete } = await inspectWorktrees();
+    const mib = bytes / (1024 * 1024);
+    const size = (complete ? mib : Math.floor(mib * 10) / 10).toFixed(1);
+    const warn = !complete || bytes > STORAGE_WARN_BYTES;
+    add('worktrees', warn ? 'warn' : 'ok', L(
+      `${WORKTREES_DIR} · ${count} 个工作树，${complete ? '' : '抽样至少 '}${size} MiB`,
+      `${WORKTREES_DIR} · ${count} worktrees, ${complete ? '' : 'sampled at least '}${size} MiB`,
+    ), warn ? L('用 git worktree list 查看目录，再用 git status 检查需要保留的改动', 'Use git worktree list to locate checkouts and git status to review changes worth keeping') : null);
+  } catch (error) { add('worktrees', 'warn', error.message, L('检查工作树目录的访问权限', 'Check access to the worktree directory')); }
   const alive = all.filter((c) => c.proc?.alive);
   // ★ 共享进程下多个会话共用一个 PID：必须按 PID 去重，否则同一份 RSS 会被按会话
   //   重复累加，"RSS 合计"就会凭空翻几倍，把这行诊断变成误导。

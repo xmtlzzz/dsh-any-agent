@@ -100,11 +100,12 @@ export const SENTINEL_WAIT_SEC = TURN_MAX_MS > 0 ? Math.ceil(TURN_MAX_MS / 1000)
  * 路径放进单引号字面量：PowerShell 单引号里只有 `'` 需要转义（写成 `''`），
  * `$`、反引号都不展开，所以不会被路径内容注入。
  */
-export function psWaitCommand(sentinelPath, timeoutSec = SENTINEL_WAIT_SEC) {
+export function psWaitCommand(sentinelPath, timeoutSec = SENTINEL_WAIT_SEC, checkInbox = false) {
   const lit = `'${String(sentinelPath).replace(/'/g, "''")}'`;
+  const approval = checkInbox ? `if(Test-Path -LiteralPath ($f + '.approval')){ 'CHECK_INBOX'; exit 0 }; ` : '';
   return (
     `$f=${lit}; $dl=(Get-Date).AddSeconds(${Math.max(1, Math.floor(timeoutSec))}); ` +
-    `while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit 1 }; Start-Sleep -Seconds 2 }; 'DONE'`
+    `while(-not (Test-Path -LiteralPath $f)){ ${approval}if((Get-Date) -ge $dl){ ${checkInbox ? "'CHECK_INBOX'; exit 0" : "'TIMEOUT'; exit 1"} }; Start-Sleep -Seconds 1 }; 'DONE'`
   );
 }
 
@@ -185,6 +186,40 @@ export function renderSendResult(r) {
  * 后台收据的渲染：wait=false 直接走这里；wait=true 等超时会自动降级到这里。
  * 关键语义：**回合没有被取消**，只是我们不再原地等 —— 结果稍后由哨兵文件通知。
  */
+function approvalWaitHint(conv) {
+  return conv.onApproval === 'ask' ? L(
+    '\n审批模式为 ask：现在检查 dsh_inbox，运行回执中的等待命令，每次返回 CHECK_INBOX 都再次检查。用 dsh_approval_decide 裁决待审请求，然后继续等待完成文件。',
+    '\nApproval mode is ask: check dsh_inbox now, run the wait command in the receipt, and check again on every CHECK_INBOX. Resolve pending requests with dsh_approval_decide, then resume waiting for the result file.',
+  ) : '';
+}
+
+function runWaitCommands(hub, conv, sentinel, sentinelPosix) {
+  const ask = conv.onApproval === 'ask';
+  // Even if the filesystem cannot create the wake-up file, revisit the inbox before the approval expires.
+  const seconds = ask ? Math.max(1, Math.floor((hub.approvalTimeoutMs ?? 300000) / 2000)) : SENTINEL_WAIT_SEC;
+  const atDeadline = ask ? 'echo CHECK_INBOX; exit 0' : 'echo TIMEOUT; exit 1';
+  const approval = ask ? '[ -f "$sent.approval" ] && { echo CHECK_INBOX; exit 0; }; ' : '';
+  const psWait = psWaitCommand(sentinel, seconds, ask);
+  const bashWait =
+    `sent='${sentinelPosix.replaceAll("'", "'\\''")}'; \\\n` +
+    `dl=$(( $(date +%s)+${seconds} )); until [ -f "$sent" ]; do ${approval}[ $(date +%s) -ge $dl ] && { ${atDeadline}; }; sleep 2; done; echo DONE`;
+  const approvalFields = ask ? {
+    approval_check: 'dsh_inbox',
+    approval_file: sentinel + '.approval',
+    sentinel_wait_bash: bashWait,
+    ...(process.platform === 'win32' ? { sentinel_wait_powershell: psWait } : {}),
+  } : {};
+  return { bashWait, psWait, approvalFields };
+}
+
+function approvalReceipt(hub, conv, sentinel, sentinelPosix) {
+  if (conv.onApproval !== 'ask') return { fields: {}, text: '' };
+  const { bashWait, psWait, approvalFields } = runWaitCommands(hub, conv, sentinel, sentinelPosix);
+  const commands = [`Bash(run_in_background): ${bashWait}`];
+  if (process.platform === 'win32') commands.push(`PowerShell(run_in_background): ${psWait}`);
+  return { fields: approvalFields, text: approvalWaitHint(conv) + '\n' + commands.join('\n') };
+}
+
 export function backgroundReceipt(hub, conv, res) {
   const sentinel = res.sentinel_file ?? hub.runSentinelPath(conv.id, res.run_id);
   const sentinelPosix = toPosixPath(sentinel);
@@ -196,9 +231,8 @@ export function backgroundReceipt(hub, conv, res) {
         `Still running after ${waitedSec}s of waiting; it continues in the background (**the turn was not cancelled**).`,
       )
     : L('已在后台执行（**回合没有被取消**）。', 'Running in the background (**the turn was not cancelled**).');
-  const bashWait =
-    `  Bash(run_in_background): sent="${sentinelPosix}"; \\\n` +
-    `    dl=$(( $(date +%s)+${SENTINEL_WAIT_SEC} )); until [ -f "$sent" ]; do [ $(date +%s) -ge $dl ] && { echo TIMEOUT; exit 1; }; sleep 2; done; echo DONE\n`;
+  const hint = approvalWaitHint(conv);
+  const { bashWait, psWait, approvalFields } = runWaitCommands(hub, conv, sentinel, sentinelPosix);
   return {
     structured: {
       conversation_id: conv.id,
@@ -209,17 +243,18 @@ export function backgroundReceipt(hub, conv, res) {
       sentinel_file: sentinel,
       /** Bash/MSYS 形式（D:\a\b → /d/a/b）；非 Windows 等于 sentinel_file。 */
       sentinel_file_posix: sentinelPosix,
+      ...approvalFields,
       /** Windows 宿主：现成的 PowerShell 等待命令（路径已按单引号字面量转义）。 */
       ...(process.platform === 'win32'
-        ? { sentinel_wait_powershell: psWaitCommand(sentinel), sentinel_read_powershell: psReadCommand(sentinel) }
+        ? { sentinel_wait_powershell: psWait, sentinel_read_powershell: psReadCommand(sentinel) }
         : {}),
       ...(review ? { review } : {}),
     },
     text:
-      `${waited}${L('（', ' (')}run_id=${res.run_id}${L('）', ')')}\n\n` +
+      `${waited}${L('（', ' (')}run_id=${res.run_id}${L('）', ')')}${hint}\n\n` +
       L(
-        `【跑完自动通知，无需轮询】完成时（成功/失败/被取消）会原子写出这个文件（含最终结果，但**不含思考内容**）：\n`,
-        `[You are notified when it ends; no polling] On completion (success, failure or cancel) this file is written atomically (it holds the final result but **no reasoning**):\n`,
+        `回合完成时（成功/失败/被取消）会原子写出这个文件（含最终结果，但**不含思考内容**）：\n`,
+        `On completion (success, failure or cancel) this file is written atomically (it holds the final result but **no reasoning**):\n`,
       ) +
       `  ${sentinel}\n` +
       L(
@@ -231,20 +266,20 @@ export function backgroundReceipt(hub, conv, res) {
         `推荐用后台任务等它出现，文件一到就会唤醒你：\n`,
         `Wait for it with a background task; you are woken as soon as the file exists:\n`,
       ) +
-      bashWait +
+      `  Bash(run_in_background): ${bashWait}\n` +
       (process.platform === 'win32'
         ? L(
             `Windows 上 Bash 不可用（或会挂住）时，用 PowerShell 版本（原生路径，已转义好）：\n`,
             `On Windows, when Bash is unavailable (or hangs), use the PowerShell version (native path, already escaped):\n`,
           ) +
-          `  PowerShell(run_in_background): ${psWaitCommand(sentinel)}\n` +
+          `  PowerShell(run_in_background): ${psWait}\n` +
           L(
             `读取时必须带 -Encoding UTF8（Windows PowerShell 5.1 默认按 ANSI 读，会乱码/解析失败）：\n`,
             `Read it with -Encoding UTF8 (Windows PowerShell 5.1 reads as ANSI by default, which garbles the text and breaks parsing):\n`,
           ) +
           `  ${psReadCommand(sentinel)}\n`
         : '') +
-      (TURN_MAX_MS > 0
+      (hint ? '' : TURN_MAX_MS > 0
         ? L(
             `等待上限是回合总时长上限 + 5 分钟，哨兵一定先到；真等到 TIMEOUT 说明本服务被杀后没再起来 —— 重连本服务，哨兵会补出来。\n`,
             `The wait limit is the turn's maximum duration plus 5 minutes, so the sentinel arrives first; an actual TIMEOUT means this server was killed and never came back. Reconnect it and the sentinel is written.\n`,
@@ -299,6 +334,7 @@ export function replayRun(hub, conv, run, wantResult) {
     };
   }
   const review = conv.pendingReviewTicket?.(run.run_id) ?? null;
+  const approval = approvalReceipt(hub, conv, sentinel, sentinelPosix);
   return {
     structured: {
       conversation_id: conv.id,
@@ -310,6 +346,7 @@ export function replayRun(hub, conv, run, wantResult) {
       replayed: true,
       sentinel_file: sentinel,
       sentinel_file_posix: sentinelPosix,
+      ...approval.fields,
       ...(review ? { review } : {}),
     },
     text:
@@ -318,7 +355,7 @@ export function replayRun(hub, conv, run, wantResult) {
         `(Idempotent replay: this client_run_id is already running or queued; nothing was dispatched again) `,
       ) +
       `run_id=${run.run_id} status=${run.status}\n` +
-      sentinelLine +
+      sentinelLine + approval.text +
       (review ? `\n\n${renderReviewSection(review)}` : ''),
   };
 }
@@ -328,6 +365,7 @@ export function queuedReceipt(hub, conv, run, position) {
   const sentinel = hub.runSentinelPath(conv.id, run.run_id);
   const sentinelPosix = toPosixPath(sentinel);
   const review = conv.pendingReviewTicket?.(run.run_id) ?? null;
+  const approval = approvalReceipt(hub, conv, sentinel, sentinelPosix);
   return {
     structured: {
       conversation_id: conv.id,
@@ -335,6 +373,7 @@ export function queuedReceipt(hub, conv, run, position) {
       accepted: true,
       queued: true,
       queue_position: position,
+      ...approval.fields,
       status: 'queued',
       sentinel_file: sentinel,
       sentinel_file_posix: sentinelPosix,
@@ -345,7 +384,7 @@ export function queuedReceipt(hub, conv, run, position) {
         `已入队（第 ${position} 位）。当前回合结束后自动执行；**入队时不会写哨兵**，真正结束时才写：\n`,
         `Queued (position ${position}). It runs automatically after the current turn; **no sentinel is written when queued**, only when it really ends:\n`,
       ) +
-      `  ${sentinel}\n` +
+      `  ${sentinel}\n` + approval.text + '\n' +
       L(
         `用 dsh_queue list 查看/修改/删除；取消：dsh_queue(conversation_id, action="remove", run_id="${run.run_id}")。`,
         `Use dsh_queue list to inspect, change or delete; to cancel: dsh_queue(conversation_id, action="remove", run_id="${run.run_id}").`,

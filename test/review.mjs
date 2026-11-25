@@ -10,7 +10,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -156,8 +156,21 @@ try {
   check('dsh_get 显示已审核', /调用方审核 · pass/.test(gotReviewed.text), gotReviewed.text.slice(-300));
   check('内存 run.review 同步更新', gotReviewed.structured.run.review?.status === 'pass');
   const sentinelReviewed = JSON.parse(readFileSync(sentinelPath, 'utf8'));
+  if (process.platform !== 'win32') {
+    for (const file of [sentinelPath, reviewed.structured.review_file]) {
+      assert.equal(statSync(file).mode & 0o777, 0o600);
+    }
+  }
   check('★ 哨兵被回写为 pass', sentinelReviewed.result?.review?.status === 'pass', JSON.stringify(sentinelReviewed.result?.review));
   check('哨兵回写保留理由', /git diff/.test(String(sentinelReviewed.result?.review?.notes)));
+  const { reviewFilePath, writeReviewRecord } = await import('../src/review.mjs');
+  const blockedFile = reviewFilePath(conv.id, 'blocked-review');
+  mkdirSync(blockedFile);
+  assert.throws(() => writeReviewRecord({
+    ticket: { conversation_id: conv.id, run_id: 'blocked-review' }, verdict: 'pass',
+  }));
+  check('failed review publication removes its temporary file',
+    !readdirSync(dirname(blockedFile)).some(name => name.startsWith('blocked-review.review.json.tmp.')));
 
   console.log('\n[4] fail/partial 必须说明理由；可修订裁决');
   await assert.rejects(

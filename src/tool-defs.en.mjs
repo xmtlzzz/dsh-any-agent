@@ -85,7 +85,7 @@ export const TOOL_TEXT_EN = {
       'runs to the end with the result delivered through the sentinel file (timeout_ms=0 means wait forever). ' +
       'In both modes a small file holding the final result is written atomically when the turn ends. ' +
       '**Wait for it with a background task (Bash run_in_background + `until [ -f sentinel_file ]`; on Windows/PowerShell a ' +
-      '`Test-Path` loop, and the receipt contains ready-made commands) and you are woken when it lands; no polling needed.** ' +
+      '`Test-Path` loop, and the receipt contains ready-made commands) and you are woken when it lands. In ask mode, CHECK_INBOX means to check dsh_inbox, resolve pending approvals and resume waiting.** ' +
       'Once the file exists, read it for the result, or collect with dsh_get(conversation_id, run_id); dsh_read shows output ' +
       'while the turn is running. Reasoning is hidden by default (answer plus reasoning statistics only). ' +
       'Results and background receipts carry a `review` ticket (advisory by default): verify, then submit a verdict with ' +
@@ -331,7 +331,7 @@ export const INSTRUCTIONS_EN = `This server drives DeepSeek Harness (DSH) as a c
 
 [Flow] dsh_start(cwd?) -> dsh_send(conversation_id, prompt), non-blocking by default, returns run_id + sentinel_file at once -> wait for the sentinel -> read it or collect with dsh_get -> dsh_review. dsh_status / dsh_read / dsh_list(only_running=true) work at any time. dsh_release when done.
 
-[Waiting: the sentinel file, not polling] Every turn that ends (success, failure or cancel) writes a sentinel JSON atomically. Wait for it with a **background task** (the receipt has ready-made commands: sentinel_file_posix for Bash, sentinel_wait_powershell for PowerShell) and the host wakes you when it lands; read it for status and result (in Windows PowerShell read with -Encoding UTF8; the receipt has sentinel_read_powershell). wait=true blocks in place; a wait timeout only moves the turn to the background and never cancels it. Progress notifications are sent only when the call carries a progressToken.
+[Waiting] In ask mode, use the receipt’s waiter. On CHECK_INBOX, check dsh_inbox, decide pending approvals and resume the wait. Every turn that ends (success, failure or cancel) writes a sentinel JSON atomically. Wait for it with a **background task** (the receipt has ready-made commands: sentinel_file_posix for Bash, sentinel_wait_powershell for PowerShell) and the host wakes you when it lands; read it for status and result (in Windows PowerShell read with -Encoding UTF8; the receipt has sentinel_read_powershell). wait=true blocks in place; a wait timeout only moves the turn to the background and never cancels it. Progress notifications are sent only when the call carries a progressToken.
 
 [Write lock] One writer per conversation at a time. On "already owned by an active write handle" (or a vague Internal error) do not retry; read lock_holder from dsh_status: stale-mcp -> dsh_takeover; live-mcp -> dsh_release on that side, or dsh_takeover(force=true) if you must; none usually means the GUI holds it -> ask the user to close it there. This server never kills the GUI.
 

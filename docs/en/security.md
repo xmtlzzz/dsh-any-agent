@@ -38,11 +38,12 @@ Verified experimentally ([`test/workspace-effect.mjs`](../../test/workspace-effe
 Maintenance CLI:
 
 ```bash
-node bin/dsh-any-agent-workspaces.mjs --list                  # inspect the registry
-node bin/dsh-any-agent-workspaces.mjs --backfill              # register every session found on disk
-node bin/dsh-any-agent-workspaces.mjs --prune-temp            # drop temp-directory entries
-node bin/dsh-any-agent-workspaces.mjs --prune-empty           # drop empty workspaces whose path is gone
-node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # delete test sessions (strict rules)
+dsh-any-agent-workspaces --help
+dsh-any-agent-workspaces --list                  # inspect the registry
+dsh-any-agent-workspaces --backfill              # register every session found on disk
+dsh-any-agent-workspaces --prune-temp            # drop temp-directory entries
+dsh-any-agent-workspaces --prune-empty           # drop empty workspaces whose path is gone
+dsh-any-agent-workspaces --purge-test-sessions   # delete test sessions (strict rules)
 ```
 
 > ⚠️ Before restarting DSH, **don't touch workspaces in the GUI** — the server will write its in-memory state back over the file.
@@ -95,3 +96,5 @@ Silent by default — **not one byte is written**.
 Network: `dsh_doctor` checks this package's latest release at `registry.npmjs.org` with a fixed package name and an `Accept` header. It accepts only complete SemVer strings from the response and cache, and uses fixed error messages. Set `DSH_MCP_UPDATE_CHECK=0` to disable the check. Model requests are made by DSH, not by this server.
 
 On the DSH side (not under this server's control): the session logs in `~/.dsh/sessions` (with full reasoning, see above); this server also registers each conversation's workspace in DSH's `workspace.json` so the GUI shows it (`DSH_MCP_REGISTER_WORKSPACE=0` turns that off).
+
+The `registry_lock` check reports the writer PID and lock age. A live owner keeps its lock. The `runs_dir` check also verifies hard-link support. The `worktrees` check estimates the total file size of managed checkouts; a partial scan shows a lower bound. Usage over 500 MiB or an incomplete scan raises a warning. Review retained changes with `git worktree list` and `git status`.

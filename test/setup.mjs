@@ -42,10 +42,10 @@ function sandbox(configs = {}) {
   return makeSandboxHome('dsh-setup-', configs);
 }
 
-function runSetup(home, args = []) {
+function runSetup(home, args = [], bin = '/fake/dsh/bin.js') {
   const r = spawnSync(NODE, [SETUP, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, HOME: home, USERPROFILE: home, APPDATA: home, DSH_BIN: '/fake/dsh/bin.js' },
+    env: { ...process.env, HOME: home, USERPROFILE: home, APPDATA: home, DSH_BIN: bin },
   });
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
 }
@@ -328,6 +328,24 @@ console.log('\n[11] repair refreshes the launch fields without replacing existin
       backupsIn(join(home, '.cursor')).length === 1, again.out);
     const conflict = runSetup(home, ['--repair', '--yes', '--daemon', ...selected]);
     check('repair rejects flags that would rewrite existing settings', conflict.code === 2);
+    const invalid = runSetup(home, ['--repair', '--reset-env', '--json']);
+    check('invalid reset combinations return the JSON error contract', invalid.code === 2 && JSON.parse(invalid.out).mode === 'error');
+    const update = runSetup(home, ['--yes', '--daemon', ...selected]);
+    check('regular setup preserves custom environment in JSON, nested Zed, opencode and TOML', update.code === 0 &&
+      [cursor, zed, opencode].every(file => read(file).includes('/custom/runtime')) &&
+      read(codex).includes('DSH_MCP_APPROVAL = "ask"'), update.out);
+    const repeat = runSetup(home, ['--yes', '--daemon', ...selected]);
+    check('preserving environment is idempotent', repeat.code === 0 && /Summary: 0 changed/.test(repeat.out));
+    const keepBin = runSetup(home, ['--yes', '--daemon', ...selected], '');
+    check('reinstall without DSH_BIN keeps the configured path in all client formats', keepBin.code === 0 &&
+      [cursor, zed, opencode, codex].every(file => read(file).includes('/fake/dsh/bin.js')));
+    const setBin = runSetup(home, ['--yes', '--daemon', ...selected], '/changed/entry.js');
+    check('an explicit DSH_BIN replaces the configured path', setBin.code === 0 &&
+      [cursor, zed, opencode, codex].every(file => read(file).includes('/changed/entry.js') && !read(file).includes('/fake/dsh/bin.js')));
+    const reset = runSetup(home, ['--yes', '--reset-env', ...selected]);
+    check('explicit reset clears custom settings', reset.code === 0 &&
+      [cursor, zed, opencode].every(file => !read(file).includes('/custom/runtime')) &&
+      !read(codex).includes('DSH_MCP_APPROVAL'), reset.out);
   } finally {
     removeSandbox(home);
   }
@@ -335,6 +353,27 @@ console.log('\n[11] repair refreshes the launch fields without replacing existin
 
 {
   const file = '.codex/config.toml';
+  for (const original of [
+    '[mcp_servers]\ndsh-any-agent = { command = "old", args = ["a", "b"], env = { CUSTOM = "a,b}#", DSH_MCP_LOG = "debug" } }\n',
+    '[mcp_servers.dsh-any-agent]\ncommand = "old"\nenv.CUSTOM = "a,b}#"\nenv.DSH_MCP_LOG = "debug"\n',
+  ]) {
+    const home = sandbox({ [file]: original });
+    try {
+      const result = runSetup(home, ['--yes', '--only', 'codex']);
+      const contents = readFileSync(join(home, file), 'utf8');
+      check('inline and dotted TOML keep custom values with delimiters and refresh managed values',
+        result.code === 0 && contents.includes('"a,b}#"') && !contents.includes('"debug"'), result.out);
+    } finally { removeSandbox(home); }
+  }
+  for (const bad of ['123', '{ a = 1 }']) {
+    const original = '[mcp_servers]\ndsh-any-agent = { command = "old", env = { BAD = ' + bad + ' } }\n';
+    const home = sandbox({ [file]: original });
+    try {
+      const result = runSetup(home, ['--yes', '--only', 'codex']);
+      check('setup rejects a non-string inline TOML environment value without changing the file',
+        result.code !== 0 && result.out.includes('--reset-env') && readFileSync(join(home, file), 'utf8') === original, result.out);
+    } finally { removeSandbox(home); }
+  }
   const neighbor = '["mcp_servers.dsh-any-agent"]\nkeep = true\n';
   const quoted = '["mcp_servers"."dsh-any-agent"]\ncommand = "old"\n';
   const home = sandbox({ [file]: quoted + neighbor });

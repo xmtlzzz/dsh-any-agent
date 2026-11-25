@@ -129,6 +129,9 @@ export async function startDashboard({ tail, port = 0, pollMs = 500, token = ran
       return;
     }
     if (url.pathname === '/events') {
+      const disconnect = () => clients.delete(res);
+      res.on('error', disconnect);
+      res.once('close', disconnect);
       res.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
         Connection: 'keep-alive',
@@ -137,7 +140,6 @@ export async function startDashboard({ tail, port = 0, pollMs = 500, token = ran
       res.write('retry: 2000\n\n');
       clients.add(res);
       send(res, snapshot);
-      req.on('close', () => clients.delete(res));
       return;
     }
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });

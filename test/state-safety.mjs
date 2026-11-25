@@ -7,7 +7,7 @@
  *   [4] 非法数值环境变量落到安全侧（负 TTL 不清空哨兵；空串权限/思考档回落默认）
  */
 
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, utimesSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -61,6 +61,19 @@ try {
   const normal = join(root, 'writable');
   cfg.assertWritableDir(normal, '测试目录');
   check('可写目录被创建', existsSync(normal));
+  cfg.probeWritableDir(normal, { hardlink: true });
+  check('hard-link probe removes both names', readdirSync(normal).length === 0);
+  const unsupported = runNode(`import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    let cleanup = 0;
+    fs.linkSync = () => { throw Object.assign(new Error('unsupported hard links'), { code: 'ENOTSUP' }); };
+    fs.rmSync = () => { cleanup++; throw new Error('cleanup denied'); };
+    syncBuiltinESMExports();
+    const cfg = await import(${JSON.stringify(CONFIG)});
+    try { cfg.probeWritableDir(process.env.PROBE_DIR, { hardlink: true }); }
+    catch (e) { console.log(JSON.stringify({ code: e.code, cleanup })); }`, { PROBE_DIR: normal });
+  check('unsupported hard links retain the original failure even when probe cleanup also fails',
+    unsupported.value?.code === 'ENOTSUP' && unsupported.value?.cleanup === 1, unsupported.stderr);
   const blocked = join(root, 'not-a-dir');
   writeFileSync(blocked, 'x');
   let threw = null;
@@ -93,8 +106,28 @@ try {
   const registryModule = new URL('../src/registry.mjs', import.meta.url).href;
   const crash = runNode(`import { withRegistryLock } from ${JSON.stringify(registryModule)};
     await withRegistryLock(process.env.REGISTRY, () => process.exit(17));`, { REGISTRY: cfg.STATE_FILE });
+  const markerName = readdirSync(cfg.STATE_FILE + '.lock')[0];
+  const deadPid = markerName.split('-')[0];
+  const abandoned = mkdtempSync(cfg.STATE_FILE + '.lock-' + deadPid + '-');
+  const active = mkdtempSync(cfg.STATE_FILE + '.lock-' + process.pid + '-');
+  await hub.load();
+  check('startup removes an abandoned staging directory and preserves a live writer staging its marker',
+    !existsSync(abandoned) && existsSync(active));
   await hub.save();
   check('持锁进程退出后仍可保存注册表', crash.code === 17 && !existsSync(cfg.STATE_FILE + '.lock'));
+  const { inspectRegistryLock, withRegistryLockSync } = await import(registryModule);
+  const lockDir = cfg.STATE_FILE + '.lock';
+  mkdirSync(lockDir);
+  const ownerFile = join(lockDir, process.pid + '-00000000-0000-0000-0000-000000000000');
+  const old = new Date(Date.now() - 120000);
+  writeFileSync(ownerFile, String(Math.round(Date.now() - process.uptime() * 1000)));
+  utimesSync(ownerFile, old, old);
+  check('a live owner retains an old lock', inspectRegistryLock(cfg.STATE_FILE).state === 'held');
+  writeFileSync(ownerFile, '1');
+  utimesSync(ownerFile, old, old);
+  check('process identity identifies a reused PID', inspectRegistryLock(cfg.STATE_FILE).state === 'reused');
+  withRegistryLockSync(cfg.STATE_FILE, () => {});
+  check('the next writer recovers the stale lock', !existsSync(lockDir));
 
   // All four processes load the same snapshot before any writer can proceed.
   const writer = `import { Hub, Conversation } from ${JSON.stringify(HUB)};

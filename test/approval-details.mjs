@@ -1,14 +1,15 @@
 /** Approval context and lifecycle regression: no DSH process or model request. */
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-approval-details-'));
 process.env.DSH_MCP_STATE = join(root, 'state.json');
 process.env.DSH_MCP_APPROVAL = 'auto-allow';
+delete process.env.DSH_MCP_APPROVAL_TIMEOUT_MS;
 const { Hub, Conversation } = await import('../src/hub.mjs');
 const { createHandlers } = await import('../src/tools.mjs');
 const logs = [];
@@ -68,6 +69,37 @@ try {
   });
 
   console.log('\n[2] credential fields and common inline literals are redacted');
+  const run = conv.createRun('approval wake-up');
+  conv.currentRun = run;
+  const { backgroundReceipt, queuedReceipt, replayRun } = await import('../src/tool-render.mjs');
+  const receipt = backgroundReceipt(hub, conv, run);
+  const wakeFile = receipt.structured.approval_file;
+  const overlapping = [conv.onPermissionRequest(request()), conv.onPermissionRequest(request())];
+  const ids = [...conv.pendingApprovals.keys()];
+  check('ask receipt wakes for approvals without writing their contents', () => {
+    assert.equal(receipt.structured.approval_check, 'dsh_inbox');
+    assert.match(receipt.text, /CHECK_INBOX/);
+    assert.equal(readFileSync(wakeFile).length, 0);
+    for (const other of [queuedReceipt(hub, conv, run, 1), replayRun(hub, conv, run, false)]) {
+      assert.equal(other.structured.approval_file, wakeFile);
+      assert.equal(other.structured.sentinel_wait_bash, receipt.structured.sentinel_wait_bash);
+      assert.ok(other.text.includes(receipt.structured.sentinel_wait_bash));
+      if (process.platform === 'win32') assert.ok(other.text.includes(receipt.structured.sentinel_wait_powershell));
+    }
+    assert.match(receipt.structured.sentinel_wait_bash, /\+150\s*\)\)/);
+    if (process.platform !== 'win32') {
+      const wait = spawnSync('/bin/sh', ['-c', receipt.structured.sentinel_wait_bash], { encoding: 'utf8', timeout: 5000 });
+      assert.equal(wait.status, 0, wait.stderr);
+      assert.equal(wait.stdout.trim(), 'CHECK_INBOX');
+    }
+  });
+  conv.decideApproval(ids[0], 'deny');
+  await overlapping[0];
+  check('one remaining approval keeps the wake-up file', () => assert.ok(existsSync(wakeFile)));
+  conv.decideApproval(ids[1], 'deny');
+  await overlapping[1];
+  check('last decision clears the wake-up file', () => assert.ok(!existsSync(wakeFile)));
+  conv.currentRun = null;
   const hidden = conv.onPermissionRequest(request({
     command: 'node ./probe.cjs --api-key SYNTHETIC_FLAG_CREDENTIAL; TOKEN=SYNTHETIC_ASSIGNMENT; Write-Output sk-SYNTHETIC_CREDENTIAL_123',
     justification: 'Authorization: Bearer SYNTHETIC_BEARER_CREDENTIAL',

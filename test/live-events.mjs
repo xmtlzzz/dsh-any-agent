@@ -364,6 +364,18 @@ try {
 
   console.log('\n[8] 写入侧的防御');
   check('非法会话 id 不写（防路径穿越）', () => live.emitLive('../escape', 'tool', {}) === false && !existsSync(join(root, 'escape')));
+  check('log rotation retries on the first write after the destination becomes available', () => {
+    const id = 'live-events-rotation';
+    const dir = live.liveConvDir(id);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, live.LIVE_FILE);
+    writeFileSync(file, Buffer.alloc(5 * 1024 * 1024));
+    mkdirSync(file + '.1');
+    if (!live.emitLive(id, 'first')) return false;
+    rmSync(file + '.1', { recursive: true });
+    return live.emitLive(id, 'second') && existsSync(file + '.1') &&
+      JSON.parse(readFileSync(file, 'utf8')).type === 'second';
+  });
   const big = 'y'.repeat(20_000);
   live.emitLive('live-events-big', 'tool', { name: 'pwsh' }, { input_preview: big });
   const bigEv = events('live-events-big')[0];

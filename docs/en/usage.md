@@ -36,6 +36,8 @@ If the host cancels a blocking MCP request, the server stops waiting and sending
 
 ## 🔔 Workflow: get notified on completion (no polling)
 
+**When approvals are set to `ask`**, use the wait commands in the receipt. They also watch an empty `.approval` file. On `CHECK_INBOX`, check `dsh_inbox`, resolve pending requests with `dsh_approval_decide` and resume waiting. Only `DONE` means the result file is ready. While waiting for a queued run, also check approvals for the active turn. If neither file appears, the command prompts an inbox check after half the approval timeout (150 seconds by default).
+
 Besides `run_id`, `wait=false` returns a **`sentinel_file`** path plus **`sentinel_file_posix`** (the Bash/MSYS form — use it directly; hand-converting Windows paths is the easiest way to make your waiter hang until timeout). When the turn ends — **whether it succeeds, fails, or is cancelled** — the service **atomically writes** a small file there containing the final `status`, `result` and the **review ticket** (`result.review`). So you neither poll nor block: **wait for that file with a background task in your own host (Claude/Codex); the moment it appears, you're woken up.**
 
 ```bash

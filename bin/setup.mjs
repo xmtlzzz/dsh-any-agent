@@ -76,6 +76,7 @@ if (has('--help') || has('-h')) {
     '  dsh-any-agent-setup --repair [--yes]    update the existing launch command and arguments\n' +
     '  dsh-any-agent-setup --yes --only a,b    only these clients\n' +
     '  dsh-any-agent-setup --yes --permission read-only\n' +
+    '  dsh-any-agent-setup --yes --reset-env   discard custom environment settings\n' +
     '  dsh-any-agent-setup --yes --daemon      run turns in a resident process that\n' +
     '                                          outlives the client (DSH_MCP_DAEMON=1)\n' +
     '  dsh-any-agent-setup --remove --yes      unregister\n' +
@@ -125,6 +126,12 @@ const tick = (s) => log('  OK   ' + s);
 const dash = (s) => log('  ---  ' + s);
 const bang = (s) => log('  FAIL ' + s);
 
+if (has('--reset-env') && (REPAIR || REMOVE)) {
+  const error = '--reset-env applies only to installation';
+  if (JSON_OUT) process.stdout.write(JSON.stringify({ ok: false, mode: 'error', error, clients: [] }) + '\n');
+  else bang(error);
+  process.exit(2);
+}
 if (REPAIR && (REMOVE || has('--permission') || DAEMON)) {
   const error = '--repair updates the launch command and arguments; run --remove, --permission or --daemon separately';
   if (JSON_OUT) process.stdout.write(JSON.stringify({ ok: false, mode: 'error', error, clients: [] }) + '\n');
@@ -158,7 +165,7 @@ if (unknown.length) {
 
 const launch = defaultLaunch();
 const env = desiredEnv(PERMISSION, DAEMON ? { DSH_MCP_DAEMON: '1' } : {});
-const ctx = { dirs, remove: REMOVE, repair: REPAIR, write: WRITE, launch, env, byId, force: FORCE };
+const ctx = { dirs, remove: REMOVE, repair: REPAIR, resetEnv: has('--reset-env'), write: WRITE, launch, env, byId, force: FORCE };
 
 if (!JSON_OUT) {
   log('');
@@ -169,7 +176,7 @@ if (!JSON_OUT) {
   if (!REPAIR) {
     log('  permission : ' + PERMISSION);
     log('  daemon     : ' + (DAEMON ? 'on (DSH_MCP_DAEMON=1)' : 'off'));
-    log('  DSH_BIN    : ' + (process.env.DSH_BIN || '(unset -- auto-detect at runtime)'));
+    log('  DSH_BIN    : ' + (process.env.DSH_BIN || '(unset in this shell)'));
   }
   log('  launch     : ' + launch.command + (launch.args.length ? ' ' + launch.args.join(' ') : '') + '   (' + launch.style + ')');
   log('');

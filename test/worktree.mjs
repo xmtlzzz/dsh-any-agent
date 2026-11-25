@@ -31,7 +31,7 @@ process.env.DSH_BIN = join(HERE, 'fake-acp.mjs');
 process.env.FAKE_ACP_DIR = join(root, 'fake-acp');
 process.env.DSH_MCP_SHARED_PROCESS = '0';
 
-const { createWorktree, removeWorktree, discardWorktree } = await import('../src/worktree.mjs');
+const { createWorktree, removeWorktree, discardWorktree, inspectWorktrees } = await import('../src/worktree.mjs');
 
 let passed = 0;
 let failed = 0;
@@ -68,6 +68,11 @@ try {
   const repo = makeRepo('repo-a');
   const head = git(repo, 'rev-parse', 'HEAD');
   const wt = await createWorktree(repo, { root: wtRoot });
+  await check('doctor counts managed worktrees and labels a partial size scan', async () => {
+    const usage = await inspectWorktrees(wtRoot);
+    const sample = await inspectWorktrees(wtRoot, 0);
+    return usage.count === 1 && usage.complete && usage.bytes > 0 && sample.count === 1 && !sample.complete;
+  });
   await check('目录在 worktree 根下、不在仓库里', () => wt.path.startsWith(wtRoot + sep) && !resolve(wt.path).startsWith(repo + sep));
   await check('分支名 dsh/… 且已建出', () => /^dsh\/\d{8}-\d{6}-[0-9a-f]{4}$/.test(wt.branch) && branches(repo).includes(wt.branch), wt.branch);
   await check('基于主检出的 HEAD', () => wt.base === head && git(wt.path, 'rev-parse', 'HEAD') === head);
