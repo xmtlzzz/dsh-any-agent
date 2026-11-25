@@ -62,7 +62,7 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 | `debug` | 更细的本服务事件；仍不打印 DSH 输出 |
 | `DSH_MCP_LOG_STDERR=1` | 额外转发 DSH 原始 stderr（**可能含思考内容**） |
 
-**本服务不把思考内容写进自己的落盘物**；它只会落盘调用方离线收活/审核所需的正文，但从不落盘思考文本：
+**落盘的回合结果默认省略思考正文。** 本服务保存答复和审核证据，便于调用方断线后取回。
 
 - 不写日志（默认静默）；状态文件与 `<状态目录>/meta/` 下的会话元数据侧车都只有元数据（id、cwd、权限、计数、标题提示），冒烟测试里有一条断言专门守注册表。
 - **异步完成哨兵需要把正文写进文件**（否则调用方无法离线收活），载荷还包含用量与（已按审批规则脱敏的）工具输入，但 `result.thinking` 会被**剥掉**，并始终给出布尔 `thinking_omitted`。测试里专门验证了：即使请求 `reasoning=full`，哨兵里也不出现任何思考文本——而同一 run 在内存（`dsh_get`）里仍能看到。设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 可刻意打破这条。
@@ -70,11 +70,11 @@ node bin/dsh-any-agent-workspaces.mjs --purge-test-sessions   # 删测试会话�
 - 哨兵**与审核记录**默认 7 天后由启动清理删除（`DSH_MCP_SENTINEL_TTL_MS`，`0` 表示永久保留）。
 - live 事件流（`<状态目录>/live/`，供 `watch` / `dashboard` 查看）默认带**脱敏后的**命令、路径与 prompt 预览，暴露面不超过哨兵；不含思考内容，同样按 7 天清理。不想落这些预览就设 `DSH_MCP_LIVE=meta`，完全不要就设 `off`。`dashboard` 只监听 `127.0.0.1`，要求一次性 token 并校验 Host 头，且是只读的。
 
-> ⚠️ **DSH 自己会在 `~/.dsh/sessions` 写会话日志，而且其中包含完整 reasoning 文本**（即使 `reasoning=hide` 也照存）。那是 resume 的依据，不在本服务控制范围内；“思考不落盘”的绝对表述只适用于**本服务自己的**日志/哨兵/注册表。
+> DSH 会在 `~/.dsh/sessions` 中保存自己的会话日志，用于恢复对话。即使设置 `reasoning=hide`，这份日志仍包含完整的思考正文。
 
 ### 📁 本服务写到磁盘上的东西
 
-`<状态目录>` 默认是 `~/.dsh/.dsh-any-agent/`（跟着 `DSH_MCP_STATE` 走）。下面没有一处保存思考正文。
+`<状态目录>` 默认是 `~/.dsh/.dsh-any-agent/`，跟随 `DSH_MCP_STATE`。开启 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 后，如果回合返回了 `result.thinking`，完成哨兵和临时的 `.running` 结果检查点都可能保存它。
 
 | 路径 | 内容 | 保留多久 | 怎么关 / 清 |
 |---|---|---|---|

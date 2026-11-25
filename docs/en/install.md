@@ -2,7 +2,7 @@
 
 # 📦 Requirements
 
-- **Node.js ≥ 22.15** — the server uses `zstdDecompressSync` from `node:zlib` to read DSH session headers, and that API does not exist before 22.15
+- **Node.js ≥ 22.15** runs this MCP server. The npm distribution of DSH requires Node.js ≥ 24.9 starting with `0.2.2-rc.1`. When using desktop DSH, the server launches DSH with the desktop app’s bundled runtime.
 - **DSH installed** (`@deepseek-ai/dsh`), with working credentials under `~/.dsh`
 - A working provider/model route in your local DSH configuration. The server prepares its `dsh-mcp` ACP profile automatically from that route; no provider config or credentials are bundled.
 

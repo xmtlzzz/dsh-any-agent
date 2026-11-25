@@ -48,10 +48,10 @@ DSH (DeepSeek Harness) can do all of that — it has file/shell tools, skills, s
 | 🌿 **Edit the same repository at the same time** | `dsh_start(isolation="worktree")` gives the conversation its own Git worktree and branch while you keep editing the original directory. Review the changes in the worktree and merge its commits when ready. Worktree isolation is off by default. |
 | 🪟 **Many conversations at once** | `dsh_list(only_running)` shows what's live; `dsh_read` gives cursor-based incremental output. Cycle between them like windows. |
 | 👀 **You can see it yourself** | `dsh-any-agent watch` (terminal) or `dsh-any-agent dashboard` (local read-only web page) lays dispatched work out as a call chain — client → conversation → run → tool calls / approvals — with per-run tokens and context-window use, updating while the run is going. Separate processes, never touch the write lock, and show work from every client together. |
-| 🧠 **Reasoning hidden by default** | You get "thought for N chars / M seconds" statistics instead of context-burning prose — and it is never logged, never written to disk. |
+| 🧠 **Reasoning hidden by default** | The caller gets character and timing statistics. The MCP server omits reasoning from stored results by default. DSH keeps its own session log for resume. |
 | 🤫 **Silent by default** | Not one byte on stderr, so nothing pollutes your host's logs. stdout carries the protocol and nothing else. |
 | 🧩 **Capabilities compose** | DSH can mount its own MCP servers (IDA Pro, browsers, your internal tooling), so this is a bridge to a whole toolbox. |
-| 🛡️ **Read-only that really is read-only** | `read-only` sandbox plus auto-denied approvals, for working on untrusted samples. |
+| 🛡️ **Read-only sessions** | DSH restricts its file and shell tools and denies approval requests. External MCP tools use the permissions of their own servers. |
 | 🔎 **Caller review, not blind relay** | Every result carries a `review` ticket (checklist + evidence + `dsh_review` entry). The caller verifies with its own tools, then records `pass` / `partial` / `fail`. Advisory by default — it never blocks the next dispatch, and a failed review is not silently fed back to DSH. |
 
 ## 🧭 Positioning: a dispatcher, not a capability aggregator
@@ -75,8 +75,9 @@ server does not grow one MCP tool per DSH feature.
 
 **Team mode (opt-in since 0.5.0)**: off by default. Run `dsh-any-agent team on`
 and reconnect to use the `dsh-team` profile by default. From DSH `0.2.2-rc.2`, new
-sessions use DSH's shared task board and standard subagent tools. Earlier DSH
-versions use the experimental team tools. Teammates share one workspace.
+sessions use DSH's shared task board and standard subagent tools. DSH
+`0.1.7-rc.1` through `0.2.2-rc.1` replaces the standard subagent tools with
+nine experimental team tools. Teammates share one workspace in both modes.
 
 **Only dispatch semantics become tools**: start, send, read, get, review, interject,
 interrupt, approve, queue, inbox, status, release, takeover, doctor. No file I/O, no

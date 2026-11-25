@@ -27,7 +27,7 @@
 | `DSH_MCP_AUDIT_FILE` | 空（关闭） | 元数据审计 JSONL 路径。只记事件、会话/回合 ID、决定与计数；**不记** prompt、正文、思考、工具输入。10MB 滚动到 `.1` |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | `dsh_list` 磁盘探测结果的缓存时长（探测要 spawn 一个 DSH 进程，实测约 1 秒） |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000`（7 天） | 启动时清理超过此时长的哨兵、幂等收据和审核记录。`0` 关闭清理 |
-| `DSH_MCP_SENTINEL_INCLUDE_REASONING` | 未设置 | `1` 会把 `result.thinking` 一并写进哨兵（**打破"思考不落盘"的保证**）；answer/error/title/工具输入仍会脱敏 |
+| `DSH_MCP_SENTINEL_INCLUDE_REASONING` | 未设置 | 设为 `1` 后，回合返回的 `result.thinking` 会存入临时 `.running` 结果检查点和完成哨兵。答复、错误、标题和工具输入仍会脱敏。 |
 | `DSH_MCP_UPDATE_CHECK` | `1` | `dsh_doctor` 是否去 npm 查新版本（只在调用 doctor 时、只请求本包的 latest、最多 4 秒、缓存 24 小时）。`0` = 不联网 |
 | `DSH_MCP_SENTINEL_TOOL_INPUTS` | `1` | `0` = 哨兵里不写工具输入（命令、路径、写入的文件内容），每个工具只留名字、状态与 `input_chars`，自动放行审批摘要也去掉 `command_preview`。内存里的 `dsh_get` 不受影响 |
 | `DSH_MCP_REVIEW` | `advisory` | 调用方审核策略。`advisory`（默认）给每个结果/哨兵附审核单（清单 + 证据 + `dsh_review` 入口），**但不阻塞**后续派活；`off` 关闭自动审核单。单会话/单次派活可用 `review` 参数覆盖 |

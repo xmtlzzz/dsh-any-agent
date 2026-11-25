@@ -27,7 +27,7 @@
 | `DSH_MCP_AUDIT_FILE` | empty (off) | Metadata audit JSONL path. Records events, conversation/run ids, decisions and counts; **never** prompts, answers, thinking or tool input. Rotates at 10 MB |
 | `DSH_MCP_LIST_PROBE_TTL_MS` | `10000` | Cache lifetime for `dsh_list`'s on-disk probe (the probe spawns a DSH process and takes ~1 s) |
 | `DSH_MCP_SENTINEL_TTL_MS` | `604800000` (7 days) | Startup pruning age for sentinels, idempotency receipts and review records. `0` disables pruning |
-| `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` writes `result.thinking` into the sentinel (**breaks the never-on-disk guarantee**); answer/error/title/tool inputs are still credential-redacted |
+| `DSH_MCP_SENTINEL_INCLUDE_REASONING` | unset | `1` retains `result.thinking`, when present, in both the pending `.running` checkpoint and the completion sentinel. Credential redaction still applies to answers, errors, titles and tool inputs. |
 | `DSH_MCP_UPDATE_CHECK` | `1` | Whether `dsh_doctor` asks npm for a newer version (only when doctor is called; requests this package's latest only; 4 s at most; cached 24 hours). `0` = no network |
 | `DSH_MCP_SENTINEL_TOOL_INPUTS` | `1` | `0` = sentinels carry no tool inputs (commands, paths, written file contents); each tool keeps its name, status and `input_chars`, and auto-approval summaries drop `command_preview`. `dsh_get` from memory is unaffected |
 | `DSH_MCP_REVIEW` | `advisory` | Caller-review policy. `advisory` (default) attaches a review ticket (checklist + evidence + `dsh_review` entry) to every result and sentinel **without blocking later sends**; `off` disables automatic tickets. Per-conversation/per-send overrides use the `review` argument |
