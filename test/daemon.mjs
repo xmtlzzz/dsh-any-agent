@@ -10,6 +10,7 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -198,6 +199,22 @@ try {
   await check('信息文件随之删除', () => infoFiles().length === 0, JSON.stringify(infoFiles()));
 
   console.log('\n[6] 日志滚动');
+  await check('failed startup releases its endpoint and the proxy falls back promptly', () => {
+    const state = join(root, 'startup-failure');
+    const blocked = join(root, 'runs-is-a-file');
+    writeFileSync(blocked, '');
+    const env = { ...process.env, ...baseEnv, DSH_MCP_STATE: join(state, 'state.json'), DSH_MCP_RUNS_DIR: blocked };
+    const probe = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `import { daemonEndpoint } from ${JSON.stringify(new URL('../src/daemon.mjs', import.meta.url).href)}; console.log(JSON.stringify(daemonEndpoint()))`],
+      { encoding: 'utf8', env });
+    const endpoint = JSON.parse(probe.stdout);
+    const cli = join(HERE, '..', 'bin', 'dsh-any-agent.mjs');
+    for (const args of [['--daemon'], []]) {
+      const child = spawnSync(process.execPath, [cli, ...args], { env, encoding: 'utf8', timeout: 12_000 });
+      if (child.status !== 1 || existsSync(endpoint.infoFile) || existsSync(endpoint.path)) return false;
+    }
+    return true;
+  });
   // 常驻进程的 stderr 每次启动都追加到 daemon-<id>.log：超过 10 MB 时下次启动先滚动成 .1。
   const logFile = join(stateDir, `daemon-${id}.log`);
   writeFileSync(logFile, Buffer.alloc(10 * 1024 * 1024 + 1, 0x41));

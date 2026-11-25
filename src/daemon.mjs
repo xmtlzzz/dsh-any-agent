@@ -23,7 +23,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -149,13 +149,18 @@ function spawnDaemon(ep) {
   } catch {
     /* 日志写不了就不要日志 */
   }
-  const child = spawn(process.execPath, [BIN, '--daemon'], {
-    detached: true,
-    stdio: ['ignore', 'ignore', err],
-    windowsHide: true,
-    env: process.env,
-  });
-  child.unref();
+  try {
+    const child = spawn(process.execPath, [BIN, '--daemon'], {
+      detached: true,
+      stdio: ['ignore', 'ignore', err],
+      windowsHide: true,
+      env: process.env,
+    });
+    child.unref();
+    return child;
+  } finally {
+    if (typeof err === 'number') closeSync(err);
+  }
 }
 
 /**
@@ -166,9 +171,18 @@ export async function runProxy({ log, startTimeoutMs = 15_000 }) {
   const ep = daemonEndpoint();
   let socket = await tryConnect(ep);
   if (!socket) {
-    spawnDaemon(ep);
+    let failed = false;
+    try {
+      const child = spawnDaemon(ep);
+      child.once('error', () => { failed = true; });
+      // A clean exit can mean a concurrent launcher already owns the endpoint.
+      child.once('exit', (code) => { failed = code !== 0; });
+    } catch (error) {
+      log.info(`[dsh-any-agent] Could not launch daemon: ${error.message}`);
+      return false;
+    }
     const deadline = Date.now() + startTimeoutMs;
-    while (!socket && Date.now() < deadline) {
+    while (!socket && !failed && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 150));
       socket = await tryConnect(ep, 1000);
     }
@@ -225,8 +239,12 @@ function authenticate(socket, token, onAuthed) {
 /** 原子写信息文件（只有当前用户能读：令牌在里面）。 */
 function writeInfo(ep, info) {
   const tmp = `${ep.infoFile}.tmp.${process.pid}`;
-  writeFileSync(tmp, JSON.stringify(info, null, 2), { encoding: 'utf8', mode: 0o600 });
-  renameSync(tmp, ep.infoFile);
+  try {
+    writeFileSync(tmp, JSON.stringify(info, null, 2), { encoding: 'utf8', mode: 0o600 });
+    renameSync(tmp, ep.infoFile);
+  } finally {
+    try { rmSync(tmp, { force: true }); } catch {}
+  }
 }
 
 function listen(server, path) {
@@ -250,22 +268,19 @@ export async function runDaemon({ log }) {
   let connections = 0;
   let lastActive = Date.now();
   // 先占住地址再起 Hub：同一身份的常驻进程已经在跑时，不该再去碰注册表、起回收器。
-  // 连接可能在 Hub 起好之前到达：认证后等 hubReady 再接 MCP 会话（期间的字节在 PassThrough 里排队）。
   let hub = null;
-  let resolveHub;
-  const hubReady = new Promise((r) => (resolveHub = r));
 
   const server = net.createServer((socket) => {
     socket.on('error', () => {});
-    authenticate(socket, token, async (input) => {
+    if (!hub) return socket.destroy();
+    authenticate(socket, token, (input) => {
       connections += 1;
       lastActive = Date.now();
       socket.once('close', () => {
         connections -= 1;
         lastActive = Date.now();
       });
-      const h = await hubReady;
-      if (!socket.destroyed) serveMcp({ hub: h, log, input, output: socket });
+      serveMcp({ hub, log, input, output: socket });
     });
   });
 
@@ -286,9 +301,18 @@ export async function runDaemon({ log }) {
       } else return;
     } else return; // 同一身份的常驻进程已经在跑（两个客户端同时拉起时会撞上）
   }
-  writeInfo(ep, { pid: process.pid, token, version: SERVER_VERSION, started_at: new Date().toISOString() });
-  hub = await startHub(log);
-  resolveHub(hub);
+  try {
+    // The listener owns this address. Discard any previous discovery file before startup.
+    rmSync(ep.infoFile, { force: true });
+    hub = await startHub(log);
+    writeInfo(ep, { pid: process.pid, token, version: SERVER_VERSION, started_at: new Date().toISOString() });
+    lastActive = Date.now();
+  } catch (error) {
+    // Node unlinks its own Unix socket when it closes the listening server.
+    server.close();
+    if (hub) await hub.shutdown().catch(() => {});
+    throw error;
+  }
   log.info(`[dsh-any-agent] 常驻进程 ${ep.id} 已启动（pid ${process.pid}，注册表载入 ${hub.conversations.size} 个会话）`);
 
   let stopping = false;
