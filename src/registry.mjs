@@ -1,10 +1,11 @@
 import {
-  mkdtempSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync,
+  lstatSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isPidAlive } from './procstat.mjs';
+import { processStartTime } from './locks.mjs';
 
 const sleepWord = new Int32Array(new SharedArrayBuffer(4));
 
@@ -41,36 +42,82 @@ function release(dir, marker) {
   }
 }
 
-function clearDeadOwner(dir) {
-  let markers;
+const LOCK_WAIT_MS = 5000;
+const PROCESS_STARTED_AT = Math.round(Date.now() - process.uptime() * 1000);
+const ownerPattern = /^(\d+)-[\da-f-]{36}$/;
+
+function lockOwner(dir, startTimeOf) {
   try {
-    markers = readdirSync(dir);
+    if (!lstatSync(dir).isDirectory()) return { state: 'unknown' };
+    const markers = readdirSync(dir);
+    if (!markers.length) return { state: 'empty' };
+    const marker = markers[0];
+    const match = ownerPattern.exec(marker);
+    if (markers.length !== 1 || !match) return { state: 'unknown' };
+    const stat = lstatSync(join(dir, marker));
+    if (!stat.isFile()) return { state: 'unknown' };
+    const pid = Number(match[1]);
+    const ageMs = Math.max(0, Date.now() - stat.mtimeMs);
+    let state = 'held';
+    if (!isPidAlive(pid)) state = 'dead';
+    else if (ageMs >= LOCK_WAIT_MS) {
+      // A process that started after the marker was created cannot own this lock.
+      const started = startTimeOf(pid);
+      const recorded = stat.size <= 32 ? Number(readFileSync(join(dir, marker), 'utf8')) : NaN;
+      const ownerTime = recorded > 0 ? recorded : Math.max(stat.birthtimeMs, stat.mtimeMs);
+      if (started != null && started > ownerTime + 2000) state = 'reused';
+    }
+    return { state, marker, pid, ageMs };
   } catch (error) {
-    if (error.code === 'ENOENT') return;
+    if (error.code === 'ENOENT') return { state: 'absent' };
     throw error;
   }
-  if (!markers.length) return release(dir);
-  const marker = markers[0];
-  const owner = /^(\d+)-[\da-f-]{36}$/.exec(marker);
-  if (markers.length === 1 && owner && !isPidAlive(Number(owner[1]))) release(dir, marker);
+}
+
+export function inspectRegistryLock(file) {
+  return lockOwner(file + '.lock', processStartTime);
+}
+
+export function pruneRegistryStages(file) {
+  const prefix = basename(file) + '.lock-';
+  for (const entry of readdirSync(dirname(file), { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
+    const suffix = entry.name.slice(prefix.length);
+    const stage = /^(?:(\d+)-)?[a-zA-Z0-9]{6}$/.exec(suffix);
+    if (!stage) continue;
+    const dir = join(dirname(file), entry.name);
+    const owner = lockOwner(dir, processStartTime);
+    if (owner.state === 'dead' || owner.state === 'reused') release(dir, owner.marker);
+    else if (owner.state === 'empty' && stage[1] && !isPidAlive(Number(stage[1]))) release(dir);
+  }
 }
 
 /** Publish a populated lock directory in one rename so even a crash leaves an identifiable owner. */
 function* registryLockAttempts(file, action) {
   const lock = file + '.lock';
-  const stage = mkdtempSync(lock + '-');
+  const stage = mkdtempSync(lock + '-' + process.pid + '-');
   const marker = process.pid + '-' + randomUUID();
   let acquired = false;
   try {
-    writeFileSync(join(stage, marker), '');
-    const deadline = Date.now() + 5000;
+    writeFileSync(join(stage, marker), String(PROCESS_STARTED_AT));
+    const deadline = Date.now() + LOCK_WAIT_MS;
+    const starts = new Map();
+    const startTimeOf = (pid) => {
+      if (!starts.has(pid)) starts.set(pid, processStartTime(pid));
+      return starts.get(pid);
+    };
+    let finalRetry = false;
     while (!acquired) {
       try {
         renameSync(stage, lock);
         acquired = true;
       } catch (error) {
         if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES'].includes(error.code)) throw error;
-        clearDeadOwner(lock);
+        const owner = lockOwner(lock, startTimeOf);
+        if (owner.state === 'empty' || owner.state === 'dead' || owner.state === 'reused') {
+          release(lock, owner.marker);
+          if (Date.now() >= deadline && !finalRetry) { finalRetry = true; continue; }
+        }
         if (Date.now() >= deadline) throw new Error(`Cannot acquire conversation registry lock ${lock}: ${error.message}`);
         yield 10;
       }

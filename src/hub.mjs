@@ -54,7 +54,7 @@ import { refreshRssMap, rssMb } from './procstat.mjs';
 import { readConversationMeta } from './titles.mjs';
 import { Conversation } from './conversation.mjs';
 import * as runStore from './run-store.mjs';
-import { readRegistry, withRegistryLock, writeRegistry } from './registry.mjs';
+import { pruneRegistryStages, readRegistry, withRegistryLock, writeRegistry } from './registry.mjs';
 import { emitLive, livePreview } from './live.mjs';
 import { homeWorkspaceProblem } from './workspace-guard.mjs';
 import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
@@ -113,9 +113,11 @@ export class Hub {
     // ★ 启动即确认三个关键目录可写。以前"写失败只记 silent 日志"会让服务
     //   看起来正常，但注册表/哨兵/锁登记全部丢失，异步等待永远醒不过来。
     assertWritableDir(dirname(STATE_FILE), '状态目录');
-    assertWritableDir(RUNS_DIR, '哨兵目录');
+    assertWritableDir(RUNS_DIR, '哨兵目录', { hardlink: true });
     assertWritableDir(REVIEWS_DIR, '审核记录目录');
     assertWritableDir(LOCKS_DIR, '锁登记目录');
+    try { pruneRegistryStages(STATE_FILE); }
+    catch (error) { this.log.info(`[hub] Registry staging cleanup: ${error.message}`); }
 
     // 旧版本的默认状态文件在包安装目录里；一次性迁移到新的用户可写目录。
     // 只在没有显式设置 DSH_MCP_STATE 时做，避免覆盖用户指定的路径。

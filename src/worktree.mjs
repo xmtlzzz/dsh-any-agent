@@ -22,6 +22,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
+import { lstat, opendir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { STATE_FILE } from './config.mjs';
 import { execGit } from './git-executable.mjs';
@@ -33,6 +34,32 @@ export const ISOLATION_MODES = ['none', 'worktree'];
 
 /** worktree 默认放在这里（与注册表同一个状态目录）。 */
 export const WORKTREES_DIR = process.env.DSH_MCP_WORKTREES_DIR ?? join(dirname(STATE_FILE), 'worktrees');
+
+/** Bound the doctor scan for checkouts containing large dependency or build directories. */
+export async function inspectWorktrees(root = WORKTREES_DIR, limit = 2048) {
+  const result = { count: 0, bytes: 0, complete: true };
+  const dirs = [];
+  let top;
+  try { top = await opendir(root); }
+  catch (error) { if (error.code === 'ENOENT') return result; throw error; }
+  for await (const entry of top) {
+    if (entry.isDirectory() && /-\d{8}-\d{6}-[\da-f]{4}$/.test(entry.name)) dirs.push(join(root, entry.name));
+  }
+  result.count = dirs.length;
+  let visited = 0;
+  while (dirs.length) {
+    const dir = dirs.pop();
+    try {
+      for await (const entry of await opendir(dir)) {
+        if (++visited > limit) return { ...result, complete: false };
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) dirs.push(path);
+        else if (entry.isFile()) result.bytes += (await lstat(path)).size;
+      }
+    } catch { result.complete = false; }
+  }
+  return result;
+}
 
 /** 一个保证为空的钩子目录：让 git 不跑仓库自带的任何钩子。 */
 function noHooksDir(root) {
