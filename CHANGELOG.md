@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.8] — 2026-11-25
+
 - `dsh_doctor` now distinguishes warnings in its summary and identifies the active installation when `DSH_BIN` overrides discovery. Startup and diagnostic directory checks use exclusive temporary files to preserve existing files.
+- Run receipts and crash recovery now live in a dedicated module. A separate tracker owns per-turn live events and token accounting. Existing session data, idempotency keys and completion files carry forward on upgrade.
+- Clarified runtime requirements, team-mode versions and what is stored locally in the installation and privacy guides.
 
 ## [0.7.7] — 2026-11-19
 
@@ -1751,7 +1755,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...HEAD
+[0.7.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.4...v0.7.5
