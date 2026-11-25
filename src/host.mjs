@@ -12,6 +12,7 @@
  */
 
 import { AcpProcess } from './acp.mjs';
+import { L } from './lang.mjs';
 
 const now = () => Date.now();
 
@@ -123,7 +124,7 @@ export class SessionHost {
   }
 
   request(method, params, timeoutMs) {
-    if (!this.proc) return Promise.reject(new Error('共享 DSH 进程未运行'));
+    if (!this.proc) return Promise.reject(new Error(L('共享 DSH 进程未运行', 'The shared DSH process is not running')));
     return this.proc.request(method, params, timeoutMs);
   }
 

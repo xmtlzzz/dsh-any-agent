@@ -38,6 +38,7 @@ MCP 宿主在 Windows 上通过 `System32` 的绝对路径执行进程检测、�
 维护命令：
 
 ```bash
+dsh-any-agent-workspaces --help
 dsh-any-agent-workspaces --list                  # 查看注册表
 dsh-any-agent-workspaces --backfill              # 扫描磁盘上的会话，全部补登记
 dsh-any-agent-workspaces --prune-temp            # 清掉临时目录条目
@@ -96,4 +97,4 @@ dsh-any-agent-workspaces --purge-test-sessions   # 删测试会话（规则写�
 
 DSH 那一侧（不归本服务管）：`~/.dsh/sessions` 里的会话日志（含完整思考，见上）；本服务还会把会话的工作区登记进 DSH 的 `workspace.json`，GUI 才看得到这些会话（`DSH_MCP_REGISTER_WORKSPACE=0` 关闭）。
 
-`registry_lock` 显示注册表写锁的持有进程与时长，活跃持有者的锁会保留。`runs_dir` 也会检查硬链接能力。`worktrees` 估算隔离工作树的文件总大小，大目录显示已扫描部分的下限。可用 `git worktree list` 与 `git status` 查看保留的改动。
+`registry_lock` 显示注册表写锁的持有进程与时长，活跃持有者的锁会保留。`runs_dir` 也会检查硬链接能力。`worktrees` 估算隔离工作树的文件总大小，未完成的扫描会显示已扫描部分的下限。超过 500 MiB 或扫描不完整时会提示警告。可用 `git worktree list` 与 `git status` 查看保留的改动。

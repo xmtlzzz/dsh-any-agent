@@ -222,9 +222,18 @@ try {
   assert.equal(retained.run.result_available, false);
   assert.equal(retained.sentinel_file, undefined);
   if (!real) assert.equal(countPrompts(), beforeRetry);
-  const list = npmRun(['exec', '--offline', '--prefix', install, '--', 'dsh-any-agent-workspaces', '--list'],
-    { ...process.env, DSH_HOME: join(root, 'empty-home') });
-  assert.match(list, /共 0 个工作区/);
+  const cliEnv = { ...process.env, DSH_HOME: join(root, 'empty-home'), DSH_MCP_LANG: 'en' };
+  const list = npmRun(['exec', '--offline', '--prefix', install, '--', 'dsh-any-agent-workspaces', '--list'], cliEnv);
+  assert.match(list, /Registered workspaces: 0/);
+  const cli = join(install, 'node_modules', 'dsh-any-agent', 'bin', 'dsh-any-agent-workspaces.mjs');
+  for (const [lang, flag, expected] of [['zh', '-h', '用法'], ['en', '--help', 'Usage']]) {
+    const help = spawnSync(process.execPath, [cli, flag], { encoding: 'utf8', env: { ...cliEnv, DSH_MCP_LANG: lang } });
+    assert.equal(help.status, 0);
+    assert.ok(help.stdout.includes(expected) && help.stdout.includes('--prune-empty'));
+  }
+  const typo = spawnSync(process.execPath, [cli, '--prune-empt'], { encoding: 'utf8', env: cliEnv });
+  assert.equal(typo.status, 2);
+  assert.match(typo.stderr, /Invalid argument/);
   const backend = runtime ? `DSH ${runtime.version ?? 'unknown version'} via ${runtime.source}, real provider` : 'simulated ACP';
   const scenario = upgrade ? `upgrade from npm ${baseline}` : 'lifecycle';
   console.log(`Packaged MCP ${scenario} passed (${backend}; ${process.platform}, Node ${process.versions.node}).`);

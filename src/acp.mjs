@@ -101,7 +101,7 @@ export class AcpProcess {
 
   /** 拉起进程。注意 ACP 没有"就绪"握手信号，spawn 后即可发请求。 */
   start() {
-    if (this.#child) throw new Error('AcpProcess 已经启动过了');
+    if (this.#child) throw new Error(L('AcpProcess 已经启动过了', 'AcpProcess has already started'));
     if (!statSync(this.cwd, { throwIfNoEntry: false })?.isDirectory()) {
       throw new Error(L(
         '工作区目录不存在或不是目录：' + this.cwd + '。恢复原目录，或用新工作区的绝对路径调用 dsh_start。',
@@ -172,7 +172,7 @@ export class AcpProcess {
     //   未监听的 EPIPE 会以未处理错误终止**整个 MCP 进程**（连带所有会话）。
     const streamError = (e) => {
       this.#log.info(`[acp] 子进程 stdio 错误: ${e.message}`);
-      failChild(new Error(`DSH 进程 stdio 不可用: ${e.message}`, { cause: e }));
+      failChild(new Error(L(`DSH 进程 stdio 不可用: ${e.message}`, `DSH process stdio is unavailable: ${e.message}`), { cause: e }));
     };
     child.stdin.on('error', streamError);
     child.stdout.on('error', streamError);
@@ -187,7 +187,7 @@ export class AcpProcess {
       }
     });
     child.on('exit', (code) => {
-      failChild(new Error(`DSH 进程退出（code=${code}）`));
+      failChild(new Error(L(`DSH 进程退出（code=${code}）`, `DSH process exited (code=${code})`)));
       this.#log.debug(`[acp] 进程退出 code=${code}`);
     });
     child.on('error', (e) => {
@@ -310,7 +310,7 @@ export class AcpProcess {
       if (!written) {
         if (timer) clearTimeout(timer);
         this.#pending.delete(id);
-        reject(new Error(`ACP 写入失败（子进程 stdin 不可写）: ${method}`));
+        reject(new Error(L(`ACP 写入失败（子进程 stdin 不可写）: ${method}`, `Could not write ACP request to child stdin: ${method}`)));
       }
     });
   }

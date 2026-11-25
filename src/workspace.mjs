@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { StringDecoder } from 'node:string_decoder';
 import { createZstdDecompress, zstdDecompressSync } from 'node:zlib';
 import { DSH_HOME, PKG_ROOT, REGISTER_WORKSPACE } from './config.mjs';
+import { L } from './lang.mjs';
 
 const WORKSPACE_FILE = join(DSH_HOME, 'storages', 'workspace.json');
 const SESSIONS_ROOT = join(DSH_HOME, 'sessions');
@@ -178,10 +179,10 @@ function readDoc() {
   try {
     parsed = JSON.parse(readFileSync(WORKSPACE_FILE, 'utf8'));
   } catch (e) {
-    throw new Error(`workspace.json 无法解析，已保持原样不写入: ${WORKSPACE_FILE}（${e.message}）`);
+    throw new Error(L(`workspace.json 无法解析，已保持原样不写入: ${WORKSPACE_FILE}（${e.message}）`, `Could not parse workspace.json at ${WORKSPACE_FILE} (${e.message})`));
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`workspace.json 结构异常（不是对象），已保持原样不写入: ${WORKSPACE_FILE}`);
+    throw new Error(L(`workspace.json 结构异常（不是对象），已保持原样不写入: ${WORKSPACE_FILE}`, `Expected an object in workspace.json at ${WORKSPACE_FILE}`));
   }
   const doc = parsed;
   doc.global ??= emptyDoc().global;
@@ -338,7 +339,7 @@ export async function readHeaderAsync(file, { timeoutMs = 5000, maxHeaderBytes =
 export function scanSessions() {
   const byCwd = new Map();
   if (!existsSync(SESSIONS_ROOT)) {
-    throw new Error(`会话目录不存在或不可读: ${SESSIONS_ROOT}`);
+    throw new Error(L(`会话目录不存在或不可读: ${SESSIONS_ROOT}`, `Could not read the sessions directory: ${SESSIONS_ROOT}`));
   }
   for (const bucket of readdirSync(SESSIONS_ROOT)) {
     const bucketPath = join(SESSIONS_ROOT, bucket);
@@ -613,11 +614,11 @@ export function purgeTestSessions({ dryRun = false, ids = [], roots = [], idsOnl
     const swept = !scoped && isTestSessionCwd(e.cwd);
     if (!named && !inRoot && !swept) continue;
     if (!isTestSessionCwd(e.cwd)) {
-      refuse(e, 'cwd 不是测试目录，拒绝删除');
+      refuse(e, L('cwd 不是测试目录，拒绝删除', 'The working directory is outside the test directories'));
       continue;
     }
     if (!eligibleShape(e)) {
-      refuse(e, '会话 id 与目录名不一致或形状非法');
+      refuse(e, L('会话 id 与目录名不一致或形状非法', 'The session ID is invalid or does not match the directory name'));
       continue;
     }
     take(e, named ? '显式指定' : inRoot ? '测试根目录' : DESKTOP_TEST_SESSION_RE.test(e.cwd) ? '验收测试目录' : '测试临时目录');
@@ -629,11 +630,11 @@ export function purgeTestSessions({ dryRun = false, ids = [], roots = [], idsOnl
     for (const e of all) {
       if (victims.has(e.id) || !e.parent || !victims.has(e.parent)) continue;
       if (!isTestSessionCwd(e.cwd)) {
-        refuse(e, '子会话的 cwd 不是测试目录，拒绝删除');
+        refuse(e, L('子会话的 cwd 不是测试目录，拒绝删除', 'The child session is outside the test directories'));
         continue;
       }
       if (!eligibleShape(e)) {
-        refuse(e, '会话 id 与目录名不一致或形状非法');
+        refuse(e, L('会话 id 与目录名不一致或形状非法', 'The session ID is invalid or does not match the directory name'));
         continue;
       }
       take(e, '子会话（随父会话）');
