@@ -13,7 +13,7 @@
  *   - 转发进程只搬字节：客户端关掉它，常驻进程里的回合照常跑完、照常写哨兵；
  *   - 没有客户端连着、也没有回合在跑，空闲 DSH_MCP_DAEMON_IDLE_MS（默认 10 分钟）后自己退出。
  *
- * 身份：同一个状态目录 + 同一版本 + 同一组 DSH_* / 语言 / 凭据（`*_KEY`）/ 代理环境变量 → 同一个常驻进程。
+ * 身份：同一个状态目录 + 同一版本 + 同一组 DSH_* / 语言 / 凭据（`*_KEY` / `*_TOKEN` / `*_SECRET`）/ 代理环境变量 → 同一个常驻进程。
  * 配置不同的两个客户端（例如一个 full access、一个 read-only）不会共用一个常驻进程；
  * 升级后的新版本也会起一个新的，旧的空闲后自己退出。
  *
@@ -39,16 +39,18 @@ const BIN = fileURLToPath(new URL('../bin/dsh-any-agent.mjs', import.meta.url));
 const LOG_MAX_BYTES = 10 * 1024 * 1024;
 /** 认证行最长多少字节（防止一个不发换行的连接把内存撑大）。 */
 const MAX_AUTH_LINE = 4096;
+const AUTH_ACK = 'OK\n';
+const AUTH_TIMEOUT_MS = 3000;
 
 /**
  * 影响服务行为的环境变量：这些不同就不能共用一个常驻进程。
  * 常驻进程的环境原样传给 DSH 子进程（acp.mjs），所以除了 DSH_* / 语言，还要算上 DSH 会用到的
- * 凭据与代理：名字以 `_KEY` 结尾的（`DEEPSEEK_API_KEY`、profile 里 `apiKeyEnv` 指的变量）和
+ * 凭据与代理：名字以 `_KEY`、`_TOKEN` 或 `_SECRET` 结尾的（`DEEPSEEK_API_KEY`、profile 里 `apiKeyEnv` 指的变量）和
  * `*_PROXY`。不能整个环境都算：客户端环境里有每个会话都不同的变量（会话 id、管道名），
  * 那样每次重连都会另起一个常驻进程。钥匙是高熵随机串，截断的哈希反推不出来。
  */
 const IDENTITY_ENV = (key) =>
-  key.startsWith('DSH_') || key === 'LANG' || key === 'LC_ALL' || key === 'LC_MESSAGES' || /(^|_)(API_?KEY|KEY|PROXY)$/i.test(key);
+  key.startsWith('DSH_') || key === 'LANG' || key === 'LC_ALL' || key === 'LC_MESSAGES' || /(^|_)(API_?KEY|KEY|TOKEN|SECRET|PROXY)$/i.test(key);
 
 /** `dsh-any-agent team on/off` 写的设置文件内容（读不到为空）。 */
 function teamSettingsText() {
@@ -62,8 +64,14 @@ function teamSettingsText() {
 /** 常驻进程的地址与信息文件。 */
 export function daemonEndpoint(env = process.env) {
   const h = createHash('sha256');
-  h.update(`${SERVER_VERSION}\0${STATE_DIR}`);
-  for (const key of Object.keys(env).filter(IDENTITY_ENV).sort()) h.update(`\0${key}=${env[key]}`);
+  // Keep proxies that require the acknowledgement separate from older daemons.
+  h.update(`auth-v2\0${SERVER_VERSION}\0${STATE_DIR}`);
+  const identity = new Map();
+  for (const name of Object.keys(env).sort()) {
+    const key = process.platform === 'win32' ? name.toUpperCase() : name;
+    if (IDENTITY_ENV(key) && !identity.has(key)) identity.set(key, env[name]);
+  }
+  for (const key of [...identity.keys()].sort()) h.update(`\0${key}=${identity.get(key)}`);
   // team 开关存在设置文件里，config.mjs 只在进程启动时读一次，常驻进程不会重读：
   // 文件内容也算身份，切换后重连的客户端会用一个按新设置启动的常驻进程（旧的空闲后自己退出）。
   h.update(`\0team-settings=${teamSettingsText()}`);
@@ -100,16 +108,26 @@ function tryConnect(ep, timeoutMs = 2000) {
   if (!info?.token) return Promise.resolve(null);
   return new Promise((resolve) => {
     const socket = net.connect(ep.path);
-    const timer = setTimeout(() => {
-      socket.destroy();
-      resolve(null);
-    }, timeoutMs);
+    const timer = setTimeout(() => socket.destroy(), timeoutMs);
     socket.once('connect', () => {
-      clearTimeout(timer);
       socket.write(JSON.stringify({ dsh_any_agent_auth: info.token }) + '\n');
-      resolve(socket);
     });
-    socket.once('error', () => {
+    let received = 0;
+    const ack = Buffer.from(AUTH_ACK);
+    const onData = (chunk) => {
+      const count = Math.min(chunk.length, ack.length - received);
+      if (!chunk.subarray(0, count).equals(ack.subarray(received, received + count))) return socket.destroy();
+      received += count;
+      if (received < ack.length) return;
+      socket.pause();
+      socket.off('data', onData);
+      if (count < chunk.length) socket.unshift(chunk.subarray(count));
+      clearTimeout(timer);
+      resolve(socket);
+    };
+    socket.on('data', onData);
+    socket.once('error', () => socket.destroy());
+    socket.once('close', () => {
       clearTimeout(timer);
       resolve(null);
     });
@@ -172,6 +190,8 @@ export async function runProxy({ log, startTimeoutMs = 15_000 }) {
 /** 等第一行（认证行），之后的字节原样交给 MCP 会话。 */
 function authenticate(socket, token, onAuthed) {
   let buf = Buffer.alloc(0);
+  const timer = setTimeout(() => socket.destroy(), AUTH_TIMEOUT_MS);
+  socket.once('close', () => clearTimeout(timer));
   const onData = (chunk) => {
     buf = Buffer.concat([buf, chunk]);
     const nl = buf.indexOf(0x0a);
@@ -180,6 +200,8 @@ function authenticate(socket, token, onAuthed) {
       return;
     }
     socket.off('data', onData);
+    clearTimeout(timer);
+    if (nl > MAX_AUTH_LINE) return socket.destroy();
     let given = null;
     try {
       given = JSON.parse(buf.subarray(0, nl).toString('utf8'))?.dsh_any_agent_auth;
@@ -191,6 +213,7 @@ function authenticate(socket, token, onAuthed) {
       return;
     }
     const input = new PassThrough();
+    socket.write(AUTH_ACK);
     const rest = buf.subarray(nl + 1);
     if (rest.length) input.write(rest);
     socket.pipe(input);
@@ -233,16 +256,16 @@ export async function runDaemon({ log }) {
   const hubReady = new Promise((r) => (resolveHub = r));
 
   const server = net.createServer((socket) => {
-    connections += 1;
-    lastActive = Date.now();
     socket.on('error', () => {});
-    socket.on('close', () => {
-      connections -= 1;
-      lastActive = Date.now();
-    });
     authenticate(socket, token, async (input) => {
+      connections += 1;
+      lastActive = Date.now();
+      socket.once('close', () => {
+        connections -= 1;
+        lastActive = Date.now();
+      });
       const h = await hubReady;
-      serveMcp({ hub: h, log, input, output: socket });
+      if (!socket.destroyed) serveMcp({ hub: h, log, input, output: socket });
     });
   });
 

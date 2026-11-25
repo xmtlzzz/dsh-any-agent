@@ -176,13 +176,25 @@ try {
   await check('没带令牌：拿不到任何应答', async () => (await rawProbe(path, null)) === '');
   await check('令牌不对：拿不到任何应答', async () => (await rawProbe(path, JSON.stringify({ dsh_any_agent_auth: 'wrong' }))) === '');
   const token = readInfo(info).token;
-  await check('令牌对：正常应答（对照）', async () => /dsh-any-agent/.test(await rawProbe(path, JSON.stringify({ dsh_any_agent_auth: token }))));
+  await check('令牌对：先确认握手，再返回 MCP 应答', async () => /^OK\n.*dsh-any-agent/.test(await rawProbe(path, JSON.stringify({ dsh_any_agent_auth: token }))));
+  const { daemonEndpoint } = await import('../src/daemon.mjs');
+  await check('credentials and platform environment casing determine the endpoint', () => {
+    for (const key of ['SERVICE_TOKEN', 'SERVICE_SECRET']) {
+      if (daemonEndpoint({ [key]: 'a' }).id === daemonEndpoint({ [key]: 'b' }).id) return false;
+    }
+    const same = daemonEndpoint({ HTTP_PROXY: 'proxy' }).id === daemonEndpoint({ http_proxy: 'proxy' }).id;
+    return same === (process.platform === 'win32');
+  });
 
   console.log('\n[5] 空闲退出');
+  const pendingHandshake = net.connect(path);
+  pendingHandshake.on('error', () => {});
+  await new Promise(resolve => pendingHandshake.once('connect', resolve));
   for (const cl of clients.splice(0)) await cl.close();
   const pids = daemonPids();
   for (let i = 0; i < 100 && pids.some(alive); i++) await sleep(100);
   await check('没有客户端、没有回合：空闲后常驻进程退出', () => !pids.some(alive), JSON.stringify(pids.filter(alive)));
+  pendingHandshake.destroy();
   await check('信息文件随之删除', () => infoFiles().length === 0, JSON.stringify(infoFiles()));
 
   console.log('\n[6] 日志滚动');
