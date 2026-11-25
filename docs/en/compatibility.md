@@ -71,12 +71,12 @@ dsh-any-agent --version          # this server
 dsh-any-agent team status        # team switch and profile
 ```
 
-In an MCP client, call `dsh_doctor` and look at:
+In an MCP client, call `dsh_doctor`. The heading distinguishes a clean result, warnings and failures. The structured `ok` field is `false` only when a check fails.
 
 - `dsh_bin`: DSH entry point, version, source (desktop / npm global / npx cache / DSH_BIN) and runtime; **warn** when it resolves from an npx cache (`_npx/<hash>/`), which disappears on cache cleanup;
 - `dsh_runtime`: whether the Node runtime used to launch DSH satisfies `engines.node`. From 0.7.6 onwards, an invalid `DSH_RUNTIME` path or confirmed incompatibility reports **fail**. A version that cannot be read reports **warn**;
 - `dsh_desktop`: the desktop app's version; **warn** when it differs from the DSH this server uses (both share the `~/.dsh` session store);
-- `dsh_candidates`: every DSH found and which one was picked;
+- `dsh_candidates` lists alternative installations found by automatic discovery. When `DSH_BIN` overrides discovery, it identifies the effective path.
 - `dsh_version`: `verified` is ok. The note refers to full-suite testing; the table also records narrower checks such as the 0.7.2 installed package lifecycle. `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
 - `profile`: exists, drift, route source;
 - `team`: `on` / `off` / `requested but unavailable` (the version or profile lacks compatible team configuration);

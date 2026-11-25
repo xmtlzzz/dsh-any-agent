@@ -5,7 +5,8 @@
  * 因为本服务是被 Codex/Claude 以未知环境拉起的。
  */
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -240,6 +241,19 @@ export const LEGACY_STATE_FILE = join(PKG_ROOT, '.state', 'conversations.json');
 /** 是否仍在使用默认状态路径（显式设置 DSH_MCP_STATE 时不做自动迁移）。 */
 export const USING_DEFAULT_STATE = !process.env.DSH_MCP_STATE;
 
+/** 创建并清理本次检查专用的探测文件，保留原始文件系统错误供体检展示。 */
+export function probeWritableDir(dir) {
+  mkdirSync(dir, { recursive: true });
+  const probe = join(dir, `.write-probe-${randomUUID()}`);
+  const fd = openSync(probe, 'wx', 0o600);
+  try {
+    writeFileSync(fd, 'ok');
+  } finally {
+    closeSync(fd);
+    rmSync(probe);
+  }
+}
+
 /**
  * 确认一个目录可写；不可写就抛出可直接展示给用户的错误。
  *
@@ -248,10 +262,7 @@ export const USING_DEFAULT_STATE = !process.env.DSH_MCP_STATE;
  */
 export function assertWritableDir(dir, label = '目录') {
   try {
-    mkdirSync(dir, { recursive: true });
-    const probe = join(dir, `.write-probe-${process.pid}-${Math.random().toString(36).slice(2)}`);
-    writeFileSync(probe, 'ok', 'utf8');
-    rmSync(probe, { force: true });
+    probeWritableDir(dir);
   } catch (e) {
     throw new Error(
       `${label}不可写: ${dir}\n` +

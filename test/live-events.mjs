@@ -9,7 +9,7 @@
  *   5. 现有输出不变：tools_used 不混入 live 跟踪字段；
  *   6. 失败路径 / 审批裁决 / 排队 / forget 都有对应事件或清理。
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -325,8 +325,13 @@ try {
     const blocked = inspectLive({ dir: join(root, 'not-a-dir', 'live'), level: 'detail' });
     check('目录不可写只报 warn（不影响派活）并给出修复建议', () => blocked[0] === 'warn' && blocked[1].includes('不可写') && blocked[2]?.includes('DSH_MCP_LIVE_DIR'));
     const emptyDir = join(root, 'live-empty');
+    mkdirSync(emptyDir);
+    const existing = `.doctor-${process.pid}`;
+    writeFileSync(join(emptyDir, existing), 'keep');
     const empty = inspectLive({ dir: emptyDir, level: 'detail' });
-    check('空目录：ok，提示还没有事件', () => empty[0] === 'ok' && empty[1].includes('0 个会话') && empty[1].includes('还没有任何事件'));
+    check('无事件时提示空状态，并保留目录原有文件', () =>
+      empty[0] === 'ok' && empty[1].includes('0 个会话') && empty[1].includes('还没有任何事件') &&
+      readdirSync(emptyDir).length === 1 && readFileSync(join(emptyDir, existing), 'utf8') === 'keep');
     const normal = inspectLive({ dir: liveDir, level: 'detail' });
     check('有事件时报会话数、占用和最近事件时间', () => normal[0] === 'ok' && /\d+ 个会话/.test(normal[1]) && !normal[1].includes(' 0 个会话') && normal[1].includes('最近一条事件'));
   }

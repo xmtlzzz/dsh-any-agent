@@ -199,7 +199,7 @@ try {
       process.chdir(cwd);
     }
   });
-  check('普通路径的 DSH_BIN → 用本进程 node，并按 engines 判定', () => {
+  check('普通路径的 DSH_BIN 使用本进程 Node，体检也显示显式选择', () => {
     const pkgDir = join(root, 'npm', 'node_modules', '@deepseek-ai', 'dsh');
     mkdirSync(join(pkgDir, 'lib'), { recursive: true });
     writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ version: '0.2.1-rc.5', engines: { node: '>=1' } }));
@@ -211,6 +211,27 @@ try {
     assert.equal(d.runtime, 'node');
     assert.equal(d.runtimeOk, true);
     assert.deepEqual(d.env, {});
+
+    // The same install is also discoverable via APPDATA. Only the explicit path was selected.
+    const report = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { runDoctor } from './src/doctor.mjs';
+      const report = await runDoctor({ conversations: new Map() });
+      console.log(JSON.stringify(report));
+    `], {
+      encoding: 'utf8', timeout: 15_000, cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: {
+        ...process.env, APPDATA: root, DSH_HOME: join(root, 'doctor-home'),
+        DSH_MCP_STATE: join(root, 'doctor-state.json'), DSH_MCP_LANG: 'en', DSH_MCP_UPDATE_CHECK: '0',
+      },
+    });
+    assert.equal(report.status, 0, report.stderr);
+    const { text, structured } = JSON.parse(report.stdout);
+    const candidates = structured.checks.find((c) => c.id === 'dsh_candidates');
+    assert.ok(candidates.detail.includes('using DSH_BIN=' + d.bin));
+    assert.doesNotMatch(candidates.detail, /\(picked\)/);
+    assert.equal(structured.ok, true);
+    assert.equal(structured.verdict, 'ok');
+    assert.equal(text.split('\n')[0], 'Checks passed with warnings');
   });
   check('DSH_BIN 指向不存在的路径或目录（含 asar）→ 清晰报错', () => {
     for (const path of [join(root, 'missing', 'bin.js'), root, dirname(asarBin)]) {

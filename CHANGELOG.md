@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `dsh_doctor` now distinguishes warnings in its summary and identifies the active installation when `DSH_BIN` overrides discovery. Startup and diagnostic directory checks use exclusive temporary files to preserve existing files.
+
 ## [0.7.7] — 2026-11-19
 
 ### Fixed
