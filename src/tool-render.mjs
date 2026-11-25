@@ -196,7 +196,7 @@ function approvalWaitHint(conv) {
 function runWaitCommands(hub, conv, sentinel, sentinelPosix) {
   const ask = conv.onApproval === 'ask';
   // Even if the filesystem cannot create the wake-up file, revisit the inbox before the approval expires.
-  const seconds = ask ? Math.max(1, Math.min(30, Math.floor((hub.approvalTimeoutMs ?? 300000) / 2000))) : SENTINEL_WAIT_SEC;
+  const seconds = ask ? Math.max(1, Math.floor((hub.approvalTimeoutMs ?? 300000) / 2000)) : SENTINEL_WAIT_SEC;
   const atDeadline = ask ? 'echo CHECK_INBOX; exit 0' : 'echo TIMEOUT; exit 1';
   const approval = ask ? '[ -f "$sent.approval" ] && { echo CHECK_INBOX; exit 0; }; ' : '';
   const psWait = psWaitCommand(sentinel, seconds, ask);
@@ -210,6 +210,14 @@ function runWaitCommands(hub, conv, sentinel, sentinelPosix) {
     ...(process.platform === 'win32' ? { sentinel_wait_powershell: psWait } : {}),
   } : {};
   return { bashWait, psWait, approvalFields };
+}
+
+function approvalReceipt(hub, conv, sentinel, sentinelPosix) {
+  if (conv.onApproval !== 'ask') return { fields: {}, text: '' };
+  const { bashWait, psWait, approvalFields } = runWaitCommands(hub, conv, sentinel, sentinelPosix);
+  const commands = [`Bash(run_in_background): ${bashWait}`];
+  if (process.platform === 'win32') commands.push(`PowerShell(run_in_background): ${psWait}`);
+  return { fields: approvalFields, text: approvalWaitHint(conv) + '\n' + commands.join('\n') };
 }
 
 export function backgroundReceipt(hub, conv, res) {
@@ -326,6 +334,7 @@ export function replayRun(hub, conv, run, wantResult) {
     };
   }
   const review = conv.pendingReviewTicket?.(run.run_id) ?? null;
+  const approval = approvalReceipt(hub, conv, sentinel, sentinelPosix);
   return {
     structured: {
       conversation_id: conv.id,
@@ -337,7 +346,7 @@ export function replayRun(hub, conv, run, wantResult) {
       replayed: true,
       sentinel_file: sentinel,
       sentinel_file_posix: sentinelPosix,
-      ...(conv.onApproval === 'ask' ? runWaitCommands(hub, conv, sentinel, sentinelPosix).approvalFields : {}),
+      ...approval.fields,
       ...(review ? { review } : {}),
     },
     text:
@@ -346,7 +355,7 @@ export function replayRun(hub, conv, run, wantResult) {
         `(Idempotent replay: this client_run_id is already running or queued; nothing was dispatched again) `,
       ) +
       `run_id=${run.run_id} status=${run.status}\n` +
-      sentinelLine + approvalWaitHint(conv) +
+      sentinelLine + approval.text +
       (review ? `\n\n${renderReviewSection(review)}` : ''),
   };
 }
@@ -356,6 +365,7 @@ export function queuedReceipt(hub, conv, run, position) {
   const sentinel = hub.runSentinelPath(conv.id, run.run_id);
   const sentinelPosix = toPosixPath(sentinel);
   const review = conv.pendingReviewTicket?.(run.run_id) ?? null;
+  const approval = approvalReceipt(hub, conv, sentinel, sentinelPosix);
   return {
     structured: {
       conversation_id: conv.id,
@@ -363,7 +373,7 @@ export function queuedReceipt(hub, conv, run, position) {
       accepted: true,
       queued: true,
       queue_position: position,
-      ...(conv.onApproval === 'ask' ? runWaitCommands(hub, conv, sentinel, sentinelPosix).approvalFields : {}),
+      ...approval.fields,
       status: 'queued',
       sentinel_file: sentinel,
       sentinel_file_posix: sentinelPosix,
@@ -374,7 +384,7 @@ export function queuedReceipt(hub, conv, run, position) {
         `已入队（第 ${position} 位）。当前回合结束后自动执行；**入队时不会写哨兵**，真正结束时才写：\n`,
         `Queued (position ${position}). It runs automatically after the current turn; **no sentinel is written when queued**, only when it really ends:\n`,
       ) +
-      `  ${sentinel}\n` + approvalWaitHint(conv) + '\n' +
+      `  ${sentinel}\n` + approval.text + '\n' +
       L(
         `用 dsh_queue list 查看/修改/删除；取消：dsh_queue(conversation_id, action="remove", run_id="${run.run_id}")。`,
         `Use dsh_queue list to inspect, change or delete; to cancel: dsh_queue(conversation_id, action="remove", run_id="${run.run_id}").`,

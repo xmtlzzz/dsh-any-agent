@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline';
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-approval-details-'));
 process.env.DSH_MCP_STATE = join(root, 'state.json');
 process.env.DSH_MCP_APPROVAL = 'auto-allow';
+delete process.env.DSH_MCP_APPROVAL_TIMEOUT_MS;
 const { Hub, Conversation } = await import('../src/hub.mjs');
 const { createHandlers } = await import('../src/tools.mjs');
 const logs = [];
@@ -82,7 +83,10 @@ try {
     for (const other of [queuedReceipt(hub, conv, run, 1), replayRun(hub, conv, run, false)]) {
       assert.equal(other.structured.approval_file, wakeFile);
       assert.equal(other.structured.sentinel_wait_bash, receipt.structured.sentinel_wait_bash);
+      assert.ok(other.text.includes(receipt.structured.sentinel_wait_bash));
+      if (process.platform === 'win32') assert.ok(other.text.includes(receipt.structured.sentinel_wait_powershell));
     }
+    assert.match(receipt.structured.sentinel_wait_bash, /\+150\s*\)\)/);
     if (process.platform !== 'win32') {
       const wait = spawnSync('/bin/sh', ['-c', receipt.structured.sentinel_wait_bash], { encoding: 'utf8', timeout: 5000 });
       assert.equal(wait.status, 0, wait.stderr);
