@@ -12,6 +12,8 @@
  * 导出的 API 与 js-yaml 的 load/dump 同名，bootstrap 只需替换 import。
  */
 
+import { L } from './lang.mjs';
+
 /** 去掉行内注释；引号内的 # 不算注释。 */
 function stripComment(s) {
   let quote = null;
@@ -63,7 +65,7 @@ function parseScalar(raw) {
   if (TRUES.has(s)) return true;
   if (FALSES.has(s)) return false;
   if (s.startsWith('"') || s.startsWith("'")) {
-    if (!(s.endsWith(s[0]) && s.length >= 2)) throw new Error(`引号未闭合: ${s}`);
+    if (!(s.endsWith(s[0]) && s.length >= 2)) throw new Error(L(`引号未闭合: ${s}`, `Unterminated quote: ${s}`));
     return parseQuoted(s);
   }
   if (s.startsWith('[') || s.startsWith('{')) return parseFlow(s);
@@ -104,7 +106,7 @@ function parseFlow(text) {
       else if (c === '\\') escaped = true;
       else if (c === '"') break;
     }
-    if (j >= text.length) throw new Error(`flow 集合里的引号未闭合: ${text}`);
+    if (j >= text.length) throw new Error(L(`flow 集合里的引号未闭合: ${text}`, `Unterminated quote in flow collection: ${text}`));
     const out = parseQuoted(text.slice(i, j + 1));
     i = j + 1;
     return out;
@@ -118,7 +120,7 @@ function parseFlow(text) {
   };
   const value = () => {
     ws();
-    if (i >= text.length) throw new Error(`flow 集合不完整: ${text}`);
+    if (i >= text.length) throw new Error(L(`flow 集合不完整: ${text}`, `Incomplete flow collection: ${text}`));
     if (text[i] === '[') {
       i++;
       const arr = [];
@@ -138,7 +140,7 @@ function parseFlow(text) {
           i++;
           return arr;
         }
-        throw new Error(`flow 数组缺少 , 或 ]: ${text}`);
+        throw new Error(L(`flow 数组缺少 , 或 ]: ${text}`, `Missing , or ] in flow sequence: ${text}`));
       }
     }
     if (text[i] === '{') {
@@ -152,7 +154,7 @@ function parseFlow(text) {
       for (;;) {
         const k = readKey();
         ws();
-        if (text[i] !== ':') throw new Error(`flow 对象缺少 : ${text}`);
+        if (text[i] !== ':') throw new Error(L(`flow 对象缺少 : ${text}`, `Missing : in flow mapping: ${text}`));
         i++;
         obj[k] = value();
         ws();
@@ -164,7 +166,7 @@ function parseFlow(text) {
           i++;
           return obj;
         }
-        throw new Error(`flow 对象缺少 , 或 }: ${text}`);
+        throw new Error(L(`flow 对象缺少 , 或 }: ${text}`, `Missing , or } in flow mapping: ${text}`));
       }
     }
     if (text[i] === '"' || text[i] === "'") return readQuoted();
@@ -174,7 +176,7 @@ function parseFlow(text) {
   };
   const out = value();
   ws();
-  if (i !== text.length) throw new Error(`flow 集合尾部有多余内容: ${text}`);
+  if (i !== text.length) throw new Error(L(`flow 集合尾部有多余内容: ${text}`, `Trailing content after flow collection: ${text}`));
   return out;
 }
 
@@ -216,7 +218,8 @@ const isSeq = (text) => text === '-' || /^-\s/.test(text);
 
 function parseBlock(tokens, index, indent) {
   if (index >= tokens.length || tokens[index].indent !== indent) {
-    throw new Error(`第 ${tokens[index]?.line ?? '?'} 行缩进不一致`);
+    const line = tokens[index]?.line ?? '?';
+    throw new Error(L(`第 ${line} 行缩进不一致`, `Inconsistent indentation on line ${line}`));
   }
   return isSeq(tokens[index].text)
     ? parseSequence(tokens, index, indent)
@@ -287,7 +290,7 @@ function parseMapping(tokens, index, indent) {
   while (i < tokens.length && tokens[i].indent === indent && !isSeq(tokens[i].text)) {
     const t = tokens[i];
     const kv = splitKey(t.text);
-    if (!kv) throw new Error(`第 ${t.line} 行不是 key: value：${t.text}`);
+    if (!kv) throw new Error(L(`第 ${t.line} 行不是 key: value：${t.text}`, `Line ${t.line} is not key: value: ${t.text}`));
     if (kv.value === '') {
       if (i + 1 < tokens.length && tokens[i + 1].indent > indent) {
         const r = parseBlock(tokens, i + 1, tokens[i + 1].indent);
@@ -335,7 +338,7 @@ export function load(text) {
     if (/^\s*%/.test(raw)) continue;
     const indentText = raw.match(/^[ \t]*/)[0];
     if (indentText.includes('\t')) {
-      throw new Error(`第 ${i + 1} 行使用了制表符缩进（YAML 不允许）`);
+      throw new Error(L(`第 ${i + 1} 行使用了制表符缩进（YAML 不允许）`, `Line ${i + 1} uses tab indentation (disallowed in YAML)`));
     }
     const content = stripComment(raw.slice(indentText.length)).trimEnd();
     if (!content) continue;
@@ -344,7 +347,8 @@ export function load(text) {
   if (!tokens.length) return null;
   const r = parseBlock(tokens, 0, tokens[0].indent);
   if (r.next !== tokens.length) {
-    throw new Error(`第 ${tokens[r.next]?.line ?? '?'} 行无法归入任何结构`);
+    const line = tokens[r.next]?.line ?? '?';
+    throw new Error(L(`第 ${line} 行无法归入任何结构`, `Line ${line} does not belong to any structure`));
   }
   return r.value;
 }

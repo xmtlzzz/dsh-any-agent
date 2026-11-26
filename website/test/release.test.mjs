@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeVersion,
+  compareVersions,
   fetchLatestVersion,
   readCachedVersion,
   VERSION_SOURCES,
@@ -18,6 +19,15 @@ test('normalizeVersion accepts v-prefixed semver and prereleases, rejects junk',
   assert.equal(normalizeVersion('v0.3.3'), '0.3.3');
   assert.equal(normalizeVersion('1.2.3-rc.1'), '1.2.3-rc.1');
   for (const bad of ['', 'v', 'latest', '0.3', 'v0.3.3.4', 'abc']) assert.equal(normalizeVersion(bad), null);
+});
+
+test('compareVersions orders semver and prereleases accurately', () => {
+  assert.ok(compareVersions('0.7.9', '0.7.8') > 0);
+  assert.ok(compareVersions('0.7.10', '0.7.9') > 0);
+  assert.ok(compareVersions('0.7.7', '0.7.9') < 0);
+  assert.equal(compareVersions('0.7.9', 'v0.7.9'), 0);
+  assert.ok(compareVersions('1.0.0', '1.0.0-rc.1') > 0);
+  assert.ok(compareVersions('1.0.0-rc.2', '1.0.0-rc.1') > 0);
 });
 
 test('version sources start with npm and include GitHub release/tag fallbacks', () => {
@@ -81,6 +91,41 @@ test('fetchLatestVersion returns unavailable instead of inventing a version', as
     version: null,
     source: 'unavailable',
   });
+});
+
+test('fetchLatestVersion treats stale /api/version as fallback only and never poisons localStorage', async () => {
+  // 1) Stale site fallback still checks npm and adopts fresh 0.7.9.
+  const store1 = new Map();
+  const storage1 = { getItem: (k) => store1.get(k) ?? null, setItem: (k, v) => store1.set(k, v) };
+  const calls1 = [];
+  const res1 = await fetchLatestVersion(async (url) => {
+    calls1.push(url);
+    if (url === SITE_VERSION_URL) return { ok: true, json: async () => ({ version: '0.7.8', stale: true }) };
+    if (url === VERSION_SOURCES[0].url) return { ok: true, json: async () => ({ version: '0.7.9' }) };
+    return { ok: false, json: async () => ({}) };
+  }, storage1);
+  assert.deepEqual(res1, { version: '0.7.9', source: 'npm' });
+  assert.deepEqual(calls1, [SITE_VERSION_URL, VERSION_SOURCES[0].url]);
+  assert.equal(readCachedVersion(storage1)?.version, '0.7.9');
+
+  // 2) When all fresh upstreams fail, return site-stale without writing to localStorage.
+  const store2 = new Map();
+  const storage2 = { getItem: (k) => store2.get(k) ?? null, setItem: (k, v) => store2.set(k, v) };
+  const res2 = await fetchLatestVersion(async (url) => {
+    if (url === SITE_VERSION_URL) return { ok: true, json: async () => ({ version: '0.7.8', stale: true }) };
+    return { ok: false, json: async () => ({}) };
+  }, storage2);
+  assert.deepEqual(res2, { version: '0.7.8', source: 'site-stale' });
+  assert.equal(readCachedVersion(storage2), null);
+
+  // 3) A stale site fallback must not downgrade an expired but newer localStorage version.
+  const store3 = new Map([[VERSION_CACHE_KEY, JSON.stringify({ version: '0.7.9', ts: Date.now() - 3600_000 })]]);
+  const storage3 = { getItem: (k) => store3.get(k) ?? null, setItem: (k, v) => store3.set(k, v) };
+  const res3 = await fetchLatestVersion(async (url) => {
+    if (url === SITE_VERSION_URL) return { ok: true, json: async () => ({ version: '0.7.8', stale: true }) };
+    return { ok: false, json: async () => ({}) };
+  }, storage3);
+  assert.deepEqual(res3, { version: '0.7.9', source: 'stale-cache' });
 });
 
 test('formatStars formats numbers under 1000 verbatim and abbreviates thousands with k', () => {

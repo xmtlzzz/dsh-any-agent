@@ -23,7 +23,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -167,28 +167,39 @@ function spawnDaemon(ep) {
  * 转发进程：连上（必要时拉起）常驻进程，把客户端的 stdio 原样接过去。
  * @returns {Promise<boolean>} false = 常驻进程起不来，调用方应退回普通 stdio 模式。
  */
-export async function runProxy({ log, startTimeoutMs = 15_000 }) {
+export async function runProxy({ log, startTimeoutMs = 6_000, onFallback = null }) {
   const ep = daemonEndpoint();
   let socket = await tryConnect(ep);
+  let reason = null;
   if (!socket) {
     let failed = false;
     try {
       const child = spawnDaemon(ep);
-      child.once('error', () => { failed = true; });
+      child.once('error', (e) => { failed = true; reason = e.message; });
       // A clean exit can mean a concurrent launcher already owns the endpoint.
-      child.once('exit', (code) => { failed = code !== 0; });
+      child.once('exit', (code) => {
+        if (code !== 0) {
+          failed = true;
+          reason ??= `daemon exited with code ${code}`;
+        }
+      });
     } catch (error) {
+      reason = error.message;
       log.info(`[dsh-any-agent] Could not launch daemon: ${error.message}`);
+      onFallback?.({ reason, endpointId: ep.id, logFile: ep.logFile });
       return false;
     }
-    const deadline = Date.now() + startTimeoutMs;
+    const startedAt = Date.now();
+    const deadline = startedAt + startTimeoutMs;
     while (!socket && !failed && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, Date.now() - startedAt < 1000 ? 80 : 200));
       socket = await tryConnect(ep, 1000);
     }
+    if (!socket) reason ??= `timed out after ${startTimeoutMs}ms`;
   }
   if (!socket) {
     log.info(`[dsh-any-agent] 常驻进程 ${ep.id} 起不来（日志见 ${ep.logFile}），退回普通模式`);
+    onFallback?.({ reason, endpointId: ep.id, logFile: ep.logFile });
     return false;
   }
   log.info(`[dsh-any-agent] 已连上常驻进程 ${ep.id}`);
@@ -305,6 +316,7 @@ export async function runDaemon({ log }) {
     // The listener owns this address. Discard any previous discovery file before startup.
     rmSync(ep.infoFile, { force: true });
     hub = await startHub(log);
+    hub.runtime = { mode: 'daemon', endpointId: ep.id, pid: process.pid, logFile: ep.logFile };
     writeInfo(ep, { pid: process.pid, token, version: SERVER_VERSION, started_at: new Date().toISOString() });
     lastActive = Date.now();
   } catch (error) {
@@ -345,4 +357,59 @@ export async function runDaemon({ log }) {
     }, Math.max(200, Math.min(30_000, Math.floor(DAEMON_IDLE_MS / 3))));
     timer.unref?.();
   }
+}
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+}
+
+/** 列出状态目录下所有登记过的常驻进程信息（附存活状态）。 */
+export function listDaemons() {
+  if (!existsSync(STATE_DIR)) return [];
+  const out = [];
+  for (const name of readdirSync(STATE_DIR).sort()) {
+    const m = /^daemon-([0-9a-f]+)\.json$/.exec(name);
+    if (!m) continue;
+    const infoFile = join(STATE_DIR, name);
+    try {
+      const info = JSON.parse(readFileSync(infoFile, 'utf8'));
+      out.push({
+        id: m[1],
+        pid: info.pid ?? null,
+        alive: pidAlive(info.pid),
+        version: info.version ?? null,
+        started_at: info.started_at ?? null,
+        infoFile,
+      });
+    } catch {
+      /* 损坏的旧文件忽略 */
+    }
+  }
+  return out;
+}
+
+/** 向所有存活的常驻进程发送退出信号，并清理已死进程残留的信息文件。 */
+export function stopDaemons() {
+  const stopped = [];
+  const cleaned = [];
+  for (const d of listDaemons()) {
+    if (d.alive) {
+      try {
+        process.kill(d.pid, 'SIGTERM');
+        stopped.push(d);
+      } catch {}
+    } else {
+      try {
+        rmSync(d.infoFile, { force: true });
+        cleaned.push(d);
+      } catch {}
+    }
+  }
+  return { stopped, cleaned };
 }

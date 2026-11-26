@@ -27,7 +27,7 @@ An MCP server that drives DeepSeek Harness as a **long-lived coding agent**. Han
 You already have a coding agent in your editor. What you do **not** have is one that can:
 
 - **hand a multi-hour job to another agent and walk away** — then collect the result when it's done;
-- **keep the job alive across restarts** of your editor, your session, your machine's idle reap (the conversation always survives; for a turn that is still running to survive the client closing or reconnecting, turn on resident process mode, `DSH_MCP_DAEMON=1`);
+- **keep the job alive across restarts** of your editor, your session, your machine's idle reap (the conversation always survives, and `dsh-any-agent-setup --yes` enables resident process mode `DSH_MCP_DAEMON=1` by default so even an in-flight turn survives client close/reconnect; pass `--no-daemon` for direct stdio);
 - **cut in mid-flight** when it's going the wrong way, without destroying the work;
 - **run several of them at once** and switch between them;
 - **see what it is doing** without asking the agent — which tools it called, which approvals went through, how many tokens it spent.
@@ -156,7 +156,7 @@ Only using Cursor or VS Code? Add it in one click instead (runs `npx -y dsh-any-
 | `dsh_queue` | Inspect/modify the session queue: `list` / `remove` / `update` / `promote` (created by `dsh_send(queue=true)`, memory only) |
 | `dsh_doctor` | Read-only health check: DSH version, profile, registry locks, result-directory hard links, worktree usage, orphan locks, sessions and RSS, effective config |
 
-Every tool declares all four MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). Six only read state and are marked read-only: `dsh_list`, `dsh_read`, `dsh_get`, `dsh_status`, `dsh_inbox`, `dsh_doctor`. Tool titles, descriptions and the server instructions come in English and Chinese: they follow your system language, or set `DSH_MCP_LANG=en|zh`. Tool results follow the same setting; a few less common error messages are still Chinese only.
+Every tool declares all four MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). Six only read state and are marked read-only: `dsh_list`, `dsh_read`, `dsh_get`, `dsh_status`, `dsh_inbox`, `dsh_doctor`. Tool titles, descriptions, server instructions, tool output, and user-facing errors all come in English and Chinese: they follow your system language, or set `DSH_MCP_LANG=en|zh`.
 
 ## 👀 Live view: see what the dispatched work is doing
 

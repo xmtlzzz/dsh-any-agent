@@ -164,6 +164,8 @@ const OFFLINE = [
   // 零依赖静态检查（scripts/lint.mjs）自身的回归：每条规则都会报、合法写法不误报，
   // 并顺带断言本仓库是 lint 干净的。纯文件系统 + node --check，不花 token。
   'lint.mjs',
+  // 英文模式（DSH_MCP_LANG=en）报错与 CLI 文案零中文泄露回归，含 failedKeys 结构化判定。
+  'i18n-en.mjs',
 ];
 
 /** 需要真实 DSH + provider 的套件（--all）。 */

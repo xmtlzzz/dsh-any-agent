@@ -14,7 +14,8 @@
  *   3. exports   具名导入必须是目标模块的导出（含 export { a } from、export * from 的传递）；
  *                `const { a } = await import('./x.mjs')` 解构出来的名字同样检查；
  *                node:fs 这类内置模块的具名导入也对照当前 Node 实际导出检查；
- *   4. unused    没有被用到的具名导入（import { a, b } 里的 a 或 b）。
+ *   4. unused    没有被用到的具名导入（import { a, b } 里的 a 或 b）；
+ *   5. cycle     静态 import / export ... from 不能形成模块循环依赖。
  *
  * 实现是静态词法扫描，不是完整的 JS 解析器：先把注释 / 字符串 / 正则 / 模板字符串里的
  * 纯文本剔掉，再在 token 流上识别 import / export 语句。取舍是宁可漏报也不误报 ——
@@ -516,6 +517,53 @@ function unusedImports(file) {
   return problems;
 }
 
+/** 静态 import / re-export 循环依赖检测（每个简单环按字典序首节点报告一次）。 */
+function findCycles(files) {
+  const fileSet = new Set(files);
+  const edges = new Map();
+  for (const file of files) {
+    const mod = getModule(file);
+    const deps = new Set();
+    for (const entry of [...mod.imports, ...mod.reExports]) {
+      if (!entry.spec.startsWith('.')) continue;
+      const target = resolve(dirname(file), entry.spec);
+      if (fileSet.has(target)) deps.add(target);
+    }
+    edges.set(file, [...deps].sort());
+  }
+
+  const state = new Map(); // 0/undefined=未访, 1=栈中, 2=已完成
+  const stack = [];
+  const seenCycles = new Set();
+  const problems = [];
+
+  const dfs = (u) => {
+    state.set(u, 1);
+    stack.push(u);
+    for (const v of edges.get(u) ?? []) {
+      const s = state.get(v);
+      if (s === 1) {
+        const raw = stack.slice(stack.indexOf(v));
+        let minIdx = 0;
+        for (let i = 1; i < raw.length; i++) if (rel(raw[i]) < rel(raw[minIdx])) minIdx = i;
+        const cycle = [...raw.slice(minIdx), ...raw.slice(0, minIdx), raw[minIdx]];
+        const key = cycle.map(rel).join(' -> ');
+        if (!seenCycles.has(key)) {
+          seenCycles.add(key);
+          problems.push(`${rel(cycle[0])}:1: [cycle] 存在循环依赖: ${key}`);
+        }
+      } else if (!s) {
+        dfs(v);
+      }
+    }
+    stack.pop();
+    state.set(u, 2);
+  };
+
+  for (const file of files) if (!state.get(file)) dfs(file);
+  return problems;
+}
+
 // ── 入口 ──────────────────────────────────────────────────────────
 
 function collectFiles() {
@@ -575,13 +623,14 @@ async function main() {
     }
     problems.push(...unusedImports(file));
   }
+  problems.push(...findCycles(files));
 
   problems.sort();
   for (const p of problems) console.log(p);
   console.log(
     problems.length
       ? `\nlint: ${problems.length} 个问题（检查了 ${files.length} 个文件）`
-      : `lint: ${files.length} 个文件，语法 / 导入路径 / 具名导出 / 未使用导入均无问题`,
+      : `lint: ${files.length} 个文件，语法 / 导入路径 / 具名导出 / 未使用导入 / 循环依赖均无问题`,
   );
   process.exit(problems.length ? 1 : 0);
 }

@@ -56,7 +56,7 @@ export function writeRunSentinel(paths, conversationId, run, log) {
     publishRunSentinel(file, paths.runMarkerPath(conversationId, run.run_id), runSentinelPayload(conversationId, run));
     return file;
   } catch (e) {
-    const msg = `写完成哨兵失败（${file}）: ${e.message}`;
+    const msg = L(`写完成哨兵失败（${file}）: ${e.message}`, `Failed to write completion sentinel (${file}): ${e.message}`);
     run.sentinel_error = msg;
     log.info(`[hub] ${msg}`);
     return null;

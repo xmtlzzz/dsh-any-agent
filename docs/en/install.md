@@ -46,7 +46,7 @@ Run the three commands in [Quick start](../../README.md#quick-start), then recon
 ```bash
 dsh-any-agent-setup --yes --only cursor,zed     # just these
 dsh-any-agent-setup --yes --permission read-only
-dsh-any-agent-setup --yes --daemon               # turns run in a resident process; closing/reconnecting the client doesn't stop them
+dsh-any-agent-setup --yes --no-daemon            # opt out of resident process mode and use direct stdio (daemon mode is on by default)
 dsh-any-agent-setup --remove --yes               # take it back out; only its own entry is removed
 ```
 
@@ -170,7 +170,7 @@ A restore saves the **current** file as `.bak-dsh-pre-restore-<timestamp>` so yo
 | Register with every client found | `dsh-any-agent-setup --yes` |
 | Register with just some | `dsh-any-agent-setup --yes --only cursor,zed` |
 | Change the permission tier in place | `dsh-any-agent-setup --yes --permission read-only` |
-| Turn on resident process mode (`DSH_MCP_DAEMON=1`) | `dsh-any-agent-setup --yes --daemon` (rewritten from this run's flags like `--permission`; re-running without it turns it off) |
+| Toggle resident process mode (on by default, `DSH_MCP_DAEMON=1`) | Enabled by default on install; pass `--no-daemon` for direct stdio (`0`), and re-running without either flag preserves your existing setting; manage with `dsh-any-agent daemon status\|stop` |
 | Update after upgrading the package | `dsh-any-agent-setup --yes` (idempotent; only differing entries are rewritten) |
 | Refresh launch paths in existing entries (0.7.6 and later) | `dsh-any-agent-setup --repair --yes` |
 | Reset custom environment variables | Preview with `dsh-any-agent-setup --reset-env` and add `--yes` to apply |
@@ -179,7 +179,7 @@ A restore saves the **current** file as `.bak-dsh-pre-restore-<timestamp>` so yo
 | Uninstall completely | `dsh-any-agent-setup --remove --yes`, then `npm uninstall -g dsh-any-agent`; `$DSH_HOME/profiles/dsh-mcp/` can stay or go (leaving it is harmless). This server never writes your DSH credentials or session history, so they are untouched |
 | Undo one bad write | copy `.bak-dsh-<stamp>` back over the config |
 
-Re-running setup preserves custom settings such as `DSH_BIN`, `DSH_RUNTIME`, `DSH_MCP_APPROVAL` and `DSH_MCP_LANG`. Set `DSH_BIN` in the shell running setup to replace the saved entry point. Setup regenerates `DSH_MCP_PERMISSION`, `DSH_MCP_LOG` and `DSH_MCP_DAEMON` from the current options.
+Re-running setup preserves custom settings such as `DSH_BIN`, `DSH_RUNTIME`, `DSH_MCP_APPROVAL`, `DSH_MCP_LANG`, and `DSH_MCP_DAEMON` (pass `--daemon`, `--no-daemon`, or `--reset-env` to change `DSH_MCP_DAEMON`). Set `DSH_BIN` in the shell running setup to replace the saved entry point. Setup regenerates `DSH_MCP_PERMISSION` and `DSH_MCP_LOG` from the current options.
 
 <details>
 <summary>What removal changes: verification details</summary>

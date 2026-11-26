@@ -22,7 +22,7 @@ npm run build
 
 ## Cloudflare Workers 部署
 
-使用 Cloudflare Workers Static Assets，外加一个只接管 `/api/stars` 与 `/api/version` 的小 Worker（`src/worker.mjs`，`wrangler.jsonc` 的 `run_worker_first` 只列了 `/api/*`，其余路径直接走静态资源）。它在边缘取 GitHub star 数与最新发布的版本号并缓存 10 分钟，取不到时回最近一次成功的值，这样页面不受访客 IP 的 GitHub 频控（未登录每小时 60 次）和直连超时影响；页面拿不到边缘端点时（纯静态托管、本地预览）退回直连 npm / GitHub。不需要数据库或后台服务；可选地用 `npx wrangler@4.125.0 secret put GITHUB_TOKEN` 配一个不带任何权限的 GitHub token，把边缘的额度提到每小时 5000 次。已有 Wrangler 登录时：
+使用 Cloudflare Workers Static Assets，外加一个只接管 `/api/stars` 与 `/api/version` 的小 Worker（`src/worker.mjs`，`wrangler.jsonc` 的 `run_worker_first` 只列了 `/api/*`，其余路径直接走静态资源）。`/api/stars` 在边缘缓存 10 分钟、过期时先回最近一次成功值并后台刷新；`/api/version` 在边缘缓存 3 分钟、过期时先同步刷新（总超时 2 秒内依次查 npm / GitHub），仅当上游都不可达时才回退最近一次成功值并标 `stale: true`，同时向客户端返回 `Cache-Control: no-store` 避免被 Zone 默认 Browser Cache TTL 放大，这样页面既不受访客 IP 频控和直连超时影响，也不会把冷门 PoP 的历史旧版本长期锁在浏览器里；页面拿不到边缘端点时（纯静态托管、本地预览）退回直连 npm / GitHub。不需要数据库或后台服务；可选地用 `npx wrangler@4.125.0 secret put GITHUB_TOKEN` 配一个不带任何权限的 GitHub token，把边缘的额度提到每小时 5000 次。已有 Wrangler 登录时：
 
 ```bash
 npm run deploy

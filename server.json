@@ -6,12 +6,12 @@
     "url": "https://github.com/xmtlzzz/dsh-any-agent",
     "source": "github"
   },
-  "version": "0.7.9",
+  "version": "0.8.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "dsh-any-agent",
-      "version": "0.7.9",
+      "version": "0.8.0",
       "transport": {
         "type": "stdio"
       },
@@ -25,7 +25,7 @@
         },
         {
           "name": "DSH_MCP_DAEMON",
-          "description": "Set to 1 to keep active turns running when the MCP client disconnects.",
+          "description": "Set to 1 to keep active turns running when the MCP client disconnects (written as 1 by dsh-any-agent-setup by default; use --no-daemon for 0).",
           "format": "string",
           "isRequired": false,
           "isSecret": false,

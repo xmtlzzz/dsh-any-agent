@@ -21,6 +21,7 @@ import {
   SHARED_PROCESS,
   STATE_FILE,
   TEAM_MODE,
+  DAEMON_IDLE_MS,
   DAEMON_MODE,
   STALL_MS,
   TURN_MAX_MS,
@@ -44,6 +45,7 @@ import { liveSettings } from './live.mjs';
 import { L } from './lang.mjs';
 import { checkForUpdate } from './update-check.mjs';
 import { inspectWorktrees, WORKTREES_DIR } from './worktree.mjs';
+import { missingRegisteredSessions } from './workspace.mjs';
 
 /** DSH 来源的英文叫法（中文用 dsh-locate 的 SOURCE_LABEL）。 */
 const SOURCE_LABEL_EN = { env: 'DSH_BIN', desktop: 'desktop app', global: 'npm global', npx: 'npx cache' };
@@ -334,6 +336,68 @@ export async function runDoctor(hub) {
       `idle_ttl=${IDLE_TTL_MS}ms max_live=${MAX_LIVE} max_rss=${MAX_RSS_MB}MB shared=${SHARED_PROCESS} ` +
       `daemon=${DAEMON_MODE ? 'on' : 'off'} watchdog=${WATCHDOG_AFTER_MS}/${STALL_MS}/${TURN_MAX_MS}ms`,
   );
+
+  // 常驻模式运行状态：区分真正走常驻、普通直连，以及常驻起不来降级到直连。
+  const rt = hub.runtime ?? { mode: 'direct' };
+  if (rt.mode === 'daemon') {
+    const idleLabel = DAEMON_IDLE_MS > 0 ? `${Math.round(DAEMON_IDLE_MS / 60000)}m` : 'off';
+    add(
+      'daemon',
+      'ok',
+      L(
+        `常驻模式运行中（id=${rt.endpointId ?? '?'}，pid=${rt.pid ?? process.pid}，空闲退出=${idleLabel}）`,
+        `resident daemon active (id=${rt.endpointId ?? '?'}, pid=${rt.pid ?? process.pid}, idle exit=${idleLabel})`,
+      ),
+    );
+  } else if (rt.fallbackReason) {
+    add(
+      'daemon',
+      'warn',
+      L(
+        `请求了常驻模式但已降级为直连 stdio（${rt.fallbackReason}）`,
+        `resident daemon requested but fell back to direct stdio (${rt.fallbackReason})`,
+      ),
+      L(
+        `检查日志 ${rt.logFile ?? 'daemon-*.log'}，或用 dsh-any-agent-setup --yes --no-daemon 切回直连`,
+        `check ${rt.logFile ?? 'daemon-*.log'}, or run dsh-any-agent-setup --yes --no-daemon for direct stdio`,
+      ),
+    );
+  } else {
+    add(
+      'daemon',
+      'ok',
+      L(
+        '直连 stdio 模式（重启客户端会中断运行中回合；需常驻请用 dsh-any-agent-setup --yes --daemon）',
+        'direct stdio mode (restarting the client stops in-flight turns; use dsh-any-agent-setup --yes --daemon to keep turns alive)',
+      ),
+    );
+  }
+
+  // 工作区登记漂移检测：识别运行中的 DSH GUI 内存把 workspace.json 覆盖回去的情况。
+  try {
+    const sync = missingRegisteredSessions(all);
+    if (sync.skipped) {
+      add('workspace_sync', 'ok', L('已关闭工作区登记（DSH_MCP_REGISTER_WORKSPACE=off）', 'workspace registration off (DSH_MCP_REGISTER_WORKSPACE=off)'));
+    } else if (sync.missing.length) {
+      add(
+        'workspace_sync',
+        'warn',
+        L(
+          `${sync.missing.length}/${sync.checked} 个项目会话未出现在 DSH workspace.json 中（可能被运行中的 GUI 内存覆盖）`,
+          `${sync.missing.length}/${sync.checked} project conversation(s) missing from DSH workspace.json (likely overwritten by a running GUI)`,
+        ),
+        L('先退出/重启 DSH GUI，再运行 dsh-any-agent-workspaces --backfill 补登记', 'restart DSH GUI first, then run dsh-any-agent-workspaces --backfill'),
+      );
+    } else {
+      add(
+        'workspace_sync',
+        'ok',
+        L(`已核对 ${sync.checked} 个项目会话，workspace.json 登记完整`, `checked ${sync.checked} project conversation(s); workspace.json is in sync`),
+      );
+    }
+  } catch (e) {
+    add('workspace_sync', 'warn', e.message);
+  }
   add(
     'team',
     backend ? 'ok' : TEAM_MODE ? 'warn' : 'ok',

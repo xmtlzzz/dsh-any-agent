@@ -348,8 +348,18 @@ const doc = await handlers.dsh_doctor();
 const ids = doc.structured.checks.map((c) => c.id);
 check('返回 checks 数组', () => assert.ok(Array.isArray(doc.structured.checks)));
 check('包含关键检查项', () => {
-  for (const id of ['dsh_bin', 'profile', 'state', 'runs_dir', 'locks_dir', 'sessions', 'config']) {
+  for (const id of ['dsh_bin', 'profile', 'state', 'runs_dir', 'locks_dir', 'sessions', 'config', 'daemon', 'workspace_sync']) {
     assert.ok(ids.includes(id), `缺少 ${id}`);
+  }
+});
+check('daemon 降级时会报 warn 并附带原因', async () => {
+  hub.runtime = { mode: 'direct', fallbackReason: 'pipe blocked', logFile: '/tmp/daemon-test.log' };
+  try {
+    const fallbackDoc = await handlers.dsh_doctor();
+    const d = fallbackDoc.structured.checks.find((c) => c.id === 'daemon');
+    assert.ok(d && d.status === 'warn' && /pipe blocked/.test(d.detail), JSON.stringify(d));
+  } finally {
+    delete hub.runtime;
   }
 });
 check('verdict 是 ok 或 fail', () => assert.ok(['ok', 'fail'].includes(doc.structured.verdict)));

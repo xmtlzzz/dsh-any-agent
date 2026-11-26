@@ -430,8 +430,16 @@ export function describeLeaseConflict(conversationId, holder) {
       '  This server will **not** kill it (that would take your UI and the conversation you are reading down with it).',
     ));
     lines.push(L(
-      '  请在那个窗口里关掉该会话（或切走），然后重试。',
-      '  Close the conversation in that window (or switch away from it), then retry.',
+      '  注意：DSH GUI 点开会话后，**切走或归档也不会释放写锁**。',
+      '  Note: once opened in DSH GUI, **switching away or archiving does not release the write lock**.',
+    ));
+    lines.push(L(
+      '  恢复：重启 DSH 桌面端 / dsh web 即可归还写锁（历史与产物无损）。',
+      '  To recover: restart the DSH desktop app / dsh web to release the lock (history and files stay intact).',
+    ));
+    lines.push(L(
+      '  预防：查看实时进度请用 dsh-any-agent watch 或 dsh-any-agent dashboard --open（只读、不碰写锁）。',
+      '  To prevent this: watch progress with dsh-any-agent watch or dsh-any-agent dashboard --open (read-only, never takes the lock).',
     ));
   }
   return lines.join('\n');

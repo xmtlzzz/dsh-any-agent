@@ -5,6 +5,7 @@
  * 的状态，所以放在一起方便对照 ACP 的规范形状。
  */
 
+import { L } from './lang.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
 
 /** 按 ACP 权限应答的规范形状挑选项。 */
@@ -42,6 +43,7 @@ export function approvalContext(params, toolCall, desc, options) {
 export async function applySessionConfig(proc, sessionId, cfg) {
   const applied = [];
   const failed = [];
+  const failedKeys = [];
   const set = async (configId, value, label) => {
     if (value === undefined || value === null || value === '') return;
     try {
@@ -50,16 +52,17 @@ export async function applySessionConfig(proc, sessionId, cfg) {
       await proc.request('session/set_config_option', { sessionId, configId, value }, 30_000);
       applied.push(label);
     } catch (e) {
-      failed.push(`${label} 设置失败: ${e.message}`);
+      failed.push(L(`${label} 设置失败: ${e.message}`, `${label} failed: ${e.message}`));
+      failedKeys.push(configId);
     }
   };
   const effort = cfg.reasoningEffort === 'default' ? '' : cfg.reasoningEffort;
   // Selecting a model resets its dependent reasoning option in ACP. Apply effort last.
   if (cfg.provider && cfg.model) {
-    await set('model', JSON.stringify([cfg.provider, cfg.model]), `模型=${cfg.provider}/${cfg.model}`);
+    await set('model', JSON.stringify([cfg.provider, cfg.model]), L(`模型=${cfg.provider}/${cfg.model}`, `model=${cfg.provider}/${cfg.model}`));
   }
-  await set('reasoning_effort', effort, `思考深度=${effort}`);
-  return { applied, failed };
+  await set('reasoning_effort', effort, L(`思考深度=${effort}`, `reasoning_effort=${effort}`));
+  return { applied, failed, failedKeys };
 }
 
 /**

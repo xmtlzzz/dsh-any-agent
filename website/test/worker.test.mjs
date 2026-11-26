@@ -35,7 +35,18 @@ test('stars: a miss asks GitHub once, answers the count and caches it', async ()
 
   const again = await handleStars(req(), {}, { fetchImpl: github(99, calls), cache });
   assert.equal((await again.json()).stars, 12, 'a fresh cached count is served without asking GitHub');
+  assert.match(again.headers.get('cache-control'), /max-age=600/);
   assert.equal(calls.length, 1);
+});
+
+test('stars: cache hit rewrites Cache-Control instead of leaking zone 4h Browser Cache TTL', async () => {
+  const cache = fakeCache();
+  await handleStars(req(), {}, { fetchImpl: github(15), cache });
+  const entry = cache.store.get('https://site.example/api/stars');
+  entry.headers['cache-control'] = 'public, max-age=14400';
+  const hit = await handleStars(req(), {}, { fetchImpl: github(99), cache });
+  assert.equal((await hit.json()).stars, 15);
+  assert.equal(hit.headers.get('cache-control'), 'public, max-age=600');
 });
 
 test('stars: when GitHub fails, the last good count is served', async () => {
@@ -124,15 +135,19 @@ test('version: asks npm once, caches the version, and falls back to GitHub relea
     cache,
   });
   assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
   const body = await res.json();
   assert.equal(body.version, '0.7.7');
   assert.equal(body.source, 'npm');
   assert.equal(calls.length, 1);
 
+  // Simulate Cloudflare Zone Browser Cache TTL rewriting cached response headers to 14400 s.
+  for (const entry of cache.store.values()) entry.headers['cache-control'] = 'public, max-age=14400';
   const cached = await handleVersion(req('/api/version'), {}, {
     fetchImpl: async () => { throw new Error('should not fetch'); },
     cache,
   });
+  assert.equal(cached.headers.get('cache-control'), 'no-store');
   assert.equal((await cached.json()).version, '0.7.7');
 
   const fallbackCache = fakeCache();
@@ -148,4 +163,65 @@ test('version: asks npm once, caches the version, and falls back to GitHub relea
   const fbBody = await fbRes.json();
   assert.equal(fbBody.version, '0.7.7');
   assert.equal(fbBody.source, 'github-release');
+});
+
+test('version: expired fresh cache synchronously fetches the new release instead of returning old last-good', async () => {
+  const cache = fakeCache();
+  await handleVersion(req('/api/version'), {}, {
+    fetchImpl: async () => new Response(JSON.stringify({ version: '0.7.8' }), { status: 200 }),
+    cache,
+  });
+  // Expire only the short-lived fresh entry; last-good still holds 0.7.8.
+  for (const key of [...cache.store.keys()]) {
+    if (!key.includes('last-good')) cache.store.delete(key);
+  }
+  const res = await handleVersion(req('/api/version'), {}, {
+    fetchImpl: async () => new Response(JSON.stringify({ version: '0.7.9' }), { status: 200 }),
+    cache,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  const body = await res.json();
+  assert.equal(body.version, '0.7.9');
+  assert.equal(body.stale, undefined);
+});
+
+test('version: falls back to stale last-good only when all upstreams fail or hang within timeout budget', async () => {
+  const cache = fakeCache();
+  await handleVersion(req('/api/version'), {}, {
+    fetchImpl: async () => new Response(JSON.stringify({ version: '0.7.8' }), { status: 200 }),
+    cache,
+  });
+  for (const key of [...cache.store.keys()]) {
+    if (!key.includes('last-good')) cache.store.delete(key);
+  }
+  const t0 = Date.now();
+  const res = await handleVersion(req('/api/version'), {}, {
+    fetchImpl: hanging,
+    cache,
+    timeoutMs: 200,
+  });
+  const took = Date.now() - t0;
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  assert.ok(took < 700, `expected timeout budget to bound fallback, took ${took} ms`);
+  const body = await res.json();
+  assert.equal(body.version, '0.7.8');
+  assert.equal(body.stale, true);
+});
+
+test('version: a hanging npm source still leaves budget to fall back to GitHub release', async () => {
+  const res = await handleVersion(req('/api/version'), {}, {
+    fetchImpl: async (url, init) => {
+      if (url.includes('npmjs.org')) return hanging(url, init);
+      return new Response(JSON.stringify({ tag_name: 'v0.7.9' }), { status: 200 });
+    },
+    cache: fakeCache(),
+    timeoutMs: 300,
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.version, '0.7.9');
+  assert.equal(body.source, 'github-release');
+  assert.equal(body.stale, undefined);
 });

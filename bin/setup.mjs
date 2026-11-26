@@ -7,7 +7,8 @@
  *   dsh-any-agent-setup --repair --yes        更新已有条目的启动命令和参数
  *   dsh-any-agent-setup --yes --only cursor,zed
  *   dsh-any-agent-setup --yes --permission read-only
- *   dsh-any-agent-setup --yes --daemon        回合跑在常驻进程里（写 DSH_MCP_DAEMON=1）
+ *   dsh-any-agent-setup --yes --daemon        显式开启常驻进程模式（默认已开，DSH_MCP_DAEMON=1）
+ *   dsh-any-agent-setup --yes --no-daemon     关闭常驻进程模式，退回直连 stdio（DSH_MCP_DAEMON=0）
  *   dsh-any-agent-setup --json                机器可读的计划
  *   dsh-any-agent-setup --remove --yes        只把自己那一条摘掉
  *
@@ -77,8 +78,9 @@ if (has('--help') || has('-h')) {
     '  dsh-any-agent-setup --yes --only a,b    only these clients\n' +
     '  dsh-any-agent-setup --yes --permission read-only\n' +
     '  dsh-any-agent-setup --yes --reset-env   discard custom environment settings\n' +
-    '  dsh-any-agent-setup --yes --daemon      run turns in a resident process that\n' +
-    '                                          outlives the client (DSH_MCP_DAEMON=1)\n' +
+    '  dsh-any-agent-setup --yes --daemon      enable resident daemon mode (default;\n' +
+    '                                          DSH_MCP_DAEMON=1, idle exit 10m)\n' +
+    '  dsh-any-agent-setup --yes --no-daemon   use direct stdio mode (DSH_MCP_DAEMON=0)\n' +
     '  dsh-any-agent-setup --remove --yes      unregister\n' +
     '  dsh-any-agent-setup --json              machine-readable result on stdout\n' +
     '  dsh-any-agent-setup --home <dir>        use another home (sandbox/testing)\n' +
@@ -112,8 +114,14 @@ const ONLY = (val('--only', '') || val('--clients', '') || '').split(',').map((s
 const PERMISSION = val('--permission', 'workspace-write');
 const HOME_OVERRIDE = val('--home');
 const FORCE = has('--force');
-/** 写 DSH_MCP_DAEMON=1。和 --permission 一样，每次都按这次的参数整条重写：不带它重跑就去掉。 */
-const DAEMON = has('--daemon');
+/**
+ * 常驻模式默认开启（DSH_MCP_DAEMON=1），可用 --no-daemon 显式关闭（DSH_MCP_DAEMON=0）。
+ * 未显式传 --daemon / --no-daemon 重跑时保留配置里原有的 DSH_MCP_DAEMON（与其它自定义 env 一致）。
+ */
+const FLAG_DAEMON = has('--daemon');
+const FLAG_NO_DAEMON = has('--no-daemon');
+const DAEMON = !FLAG_NO_DAEMON;
+const EXPLICIT_DAEMON = FLAG_DAEMON || FLAG_NO_DAEMON;
 const ALL = has('--all');
 const STAMP = new Date().toISOString().replace(/[:.]/g, '-');
 
@@ -132,15 +140,23 @@ if (has('--reset-env') && (REPAIR || REMOVE)) {
   else bang(error);
   process.exit(2);
 }
-if (REPAIR && (REMOVE || has('--permission') || DAEMON)) {
-  const error = '--repair updates the launch command and arguments; run --remove, --permission or --daemon separately';
+if (FLAG_DAEMON && FLAG_NO_DAEMON) {
+  const error = 'cannot combine --daemon and --no-daemon';
+  if (JSON_OUT) process.stdout.write(JSON.stringify({ ok: false, mode: 'error', error, clients: [] }) + '\n');
+  else bang(error);
+  process.exit(2);
+}
+if (REPAIR && (REMOVE || has('--permission') || EXPLICIT_DAEMON)) {
+  const error = '--repair updates the launch command and arguments; run --remove, --permission or --daemon/--no-daemon separately';
   if (JSON_OUT) process.stdout.write(JSON.stringify({ ok: false, mode: 'error', error, clients: [] }) + '\n');
   else bang(error);
   process.exit(2);
 }
 
 if (!PERMISSION_TIERS.includes(PERMISSION)) {
-  log(`--permission 必须是 ${PERMISSION_TIERS.join(' | ')} 之一；收到: ${JSON.stringify(PERMISSION)}`);
+  const error = `--permission must be one of ${PERMISSION_TIERS.join(' | ')}; got: ${JSON.stringify(PERMISSION)}`;
+  if (JSON_OUT) process.stdout.write(JSON.stringify({ ok: false, mode: 'error', error, clients: [] }) + '\n');
+  else bang(error);
   process.exit(2);
 }
 
@@ -164,8 +180,19 @@ if (unknown.length) {
 }
 
 const launch = defaultLaunch();
-const env = desiredEnv(PERMISSION, DAEMON ? { DSH_MCP_DAEMON: '1' } : {});
-const ctx = { dirs, remove: REMOVE, repair: REPAIR, resetEnv: has('--reset-env'), write: WRITE, launch, env, byId, force: FORCE };
+const env = desiredEnv(PERMISSION, { DSH_MCP_DAEMON: DAEMON ? '1' : '0' });
+const ctx = {
+  dirs,
+  remove: REMOVE,
+  repair: REPAIR,
+  resetEnv: has('--reset-env'),
+  replaceDaemon: EXPLICIT_DAEMON || has('--reset-env'),
+  write: WRITE,
+  launch,
+  env,
+  byId,
+  force: FORCE,
+};
 
 if (!JSON_OUT) {
   log('');
@@ -175,7 +202,9 @@ if (!JSON_OUT) {
   log('  home       : ' + dirs.home);
   if (!REPAIR) {
     log('  permission : ' + PERMISSION);
-    log('  daemon     : ' + (DAEMON ? 'on (DSH_MCP_DAEMON=1)' : 'off'));
+    log('  daemon     : ' + (DAEMON
+      ? 'on (DSH_MCP_DAEMON=1, idle exit 10m; --no-daemon for direct stdio)'
+      : 'off (DSH_MCP_DAEMON=0, direct stdio)'));
     log('  DSH_BIN    : ' + (process.env.DSH_BIN || '(unset in this shell)'));
   }
   log('  launch     : ' + launch.command + (launch.args.length ? ' ' + launch.args.join(' ') : '') + '   (' + launch.style + ')');

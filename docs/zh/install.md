@@ -59,7 +59,7 @@ dsh --profile dsh-mcp --from-default-profile acp
 ```bash
 dsh-any-agent-setup --yes --only cursor,zed     # 只装这几个
 dsh-any-agent-setup --yes --permission read-only
-dsh-any-agent-setup --yes --daemon               # 回合跑在常驻进程里，客户端关掉/重连也不中断
+dsh-any-agent-setup --yes --no-daemon            # 退回直连 stdio（默认安装已开启常驻进程模式）
 dsh-any-agent-setup --remove --yes               # 全部移除，只摘自己那条
 ```
 
@@ -183,7 +183,7 @@ DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `
 | 注册到所有检测到的客户端 | `dsh-any-agent-setup --yes` |
 | 只注册某几个 | `dsh-any-agent-setup --yes --only cursor,zed` |
 | 就地改权限档 | `dsh-any-agent-setup --yes --permission read-only` |
-| 开常驻进程模式（`DSH_MCP_DAEMON=1`） | `dsh-any-agent-setup --yes --daemon`（常规注册时按本次参数设置，省略 `--daemon` 会关闭常驻模式） |
+| 切换常驻进程模式（默认开启 `DSH_MCP_DAEMON=1`） | 安装默认写入 `DSH_MCP_DAEMON=1`；加 `--no-daemon` 退回直连 stdio（`0`），不带显式开关重跑保留既有设置；可用 `dsh-any-agent daemon status\|stop` 查看与停止 |
 | 升级包之后更新配置 | `dsh-any-agent-setup --yes`（幂等，只重写有差异的条目） |
 | 仅更新已有条目的启动路径（0.7.6 起） | `dsh-any-agent-setup --repair --yes` |
 | 重置自定义环境变量 | `dsh-any-agent-setup --reset-env` 预览，加 `--yes` 应用 |
@@ -192,7 +192,7 @@ DSH 自己的 ACL 沙箱要求临时目录在工作区**之外**。Windows 上 `
 | 彻底卸载 | 先 `dsh-any-agent-setup --remove --yes`，再 `npm uninstall -g dsh-any-agent`；`$DSH_HOME/profiles/dsh-mcp/` 可删可留（留着无害）。你的 DSH 凭据和会话历史本服务从不写入，不受影响 |
 | 撤销某次误写 | 把 `.bak-dsh-<时间戳>` 复制回原文件 |
 
-重复注册时会保留已有的 `DSH_BIN`、`DSH_RUNTIME`、`DSH_MCP_APPROVAL`、`DSH_MCP_LANG` 等自定义设置。在运行安装命令的终端显式设置 `DSH_BIN` 可以更新入口。安装器仍按本次选项生成 `DSH_MCP_PERMISSION`、`DSH_MCP_LOG` 和 `DSH_MCP_DAEMON`。
+重复注册时会保留已有的 `DSH_BIN`、`DSH_RUNTIME`、`DSH_MCP_APPROVAL`、`DSH_MCP_LANG` 与 `DSH_MCP_DAEMON` 等自定义设置（传 `--daemon` / `--no-daemon` 或 `--reset-env` 时改写 `DSH_MCP_DAEMON`）。在运行安装命令的终端显式设置 `DSH_BIN` 可以更新入口。安装器按本次选项生成 `DSH_MCP_PERMISSION` 和 `DSH_MCP_LOG`。
 
 <details>
 <summary>移除操作的实测记录</summary>

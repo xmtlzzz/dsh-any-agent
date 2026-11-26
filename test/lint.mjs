@@ -104,6 +104,8 @@ console.log('\n[2] 每条规则都会报');
     // b.mjs 用 export * 转出 a.mjs：export * 不含 default
     'src/default.mjs': "import dflt from './b.mjs';\nexport const df = dflt;\n",
     'src/jsdoc.mjs': "/** uses a() somewhere */\nimport { a } from './a.mjs';\nexport const z = 1;\n",
+    'src/cyc1.mjs': "import { c2 } from './cyc2.mjs';\nexport const c1 = () => c2;\n",
+    'src/cyc2.mjs': "import { c1 } from './cyc1.mjs';\nexport const c2 = () => c1;\n",
   });
   const r = lintTree(dir);
   check('退出码 1', r.code === 1, `exit=${r.code}`);
@@ -117,6 +119,7 @@ console.log('\n[2] 每条规则都会报');
   check('exports：内置模块的具名导入也对照实际导出', has(r.out, 'src/builtin.mjs', 'exports', 'definitelyNotAnFsExport'), r.out);
   check('exports：export * 不转出 default', has(r.out, 'src/default.mjs', 'exports', 'default'), r.out);
   check('unused：只在注释里出现不算使用', has(r.out, 'src/jsdoc.mjs', 'unused', "'a'"), r.out);
+  check('cycle：静态循环依赖会被报', has(r.out, 'src/cyc1.mjs', 'cycle', 'src/cyc2.mjs'), r.out);
   check('没有牵连无辜文件', !/^src\/(a|b)\.mjs:/m.test(r.out), r.out);
   rmSync(dir, { recursive: true, force: true });
 }

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-26
+
+- `dsh-any-agent-setup --yes` now enables resident process mode (`DSH_MCP_DAEMON=1`) by default so active turns survive client closes and reconnects; pass `--no-daemon` for direct stdio (`0`), and re-running setup without either flag preserves your existing `DSH_MCP_DAEMON` value. Added `dsh-any-agent daemon status|stop`, tightened daemon proxy startup fallback from 15s to 6s, and added `daemon` and `workspace_sync` checks to `dsh_doctor`.
+- Clarified external write-lock guidance when DSH GUI holds a conversation lock (switching or archiving in the GUI does not release the lock; restart DSH desktop / `dsh web` to reclaim it, and use `dsh-any-agent watch` or `dashboard --open` for read-only progress). Added a concise live-view hint to `dsh_start`.
+- Completed bilingual (`DSH_MCP_LANG=en|zh`) coverage for user-facing errors and CLI commands (`setup` and `restore`), decoupled session config failure checks from localized text via structured `failedKeys`, and added the `i18n-en` regression suite.
+- Split the six largest core modules (`clients`, `conversation`, `tools`, `hub`, `workspace`, and `live-view`) into focused sub-modules behind backward-compatible facades, added zero-runtime JSDoc definitions (`src/types.mjs`), and added static import-cycle detection (`[cycle]`) to `npm run lint`.
+- Fixed stale version display on the project website by shortening `/api/version` edge cache freshness to 3 minutes with synchronous refresh before stale fallback, setting `Cache-Control: no-store` for browser responses, and preventing client-side version downgrades.
+
 ## [0.7.9] — 2026-11-25
 
 - In `ask` mode, pending approvals wake background runs. Queued and replayed receipts include the Bash or PowerShell wait command for text-only clients.
@@ -1762,7 +1770,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...v0.8.0
 [0.7.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...v0.7.9
 [0.7.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...v0.7.7
