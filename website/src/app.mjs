@@ -698,7 +698,7 @@ const TOOL_INFO = {
   dsh_approval_decide: { ro: false, demo: null, zh: ['裁决审批', '对收件箱中的指定审批请求执行放行或拒绝，并驱动会话继续执行。'], en: ['Decide approval', 'Approves or denies a pending approval request so the blocked turn can proceed.'] },
   dsh_takeover: { ro: false, demo: null, zh: ['抢占写锁', '核实持锁进程的系统启动时间确认原宿主失联后接管写锁（绝不终止 GUI），支持安全接力。'], en: ['Take over write lock', 'Verifies the holder’s OS start time before preempting a stale or sibling MCP lock (never kills the GUI).'] },
   dsh_release: { ro: false, demo: null, zh: ['释放会话', '释放单个或全部空闲会话的进程与写锁，便于回收内存或转入 DSH GUI 接手。'], en: ['Release conversation', 'Releases one or all idle sessions and their write locks to reclaim memory or hand off to DSH GUI.'] },
-  dsh_doctor: { ro: true, demo: null, zh: ['环境体检', '检查实际生效的 DSH 安装（含 DSH_BIN 覆盖）与候选版本、Node 运行时、profile、团队模式、注册表锁、结果目录硬链接、工作树占用、孤儿锁及更新，并在摘要中区分警告与失败。'], en: ['Health check', 'Checks the active DSH installation (including DSH_BIN overrides), runtime, profile, team mode, registry locks, hard-link support, worktree usage, orphan locks and updates, distinguishing warnings from failures.'] },
+  dsh_doctor: { ro: true, demo: null, zh: ['环境体检', '检查实际生效的 DSH 安装（含 DSH_BIN 覆盖）与候选版本、Node 运行时、profile、常驻进程模式（daemon）、工作区同步（workspace_sync）、团队模式、注册表锁、结果目录硬链接、工作树占用、孤儿锁及更新，并在摘要中区分警告与失败。'], en: ['Health check', 'Checks the active DSH installation (including DSH_BIN overrides), runtime, profile, daemon mode, workspace sync, team mode, registry locks, hard-link support, worktree usage, orphan locks and updates, distinguishing warnings from failures.'] },
 };
 
 const toolDetailEl = $('#tool-detail');

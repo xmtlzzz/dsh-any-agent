@@ -151,7 +151,7 @@ dsh-any-agent-setup --only codex --yes
 | `dsh_status` | 轻量状态查询（单个会话），含写锁持有者 `lock_holder` |
 | `dsh_inbox` | **跨会话待决审批收件箱**：一次列出所有会话的审批、原因、输入与等待时长；裁决仍用 `dsh_approval_decide` |
 | `dsh_queue` | 查看和调整 `dsh_send(queue=true)` 的队列。服务重启后，未执行的回执会转为取消 |
-| `dsh_doctor` | 只读体检：DSH 版本、profile、注册表锁、结果目录硬链接、工作树占用、孤儿锁、会话与 RSS、生效配置 |
+| `dsh_doctor` | 只读体检：DSH 版本、profile、常驻进程状态、工作区同步、注册表锁、结果目录硬链接、工作树占用、孤儿锁、会话与 RSS、生效配置 |
 
 每个工具都声明了全部四个 MCP 注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`）。只读取状态的六个标成只读：`dsh_list`、`dsh_read`、`dsh_get`、`dsh_status`、`dsh_inbox`、`dsh_doctor`。工具标题、描述、服务说明、工具返回正文与常见报错均提供中英文两份：默认跟随系统语言，也可以设 `DSH_MCP_LANG=zh|en`。
 

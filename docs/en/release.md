@@ -14,15 +14,19 @@ npm version patch --no-git-tag-version
 #    Make the same change in CHANGELOG.zh.md (same version heading and links, Chinese text);
 #    check:release fails when the two disagree on headings or links
 
-# 2. Run the offline suites locally (same set as CI, no tokens, no DSH needed for most).
+# 2. Run the static checks and offline suites locally (same set as CI, no tokens, no DSH needed for most).
+npm run lint
+npm run typecheck
 node test/run.mjs
 node test/package-check.mjs
 npm run check:release   # version / this CHANGELOG section and its links / zh and en CHANGELOG agree / release notes build / doc links / package contents
 npm run docs:counts:check   # check counts in tests.md and the CI comment = the report node test/run.mjs just wrote
+npm run docs:counts:check -- --portable
 #    A mismatch means tests changed without the numbers being refreshed:
 #    node test/run.mjs --all --report .state/test-report.json && npm run docs:counts
 #    (model-suite numbers only move with a report made using --all; see "After changing tests" in docs/en/tests.md)
 node scripts/release-notes.mjs x.y.z   # preview the notes the Release page will show
+npm --prefix website run check         # if website files changed, run checks and deploy with npm --prefix website run deploy
 
 # 3. Verify the tarball itself: builds, installs, starts.
 npm pack --dry-run

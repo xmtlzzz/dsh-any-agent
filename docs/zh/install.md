@@ -115,7 +115,7 @@ Zed          33 -> 33 个键   只有 context_servers 多了个子项
 
 Codex 的 `config.toml` 同理，是按行处理的：其它 `[表]` 及其注释、顶层键（`model`、`approval_policy`、`sandbox_mode` 等）、CRLF 行尾都原样保留 —— `--remove` 只删 `[mcp_servers.dsh-any-agent]` 那两段，其余一律不动。
 
-这些断言的详细覆盖见 [`test/`](../../test/)（`test/config-safety.mjs` 共 407 项，逐条断言上面每一条）。
+这些断言的详细覆盖见 [`test/`](../../test/)（`test/config-safety.mjs` 共 450 项，逐条断言上面每一条）。
 
 **在真实 home 上做过只读验证。** 用 `setup --json`（纯计划模式）跑一遍开发机上的真实配置：9 个客户端全部报出，而现存的每份配置都**原封未动** —— size、mtime、SHA-256 全同，没有新增任何 `.bak-dsh-*`，也没有新建任何文件：
 

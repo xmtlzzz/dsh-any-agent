@@ -102,7 +102,7 @@ What changed since 0.1.x: JSON configs used to be **re-serialised whole** (value
 
 Codex's `config.toml` gets the same treatment line-wise: your other `[tables]` and their comments, the top-level keys (`model`, `approval_policy`, `sandbox_mode`, …) and CRLF endings come back exactly as they were — `--remove` deletes only the two `[mcp_servers.dsh-any-agent]` sections and leaves the rest intact.
 
-The coverage for each of those claims is in [`test/`](../../test/) (`test/config-safety.mjs` asserts them one by one, 407 checks).
+The coverage for each of those claims is in [`test/`](../../test/) (`test/config-safety.mjs` asserts them one by one, 450 checks).
 
 **Checked against a real home, read-only.** Running `setup --json` (plan mode) against an actual developer profile reported all nine clients and left every existing config untouched — identical size, mtime and SHA-256, no `.bak-dsh-*` created, no new file created:
 
