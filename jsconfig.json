@@ -11,6 +11,7 @@
   },
   "include": [
     "src/**/*.mjs",
-    "bin/**/*.mjs"
+    "bin/**/*.mjs",
+    "scripts/**/*.mjs"
   ]
 }

@@ -325,7 +325,7 @@ export const INSTRUCTIONS_EN = `This server drives DeepSeek Harness (DSH) as a c
 - Give goals, not commands. DSH's internal tool names (read, pwsh, ...) are not tools of this server; this server only has dsh_*.
 - Do not dsh_send to a busy conversation. To run after the current turn use dsh_send(queue=true) (returns at once); to stop and redirect use dsh_interject (blocks until the new turn ends); to just stop use dsh_interrupt.
 - Before treating a result as done, verify it with your own tools (read files, git diff, run tests), then submit pass/partial/fail with dsh_review (fail and partial need a reason).
-- **Do not open a conversation this server drives in the DSH GUI**: opening it gives the GUI the write lock and it is not returned. To look at it there, dsh_release first.
+- **Do not open a conversation this server drives in the DSH GUI**: opening it gives the GUI the write lock and switching away does not release it. Observe with \`dsh-any-agent watch\` / \`dashboard\`; to hand off to the GUI, dsh_release first.
 
 [Three ids] conversation_id = the long-lived conversation (the process is only a cache; after reaping or a crash the next dispatch resumes it); run_id = one dispatch; cursor = dsh_read's incremental position.
 
@@ -333,10 +333,10 @@ export const INSTRUCTIONS_EN = `This server drives DeepSeek Harness (DSH) as a c
 
 [Waiting] In ask mode, use the receipt’s waiter. On CHECK_INBOX, check dsh_inbox, decide pending approvals and resume the wait. Every turn that ends (success, failure or cancel) writes a sentinel JSON atomically. Wait for it with a **background task** (the receipt has ready-made commands: sentinel_file_posix for Bash, sentinel_wait_powershell for PowerShell) and the host wakes you when it lands; read it for status and result (in Windows PowerShell read with -Encoding UTF8; the receipt has sentinel_read_powershell). wait=true blocks in place; a wait timeout only moves the turn to the background and never cancels it. Progress notifications are sent only when the call carries a progressToken.
 
-[Write lock] One writer per conversation at a time. On "already owned by an active write handle" (or a vague Internal error) do not retry; read lock_holder from dsh_status: stale-mcp -> dsh_takeover; live-mcp -> dsh_release on that side, or dsh_takeover(force=true) if you must; none usually means the GUI holds it -> ask the user to close it there. This server never kills the GUI.
+[Write lock] One writer per conversation at a time. On "already owned by an active write handle" (or a vague Internal error) do not retry; read lock_holder from dsh_status: stale-mcp -> dsh_takeover; live-mcp -> dsh_release on that side, or dsh_takeover(force=true) if you must; none usually means the GUI holds it -> ask the user to restart the DSH desktop app / \`dsh web\` to release it (switching sessions does not release it). This server never kills the GUI.
 
 [Defaults] permission ${DEFAULT_PERMISSION}, machine approval ceiling ${defaultApprovalPolicy(DEFAULT_PERMISSION)}. Read-only forces auto-deny. Reasoning is hidden by default (returned only with reasoning='full'). Reasoning effort defaults to max (lower it with reasoning_effort).
 
 [Privacy] This server's logs, sentinels and registry never contain reasoning text, but DSH's own ~/.dsh/sessions does store it. Sentinels contain the answer and tool inputs (common secrets redacted) and are kept for 7 days.
 
-Tool results follow the same language as this text. A few less common error messages are still Chinese; the field names in structured output are always English.`;
+Tool results and error messages follow the same language as this text; the field names in structured output are always English.`;

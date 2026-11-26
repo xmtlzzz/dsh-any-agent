@@ -14,15 +14,19 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   applyRuntimeOverride,
+  applyRuntimeOverrideAsync,
   cmpVersion,
   desktopCandidate,
   desktopExeForAsar,
+  discoverDshAsync,
   existsMaybeAsar,
   parseRegExport,
+  probeRuntimeNodeAsync,
   rankCandidates,
   readDshPackage,
   readMaybeAsar,
   resolveDsh,
+  resolveDshAsync,
   satisfiesNodeRange,
   splitAsarPath,
 } from '../src/dsh-locate.mjs';
@@ -32,6 +36,16 @@ let fail = 0;
 const check = (name, fn) => {
   try {
     fn();
+    pass++;
+    console.log(`  ✓ ${name}`);
+  } catch (e) {
+    fail++;
+    console.log(`  ✗ ${name}\n      ${e.message}`);
+  }
+};
+const checkAsync = async (name, fn) => {
+  try {
+    await fn();
     pass++;
     console.log(`  ✓ ${name}`);
   } catch (e) {
@@ -361,6 +375,41 @@ try {
     assert.equal(sec.values.DisplayIcon, 'D:\\Tools\\dsh\\DeepSeek Harness.exe,0');
     assert.equal(sec.values.Quoted, 'say "hi"');
     assert.equal(sec.values.EstimatedSize, undefined);
+  });
+
+  console.log('\n[8] 异步发现与运行时探测');
+  await checkAsync('probeRuntimeNodeAsync 识别本机 Node 且缺失路径返回 null', async () => {
+    assert.equal(await probeRuntimeNodeAsync({ command: process.execPath, env: {} }), process.versions.node);
+    assert.equal(await probeRuntimeNodeAsync({ command: join(root, 'missing-node'), env: {} }), null);
+  });
+  await checkAsync('applyRuntimeOverrideAsync 与同步版本行为一致', async () => {
+    const [ok, desk] = await applyRuntimeOverrideAsync([nodeCand('>=1'), deskCand], process.execPath);
+    assert.equal(ok.command, process.execPath);
+    assert.equal(ok.runtime, 'custom');
+    assert.equal(ok.runtimeOk, true);
+    assert.deepEqual(desk, deskCand);
+    const [tooNew] = await applyRuntimeOverrideAsync([nodeCand('>=999')], process.execPath);
+    assert.equal(tooNew.runtimeOk, false);
+  });
+  await checkAsync('resolveDshAsync 显式 DSH_BIN 与同步版本一致', async () => {
+    process.env.DSH_BIN = asarBin;
+    delete process.env.DSH_RUNTIME;
+    assert.deepEqual(await resolveDshAsync(), resolveDsh());
+    delete process.env.DSH_BIN;
+  });
+  await checkAsync('discoverDshAsync 与同步 resolveDsh 共用缓存并发现新安装', async () => {
+    const savedAppData = process.env.APPDATA;
+    process.env.APPDATA = join(root, 'roaming');
+    try {
+      const list = await discoverDshAsync({ fresh: true });
+      assert.ok(list.length > 0);
+      assert.equal(list[0].version, '999.0.0-rc.3');
+      assert.equal((await resolveDshAsync()).bin, list[0].bin);
+      assert.equal(resolveDsh().bin, list[0].bin);
+    } finally {
+      if (savedAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = savedAppData;
+    }
   });
 } finally {
   if (savedBin === undefined) delete process.env.DSH_BIN;

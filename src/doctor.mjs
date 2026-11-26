@@ -32,10 +32,10 @@ import {
 } from './config.mjs';
 import {
   SOURCE_LABEL,
-  discoverDsh,
+  discoverDshAsync,
   isNpxCachePath,
-  probeRuntimeNode,
-  resolveDsh,
+  probeRuntimeNodeAsync,
+  resolveDshAsync,
   satisfiesNodeRange,
 } from './dsh-locate.mjs';
 import { inspectProfile } from './bootstrap.mjs';
@@ -125,8 +125,8 @@ export async function runDoctor(hub) {
 
   try {
     // 体检总是重新探测（不吃 60 秒缓存）：用户刚装/升级完桌面版就来查，必须看到新结果。
-    const all = discoverDsh({ fresh: true });
-    const dsh = resolveDsh();
+    const all = await discoverDshAsync({ fresh: true });
+    const dsh = await resolveDshAsync();
     const { bin, version } = dsh;
     dshVersion = version ?? null;
     const fromNpx = isNpxCachePath(bin);
@@ -146,7 +146,7 @@ export async function runDoctor(hub) {
     );
 
     // DSH 的 engines.node 与实际拉起它的运行时是否匹配（0.2.2 起要求 Node >= 24.9）。
-    const runtimeNode = probeRuntimeNode(dsh);
+    const runtimeNode = await probeRuntimeNodeAsync(dsh);
     const engOk = satisfiesNodeRange(dsh.enginesNode, runtimeNode);
     add(
       'dsh_runtime',

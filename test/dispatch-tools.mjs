@@ -425,7 +425,7 @@ console.log('\n[6b] DSH 版本档位与 npx 缓存识别');
     assert.equal(dshVersionStatus('0.2.2-rc.1').status, 'ok');
   });
   check('★ 有全量实测记录的版本报告对应的 MCP 发布版本', () => {
-    for (const [version, release] of [['0.2.1-rc.5', '0.7.1'], ['0.2.2-rc.1', '0.5.x'], ['0.2.2-rc.3', '0.7.5']]) {
+    for (const [version, release] of [['0.2.1-rc.5', '0.7.1'], ['0.2.2-rc.1', '0.5.x'], ['0.2.2-rc.3', '0.8.1']]) {
       const s = dshVersionStatus(version);
       assert.equal(s.rerun, true);
       assert.ok(s.note.includes(`已用 ${release} 跑过全量套件`));

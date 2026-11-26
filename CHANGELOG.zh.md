@@ -12,6 +12,13 @@
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-11-26
+
+- 新增零仓内依赖的 JSDoc 静态类型检查（`npm run typecheck`，通过固定版本 `typescript@5.8.3` 与 `@types/node@22` 覆盖 `src/`、`bin/` 与 `scripts/`），在零 `@ts-ignore` 前提下清零全部 126 条 `checkJs` 诊断并修复发现的静态问题（如不可达的 `REGISTER_WORKSPACE === 'off'` 分支及 `test/package-check.mjs` 递归扫描 `src/`），并在 GitHub Actions CI 中强制门禁 `typecheck` 与 `i18n-en`。
+- 升级 `dsh-any-agent daemon stop` 优先走带令牌的本机命名管道 / Unix socket 控制通道优雅关闭常驻进程（在 Windows 与 POSIX 上均能正常触发 `hub.shutdown()` 刷新注册表、为在跑回合落 `interrupted` 哨兵、释放子进程锁并删除信息文件），仅在超时或连不上时回退 `SIGTERM`。
+- 新增非阻塞异步 DSH 自动发现与运行时 Node 探测（`discoverDshAsync`、`resolveDshAsync`、`probeRuntimeNodeAsync`、`applyRuntimeOverrideAsync`，与同步版共用缓存），接入 `dsh_doctor` 并在服务启动时后台预热发现缓存，避免多客户端共享常驻进程在 Windows 注册表导出或 Electron 运行时探测时阻塞事件循环。
+- 统一 `src/mcp.mjs` 与 `bin/setup.mjs` 复用 `PKG_VERSION` 单一版本来源，同步更新中英文 MCP `INSTRUCTIONS` 中的 GUI 写锁释放指引与英文报错覆盖说明，并在兼容性文档补充 `daemon` / `workspace_sync` 检查项及 `0.8.1` 全量实测记录。
+
 ## [0.8.0] — 2026-11-26
 
 - `dsh-any-agent-setup --yes` 现默认开启常驻进程模式（`DSH_MCP_DAEMON=1`），客户端关闭或重连时运行中的回合不再中断；加 `--no-daemon` 可切回直连 stdio（`0`），不带显式开关重跑会保留既有 `DSH_MCP_DAEMON` 设置。新增 `dsh-any-agent daemon status|stop` 管理子命令，将常驻代理启动降级超时从 15 秒缩短至 6 秒，并在 `dsh_doctor` 中新增 `daemon` 与 `workspace_sync` 体检项。
@@ -1297,7 +1304,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...v0.8.0
 [0.7.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...v0.7.9
 [0.7.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...v0.7.8

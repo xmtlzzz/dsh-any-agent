@@ -5,33 +5,19 @@
  * 因为混进 stdout 的日志会直接破坏报文。日志默认静默（见 config.createLogger）。
  */
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHandlers } from './tools.mjs';
 import { localizeToolDefs } from './tool-defs.mjs';
 import { INSTRUCTIONS_EN } from './tool-defs.en.mjs';
 import { L, LANG } from './lang.mjs';
-import { DEFAULT_PERMISSION, defaultApprovalPolicy } from './config.mjs';
+import { DEFAULT_PERMISSION, PKG_VERSION, defaultApprovalPolicy } from './config.mjs';
 import { LineDecoder } from './line-decoder.mjs';
 import { withLiveClient } from './live.mjs';
 import { isObject, schemaIssue } from './tool-schema.mjs';
 
 const SERVER_NAME = 'dsh-any-agent';
-/**
- * Version comes from package.json so it cannot drift from the published
- * artifact. The old hard-coded copy is exactly the kind of duplicated fact
- * that goes stale the moment someone runs `npm version`.
- */
-export const SERVER_VERSION = (() => {
-  try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'));
-    return pkg.version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-})();
+/** Version comes from package.json via config.PKG_VERSION (single source of truth). */
+export const SERVER_VERSION = PKG_VERSION;
 const LEGACY_PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const MODERN_PROTOCOL = '2026-07-28';
 const SUPPORTED_PROTOCOLS = [MODERN_PROTOCOL, ...LEGACY_PROTOCOLS];
@@ -51,8 +37,8 @@ export const INSTRUCTIONS_MAX_CHARS = 2400;
 export const INSTRUCTIONS_EN_MAX_CHARS = 3600;
 
 /**
- * 工具描述与服务说明用哪种语言：DSH_MCP_LANG 优先，否则跟系统语言走（与 watch / dashboard 同一条规则）。
- * 进程启动时定一次；工具返回的正文不在此列，仍是中文。
+ * 工具描述、服务说明与工具正文用哪种语言：DSH_MCP_LANG 优先，否则跟系统语言走（与 watch / dashboard 同一条规则）。
+ * 进程启动时定一次。
  */
 export { LANG };
 
@@ -62,7 +48,7 @@ export const INSTRUCTIONS = `本服务把 DeepSeek Harness (DSH) 当作可长期
 - 给目标，不要给命令；DSH 内部工具名（read/pwsh…）不是本服务的工具，本服务只有 dsh_*。
 - 会话在忙时不要再 dsh_send：排到本轮之后用 dsh_send(queue=true)（立即返回）；打断并改口用 dsh_interject（阻塞到新回合跑完）；只停下用 dsh_interrupt。
 - 结果当作"完成"之前，先用你自己的工具独立核验（读文件、git diff、跑测试），再 dsh_review 提交 pass/partial/fail（fail/partial 要写理由）。
-- 本服务驱动的会话**不要在 DSH GUI 里打开**：点开即被 GUI 拿走写锁且不释放。要在 GUI 看，先 dsh_release。
+- 本服务驱动的会话**不要在 DSH GUI 里打开**：点开即被 GUI 拿走写锁且切换会话也不释放；围观请用 \`dsh-any-agent watch\` / \`dashboard\`，要在 GUI 接手先 dsh_release。
 
 【三个 id】conversation_id = 长期会话（进程只是缓存，回收/崩溃后下次派活自动 resume）；run_id = 一次派活；cursor = dsh_read 的增量游标。
 
@@ -70,7 +56,7 @@ export const INSTRUCTIONS = `本服务把 DeepSeek Harness (DSH) 当作可长期
 
 【等结果】ask 模式用回执里的等待命令；CHECK_INBOX 时查 dsh_inbox、裁决后继续等。每个回合结束（成功/失败/取消）都会原子写出哨兵 JSON。用你的**后台任务**等它出现（收据里给了现成命令：sentinel_file_posix 给 Bash，sentinel_wait_powershell 给 PowerShell），文件一到宿主就唤醒你；读它拿 status 与 result（Windows PowerShell 读取要 -Encoding UTF8，收据里有 sentinel_read_powershell）。wait=true 会原地阻塞，等超时只转后台、不取消回合。只有调用带 progressToken 时才发进度通知。
 
-【写锁】一个会话同时只能有一个写者。撞上 "already owned by an active write handle"（或笼统的 Internal error）时别重试，先看 dsh_status 的 lock_holder：stale-mcp → dsh_takeover；live-mcp → 那边 dsh_release，确需再 dsh_takeover(force=true)；none 多半是 GUI 持有 → 请用户在 GUI 里关掉，本服务绝不杀 GUI。
+【写锁】一个会话同时只能有一个写者。撞上 "already owned by an active write handle"（或笼统的 Internal error）时别重试，先看 dsh_status 的 lock_holder：stale-mcp → dsh_takeover；live-mcp → 那边 dsh_release，确需再 dsh_takeover(force=true)；none 多半是 GUI 持有 → 请用户重启 DSH 桌面版 / \`dsh web\` 释放（切换会话不会释放），本服务绝不杀 GUI。
 
 【默认值】权限 ${DEFAULT_PERMISSION}，审批上限 ${defaultApprovalPolicy(DEFAULT_PERMISSION)}；read-only 强制 auto-deny（分析不信任样本用它）。思考默认隐藏（reasoning='full' 才返回），思考深度默认 max（reasoning_effort 可调低）。
 

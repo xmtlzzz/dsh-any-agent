@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-11-26
+
+- Added zero-repo-dependency static JSDoc typechecking (`npm run typecheck` via pinned `typescript@5.8.3` + `@types/node@22` over `src/`, `bin/`, and `scripts/`), resolved all 126 `checkJs` diagnostics without `@ts-ignore`, fixed static bugs caught by the checker (including an unreachable `REGISTER_WORKSPACE === 'off'` branch and recursive `src/` scanning in `test/package-check.mjs`), and enforced both `typecheck` and `i18n-en` in GitHub Actions CI.
+- Upgraded `dsh-any-agent daemon stop` to shut down resident daemons gracefully over the authenticated local named pipe / Unix socket control channel (`hub.shutdown()` flushes the registry, writes `interrupted` sentinels for active turns, releases child locks, and removes info files cleanly on Windows as well as POSIX), falling back to `SIGTERM` only if unresponsive.
+- Added non-blocking async DSH discovery and runtime Node probing (`discoverDshAsync`, `resolveDshAsync`, `probeRuntimeNodeAsync`, `applyRuntimeOverrideAsync`) sharing caches with the synchronous helpers, wired them into `dsh_doctor`, and added background discovery pre-warming on server startup so shared multi-client daemons do not block the event loop on Windows registry export or Electron runtime checks.
+- Unified package version lookup on `PKG_VERSION` across `src/mcp.mjs` and `bin/setup.mjs`, updated bilingual MCP server `INSTRUCTIONS` to reflect current GUI write-lock release guidance and full English error localization, and documented `daemon` and `workspace_sync` checks plus full-suite `0.8.1` verification in the compatibility matrix.
+
 ## [0.8.0] — 2026-11-26
 
 - `dsh-any-agent-setup --yes` now enables resident process mode (`DSH_MCP_DAEMON=1`) by default so active turns survive client closes and reconnects; pass `--no-daemon` for direct stdio (`0`), and re-running setup without either flag preserves your existing `DSH_MCP_DAEMON` value. Added `dsh-any-agent daemon status|stop`, tightened daemon proxy startup fallback from 15s to 6s, and added `daemon` and `workspace_sync` checks to `dsh_doctor`.
@@ -1770,7 +1777,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...v0.8.0
 [0.7.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...v0.7.9
 [0.7.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...v0.7.8

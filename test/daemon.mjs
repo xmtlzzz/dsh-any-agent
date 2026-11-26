@@ -223,15 +223,61 @@ try {
   await check('超过 10 MB 的旧日志滚动成 .1，新日志从头开始', () =>
     statSync(`${logFile}.1`).size > 10 * 1024 * 1024 && (!existsSync(logFile) || statSync(logFile).size < 1024 * 1024),
   );
+
+  console.log('\n[7] 优雅停止（dsh-any-agent daemon stop）');
+  const gracefulStateDir = join(root, 'graceful-state');
+  const gracefulEnv = {
+    ...baseEnv,
+    DSH_MCP_STATE: join(gracefulStateDir, 'conversations.json'),
+    FAKE_ACP_PROMPT_MS: '15000',
+  };
+  const g = track(new McpClient({ env: gracefulEnv }).start());
+  await g.initialize();
+  const gFiles = () => (existsSync(gracefulStateDir) ? readdirSync(gracefulStateDir).filter((n) => /^daemon-[0-9a-f]+\.json$/.test(n)) : []);
+  const [gInfoName] = gFiles();
+  const gInfo = gInfoName ? JSON.parse(readFileSync(join(gracefulStateDir, gInfoName), 'utf8')) : null;
+  await check('信息文件记录了管道/socket 路径', () => typeof gInfo?.path === 'string' && gInfo.path.length > 0);
+  await check('未认证的控制指令不会关闭常驻进程', async () => {
+    const res = await rawProbe(gInfo.path, JSON.stringify({ dsh_any_agent_auth: 'wrong', control: 'shutdown' }));
+    await sleep(150);
+    return res === '' && alive(gInfo.pid);
+  });
+  const gStarted = await g.callTool('dsh_start', { cwd: root });
+  const gConv = gStarted?.structuredContent?.conversation_id;
+  const gSent = await g.callTool('dsh_send', { conversation_id: gConv, prompt: '等待被 daemon stop 优雅中断的回合' });
+  const gSentinel = gSent?.structuredContent?.sentinel_file;
+  writeFileSync(join(gracefulStateDir, 'daemon-0000000000000000.json'), JSON.stringify({ pid: 99999999, token: 'stale', version: '0.0.0' }));
+  const cli = join(HERE, '..', 'bin', 'dsh-any-agent.mjs');
+  const stopRes = spawnSync(process.execPath, [cli, 'daemon', 'stop'], {
+    env: { ...process.env, ...gracefulEnv, DSH_MCP_LANG: 'en' },
+    encoding: 'utf8',
+    timeout: 15_000,
+  });
+  await check('★ daemon stop 走控制通道优雅关闭并清理残留文件', () =>
+    stopRes.status === 0 &&
+    /Stopped 1 daemon\(s\) and cleaned 1 stale info file\(s\)/.test(stopRes.stdout) &&
+    !/SIGTERM/.test(stopRes.stdout),
+  );
+  await check('常驻进程已退出且信息文件全部清理', () => !alive(gInfo.pid) && gFiles().length === 0);
+  await check('★ 优雅关闭触发 hub.shutdown：在跑回合写出 interrupted 哨兵', () => {
+    if (!gSentinel || !existsSync(gSentinel)) return false;
+    const s = JSON.parse(readFileSync(gSentinel, 'utf8'));
+    return s.status === 'error' && s.result?.stop_reason === 'interrupted';
+  });
 } catch (e) {
   failed += 1;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);
 } finally {
   for (const cl of clients) await cl.close().catch(() => {});
-  for (const pid of daemonPids()) {
-    try {
-      process.kill(pid);
-    } catch {}
+  const extraStateDirs = [stateDir, join(root, 'graceful-state')];
+  for (const dir of extraStateDirs) {
+    if (!existsSync(dir)) continue;
+    for (const file of readdirSync(dir).filter((n) => /^daemon-[0-9a-f]+\.json$/.test(n))) {
+      try {
+        const { pid } = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+        if (pid) process.kill(pid);
+      } catch {}
+    }
   }
   await sleep(300);
   cleanupSuite({ clients: allClients, roots: [root] });
