@@ -142,7 +142,7 @@ export function readMarker(conversationId) {
 
 /**
  * 判定当前持有者属于哪一类。
- * @returns {{kind:'none'|'self'|'stale-mcp'|'live-mcp', marker:object|null, childAlive:boolean, mcpAlive:boolean, ageMs:number|null, reason:string}}
+ * @returns {{kind:'none'|'self'|'stale-mcp'|'live-mcp', marker:object|null, childAlive:boolean, mcpAlive:boolean, ageMs:number|null, known_child_pid?:number, reason:string}}
  */
 export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
   const marker = readMarker(conversationId);
@@ -242,7 +242,7 @@ export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
  * 杀掉一个 DSH 子进程。**只允许对 classification 判定为 `stale-mcp` / `live-mcp(force)`
  * 的、由本 MCP 登记过的进程调用** —— 调用方负责先做分类。
  */
-export function killHolderChild(pid, { expectedStartedAt } = {}) {
+export function killHolderChild(pid, { expectedStartedAt = undefined } = {}) {
   if (pid === process.pid || !isPidAlive(pid)) {
     return { killed: false, reason: L('目标进程不可用', 'the target process is unavailable') };
   }
@@ -302,7 +302,7 @@ function startTimeQuery(pid) {
     ? ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`]
     : ['-o', 'lstart=', '-p', String(pid)];
   const env = win ? process.env : { ...process.env, LC_ALL: 'C', TZ: 'UTC' };
-  return { command, args, options: { env, encoding: 'utf8', timeout: 3000, windowsHide: true } };
+  return { command, args, options: { env, encoding: /** @type {'utf8'} */ ('utf8'), timeout: 3000, windowsHide: true } };
 }
 
 function parseStartTime(stdout) {

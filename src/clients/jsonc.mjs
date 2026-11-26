@@ -15,9 +15,7 @@ export function scanJson(text) {
   let i = 0;
   const n = text.length;
   const fail = (msg) => {
-    const err = new Error(msg + ' at offset ' + i);
-    err.code = 'EJSONSCAN';
-    throw err;
+    throw Object.assign(new Error(msg + ' at offset ' + i), { code: 'EJSONSCAN' });
   };
 
   function skipTrivia() {

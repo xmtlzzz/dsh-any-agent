@@ -61,6 +61,7 @@ function tomlKeys(name) {
 }
 
 function findTomlRanges(lines) {
+  /** @type {Array<{start: number, end: number, main?: boolean, env?: boolean, envChild?: boolean, inline?: boolean}>} */
   const ranges = [];
   const mask = multilineMask(lines);
   let cur = null;

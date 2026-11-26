@@ -22,7 +22,7 @@ function parseTimeoutMs(raw) {
 
 export function createDispatchHandlers(hub) {
   return {
-    async dsh_send(args, { signal } = {}) {
+    async dsh_send(args, { signal = undefined } = {}) {
       if (typeof args.prompt !== 'string' || args.prompt.trim() === '') {
         throw new Error(L('prompt 不能为空：至少包含一个非空白字符', 'prompt must not be empty: it needs at least one non-whitespace character'));
       }
@@ -91,7 +91,7 @@ export function createDispatchHandlers(hub) {
       return { structured: r, text: renderSendResult(r) };
     },
 
-    async dsh_interject(args, { signal } = {}) {
+    async dsh_interject(args, { signal = undefined } = {}) {
       if (typeof args.message !== 'string' || args.message.trim() === '') {
         throw new Error(L('message 不能为空：至少包含一个非空白字符', 'message must not be empty: it needs at least one non-whitespace character'));
       }

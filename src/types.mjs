@@ -70,12 +70,14 @@
 /**
  * @typedef {object} ClientPlan
  * @property {string} id
- * @property {string} name
+ * @property {string} label
  * @property {string} path
- * @property {'json'|'toml'} format
- * @property {'install'|'update'|'repair'|'remove'|'skip'|'error'} action
- * @property {string} reason
+ * @property {string} status
+ * @property {boolean} changed
+ * @property {string} summary
+ * @property {string} [sourceHash]
  * @property {string|null} [next]
+ * @property {boolean} [deleteFile]
  * @property {string|null} [backup]
  * @property {string} [error]
  */

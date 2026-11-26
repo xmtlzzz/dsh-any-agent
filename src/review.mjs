@@ -59,6 +59,7 @@ function toolNames(result) {
 /**
  * 生成审核清单。清单是**通用的**，因为服务端不知道调用方能用哪些工具；
  * 但它会随结果形状变化（有没有改动、有没有错误、用了哪些工具）。
+ * @param {{ result?: any, permission?: string | null }} [opts]
  */
 export function buildReviewChecklist({ result = {}, permission = null } = {}) {
   const tools = toolNames(result);
@@ -149,8 +150,8 @@ export function buildReviewChecklist({ result = {}, permission = null } = {}) {
  * （此时还不知道结果，只提示"跑完后要审核"）。
  */
 export function buildReviewTicket({
-  conversationId,
-  runId,
+  conversationId = undefined,
+  runId = undefined,
   promptPreview = null,
   result = null,
   mode = 'advisory',

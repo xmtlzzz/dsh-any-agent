@@ -123,7 +123,7 @@ export function reserveRun(paths, conversationId, run) {
   }
 }
 
-function writeRunMarker(file, conversationId, run, { checkpoint, ...options } = {}) {
+function writeRunMarker(file, conversationId, run, { checkpoint = undefined, exclusive = false, mtime = undefined } = {}) {
   mkdirSync(dirname(file), { recursive: true });
   writeRunJson(file, {
     conversation_id: conversationId,
@@ -137,7 +137,7 @@ function writeRunMarker(file, conversationId, run, { checkpoint, ...options } = 
     owner_pid: process.pid,
     owner_started_at: PROCESS_STARTED_AT,
     ...(checkpoint ? { checkpoint } : {}),
-  }, options);
+  }, { exclusive, mtime });
 }
 
 export function markRunStarted(paths, conversationId, run) {
@@ -428,7 +428,7 @@ function backfillRunKeys(dir, files, log) {
   }
 }
 
-function writeRunJson(file, value, { exclusive = false, mtime } = {}) {
+function writeRunJson(file, value, { exclusive = false, mtime = undefined } = {}) {
   const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
   try {
     writeFileSync(tmp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });

@@ -19,6 +19,7 @@ import { codexBlock, entryShape, existingShapeMode } from './registry.mjs';
 
 const DELETES_FILE = '; nothing else is in the file, so the file itself would be deleted';
 
+/** @returns {import('../types.mjs').ClientPlan} */
 export function planClient(client, ctx) {
   const { dirs, remove, repair, launch, env } = ctx;
   const file = client.pathOf(dirs);
@@ -90,6 +91,7 @@ export function planClient(client, ctx) {
   return { ...base, status: 'planned', changed: true, next: r.text, summary: 'entry would be written' };
 }
 
+/** @returns {import('../types.mjs').ClientPlan} */
 export function applyClient(plan, ctx, stamp) {
   if (!plan || !plan.changed || !ctx.write) return plan;
 

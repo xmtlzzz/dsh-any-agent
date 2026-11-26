@@ -6,7 +6,8 @@
 npm test                   # offline suites; smoke skips DSH sections if no DSH
 npm run test:all           # offline + model-backed suites (needs DSH/provider)
 node test/cleanup.mjs      # suite teardown on its own (test-created dirs only; --dry-run to preview; --purge-temp to also delete %TEMP%\dsh-any-agent-* dirs)
-npm run lint               # zero-dependency static checks: syntax, imports, named exports, unused imports
+npm run lint               # zero-dependency static checks: syntax, imports, named exports, unused imports, cycles
+npm run typecheck          # zero-repo-dependency JSDoc static typecheck (tsc --checkJs --noEmit over src/ and bin/)
 node test/run.mjs --all --report .state/test-report.json   # same, writing the JSON report to a chosen path (every run writes .state/test-report.json by default)
 npm run docs:counts       # write the report's check counts back into this page and the CI comment (see "After changing tests")
 npm run docs:counts:check # check that the docs agree with the report; exit 1 and print the diff if not

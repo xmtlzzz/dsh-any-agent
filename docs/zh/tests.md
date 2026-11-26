@@ -6,7 +6,8 @@
 npm test                   # 全部离线套件；没有 DSH 时 smoke 自动跳过会话段
 npm run test:all           # 离线 + 需要模型的套件（需要 DSH/provider）
 node test/cleanup.mjs      # 单独跑收尾清理（只清测试自己造的目录；--dry-run 可预演；%TEMP% 下的 dsh-any-agent-* 目录要加 --purge-temp 才删）
-npm run lint               # 零依赖静态检查：语法、导入路径、具名导出、未使用导入
+npm run lint               # 零依赖静态检查：语法、导入路径、具名导出、未使用导入、循环依赖
+npm run typecheck          # 零仓内依赖 JSDoc 静态类型检查（tsc --checkJs --noEmit，覆盖 src/ 与 bin/）
 node test/run.mjs --all --report .state/test-report.json   # 同上，并指定 JSON 报告位置（每次运行默认都写 .state/test-report.json）
 npm run docs:counts       # 把报告里的检查数写回本文与 CI 注释（见下文「改了测试之后」）
 npm run docs:counts:check # 只检查文档与报告是否一致，不一致 exit 1 并打印差异

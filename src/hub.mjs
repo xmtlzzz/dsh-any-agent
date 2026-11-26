@@ -78,11 +78,13 @@ const now = () => Date.now();
 // ── 注册表 ────────────────────────────────────────────────────────
 
 export class Hub {
-  constructor({ log } = {}) {
+  constructor({ log = undefined } = {}) {
     this.conversations = new Map();
     /** 共享 ACP 进程池：key = `${cwd}\0${permission}`（0.5.0 起默认启用，`DSH_MCP_SHARED_PROCESS=0` 关闭）。 */
     this.hosts = new Map();
     this.log = log ?? NOOP_LOG;
+    /** 当前服务运行形态（直连/常驻/降级原因），供 dsh_doctor 展示。 */
+    this.runtime = null;
     /** 最近一次 dsh_list 磁盘探测的结果：{ok, error, cached, at}。 */
     this.lastProbe = { ok: null, error: null, cached: false, at: 0 };
     const rawApprovalTimeout = Number(process.env.DSH_MCP_APPROVAL_TIMEOUT_MS ?? 5 * 60 * 1000);
@@ -297,8 +299,8 @@ export class Hub {
       }
     }
     if (!c) {
-      let release;
-      const gate = new Promise((resolve) => { release = resolve; });
+      let release = () => {};
+      const gate = new Promise((resolve) => { release = () => resolve(undefined); });
       this.#adopting.set(id, gate);
       try {
         c = await adoptConversationFromDisk(this, id);
@@ -377,7 +379,7 @@ export class Hub {
   }
 
   /** 新建一个会话：拉起进程 + ACP 初始化 + session/new。 */
-  async create({ cwd, permission = DEFAULT_PERMISSION, onApproval, titleHint, reasoningEffort, provider, model, keepAlive = false, review, isolation } = {}) {
+  async create({ cwd = undefined, permission = DEFAULT_PERMISSION, onApproval = undefined, titleHint = undefined, reasoningEffort = undefined, provider = undefined, model = undefined, keepAlive = false, review = undefined, isolation = undefined } = {}) {
     if (this.shuttingDown) throw new Error('Service is shutting down');
     if (!cwd) {
       throw new Error(L(

@@ -81,7 +81,7 @@ export async function adoptConversationFromDisk(hub, id) {
 }
 
 /** 合并本进程内存中的会话与 DSH 磁盘上未打开的会话（带 LIST_PROBE_TTL_MS 缓存）。 */
-export async function listConversations(hub, { cwd, includeClosed = true } = {}, probeState) {
+export async function listConversations(hub, { cwd = undefined, includeClosed = true } = {}, probeState) {
   const out = new Map();
   for (const c of hub.conversations.values()) {
     if (cwd && c.cwd !== cwd) continue;

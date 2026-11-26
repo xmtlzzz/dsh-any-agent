@@ -56,7 +56,7 @@ export async function startHub(log) {
  * 在一对流上跑一个 MCP 会话（每个客户端连接一个）。
  * dsh_start 不传 cwd 时，用**这个**客户端当前打开的项目目录（MCP roots）。
  */
-export function serveMcp({ hub, log, input, output }) {
+export function serveMcp({ hub, log, input = undefined, output = undefined }) {
   const server = createMcpServer({
     hub,
     log,
@@ -99,7 +99,7 @@ export async function runStdioServer(log, { daemonFallback = null } = {}) {
  * 让它崩掉更干净 —— 会话本体都在磁盘上，重启后会 resume。
  */
 export function keepAliveOnRejection(log) {
-  process.on('unhandledRejection', (e) => {
+  process.on('unhandledRejection', (/** @type {any} */ e) => {
     log.info(`[dsh-any-agent] 未处理的 Promise 拒绝（已忽略，服务继续）: ${e?.message ?? e}`);
   });
 }

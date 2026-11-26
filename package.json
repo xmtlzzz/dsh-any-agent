@@ -53,6 +53,7 @@
     "test:packed": "node ./test/package-lifecycle.mjs",
     "test:prune": "node ./test/prune.mjs",
     "lint": "node ./scripts/lint.mjs",
+    "typecheck": "node ./scripts/typecheck.mjs",
     "check:release": "node ./scripts/check-release.mjs",
     "docs:counts": "node ./scripts/sync-test-counts.mjs",
     "docs:counts:check": "node ./scripts/sync-test-counts.mjs --check",

@@ -134,7 +134,7 @@ const DASHBOARD_BANNER = {
  *   必须传空字符串 ''（Node 会把它转成 `""`）；传字面量 '""' 会被转义成 `"\"\""`，
  *   cmd 收到的就不是空标题了（实测）。
  */
-export function openInBrowser(url, { platform = process.platform, spawnFn } = {}) {
+export function openInBrowser(url, { platform = process.platform, spawnFn = undefined } = {}) {
   const { dirs, env } = hostPath(process.env, platform);
   const [cmd, args] =
     platform === 'win32'

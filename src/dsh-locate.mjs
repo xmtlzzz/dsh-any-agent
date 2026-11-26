@@ -469,7 +469,7 @@ export function isNpxCachePath(p) {
 export function rankCandidates(list) {
   return [...list].sort(
     (a, b) =>
-      (a.runtimeOk === false) - (b.runtimeOk === false) ||
+      Number(a.runtimeOk === false) - Number(b.runtimeOk === false) ||
       cmpVersion(b.version ?? '0.0.0', a.version ?? '0.0.0') ||
       (SOURCE_RANK[b.source] ?? 0) - (SOURCE_RANK[a.source] ?? 0),
   );
@@ -477,12 +477,13 @@ export function rankCandidates(list) {
 
 function assertRuntimeFile(path) {
   if (!isRegularFile(path)) {
-    const error = new Error(L(
-      `DSH_RUNTIME 指向的文件不存在、不可访问或不是文件: ${path}`,
-      `DSH_RUNTIME does not point to an accessible file: ${path}`,
-    ));
-    error.code = 'DSH_RUNTIME_INVALID';
-    throw error;
+    throw Object.assign(
+      new Error(L(
+        `DSH_RUNTIME 指向的文件不存在、不可访问或不是文件: ${path}`,
+        `DSH_RUNTIME does not point to an accessible file: ${path}`,
+      )),
+      { code: 'DSH_RUNTIME_INVALID' },
+    );
   }
 }
 
