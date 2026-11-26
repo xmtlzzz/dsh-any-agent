@@ -253,6 +253,7 @@ for (const client of clients) {
     continue;
   }
 
+  /** @type {import('../src/types.mjs').ClientPlan} */
   let plan;
   try {
     plan = planClient(client, ctx);
@@ -260,6 +261,7 @@ for (const client of clients) {
     plan = { id: client.id, label: client.label, path: client.pathOf(dirs), status: 'failed', changed: false, summary: e.message };
   }
 
+  /** @type {import('../src/types.mjs').ClientPlan} */
   let finalPlan = plan;
   try {
     finalPlan = applyClient(plan, ctx, STAMP);
@@ -267,6 +269,7 @@ for (const client of clients) {
     finalPlan = { ...plan, status: 'failed', changed: false, summary: 'unexpected error: ' + e.message };
   }
 
+  /** @type {Record<string, any>} */
   const row = {
     id: finalPlan.id,
     label: finalPlan.label,

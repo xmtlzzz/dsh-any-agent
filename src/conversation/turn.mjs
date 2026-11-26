@@ -161,6 +161,7 @@ async function finalizeTurnBody(conv, ctx, { runRecord, c, before, t0, reasoning
     attachReview(result, { conversationId: conv.id, run: runRecord, mode: reviewMode, permission: conv.permission });
 
   try {
+    /** @type {Record<string, any>} */
     const result = {
       conversation_id: conv.id,
       run_id: runRecord.run_id,
@@ -271,7 +272,7 @@ export async function runTurn(
   conv,
   ctx,
   text,
-  { reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, run, wait = true, waitSignal, review, via = 'send', teamHint = false } = {},
+  { reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, run = undefined, wait = true, waitSignal = undefined, review = undefined, via = 'send', teamHint = false } = {},
 ) {
   const { hub, activity, assertNotForgotten, setUndispatched, resetCancelBeforeDispatch, isCancelledBeforeDispatch } = ctx;
   if (conv.busy) {

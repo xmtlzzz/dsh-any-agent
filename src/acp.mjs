@@ -30,7 +30,7 @@ const PROTOCOL_VERSION = 1;
 /** 内存里保留的 DSH stderr 行数上限（仅内存，不落盘、默认不打印）。 */
 const STDERR_TAIL_LINES = 20;
 
-const NOOP_LOG = { info: () => {}, debug: () => {}, dshStderr: () => {} };
+const NOOP_LOG = { info: (_m) => {}, debug: (_m) => {}, dshStderr: (_m) => {} };
 
 export class AcpProcess {
   #child = null;
@@ -53,8 +53,9 @@ export class AcpProcess {
    * @param {string} opts.cwd      工作区（同时作为 OS 级 cwd 与 session cwd）
    * @param {string} opts.permission 权限档，映射到 DSH_PERMISSION_MODE
    * @param {object} [opts.log]    分级 logger（见 config.createLogger）
-   * @param {(params:object)=>Promise<object>} [opts.onPermissionRequest]
-   * @param {(params:object)=>void} [opts.onNotification]
+   * @param {(params:object)=>any} [opts.onPermissionRequest]
+   * @param {(params:object, method?:string)=>void} [opts.onNotification]
+   * @param {(reason:string)=>void} [opts.onExit]
    */
   constructor({ cwd, permission, log, onPermissionRequest, onNotification, onExit }) {
     this.cwd = cwd;
@@ -298,10 +299,10 @@ export class AcpProcess {
               if (!this.#pending.delete(id)) return;
               // 带上机器可读的 code/method：上层要区分"DSH 没回话（超时）"与"DSH 明确拒绝"，
               // 前者可能是瞬时卡顿（可重试），后者重试只会重复同一个错误，不能靠匹配中文报错文本来分。
-              const err = new Error(L(`ACP 请求超时: ${method}`, `ACP request timed out: ${method}`));
-              err.code = 'ACP_TIMEOUT';
-              err.method = method;
-              err.timeoutMs = timeoutMs;
+              const err = Object.assign(
+                new Error(L(`ACP 请求超时: ${method}`, `ACP request timed out: ${method}`)),
+                { code: 'ACP_TIMEOUT', method, timeoutMs },
+              );
               reject(err);
             }, timeoutMs)
           : null;
@@ -321,7 +322,7 @@ export class AcpProcess {
   }
 
   /** 进程创建后再绑定/更换回调（Hub 需要先建进程、再建会话对象，顺序上只能事后绑）。 */
-  attachRoutes({ onNotification, onPermissionRequest } = {}) {
+  attachRoutes({ onNotification = undefined, onPermissionRequest = undefined } = {}) {
     if (onNotification) this.#onNotification = onNotification;
     if (onPermissionRequest) this.#onPermissionRequest = onPermissionRequest;
     return this;
@@ -341,7 +342,7 @@ export class AcpProcess {
   #initResult = null;
 
   /** 优雅收尾：close 由调用方负责，这里只关 stdin（DSH 绑定 stdin EOF → 有界退出）。 */
-  async stop({ graceMs = 3000, killWaitMs = 5000, signal } = {}) {
+  async stop({ graceMs = 3000, killWaitMs = 5000, signal = undefined } = {}) {
     const child = this.#child;
     if (!child) return true;
     this.#stopping = true;

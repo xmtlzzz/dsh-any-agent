@@ -285,7 +285,7 @@ export function listWorkspaces() {
 
 /** 检查已登记的项目会话是否仍出现在 DSH workspace.json 中（用于识别被 GUI 内存覆盖丢失的登记）。 */
 export function missingRegisteredSessions(conversations) {
-  if (REGISTER_WORKSPACE === 'off' || REGISTER_WORKSPACE === false) return { checked: 0, missing: [], skipped: true };
+  if (REGISTER_WORKSPACE === false) return { checked: 0, missing: [], skipped: true };
   const candidates = conversations.filter((c) => c?.id && c?.cwd && shouldRegister(c.cwd));
   if (!candidates.length) return { checked: 0, missing: [], skipped: false };
   const doc = readDoc();

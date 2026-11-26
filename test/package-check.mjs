@@ -8,7 +8,7 @@
  * 退出码非 0 表示不能发布。
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -75,10 +75,9 @@ if (!m) {
   bad('engines.node is missing or not a >=X.Y floor: ' + JSON.stringify(floor));
 } else {
   const [major, minor] = [Number(m[1]), Number(m[2])];
-  const needsZstd = /zstdDecompressSync|zstdCompressSync/.test(
-    readFileSync(join(ROOT, 'src', 'workspace.mjs'), 'utf8') +
-    readFileSync(join(ROOT, 'src', 'hub.mjs'), 'utf8'),
-  );
+  const scanMjs = (dir) => readdirSync(dir, { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory() ? scanMjs(join(dir, e.name)) : e.name.endsWith('.mjs') ? [join(dir, e.name)] : []));
+  const needsZstd = scanMjs(join(ROOT, 'src')).some((f) => /zstdDecompressSync|zstdCompressSync/.test(readFileSync(f, 'utf8')));
   // zstd landed in Node 22.15; anything lower cannot load the module graph.
   const required = needsZstd ? [22, 15] : [0, 0];
   const okFloor = major > required[0] || (major === required[0] && minor >= required[1]);

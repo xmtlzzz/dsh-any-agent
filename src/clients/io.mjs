@@ -80,7 +80,7 @@ export function pruneBackups(file) {
 }
 
 /** 先写临时文件再改名，尽量保留原文件权限，避免崩溃时留下半截配置。 */
-export function atomicWrite(file, text, { mode } = {}) {
+export function atomicWrite(file, text, { mode = undefined } = {}) {
   let originalMode = mode;
   if (originalMode === undefined) {
     try { originalMode = statSync(file).mode; } catch { originalMode = null; }

@@ -11,7 +11,7 @@ import { latestRun } from './inspect.mjs';
 
 export function createSessionHandlers(hub, { projectDir = null } = {}) {
   return {
-    async dsh_start(args, { signal, modern } = {}) {
+    async dsh_start(args, { signal = undefined, modern = undefined } = {}) {
       let cwd = args.cwd;
       let cwdSource = cwd ? 'explicit' : null;
       if (!cwd && projectDir && !modern) {

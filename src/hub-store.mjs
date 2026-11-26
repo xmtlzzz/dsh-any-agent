@@ -12,7 +12,7 @@ import { DSH_HOME, STATE_FILE } from './config.mjs';
 import { findSessionHeaderStatus } from './workspace.mjs';
 
 /** 没有注入 logger 时的占位（Hub 构造器与 pruneStaleTombstones 的默认值共用）。 */
-export const NOOP_LOG = { info: () => {}, debug: () => {}, dshStderr: () => {} };
+export const NOOP_LOG = { info: (_m) => {}, debug: (_m) => {}, dshStderr: (_m) => {} };
 
 /**
  * 会话元数据侧车（`.state/meta/<id>.json`）。

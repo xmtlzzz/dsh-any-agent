@@ -21,7 +21,7 @@ function isVersion(value) {
   return !!match && !match[4]?.split('.').some((id) => /^0\d+$/.test(id));
 }
 
-const verdict = (current, latest, cached) => ({ status: 'ok', current, latest, newer: cmpVersion(latest, current) > 0, cached });
+const verdict = (current, latest, cached) => ({ status: /** @type {'ok'} */ ('ok'), current, latest, newer: cmpVersion(latest, current) > 0, cached });
 
 /**
  * @returns {Promise<

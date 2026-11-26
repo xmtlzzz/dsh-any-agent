@@ -22,7 +22,7 @@ import {
 
 const now = () => Date.now();
 
-export async function verifyPermissionRecorded(conv, { hub }, { attempts, delayMs = 250 } = {}) {
+export async function verifyPermissionRecorded(conv, { hub }, { attempts = undefined, delayMs = 250 } = {}) {
   const tries = Number.isFinite(attempts) ? attempts : conv.permission === 'read-only' ? 40 : 6;
   const patchFile = join(DSH_HOME, 'profiles', process.env.DSH_MCP_PROFILE ?? 'dsh-mcp', 'cordis.patch.yml');
   for (let i = 0; i < tries; i++) {
@@ -139,10 +139,7 @@ export async function ensureAlive(conv, ctx, { retried = false } = {}) {
                 ? L('另一个活着的 dsh-any-agent 实例持有它：在那边 dsh_release，或用 dsh_takeover(force=true) 夺过来。', 'Another live dsh-any-agent instance holds it: call dsh_release there, or use dsh_takeover(force=true).')
                 : L('稍后重试。', 'Retry shortly.'),
       };
-      const err = new Error(describeLeaseConflict(conv.id, holder));
-      err.code = 'session-writer-held';
-      err.holder = holder;
-      throw err;
+      throw Object.assign(new Error(describeLeaseConflict(conv.id, holder)), { code: 'session-writer-held', holder });
     }
     if (e?.code === 'ACP_TIMEOUT' && !retried && stopped && !proc.alive) {
       hub.log.info(`[conv ${conv.id}] ${e.method ?? 'ACP'} 超时（${e.timeoutMs ?? '?'}ms），已回收该进程；重建进程重试一次`);

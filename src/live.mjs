@@ -52,7 +52,7 @@ let seq = 0;
 const sizes = new Map();
 
 /** 测试 / 工具用：覆盖目录与级别。 */
-export function configureLive({ dir, level } = {}) {
+export function configureLive({ dir = undefined, level = undefined } = {}) {
   if (typeof dir === 'string' && dir) settings.dir = dir;
   if (LIVE_LEVELS.includes(level)) settings.level = level;
   sizes.clear();

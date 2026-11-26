@@ -143,6 +143,7 @@ function spawnDaemon(ep) {
   } catch {
     /* 没有旧日志，或滚不动：照旧追加 */
   }
+  /** @type {'ignore' | number} */
   let err = 'ignore';
   try {
     err = openSync(ep.logFile, 'a');

@@ -68,9 +68,9 @@ export class RunLedger {
       conversation_id: conversationId,
       client_run_id: clientRunId ?? null,
       prompt_preview: previewOf(text),
-      status: 'queued',
+      status: /** @type {'queued'} */ ('queued'),
       /** 本回合的审核策略（off / advisory）；由 dsh_send / dsh_interject 或会话默认决定。 */
-      review_mode: normalizeReviewMode(review, sessionReview),
+      review_mode: /** @type {'off' | 'advisory'} */ (normalizeReviewMode(review, sessionReview)),
       started_at: null,
       ended_at: null,
       elapsed_ms: null,

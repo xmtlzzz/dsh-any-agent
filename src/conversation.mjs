@@ -71,6 +71,7 @@ export class Conversation {
     this.lockConflict = null;
     this.pendingApprovals = new Map();
     this.currentRun = null;
+    this.collector = null;
     this.idleWaiters = [];
 
     this.outBuf = new OutBuffer();
@@ -299,6 +300,7 @@ export class Conversation {
 
   readOut({ cursor = 0, includeReasoning = false, limit = 200 } = {}) {
     const page = this.outBuf.read({ cursor, limit });
+    /** @type {Record<string, any>} */
     const res = {
       conversation_id: this.id,
       state: this.state(),
@@ -418,7 +420,7 @@ export class Conversation {
     });
   }
 
-  async interject(message, { mode = 'interject', reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, clientRunId = null, review, waitSignal } = {}) {
+  async interject(message, { mode = 'interject', reasoning = 'hide', timeoutMs = PROMPT_TIMEOUT_MS, clientRunId = null, review = undefined, waitSignal = undefined } = {}) {
     const run = this.createRun(message, { clientRunId, review });
     if (!this.busy) {
       const r = await this.prompt(message, { reasoning, timeoutMs, run, via: 'interject', waitSignal });
@@ -437,12 +439,14 @@ export class Conversation {
     }
     const waited = now() - t0;
     if (!idle || waitSignal?.aborted) {
-      const err = new Error(
-        waitSignal?.aborted
-          ? L('插话请求已取消，未发送', 'Interject request was cancelled before sending')
-          : L('等待当前回合结束超时，插话未发送', 'Timed out waiting for the current turn to end; interject not sent'),
+      const err = Object.assign(
+        new Error(
+          waitSignal?.aborted
+            ? L('插话请求已取消，未发送', 'Interject request was cancelled before sending')
+            : L('等待当前回合结束超时，插话未发送', 'Timed out waiting for the current turn to end; interject not sent'),
+        ),
+        { runId: run.run_id },
       );
-      err.runId = run.run_id;
       cancelUnstartedRun(this, this.#ctx(), run, err.message);
       throw err;
     }

@@ -17,7 +17,7 @@ function projCachePath(sessionId) {
 /**
  * 读取一个会话的投影缓存。
  * @param {string} sessionId
- * @returns {{title?:string,lastPromptAt?:number,usage?:object,pressure?:object,model?:object,sandboxMode?:string}|null}
+ * @returns {{title?:string,lastPromptAt?:number,usage?:object,pressure?:object,model?:object,sandboxMode?:string,permissions?:any,turns?:number}|null}
  */
 export function readConversationMeta(sessionId) {
   const p = projCachePath(sessionId);

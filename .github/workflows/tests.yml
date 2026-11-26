@@ -137,6 +137,10 @@ jobs:
         env: { DSH_MCP_LOG: silent }
         run: node test/lint.mjs
 
+      - name: i18n-en (English locale errors and CLI, zero CJK leakage)
+        env: { DSH_MCP_LOG: silent }
+        run: node test/i18n-en.mjs
+
       - name: smoke (protocol; skips DSH session sections on this runner)
         env: { DSH_MCP_LOG: silent, DSH_BIN: '/fake/never/used.js' }
         run: node test/smoke.mjs
@@ -457,3 +461,14 @@ jobs:
           node scripts/lint.mjs
           node test/workspace-safety.mjs
           node test/bootstrap-profile.mjs
+
+  typecheck:
+    name: static typecheck (tsc --checkJs, zero repo deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: JSDoc typecheck across src/ and bin/
+        run: npm run typecheck

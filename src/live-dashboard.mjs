@@ -40,7 +40,7 @@ function tokenOk(given, token) {
 /**
  * 起 dashboard。返回 {url, port, token, server, close()}。
  * @param {object} opts
- * @param {import('./live-view.mjs').LiveTail} opts.tail
+ * @param {import('./live-view.mjs').LiveTail} [opts.tail]
  * @param {number} [opts.port] 0 = 随机
  * @param {number} [opts.pollMs]
  * @param {string} [opts.token] 测试用；缺省随机
@@ -93,7 +93,8 @@ export async function startDashboard({ tail, port = 0, pollMs = 500, token = ran
   keepTimer.unref?.();
 
   const server = createServer((req, res) => {
-    const actualPort = server.address()?.port;
+    const addr = server.address();
+    const actualPort = typeof addr === 'object' && addr ? addr.port : 0;
     const host = String(req.headers.host ?? '').toLowerCase();
     if (host !== `127.0.0.1:${actualPort}` && host !== `localhost:${actualPort}`) {
       res.writeHead(421, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
@@ -153,7 +154,8 @@ export async function startDashboard({ tail, port = 0, pollMs = 500, token = ran
       resolve();
     });
   });
-  const actual = server.address().port;
+  const addr = server.address();
+  const actual = typeof addr === 'object' && addr ? addr.port : 0;
   const url = `http://127.0.0.1:${actual}/?t=${encodeURIComponent(token)}`;
 
   return {
