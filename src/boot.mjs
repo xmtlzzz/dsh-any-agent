@@ -9,8 +9,14 @@ import { Hub } from './hub.mjs';
 import { listOrphans, pruneDeadMarkers } from './locks.mjs';
 import { pruneLive } from './live.mjs';
 import { SENTINEL_TTL_MS } from './config.mjs';
+import { discoverDshAsync } from './dsh-locate.mjs';
 import { createMcpServer } from './mcp.mjs';
 import { createHandlers } from './tools.mjs';
+
+/** 非阻塞预热 DSH 自动发现缓存，避免首轮派活在事件循环里同步阻塞 reg export。 */
+export function warmDshDiscovery() {
+  if (!process.env.DSH_BIN) void discoverDshAsync().catch(() => {});
+}
 
 /** 建好并启动一个 Hub（注册表、回收器、启动清理）。 */
 export async function startHub(log) {
@@ -74,6 +80,7 @@ export async function runStdioServer(log, { daemonFallback = null } = {}) {
     ? { mode: 'direct', fallbackReason: daemonFallback.reason, endpointId: daemonFallback.endpointId, logFile: daemonFallback.logFile }
     : { mode: 'direct' };
   serveMcp({ hub, log });
+  warmDshDiscovery();
   log.info(`[dsh-any-agent] 已启动（注册表载入 ${hub.conversations.size} 个会话，日志级别 ${log.level}）`);
   let shuttingDown = false;
   async function shutdown(signal) {

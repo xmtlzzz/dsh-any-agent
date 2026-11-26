@@ -18,12 +18,16 @@
  *          或单独设置时作用于自动发现的 npm/npx 候选 —— 桌面版始终用它自带的运行时）。
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { readFile, rm, stat } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
+import { promisify } from 'node:util';
 import { isHostAbsolute, windowsSystemExecutable } from './host-executable.mjs';
 import { L } from './lang.mjs';
+
+const execFileAsync = promisify(execFile);
 
 /** 相对 DSH 包根的入口与包描述。 */
 const DSH_PKG_PARTS = ['@deepseek-ai', 'dsh'];
@@ -37,6 +41,7 @@ export const SOURCE_LABEL = { env: 'DSH_BIN', desktop: '桌面版', global: 'npm
 /** 发现结果缓存：注册表 + 文件系统探测约 100ms，拉进程/体检时会频繁调用。 */
 const DISCOVERY_TTL_MS = 60_000;
 let discoveryCache = null;
+let inFlightDiscovery = null;
 
 // ── 版本工具 ──────────────────────────────────────────────────────
 
@@ -262,6 +267,24 @@ export function parseRegExport(text) {
   return out;
 }
 
+const WIN_UNINSTALL_ROOTS = [
+  'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+  'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+  'HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+];
+
+function extractRegistryInstalls(text) {
+  const found = [];
+  for (const sec of parseRegExport(text)) {
+    const v = sec.values;
+    if (!/deepseek\s*harness/i.test(v.DisplayName ?? '')) continue;
+    const icon = (v.DisplayIcon ?? '').replace(/,\s*-?\d+$/, '').replace(/^"|"$/g, '');
+    const dir = v.InstallLocation || (icon ? dirname(icon) : '');
+    if (dir) found.push({ dir, exe: /\.exe$/i.test(icon) ? icon : null, displayVersion: v.DisplayVersion ?? null, via: 'registry' });
+  }
+  return found;
+}
+
 /**
  * Windows 卸载注册表里的桌面版安装。
  * 用 `reg export`（UTF-16LE 文件）而不是 `reg query` 的控制台输出：后者按系统代码页
@@ -269,15 +292,10 @@ export function parseRegExport(text) {
  */
 function windowsRegistryInstalls() {
   if (process.platform !== 'win32') return [];
-  const roots = [
-    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
-    'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
-    'HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
-  ];
   const reg = windowsSystemExecutable('reg.exe');
   if (!reg || !existsSync(reg)) return [];
   const found = [];
-  roots.forEach((root, i) => {
+  WIN_UNINSTALL_ROOTS.forEach((root, i) => {
     const file = join(tmpdir(), `dsh-locate-${process.pid}-${Date.now()}-${i}.reg`);
     try {
       execFileSync(reg, ['export', root, file, '/y'], {
@@ -285,13 +303,7 @@ function windowsRegistryInstalls() {
         windowsHide: true,
         timeout: 5000,
       });
-      for (const sec of parseRegExport(readFileSync(file, 'utf16le'))) {
-        const v = sec.values;
-        if (!/deepseek\s*harness/i.test(v.DisplayName ?? '')) continue;
-        const icon = (v.DisplayIcon ?? '').replace(/,\s*-?\d+$/, '').replace(/^"|"$/g, '');
-        const dir = v.InstallLocation || (icon ? dirname(icon) : '');
-        if (dir) found.push({ dir, exe: /\.exe$/i.test(icon) ? icon : null, displayVersion: v.DisplayVersion ?? null, via: 'registry' });
-      }
+      found.push(...extractRegistryInstalls(readFileSync(file, 'utf16le')));
     } catch {
       // 该根不存在 / reg 不可用：静默跳过
     } finally {
@@ -299,6 +311,27 @@ function windowsRegistryInstalls() {
     }
   });
   return found;
+}
+
+async function windowsRegistryInstallsAsync() {
+  if (process.platform !== 'win32') return [];
+  const reg = windowsSystemExecutable('reg.exe');
+  if (!reg || !existsSync(reg)) return [];
+  const stamp = Date.now();
+  const batches = await Promise.all(
+    WIN_UNINSTALL_ROOTS.map(async (root, i) => {
+      const file = join(tmpdir(), `dsh-locate-async-${process.pid}-${stamp}-${i}.reg`);
+      try {
+        await execFileAsync(reg, ['export', root, file, '/y'], { windowsHide: true, timeout: 5000 });
+        return extractRegistryInstalls(await readFile(file, 'utf16le'));
+      } catch {
+        return [];
+      } finally {
+        await rm(file, { force: true }).catch(() => {});
+      }
+    }),
+  );
+  return batches.flat();
 }
 
 /** 各平台默认安装位置（注册表之外的兜底，以及 macOS/Linux）。 */
@@ -380,10 +413,10 @@ export function desktopCandidate({ dir, exe = null, displayVersion = null, via }
   };
 }
 
-function desktopCandidates() {
+function collectDesktopCandidates(registryInstalls) {
   const seen = new Set();
   const out = [];
-  const entries = [...windowsRegistryInstalls(), ...defaultDesktopDirs().map((dir) => ({ dir, via: 'default-path' }))];
+  const entries = [...registryInstalls, ...defaultDesktopDirs().map((dir) => ({ dir, via: 'default-path' }))];
   for (const e of entries) {
     const k = e.dir.toLowerCase();
     if (seen.has(k)) continue;
@@ -392,6 +425,14 @@ function desktopCandidates() {
     if (c) out.push(c);
   }
   return out;
+}
+
+function desktopCandidates() {
+  return collectDesktopCandidates(windowsRegistryInstalls());
+}
+
+async function desktopCandidatesAsync() {
+  return collectDesktopCandidates(await windowsRegistryInstallsAsync());
 }
 
 // ── npm 全局 / npx 缓存 ─────────────────────────────────────────
@@ -487,10 +528,7 @@ function assertRuntimeFile(path) {
   }
 }
 
-/** 自动发现到的全部候选（已排序，第一个就是默认选择）。结果缓存 60 秒。 */
-export function discoverDsh({ fresh = false } = {}) {
-  const runtime = process.env.DSH_RUNTIME ? resolve(process.env.DSH_RUNTIME) : null;
-  if (runtime) assertRuntimeFile(runtime);
+function cachedDiscovery(runtime, fresh) {
   if (
     !fresh &&
     discoveryCache &&
@@ -499,10 +537,55 @@ export function discoverDsh({ fresh = false } = {}) {
   ) {
     return discoveryCache.list;
   }
+  return null;
+}
+
+/** 自动发现到的全部候选（已排序，第一个就是默认选择）。结果缓存 60 秒。 */
+export function discoverDsh({ fresh = false } = {}) {
+  const runtime = process.env.DSH_RUNTIME ? resolve(process.env.DSH_RUNTIME) : null;
+  if (runtime) assertRuntimeFile(runtime);
+  const hit = cachedDiscovery(runtime, fresh);
+  if (hit) return hit;
   const raw = [...desktopCandidates(), ...globalCandidates(), ...npxCandidates()];
   const list = rankCandidates(runtime ? applyRuntimeOverride(raw, runtime) : raw);
   discoveryCache = { at: Date.now(), runtime, list };
   return list;
+}
+
+/** 异步自动发现（不阻塞事件循环，供常驻进程预热与 dsh_doctor 使用，与同步版共用缓存）。 */
+export async function discoverDshAsync({ fresh = false } = {}) {
+  const runtime = process.env.DSH_RUNTIME ? resolve(process.env.DSH_RUNTIME) : null;
+  if (runtime) assertRuntimeFile(runtime);
+  const hit = cachedDiscovery(runtime, fresh);
+  if (hit) return hit;
+  if (!fresh && inFlightDiscovery?.runtime === runtime) return inFlightDiscovery.promise;
+  const run = (async () => {
+    const raw = [...(await desktopCandidatesAsync()), ...globalCandidates(), ...npxCandidates()];
+    const list = rankCandidates(runtime ? await applyRuntimeOverrideAsync(raw, runtime) : raw);
+    discoveryCache = { at: Date.now(), runtime, list };
+    return list;
+  })();
+  const entry = { runtime, promise: run };
+  if (!fresh) inFlightDiscovery = entry;
+  try {
+    return await run;
+  } finally {
+    if (inFlightDiscovery === entry) inFlightDiscovery = null;
+  }
+}
+
+function rewriteNodeCandidates(list, runtime, env, runtimeNode) {
+  return list.map((c) =>
+    c.runtime === 'node'
+      ? {
+          ...c,
+          command: runtime,
+          env,
+          runtime: 'custom',
+          runtimeOk: satisfiesNodeRange(c.enginesNode, runtimeNode),
+        }
+      : c,
+  );
 }
 
 /**
@@ -517,17 +600,14 @@ export function discoverDsh({ fresh = false } = {}) {
 export function applyRuntimeOverride(list, runtime) {
   const env = { ELECTRON_RUN_AS_NODE: '1' };
   const runtimeNode = probeRuntimeNode({ command: runtime, env });
-  return list.map((c) =>
-    c.runtime === 'node'
-      ? {
-          ...c,
-          command: runtime,
-          env,
-          runtime: 'custom',
-          runtimeOk: satisfiesNodeRange(c.enginesNode, runtimeNode),
-        }
-      : c,
-  );
+  return rewriteNodeCandidates(list, runtime, env, runtimeNode);
+}
+
+/** 异步版本：非阻塞探测自定义运行时 Node 版本并改写 npm/npx 候选。 */
+export async function applyRuntimeOverrideAsync(list, runtime) {
+  const env = { ELECTRON_RUN_AS_NODE: '1' };
+  const runtimeNode = await probeRuntimeNodeAsync({ command: runtime, env });
+  return rewriteNodeCandidates(list, runtime, env, runtimeNode);
 }
 
 /** 显式 DSH_BIN（可选 DSH_RUNTIME）。 */
@@ -568,6 +648,20 @@ function explicitDsh(binPath, runtimePath) {
   };
 }
 
+function dshNotFoundError() {
+  return new Error(L(
+    'DSH CLI 未找到：没有发现 DeepSeek Harness 桌面版、npm 全局安装或 npx 缓存里的 @deepseek-ai/dsh。\n' +
+      '  安装桌面版即可自动识别；或 npm i -g @deepseek-ai/dsh；或设置 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js',
+    'DSH CLI not found: no DeepSeek Harness desktop app, global npm install, or npx-cached @deepseek-ai/dsh was detected.\n' +
+      '  Install the desktop app for auto-discovery, run `npm i -g @deepseek-ai/dsh`, or set DSH_BIN to @deepseek-ai/dsh/lib/bin.js',
+  ));
+}
+
+function cachedCandidateStale(selected) {
+  const { version, enginesNode } = readDshPackage(selected.bin);
+  return version !== selected.version || enginesNode !== selected.enginesNode || !isDshEntry(selected.bin);
+}
+
 /**
  * 解析要用的 DSH：`{ bin, command, args, env, version, source, runtime, runtimeOk, ... }`。
  * 拉起方式：`spawn(command, [...args, '--profile', X], { env: { ...process.env, ...env } })`。
@@ -580,20 +674,27 @@ export function resolveDsh({ fresh = false } = {}) {
     return explicitDsh(resolve(explicit), runtime ? resolve(runtime) : null);
   }
   let [selected] = discoverDsh({ fresh });
-  if (selected && !fresh) {
+  if (selected && !fresh && cachedCandidateStale(selected)) {
     // A desktop update or npm replacement can change the entry at the cached path.
-    const { version, enginesNode } = readDshPackage(selected.bin);
-    if (version !== selected.version || enginesNode !== selected.enginesNode || !isDshEntry(selected.bin)) {
-      [selected] = discoverDsh({ fresh: true });
-    }
+    [selected] = discoverDsh({ fresh: true });
   }
   if (selected) return selected;
-  throw new Error(L(
-    'DSH CLI 未找到：没有发现 DeepSeek Harness 桌面版、npm 全局安装或 npx 缓存里的 @deepseek-ai/dsh。\n' +
-      '  安装桌面版即可自动识别；或 npm i -g @deepseek-ai/dsh；或设置 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js',
-    'DSH CLI not found: no DeepSeek Harness desktop app, global npm install, or npx-cached @deepseek-ai/dsh was detected.\n' +
-      '  Install the desktop app for auto-discovery, run `npm i -g @deepseek-ai/dsh`, or set DSH_BIN to @deepseek-ai/dsh/lib/bin.js',
-  ));
+  throw dshNotFoundError();
+}
+
+/** 异步解析 DSH（不阻塞事件循环，与 resolveDsh 共用发现缓存）。 */
+export async function resolveDshAsync({ fresh = false } = {}) {
+  const explicit = process.env.DSH_BIN;
+  if (explicit) {
+    const runtime = process.env.DSH_RUNTIME;
+    return explicitDsh(resolve(explicit), runtime ? resolve(runtime) : null);
+  }
+  let [selected] = await discoverDshAsync({ fresh });
+  if (selected && !fresh && cachedCandidateStale(selected)) {
+    [selected] = await discoverDshAsync({ fresh: true });
+  }
+  if (selected) return selected;
+  throw dshNotFoundError();
 }
 
 /** 实测某个运行时的 Node 版本（体检用；约 0.2s，结果缓存）。 */
@@ -602,10 +703,10 @@ export function probeRuntimeNode(c) {
   if (c.command === process.execPath) return process.versions.node;
   const key = `${c.command}|${JSON.stringify(c.env)}`;
   try {
-    const stat = statSync(c.command, { throwIfNoEntry: false });
-    if (!stat?.isFile()) return null;
+    const st = statSync(c.command, { throwIfNoEntry: false });
+    if (!st?.isFile()) return null;
     const cached = runtimeNodeCache.get(key);
-    if (cached && cached.modified === stat.mtimeMs && cached.size === stat.size) return cached.version;
+    if (cached && cached.modified === st.mtimeMs && cached.size === st.size) return cached.version;
     const r = spawnSync(c.command, ['-e', 'process.stdout.write(process.versions.node)'], {
       env: { ...process.env, ...c.env },
       encoding: 'utf8',
@@ -613,7 +714,30 @@ export function probeRuntimeNode(c) {
       windowsHide: true,
     });
     const version = /^\d+\.\d+\.\d+/.test(r.stdout ?? '') ? r.stdout.trim() : null;
-    if (version) runtimeNodeCache.set(key, { modified: stat.mtimeMs, size: stat.size, version });
+    if (version) runtimeNodeCache.set(key, { modified: st.mtimeMs, size: st.size, version });
+    return version;
+  } catch {
+    return null;
+  }
+}
+
+/** 异步实测运行时的 Node 版本（不阻塞事件循环，与 probeRuntimeNode 共用缓存）。 */
+export async function probeRuntimeNodeAsync(c) {
+  if (c.command === process.execPath) return process.versions.node;
+  const key = `${c.command}|${JSON.stringify(c.env)}`;
+  try {
+    const st = await stat(c.command).catch(() => null);
+    if (!st?.isFile()) return null;
+    const cached = runtimeNodeCache.get(key);
+    if (cached && cached.modified === st.mtimeMs && cached.size === st.size) return cached.version;
+    const { stdout } = await execFileAsync(c.command, ['-e', 'process.stdout.write(process.versions.node)'], {
+      env: { ...process.env, ...c.env },
+      encoding: 'utf8',
+      timeout: 15_000,
+      windowsHide: true,
+    });
+    const version = /^\d+\.\d+\.\d+/.test(stdout ?? '') ? stdout.trim() : null;
+    if (version) runtimeNodeCache.set(key, { modified: st.mtimeMs, size: st.size, version });
     return version;
   } catch {
     return null;

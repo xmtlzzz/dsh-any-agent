@@ -10,6 +10,7 @@ upgrading DSH, and run `dsh_doctor` afterwards.
 
 | dsh-any-agent | DSH | Status | Notes |
 |---|---|---|---|
+| 0.8.1 | `0.2.2-rc.3` (desktop app) | ✅ Verified (full suite, upgrade) | On Windows (Node 22.19.0), all 45 offline suites (2,069 checks) passed, and 14 of 15 real-provider model suites passed on the first run with `concurrency` passing 31/31 on re-run (429 model checks total; optional `acceptance` skipped without IDA MCP). Real-provider in-place tarball upgrade from npm 0.8.0 also passed (result retrieval after reconnect, idempotent replay, and continuing the existing session). |
 | 0.7.9 | `0.2.2-rc.3` (desktop app) | ✅ Verified (standard ACP, upgrade) | On Windows, a roots-capable MCP client upgraded from npm 0.7.8 to the 0.7.9 tarball with a real provider. It retrieved the original result after reconnecting, continued the session and replayed both send and interject with the original key after deleting the old result file. Codex CLI also verified real-provider dispatch, background waiting and idempotent replay across connections using the candidate tarball. |
 | 0.7.8 | `0.2.2-rc.3` (desktop app) | ✅ Verified (standard ACP, upgrade) | On Windows, a roots-capable MCP client upgraded from npm 0.7.7 to the 0.7.8 tarball. With a real provider it retrieved the original answer after reconnecting, continued the same session, and replayed both send and interject requests with the original run ID after the old result file was removed. |
 | 0.7.7 | `0.2.2-rc.5` (desktop app) | ✅ Verified (standard ACP, upgrade) | On Windows, the roots-capable test client upgraded from npm 0.7.6 to the candidate tarball and verified real-provider dispatch, reconnect, idempotent retry after result deletion, and session resume with desktop Node 24.21.0. Codex CLI 0.162.0 also loaded the installed tarball and verified dispatch and replay across connections using simulated ACP. |
@@ -82,6 +83,8 @@ In an MCP client, call `dsh_doctor`. The heading distinguishes a clean result, w
 - `dsh_version`: `verified` is ok. The note refers to full-suite testing; the table also records narrower checks such as the 0.7.2 installed package lifecycle. `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
 - `registry_lock` reports the writer lock and its owner. `runs_dir` checks writes and hard links. `worktrees` warns above 500 MiB or when the size scan is incomplete.
 - `profile`: exists, drift, route source;
+- `daemon`: active runtime mode (`daemon`, `direct`, or automatic fallback to `direct` with reason and daemon log path);
+- `workspace_sync`: checks whether registered sessions are missing corresponding entries in DSH's workspace registry;
 - `team`: `on` / `off` / `requested but unavailable` (the version or profile lacks compatible team configuration);
 - `config`: effective permission, idle reaping, shared process, and so on;
 - `update`: this server's version against the latest on npm; **warn** when a newer one exists (read at most once a day, 4 s timeout; offline reads as unknown, not a problem; `DSH_MCP_UPDATE_CHECK=0` skips it).

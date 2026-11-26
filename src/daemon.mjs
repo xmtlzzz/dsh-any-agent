@@ -31,7 +31,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { DAEMON_IDLE_MS, STATE_FILE, TEAM_SETTINGS_FILE } from './config.mjs';
 import { SERVER_VERSION } from './mcp.mjs';
-import { serveMcp, startHub } from './boot.mjs';
+import { serveMcp, startHub, warmDshDiscovery } from './boot.mjs';
 
 const STATE_DIR = dirname(STATE_FILE);
 const BIN = fileURLToPath(new URL('../bin/dsh-any-agent.mjs', import.meta.url));
@@ -61,6 +61,14 @@ function teamSettingsText() {
   }
 }
 
+function endpointPath(id) {
+  if (process.platform === 'win32') return `\\\\.\\pipe\\dsh-any-agent-${id}`;
+  // Unix socket 路径有长度上限（macOS 104 字节）。状态目录太深时改放系统临时目录
+  // （macOS 上是每个用户自己的 /var/folders/…）；有令牌把关，放哪里都派不了活。
+  const sock = join(STATE_DIR, `daemon-${id}.sock`);
+  return Buffer.byteLength(sock) > 100 ? join(tmpdir(), `dsh-any-agent-${id}.sock`) : sock;
+}
+
 /** 常驻进程的地址与信息文件。 */
 export function daemonEndpoint(env = process.env) {
   const h = createHash('sha256');
@@ -76,13 +84,9 @@ export function daemonEndpoint(env = process.env) {
   // 文件内容也算身份，切换后重连的客户端会用一个按新设置启动的常驻进程（旧的空闲后自己退出）。
   h.update(`\0team-settings=${teamSettingsText()}`);
   const id = h.digest('hex').slice(0, 16);
-  // Unix socket 路径有长度上限（macOS 104 字节）。状态目录太深时改放系统临时目录
-  // （macOS 上是每个用户自己的 /var/folders/…）；有令牌把关，放哪里都派不了活。
-  let sock = join(STATE_DIR, `daemon-${id}.sock`);
-  if (Buffer.byteLength(sock) > 100) sock = join(tmpdir(), `dsh-any-agent-${id}.sock`);
   return {
     id,
-    path: process.platform === 'win32' ? `\\\\.\\pipe\\dsh-any-agent-${id}` : sock,
+    path: endpointPath(id),
     infoFile: join(STATE_DIR, `daemon-${id}.json`),
     logFile: join(STATE_DIR, `daemon-${id}.log`),
   };
@@ -102,36 +106,53 @@ const sameToken = (a, b) => {
   return x.length === y.length && x.length > 0 && timingSafeEqual(x, y);
 };
 
-/** 试着连一次；连不上（没有常驻进程 / 信息文件过期）返回 null。 */
-function tryConnect(ep, timeoutMs = 2000) {
-  const info = readInfo(ep);
-  if (!info?.token) return Promise.resolve(null);
+/** 连接管道/socket 并完成令牌握手（MCP 会话和控制指令共用）。 */
+function connectAuth(path, payload, timeoutMs = 2000) {
   return new Promise((resolve) => {
-    const socket = net.connect(ep.path);
-    const timer = setTimeout(() => socket.destroy(), timeoutMs);
+    let settled = false;
+    const done = (val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(val);
+    };
+    const socket = net.connect(path);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      done(null);
+    }, timeoutMs);
     socket.once('connect', () => {
-      socket.write(JSON.stringify({ dsh_any_agent_auth: info.token }) + '\n');
+      socket.write(JSON.stringify(payload) + '\n');
     });
     let received = 0;
     const ack = Buffer.from(AUTH_ACK);
     const onData = (chunk) => {
       const count = Math.min(chunk.length, ack.length - received);
-      if (!chunk.subarray(0, count).equals(ack.subarray(received, received + count))) return socket.destroy();
+      if (!chunk.subarray(0, count).equals(ack.subarray(received, received + count))) {
+        socket.destroy();
+        return done(null);
+      }
       received += count;
       if (received < ack.length) return;
       socket.pause();
       socket.off('data', onData);
       if (count < chunk.length) socket.unshift(chunk.subarray(count));
-      clearTimeout(timer);
-      resolve(socket);
+      done(socket);
     };
     socket.on('data', onData);
-    socket.once('error', () => socket.destroy());
-    socket.once('close', () => {
-      clearTimeout(timer);
-      resolve(null);
+    socket.once('error', () => {
+      socket.destroy();
+      done(null);
     });
+    socket.once('close', () => done(null));
   });
+}
+
+/** 试着连一次；连不上（没有常驻进程 / 信息文件过期）返回 null。 */
+function tryConnect(ep, timeoutMs = 2000) {
+  const info = readInfo(ep);
+  if (!info?.token) return Promise.resolve(null);
+  return connectAuth(ep.path, { dsh_any_agent_auth: info.token }, timeoutMs);
 }
 
 /** 以 detached 方式拉起常驻进程：它不属于客户端的进程树，客户端退出时不会被连带杀掉。 */
@@ -213,7 +234,7 @@ export async function runProxy({ log, startTimeoutMs = 6_000, onFallback = null 
   return true;
 }
 
-/** 等第一行（认证行），之后的字节原样交给 MCP 会话。 */
+/** 等第一行（认证行），识别控制指令或把之后的字节原样交给 MCP 会话。 */
 function authenticate(socket, token, onAuthed) {
   let buf = Buffer.alloc(0);
   const timer = setTimeout(() => socket.destroy(), AUTH_TIMEOUT_MS);
@@ -228,14 +249,18 @@ function authenticate(socket, token, onAuthed) {
     socket.off('data', onData);
     clearTimeout(timer);
     if (nl > MAX_AUTH_LINE) return socket.destroy();
-    let given = null;
+    let msg = null;
     try {
-      given = JSON.parse(buf.subarray(0, nl).toString('utf8'))?.dsh_any_agent_auth;
+      msg = JSON.parse(buf.subarray(0, nl).toString('utf8'));
     } catch {
       /* 不是 JSON 就当作没带令牌 */
     }
-    if (!sameToken(given, token)) {
+    if (!sameToken(msg?.dsh_any_agent_auth, token)) {
       socket.destroy();
+      return;
+    }
+    if (typeof msg?.control === 'string') {
+      onAuthed(null, msg.control);
       return;
     }
     const input = new PassThrough();
@@ -243,7 +268,7 @@ function authenticate(socket, token, onAuthed) {
     const rest = buf.subarray(nl + 1);
     if (rest.length) input.write(rest);
     socket.pipe(input);
-    onAuthed(input);
+    onAuthed(input, null);
   };
   socket.on('data', onData);
 }
@@ -281,11 +306,21 @@ export async function runDaemon({ log }) {
   let lastActive = Date.now();
   // 先占住地址再起 Hub：同一身份的常驻进程已经在跑时，不该再去碰注册表、起回收器。
   let hub = null;
+  let stopDaemon = null;
 
   const server = net.createServer((socket) => {
     socket.on('error', () => {});
     if (!hub) return socket.destroy();
-    authenticate(socket, token, (input) => {
+    authenticate(socket, token, (input, control) => {
+      if (control === 'shutdown') {
+        socket.end(AUTH_ACK);
+        setImmediate(() => stopDaemon?.('daemon stop'));
+        return;
+      }
+      if (control) {
+        socket.destroy();
+        return;
+      }
       connections += 1;
       lastActive = Date.now();
       socket.once('close', () => {
@@ -313,20 +348,6 @@ export async function runDaemon({ log }) {
       } else return;
     } else return; // 同一身份的常驻进程已经在跑（两个客户端同时拉起时会撞上）
   }
-  try {
-    // The listener owns this address. Discard any previous discovery file before startup.
-    rmSync(ep.infoFile, { force: true });
-    hub = await startHub(log);
-    hub.runtime = { mode: 'daemon', endpointId: ep.id, pid: process.pid, logFile: ep.logFile };
-    writeInfo(ep, { pid: process.pid, token, version: SERVER_VERSION, started_at: new Date().toISOString() });
-    lastActive = Date.now();
-  } catch (error) {
-    // Node unlinks its own Unix socket when it closes the listening server.
-    server.close();
-    if (hub) await hub.shutdown().catch(() => {});
-    throw error;
-  }
-  log.info(`[dsh-any-agent] 常驻进程 ${ep.id} 已启动（pid ${process.pid}，注册表载入 ${hub.conversations.size} 个会话）`);
 
   let stopping = false;
   async function stop(reason) {
@@ -344,6 +365,23 @@ export async function runDaemon({ log }) {
     if (readInfo(ep)?.pid === process.pid) rmSync(ep.infoFile, { force: true });
     process.exit(process.exitCode ?? 0);
   }
+  stopDaemon = (reason) => void stop(reason);
+
+  try {
+    // The listener owns this address. Discard any previous discovery file before startup.
+    rmSync(ep.infoFile, { force: true });
+    hub = await startHub(log);
+    hub.runtime = { mode: 'daemon', endpointId: ep.id, pid: process.pid, logFile: ep.logFile };
+    writeInfo(ep, { pid: process.pid, token, path: ep.path, version: SERVER_VERSION, started_at: new Date().toISOString() });
+    lastActive = Date.now();
+    warmDshDiscovery();
+  } catch (error) {
+    // Node unlinks its own Unix socket when it closes the listening server.
+    server.close();
+    if (hub) await hub.shutdown().catch(() => {});
+    throw error;
+  }
+  log.info(`[dsh-any-agent] 常驻进程 ${ep.id} 已启动（pid ${process.pid}，注册表载入 ${hub.conversations.size} 个会话）`);
   process.on('SIGINT', () => stop('SIGINT'));
   process.on('SIGTERM', () => stop('SIGTERM'));
 
@@ -395,15 +433,48 @@ export function listDaemons() {
   return out;
 }
 
-/** 向所有存活的常驻进程发送退出信号，并清理已死进程残留的信息文件。 */
-export function stopDaemons() {
+async function requestShutdown(info, id, timeoutMs) {
+  if (!info?.token) return false;
+  const socket = await connectAuth(
+    info.path || endpointPath(id),
+    { dsh_any_agent_auth: info.token, control: 'shutdown' },
+    Math.min(timeoutMs, 1500),
+  );
+  if (!socket) return false;
+  socket.destroy();
+  const deadline = Date.now() + timeoutMs;
+  while (pidAlive(info.pid) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return !pidAlive(info.pid);
+}
+
+/**
+ * 停止所有存活的常驻进程并清理已死进程残留的信息文件。
+ * 优先走带令牌的本机控制通道优雅关闭（Windows 上 SIGTERM 等价于强杀，会跳过 hub.shutdown）；
+ * 超时或连不上时再回退到 SIGTERM。
+ */
+export async function stopDaemons({ timeoutMs = 3_000 } = {}) {
   const stopped = [];
   const cleaned = [];
   for (const d of listDaemons()) {
     if (d.alive) {
+      let info = null;
+      try {
+        info = JSON.parse(readFileSync(d.infoFile, 'utf8'));
+      } catch {}
+      if (await requestShutdown(info, d.id, timeoutMs)) {
+        stopped.push({ ...d, graceful: true });
+        continue;
+      }
       try {
         process.kill(d.pid, 'SIGTERM');
-        stopped.push(d);
+        stopped.push({ ...d, graceful: false });
+        const deadline = Date.now() + 500;
+        while (pidAlive(d.pid) && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        if (!pidAlive(d.pid)) rmSync(d.infoFile, { force: true });
       } catch {}
     } else {
       try {

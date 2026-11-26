@@ -94,10 +94,14 @@ if (argv[0] === 'daemon') {
     process.exit(0);
   }
   if (action === 'stop') {
-    const { stopped, cleaned } = stopDaemons();
+    const { stopped, cleaned } = await stopDaemons();
+    const forced = stopped.filter((d) => !d.graceful).length;
+    const suffix = forced
+      ? L(`（其中 ${forced} 个未响应优雅关闭，已回退 SIGTERM）`, ` (${forced} did not respond to graceful shutdown; fell back to SIGTERM)`)
+      : '';
     process.stdout.write(L(
-      `已向 ${stopped.length} 个常驻进程发送退出信号，清理 ${cleaned.length} 个残留信息文件。\n`,
-      `Signalled ${stopped.length} daemon(s) to stop and cleaned ${cleaned.length} stale info file(s).\n`,
+      `已停止 ${stopped.length} 个常驻进程${suffix}，清理 ${cleaned.length} 个残留信息文件。\n`,
+      `Stopped ${stopped.length} daemon(s)${suffix} and cleaned ${cleaned.length} stale info file(s).\n`,
     ));
     process.exit(0);
   }

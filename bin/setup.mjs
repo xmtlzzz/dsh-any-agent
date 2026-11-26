@@ -28,10 +28,6 @@
  *   7) --json 时 stdout 只有一个 JSON 对象，人类日志全部走 stderr。
  */
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import {
   ENTRY_NAME,
   applyClient,
@@ -42,15 +38,9 @@ import {
   planClient,
   resolveDirs,
 } from '../src/clients.mjs';
-import { PERMISSION_TIERS } from '../src/config.mjs';
+import { PERMISSION_TIERS, PKG_VERSION } from '../src/config.mjs';
 
-/** 版本号以 package.json 为准，避免 npm version 之后这里变旧。 */
-const VERSION = (() => {
-  try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    return JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')).version ?? '0.0.0';
-  } catch { return '0.0.0'; }
-})();
+const VERSION = PKG_VERSION;
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);

@@ -278,7 +278,7 @@ const PLATFORM_LABEL = { win32: 'Windows', linux: 'Linux', darwin: 'macOS' };
 
 /**
  * 重写一份 tests.md：套件表里的数字 + 总数段落。
- * @returns {{ text:string, missing:string[], notes:string[] }}
+ * @returns {{ text:string, missing:string[], notes:string[], rows:Map<string, number> }}
  */
 export function rewriteDoc(text, lang, plan, ctx) {
   const eol = text.includes('\r\n') ? '\r\n' : '\n';

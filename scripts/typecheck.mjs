@@ -3,7 +3,7 @@
  * 零依赖静态类型检查：`npm run typecheck`。
  *
  * 借助固定版本 `typescript` 与 `@types/node`（通过 `npm exec` 临时拉取，不写入 package.json），
- * 对 `jsconfig.json` 覆盖的全部 `src/` 与 `bin/` ESM 文件执行 `tsc --noEmit --checkJs`。
+ * 对 `jsconfig.json` 覆盖的全部 `src/`、`bin/` 与 `scripts/` ESM 文件执行 `tsc --noEmit --checkJs`。
  */
 
 import { spawnSync } from 'node:child_process';
