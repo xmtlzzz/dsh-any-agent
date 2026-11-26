@@ -22,6 +22,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { L } from './lang.mjs';
 
 import {
   BOOTSTRAP_ENABLED,
@@ -173,19 +174,19 @@ function findRouting() {
         ? join(DSH_HOME, 'cordis.patch.yml')
         : join(DSH_HOME, 'profiles', name, 'cordis.patch.yml');
     if (!existsSync(file)) {
-      tried.push({ source: name, file, reason: '文件不存在' });
+      tried.push({ source: name, file, reason: L('文件不存在', 'file does not exist') });
       continue;
     }
     let entries;
     try {
       entries = yamlLoad(readFileSync(file, 'utf8'));
     } catch (e) {
-      tried.push({ source: name, file, reason: '解析失败: ' + e.message });
+      tried.push({ source: name, file, reason: L('解析失败: ', 'parse failed: ') + e.message });
       continue;
     }
     const routing = extractRouting(entries);
     if (routing) return { source: name, file, routing, tried };
-    tried.push({ source: name, file, reason: '没有 llm-pi-ai / agent-default-model 配置' });
+    tried.push({ source: name, file, reason: L('没有 llm-pi-ai / agent-default-model 配置', 'no llm-pi-ai / agent-default-model config') });
   }
   return { source: null, file: null, routing: null, tried };
 }
@@ -257,10 +258,12 @@ function buildEntries(routing, backend) {
   //   - 若清成 {}，ACP 会话就没有初始模型选择，settings 里的 reasoning_effort 也就无处可设。
   //   所以这里显式指向本机自己的默认路由 —— 与 GUI 会话用的是同一个模型。
   if (!defaultModel?.provider || !defaultModel?.model) {
-    throw new Error(
+    throw new Error(L(
       '找到的路由里没有可用的默认 provider/model：请先在 DSH GUI 的 Models 页面\n' +
         '  配置一个带 models 列表的 provider（或在来源 profile 里写 agent-default-model）。',
-    );
+      'No usable default provider/model in the discovered routes: configure a provider with a models list\n' +
+        '  on the DSH GUI Models page (or set agent-default-model in the source profile).',
+    ));
   }
   entries.push({
     id: 'acp',
@@ -343,7 +346,7 @@ export function ensureProfile({ log, teamProfile = resolveTeamProfile() } = {}) 
   try {
     ensureProfileScaffold(dir, profile);
   } catch (e) {
-    return { ok: false, error: '创建 profile 目录失败: ' + e.message };
+    return { ok: false, error: L('创建 profile 目录失败: ', 'failed to create profile directory: ') + e.message };
   }
 
   const patchPath = join(dir, 'cordis.patch.yml');
@@ -365,7 +368,7 @@ export function ensureProfile({ log, teamProfile = resolveTeamProfile() } = {}) 
   const currentText = existed ? readFileSync(patchPath, 'utf8') : null;
   if (currentText !== null && !currentText.includes(MANAGED_MARKER)) {
     debug('[bootstrap] profile 由用户维护（无管理标记），跳过自动同步');
-    return { ok: true, skipped: 'profile 由用户维护（无管理标记），保持原样' };
+    return { ok: true, skipped: L('profile 由用户维护（无管理标记），保持原样', 'profile is user-managed (no managed marker), kept as is') };
   }
 
   let found = findRouting();
@@ -384,11 +387,17 @@ export function ensureProfile({ log, teamProfile = resolveTeamProfile() } = {}) 
     }
   }
   if (!found.routing) {
-    if (existed) return { ok: true, skipped: '本机没有可复制的模型路由，且 profile 已存在' };
+    if (existed) return { ok: true, skipped: L('本机没有可复制的模型路由，且 profile 已存在', 'no model routes to copy and profile already exists') };
     return {
       ok: false,
-      error: '本机所有 profile 里都没有找到可用的模型路由（llm-pi-ai / agent-default-model）',
-      reason: '请先在 DSH GUI 的 Models 页面配置一个 provider，再重试',
+      error: L(
+        '本机所有 profile 里都没有找到可用的模型路由（llm-pi-ai / agent-default-model）',
+        'No usable model routes (llm-pi-ai / agent-default-model) found in any local profile',
+      ),
+      reason: L(
+        '请先在 DSH GUI 的 Models 页面配置一个 provider，再重试',
+        'Configure a provider on the DSH GUI Models page and retry',
+      ),
       tried: found.tried,
     };
   }
@@ -397,7 +406,7 @@ export function ensureProfile({ log, teamProfile = resolveTeamProfile() } = {}) 
   try {
     entries = buildEntries(found.routing, backend);
   } catch (e) {
-    return { ok: false, error: e.message, reason: '未写入 profile' };
+    return { ok: false, error: e.message, reason: L('未写入 profile', 'profile was not written') };
   }
   const text = renderDocument(entries, found.source);
   const hash = sha256(text);
@@ -424,7 +433,7 @@ export function ensureProfile({ log, teamProfile = resolveTeamProfile() } = {}) 
       ) + '\n',
     );
   } catch (e) {
-    return { ok: false, error: '写入 profile 失败: ' + e.message };
+    return { ok: false, error: L('写入 profile 失败: ', 'failed to write profile: ') + e.message };
   }
 
   info(

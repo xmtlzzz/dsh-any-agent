@@ -112,20 +112,36 @@ console.log('\n[3] re-running is idempotent');
   removeSandbox(home);
 }
 
-// ── 3b. --daemon ─────────────────────────────────────────────────────
+// ── 3b. --daemon / --no-daemon ───────────────────────────────────────
 
-console.log('\n[3b] --daemon adds DSH_MCP_DAEMON=1; re-running without it takes it out');
+console.log('\n[3b] daemon mode defaults on, --no-daemon disables it, and re-running preserves it');
 {
   const home = sandbox({ '.cursor/mcp.json': '{"mcpServers":{}}' });
   const file = join(home, '.cursor', 'mcp.json');
   const envOf = () => readJson(file).mcpServers['dsh-any-agent']?.env ?? {};
-  check('default install has no DSH_MCP_DAEMON', runSetup(home, ['--yes', '--only', 'cursor']).code === 0 && !('DSH_MCP_DAEMON' in envOf()));
-  const r = runSetup(home, ['--yes', '--only', 'cursor', '--daemon']);
-  check('--daemon writes DSH_MCP_DAEMON=1 next to the permission', envOf().DSH_MCP_DAEMON === '1' && envOf().DSH_MCP_PERMISSION === 'workspace-write', JSON.stringify(envOf()));
-  check('--daemon is shown in the header', /daemon\s*:\s*on/i.test(r.out), r.out.split('\n').slice(0, 8).join(' | '));
-  runSetup(home, ['--yes', '--only', 'cursor']);
-  check('re-running without --daemon removes it', !('DSH_MCP_DAEMON' in envOf()), JSON.stringify(envOf()));
+  const first = runSetup(home, ['--yes', '--only', 'cursor']);
+  check('default install enables DSH_MCP_DAEMON=1', first.code === 0 && envOf().DSH_MCP_DAEMON === '1' && envOf().DSH_MCP_PERMISSION === 'workspace-write', JSON.stringify(envOf()));
+  check('default header shows daemon on', /daemon\s*:\s*on/i.test(first.out), first.out.split('\n').slice(0, 8).join(' | '));
+  const off = runSetup(home, ['--yes', '--only', 'cursor', '--no-daemon']);
+  check('--no-daemon writes DSH_MCP_DAEMON=0', off.code === 0 && envOf().DSH_MCP_DAEMON === '0', JSON.stringify(envOf()));
+  const rerun = runSetup(home, ['--yes', '--only', 'cursor']);
+  check('re-running without daemon flags preserves DSH_MCP_DAEMON=0', rerun.code === 0 && envOf().DSH_MCP_DAEMON === '0', JSON.stringify(envOf()));
+  const backOn = runSetup(home, ['--yes', '--only', 'cursor', '--daemon']);
+  check('--daemon switches back to DSH_MCP_DAEMON=1', backOn.code === 0 && envOf().DSH_MCP_DAEMON === '1', JSON.stringify(envOf()));
+  const clash = runSetup(home, ['--yes', '--only', 'cursor', '--daemon', '--no-daemon']);
+  check('combining --daemon and --no-daemon exits 2', clash.code === 2, String(clash.code));
 
+  removeSandbox(home);
+}
+{
+  const home = sandbox({ '.codex/config.toml': '[mcp_servers.other]\ncommand = "x"\n' });
+  const file = join(home, '.codex', 'config.toml');
+  runSetup(home, ['--yes', '--only', 'codex', '--no-daemon']);
+  const afterOff = readFileSync(file, 'utf8');
+  const rerun = runSetup(home, ['--yes', '--only', 'codex']);
+  check('Codex TOML preserves DSH_MCP_DAEMON="0" without duplicating keys on re-run',
+    rerun.code === 0 && readFileSync(file, 'utf8') === afterOff && afterOff.includes('DSH_MCP_DAEMON = "0"') &&
+    afterOff.split('DSH_MCP_DAEMON').length === 2, readFileSync(file, 'utf8'));
   removeSandbox(home);
 }
 
@@ -245,6 +261,8 @@ console.log('\n[9] the command written into the config actually starts');
       env: {
         ...process.env,
         ...entry.env,
+        // Probe the written stdio entry directly without leaving a detached daemon locking the sandbox.
+        DSH_MCP_DAEMON: '0',
         DSH_MCP_LOG: 'silent',
         DSH_MCP_STATE: join(home, '.state.json'),
         DSH_HOME: join(home, '.dsh-home'),
@@ -327,7 +345,7 @@ console.log('\n[11] repair refreshes the launch fields without replacing existin
       readFileSync(join(home, '.cursor', backups[0]), 'utf8') === rows[cursor] &&
       backupsIn(join(home, '.cursor')).length === 1, again.out);
     const conflict = runSetup(home, ['--repair', '--yes', '--daemon', ...selected]);
-    check('repair rejects flags that would rewrite existing settings', conflict.code === 2);
+    check('repair rejects flags that would rewrite existing settings', conflict.code === 2 && runSetup(home, ['--repair', '--yes', '--no-daemon', ...selected]).code === 2);
     const invalid = runSetup(home, ['--repair', '--reset-env', '--json']);
     check('invalid reset combinations return the JSON error contract', invalid.code === 2 && JSON.parse(invalid.out).mode === 'error');
     const update = runSetup(home, ['--yes', '--daemon', ...selected]);

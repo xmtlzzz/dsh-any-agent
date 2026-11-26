@@ -68,8 +68,11 @@ export function serveMcp({ hub, log, input, output }) {
 }
 
 /** 默认模式：本进程就是 MCP stdio 服务端，客户端断开（stdin 结束）就收尾退出。 */
-export async function runStdioServer(log) {
+export async function runStdioServer(log, { daemonFallback = null } = {}) {
   const hub = await startHub(log);
+  hub.runtime = daemonFallback
+    ? { mode: 'direct', fallbackReason: daemonFallback.reason, endpointId: daemonFallback.endpointId, logFile: daemonFallback.logFile }
+    : { mode: 'direct' };
   serveMcp({ hub, log });
   log.info(`[dsh-any-agent] 已启动（注册表载入 ${hub.conversations.size} 个会话，日志级别 ${log.level}）`);
   let shuttingDown = false;

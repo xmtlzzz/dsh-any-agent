@@ -12,6 +12,14 @@
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-26
+
+- `dsh-any-agent-setup --yes` 现默认开启常驻进程模式（`DSH_MCP_DAEMON=1`），客户端关闭或重连时运行中的回合不再中断；加 `--no-daemon` 可切回直连 stdio（`0`），不带显式开关重跑会保留既有 `DSH_MCP_DAEMON` 设置。新增 `dsh-any-agent daemon status|stop` 管理子命令，将常驻代理启动降级超时从 15 秒缩短至 6 秒，并在 `dsh_doctor` 中新增 `daemon` 与 `workspace_sync` 体检项。
+- 修正 DSH GUI 占用写锁时的报错指引（明确说明在 GUI 中切走或归档均不会释放写锁，需重启 DSH 桌面端 / `dsh web` 归还，平时看进度请用 `dsh-any-agent watch` / `dashboard --open`），并在 `dsh_start` 首次返回中附简短的旁路查看提示。
+- 补齐用户可见报错与 `setup`/`restore` 命令行的中英文双语覆盖（`DSH_MCP_LANG=zh|en`），用结构化 `failedKeys` 解除会话模型配置失败对中文前缀的依赖，并新增 `i18n-en` 英文零中文泄露回归套件。
+- 将体量最大的 6 个核心模块（`clients`、`conversation`、`tools`、`hub`、`workspace`、`live-view`）按职责拆分为子模块目录并保留完全兼容的门面导出，新增零运行期开销的 JSDoc 类型定义（`src/types.mjs`），在 `npm run lint` 中加入静态循环依赖检测（`[cycle]`）。
+- 修复官网偶尔显示旧版本的问题：将 `/api/version` 边缘缓存保鲜期缩短至 3 分钟并在过期时优先同步刷新、对浏览器响应下发 `Cache-Control: no-store`，同时在前端避免被过期回退响应降级版本号。
+
 ## [0.7.9] — 2026-11-25
 
 - 使用 `ask` 审批策略时，待审批请求会唤醒后台等待任务。排队和幂等重试的纯文本回执也会给出 Bash 或 PowerShell 等待命令。
@@ -1289,7 +1297,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...v0.8.0
 [0.7.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...v0.7.9
 [0.7.8]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.6...v0.7.7

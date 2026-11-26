@@ -9,6 +9,7 @@
  * live 事件，仍由会话负责。
  */
 
+import { L } from './lang.mjs';
 import { normalizeReviewMode } from './review.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -57,7 +58,10 @@ export class RunLedger {
     this.queue = [];
   }
 
-  /** 建一条回合记录。派活时先建，好让调用方立刻拿到 run_id（异步模式的关键）。 */
+  /**
+   * 建一条回合记录。派活时先建，好让调用方立刻拿到 run_id（异步模式的关键）。
+   * @returns {import('./types.mjs').RunRecord}
+   */
   create(text, { conversationId, clientRunId = null, review, sessionReview, reserve }) {
     const run = {
       run_id: clientRunId ? keyedRunId(clientRunId) : `run-${Date.now().toString(36)}-${++this.runSeq}-${randomBytes(4).toString('hex')}`,
@@ -125,7 +129,10 @@ export class RunLedger {
   /** 队列满了就抛错。要在建 run 记录**之前**调用，否则满队列会留下一条永远 queued 的 run。 */
   assertRoom() {
     if (this.queue.length >= MAX_QUEUE) {
-      throw new Error(`队列已满（最多 ${MAX_QUEUE} 条）；先用 dsh_queue list 清理，或等当前回合结束`);
+      throw new Error(L(
+        `队列已满（最多 ${MAX_QUEUE} 条）；先用 dsh_queue list 清理，或等当前回合结束`,
+        `Queue is full (max ${MAX_QUEUE}); clear items with dsh_queue list or wait for the current turn to finish`,
+      ));
     }
   }
 
@@ -148,13 +155,13 @@ export class RunLedger {
   /** 从队列里取出一条（不存在抛错）。 */
   take(runId) {
     const i = this.queue.findIndex((x) => x.run.run_id === runId);
-    if (i < 0) throw new Error(`队列里没有 ${runId}`);
+    if (i < 0) throw new Error(L(`队列里没有 ${runId}`, `No queued run found: ${runId}`));
     return this.queue.splice(i, 1)[0];
   }
 
   update(runId, text) {
     const item = this.queue.find((x) => x.run.run_id === runId);
-    if (!item) throw new Error(`队列里没有 ${runId}`);
+    if (!item) throw new Error(L(`队列里没有 ${runId}`, `No queued run found: ${runId}`));
     item.text = text;
     item.run.prompt_preview = previewOf(text);
   }

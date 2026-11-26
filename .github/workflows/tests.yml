@@ -15,7 +15,7 @@ name: tests
 #     failure-terminal  terminal state on failure     10 checks
 #     shared-host       shared process host           46 checks
 #     resume-retry      cold-resume timeout retry     65 checks (fake ACP server)
-#     dispatch-tools    dispatch surface              88 checks (85 off Windows)
+#     dispatch-tools    dispatch surface              89 checks (85 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        26 checks
 #     live-events       live event stream, write side  49 checks
@@ -40,13 +40,13 @@ name: tests
 #     test-counts       report parser + docs sync     92 checks
 #     roots             cwd from MCP roots            18 checks
 #     workspace-titles  home/root cwd guard, title_hint 19 checks (17 off Windows)
-#     setup             client config writer          78 checks
+#     setup             client config writer          81 checks
 #     removal-scope     --remove only touches its own   61 checks
 #     config-safety     in-place edits, format        449 checks
 #     real-configs      real config round-trip        skips without client fixtures
 #     package-check     publishability                16 checks
 #     lint              static checks (npm run lint)  syntax, imports, exports, unused
-#     lint (selftest)   scripts/lint.mjs regression   22 checks
+#     lint (selftest)   scripts/lint.mjs regression   23 checks
 #     package job       pack -> install -> --version
 #     docker job        docker build -> --version -> MCP initialize
 #     website job       build + 45 site/a11y/worker tests + bilingual pages

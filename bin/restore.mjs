@@ -20,6 +20,7 @@ import { chmodSync, existsSync, readFileSync, readdirSync, statSync } from 'node
 import { basename, dirname, join } from 'node:path';
 
 import { atomicWrite, backupFile, clientList, pruneBackups, resolveDirs } from '../src/clients.mjs';
+import { L } from '../src/lang.mjs';
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -75,9 +76,9 @@ if (has('--list')) {
   if (JSON_OUT) {
     process.stdout.write(JSON.stringify({ ok: true, backups: all }, null, 2) + '\n');
   } else if (!all.length) {
-    log('没有任何备份。');
+    log(L('没有任何备份。', 'No backups found.'));
   } else {
-    log('共 ' + all.length + ' 份备份（新的在前）：');
+    log(L(`共 ${all.length} 份备份（新的在前）：`, `${all.length} backup(s), newest first:`));
     for (const b of all) {
       log('  ' + new Date(b.mtime).toISOString() + '  ' + b.client.padEnd(15) + '  ' + b.file);
     }
@@ -91,7 +92,10 @@ const latest = has('--latest');
 const dryRun = has('--dry-run');
 
 if (!wantStamp && !wantFile && !latest) {
-  log('需要 --list / --latest / --stamp <stamp> / --file <path> 之一。用 --help 看用法。');
+  log(L(
+    '需要 --list / --latest / --stamp <stamp> / --file <path> 之一。用 --help 看用法。',
+    'Pass one of --list, --latest, --stamp <stamp>, or --file <path>. See --help.',
+  ));
   process.exit(1);
 }
 
@@ -99,13 +103,16 @@ let chosen;
 if (wantFile) {
   chosen = all.filter((b) => b.file === wantFile);
   if (!chosen.length) {
-    log('没有这份备份: ' + wantFile);
+    log(L('没有这份备份: ', 'Backup not found: ') + wantFile);
     process.exit(1);
   }
 } else if (wantStamp) {
   chosen = all.filter((b) => b.stamp.startsWith(wantStamp));
   if (!chosen.length) {
-    log('没有 stamp 以 ' + wantStamp + ' 开头的备份。用 --list 看有哪些。');
+    log(L(
+      `没有 stamp 以 ${wantStamp} 开头的备份。用 --list 看有哪些。`,
+      `No backup with a stamp starting with ${wantStamp}. Run --list to see available backups.`,
+    ));
     process.exit(1);
   }
 } else {
@@ -120,7 +127,7 @@ if (wantFile) {
 }
 
 if (!chosen.length) {
-  log('没有可还原的备份。');
+  log(L('没有可还原的备份。', 'No backups to restore.'));
   process.exit(0);
 }
 
@@ -157,10 +164,13 @@ if (JSON_OUT) {
   process.stdout.write(JSON.stringify({ ok: failed === 0, dryRun, results }, null, 2) + '\n');
 } else {
   for (const r of results) {
-    log('  ' + (r.action === 'failed' ? 'FAIL ' : 'OK   ') + r.client.padEnd(15) +
-      (dryRun ? ' 会从 ' : ' 已从 ') + basename(r.from) + (r.safety ? '   （当前状态另存为 ' + basename(r.safety) + '）' : ''));
+    const verb = dryRun ? L(' 会从 ', ' would restore from ') : L(' 已从 ', ' restored from ');
+    const safety = r.safety ? L(`   （当前状态另存为 ${basename(r.safety)}）`, `   (current file saved as ${basename(r.safety)})`) : '';
+    log('  ' + (r.action === 'failed' ? 'FAIL ' : 'OK   ') + r.client.padEnd(15) + verb + basename(r.from) + safety);
   }
   log('');
-  log(dryRun ? '预演，没有写任何文件。' : '还原完成。重启对应的客户端即可生效。');
+  log(dryRun
+    ? L('预演，没有写任何文件。', 'Dry run; no files were written.')
+    : L('还原完成。重启对应的客户端即可生效。', 'Restore complete. Restart the affected client(s) to apply.'));
 }
 process.exit(failed ? 1 : 0);

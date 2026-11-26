@@ -9,13 +9,16 @@
  * 规则刻意保守：单段、字母数字开头、只允许 `._-`，最长 200。合法的 DSH
  * UUID 和本服务生成的 run_id 都满足；不满足的 id 在触盘之前就拒绝。
  */
+import { L } from './lang.mjs';
+
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
 
 export function assertSafeId(value, label = 'id') {
   if (typeof value !== 'string' || value === '.' || value === '..' || !SAFE_ID.test(value)) {
-    throw new Error(
+    throw new Error(L(
       `${label} 非法：只允许字母/数字开头、由字母/数字/._- 组成的单段 id（最长 200）: ${JSON.stringify(value)}`,
-    );
+      `Invalid ${label}: must be a single-segment id starting with a letter or digit using only letters, digits, and ._- (max 200 chars): ${JSON.stringify(value)}`,
+    ));
   }
   return value;
 }

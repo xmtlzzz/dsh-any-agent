@@ -27,9 +27,7 @@ import {
   DEFAULT_REASONING_EFFORT,
   DEFAULT_REVIEW,
   IDLE_TTL_MS,
-  LIST_PROBE_TTL_MS,
   MAX_LIVE,
-  MAX_RSS_MB,
   PERMISSION_TIERS,
   REAP_INTERVAL_MS,
   REASONING_EFFORTS,
@@ -50,14 +48,14 @@ import { L } from './lang.mjs';
 import { AcpProcess } from './acp.mjs';
 import { applySessionConfig } from './acp-session.mjs';
 import { SessionHost } from './host.mjs';
-import { refreshRssMap, rssMb } from './procstat.mjs';
-import { readConversationMeta } from './titles.mjs';
 import { Conversation } from './conversation.mjs';
 import * as runStore from './run-store.mjs';
+import { adoptConversationFromDisk, listConversations } from './hub/discovery.mjs';
+import { reapOnce as runReapOnce, releaseAll as runReleaseAll } from './hub/reaper.mjs';
 import { pruneRegistryStages, readRegistry, withRegistryLock, writeRegistry } from './registry.mjs';
 import { emitLive, livePreview } from './live.mjs';
 import { homeWorkspaceProblem } from './workspace-guard.mjs';
-import { registerWorkspace, findSessionHeaderStatus } from './workspace.mjs';
+import { registerWorkspace } from './workspace.mjs';
 import { ISOLATION_MODES, createWorktree, discardWorktree } from './worktree.mjs';
 import {
   META_DIR,
@@ -65,14 +63,9 @@ import {
   forgottenPath,
   isForgotten,
   pruneStaleTombstones,
-  readConversationMetaFile,
   writeConversationMeta,
 } from './hub-store.mjs';
-import {
-  LOCKS_DIR,
-  heartbeat as lockHeartbeat,
-  removeMarker,
-} from './locks.mjs';
+import { LOCKS_DIR, removeMarker } from './locks.mjs';
 import { attachReview, terminalResult } from './run-result.mjs';
 
 // 外部（测试、bin）一直从 hub.mjs 取这些函数；拆出去之后导入路径保持不变。
@@ -106,16 +99,16 @@ export class Hub {
   #adopting = new Map();
   /** 本实例从注册表移除过的会话 id（save 合并盘上条目时跳过）。 */
   #removed = new Set();
-  /** `dsh_list` 磁盘探测的短缓存（探测要 spawn 一个 DSH 进程，实测约 1 秒）。 */
-  #probeCache = null;
+  /** `dsh_list` 磁盘探测的短缓存容器。 */
+  #probeState = { cache: null };
 
   async load() {
     // ★ 启动即确认三个关键目录可写。以前"写失败只记 silent 日志"会让服务
     //   看起来正常，但注册表/哨兵/锁登记全部丢失，异步等待永远醒不过来。
-    assertWritableDir(dirname(STATE_FILE), '状态目录');
-    assertWritableDir(RUNS_DIR, '哨兵目录', { hardlink: true });
-    assertWritableDir(REVIEWS_DIR, '审核记录目录');
-    assertWritableDir(LOCKS_DIR, '锁登记目录');
+    assertWritableDir(dirname(STATE_FILE), L('状态目录', 'State directory'));
+    assertWritableDir(RUNS_DIR, L('哨兵目录', 'Sentinel directory'), { hardlink: true });
+    assertWritableDir(REVIEWS_DIR, L('审核记录目录', 'Reviews directory'));
+    assertWritableDir(LOCKS_DIR, L('锁登记目录', 'Lock markers directory'));
     try { pruneRegistryStages(STATE_FILE); }
     catch (error) { this.log.info(`[hub] Registry staging cleanup: ${error.message}`); }
 
@@ -304,72 +297,11 @@ export class Hub {
       }
     }
     if (!c) {
-      // 最后一道：注册表里没有，但会话可能就在磁盘上 —— 别的实例建的、注册表被并发写覆盖丢的、
-      // 或者根本是别的 profile / GUI 建的。**会话存储才是权威，注册表只是缓存。**
       let release;
       const gate = new Promise((resolve) => { release = resolve; });
       this.#adopting.set(id, gate);
       try {
-      const found = await findSessionHeaderStatus(id);
-      if (found.status === 'error') {
-        throw new Error(L(`无法读取会话 ${id} 的会话头：${found.reason}`, `Cannot read the session header of ${id}: ${found.reason}`));
-      }
-      const header = found.header;
-      if (header?.cwd) {
-        // ★ 权限档必须取自**会话自己的记录**，不能一律套默认值：
-        //   一个当初用 read-only 建的会话，若注册表丢了、被我们以默认档接管，
-        //   resume 时 DSH_PERMISSION_MODE 会把档位写进会话 —— 等于**悄悄提权**。
-        const meta = readConversationMeta(id);
-        const persisted = readConversationMetaFile(id);
-        const recordedPreset = meta?.permissions?.preset;
-        const recordedPermission = PERMISSION_TIERS.includes(recordedPreset) ? recordedPreset : null;
-        // 安全优先：会话记录说 read-only 就绝不能被侧车“提升”为可写档。
-        // ★ 档位未知（没有投影缓存、也没有本服务侧车）时 **fail-closed 到 read-only**。
-        //   以前回落到 DEFAULT_PERMISSION（danger-full-access），等于把一个可能是
-        //   只读的外部会话悄悄提升为完全访问。宁可让用户显式新建会话，也不要无声提权。
-        const permission =
-          recordedPermission === 'read-only'
-            ? 'read-only'
-            : PERMISSION_TIERS.includes(persisted?.permission)
-              ? persisted.permission
-              : (recordedPermission ?? 'read-only');
-        const recordedApproval = meta?.permissions?.approval;
-        let onApproval = APPROVAL_POLICIES.includes(persisted?.onApproval)
-          ? persisted.onApproval
-          : APPROVAL_POLICIES.includes(recordedApproval)
-            ? recordedApproval
-            : defaultApprovalPolicy(permission);
-        if (permission === 'read-only' && onApproval !== 'auto-deny') onApproval = 'auto-deny';
-        c = new Conversation(
-          {
-            id,
-            cwd: persisted?.cwd ?? header.cwd,
-            permission,
-            onApproval,
-            titleHint: persisted?.titleHint ?? null,
-            reasoningEffort: REASONING_EFFORTS.includes(persisted?.reasoningEffort)
-              ? persisted.reasoningEffort
-              : DEFAULT_REASONING_EFFORT,
-            provider: persisted?.provider ?? null,
-            model: persisted?.model ?? null,
-            createdAt: persisted?.createdAt,
-            lastUsedAt: persisted?.lastUsedAt,
-            turnCount: persisted?.turnCount,
-            review: REVIEW_MODES.includes(persisted?.review) ? persisted.review : DEFAULT_REVIEW,
-            workspace: persisted?.workspace ?? null,
-            worktree: persisted?.worktree ?? null,
-          },
-          this,
-        );
-        this.conversations.set(id, c);
-        try {
-          await this.save();
-        } catch (error) {
-          this.conversations.delete(id);
-          throw error;
-        }
-        this.log.info(`[hub] 从会话存储吸收了 ${id}（注册表里没有，但磁盘上有；权限档沿用 ${permission}）`);
-      }
+        c = await adoptConversationFromDisk(this, id);
       } finally {
         this.#adopting.delete(id);
         release();
@@ -594,7 +526,10 @@ export class Hub {
       // ★ 无效的 provider/model 必须 fail fast：旧行为是建出会话、静默回退
       //   profile 默认模型，调用方以为指定模型已生效。这里在外层 catch 停止进程，
       //   不注册会话，直接报错（不传 provider/model 才走 profile 默认）。
-      const modelFailure = (conv.lastConfigApplied.failed ?? []).find((f) => String(f).includes('模型='));
+      const modelIdx = (conv.lastConfigApplied.failedKeys ?? []).indexOf('model');
+      const modelFailure = modelIdx >= 0
+        ? conv.lastConfigApplied.failed?.[modelIdx]
+        : (conv.lastConfigApplied.failed ?? []).find((f) => /^(?:模型|model)=/i.test(String(f)));
       if (modelFailure) {
         throw new Error(L(
           `指定的 provider/model 无效，会话未创建：${modelFailure}\n` +
@@ -645,97 +580,15 @@ export class Hub {
   }
 
   /** 列出所有会话：本进程持有的 + DSH 磁盘上未打开的。 */
-  async list({ cwd, includeClosed = true } = {}) {
-    const out = new Map();
-    for (const c of this.conversations.values()) {
-      if (cwd && c.cwd !== cwd) continue;
-      if (isForgotten(c.id)) continue;
-      out.set(c.id, c.snapshot());
-    }
-    if (!includeClosed) {
-      this.lastProbe = { ok: null, error: null, cached: false, at: now() };
-      return [...out.values()];
-    }
-
-    // 磁盘探测要 spawn 一个 DSH 进程（实测约 1 秒），所以同 cwd 的结果缓存一小段时间，
-    // 避免"连着列几次会话"就反复拉进程。
-    const cacheKey = cwd ?? '';
-    const cached =
-      this.#probeCache && this.#probeCache.key === cacheKey && now() - this.#probeCache.at < LIST_PROBE_TTL_MS
-        ? this.#probeCache.sessions
-        : null;
-
-    let sessions = cached;
-    if (cached) {
-      this.lastProbe = { ok: true, error: null, cached: true, at: this.#probeCache.at };
-    } else if (!sessions) {
-      let proc = null;
-      try {
-        // A persisted session may refer to a removed directory. Unfiltered discovery runs from the server's own cwd.
-        proc = new AcpProcess({ cwd: cwd ?? process.cwd(), permission: 'read-only' });
-        proc.start();
-        await proc.initialize();
-        const res = await proc.request('session/list', cwd ? { cwd } : {});
-        sessions = res?.sessions ?? [];
-        this.#probeCache = { key: cacheKey, at: now(), sessions };
-        this.lastProbe = { ok: true, error: null, cached: false, at: this.#probeCache.at };
-      } catch (e) {
-        this.log.info(`[hub] session/list 探测失败: ${e.message}`);
-        sessions = []; // 失败不缓存，下次重试
-        // ★ 调用方必须能区分"没有别的会话"和"探测失败"，否则会以为会话丢了。
-        this.lastProbe = { ok: false, error: e.message, cached: false, at: now() };
-      } finally {
-        await proc?.stop().catch(() => {});
-      }
-    }
-    for (const s of sessions) {
-      if (out.has(s.sessionId)) continue;
-      if (isForgotten(s.sessionId)) continue;
-      const meta = readConversationMeta(s.sessionId);
-      out.set(s.sessionId, {
-        conversation_id: s.sessionId,
-        title: meta?.title ?? null,
-        cwd: s.cwd,
-        permission: null,
-        alive: false,
-        busy: false,
-        /** 磁盘上有、但本服务当前没打开 → detached（可用 resume 复活）。 */
-        state: 'detached',
-        current_tool: null,
-        out_chars: 0,
-        running_ms: 0,
-        turns: meta?.turns ?? null,
-        usage: meta?.usage?.totals ?? null,
-        context_pressure: meta?.pressure ?? null,
-        model: meta?.model ?? null,
-      });
-    }
-    return [...out.values()];
+  async list(options = {}) {
+    return listConversations(this, options, this.#probeState);
   }
 
-  /** 空闲回收：停掉闲置进程，会话本身保留（可 resume 复活）。
-   *
-   * ★ `DSH_MCP_IDLE_TTL_MS=0` = **永不回收**（0.4.0 起默认是 10 分钟，不再是默认值）。
-   *   理由（实测，见 docs/zh/caveats.md §3.10~3.12）：空闲回收是写锁**唯一**会变空的时刻，
-   *   而只要锁一空，你在 web 里点开那条会话，`dsh web` 就会**永久**持有它
-   *   （切走 ✗ 等待 ✗ 归档 ✗ 都不释放），本服务之后每一次 resume 都失败 ——
-   *   用户看到的正是"任务跑完后接不回去"。不回收 = **本服务一直握着写锁，GUI 抢不走**：
-   *   实测你在 GUI 里点开它是**只读打开**（照样能看内容 ✓），写锁仍在我们的 PID 上 ✓ ——
-   *   即"**你看得见，我们写得动**"，两边都不受影响。
-   *   代价是每个会话常驻一个 DSH 进程（内存）—— 想省内存就把它设成毫秒数（如 300000）。
-   *
-   * ★ 但**心跳必须一直续**，两种模式都一样：心跳停了，别的实例 90 秒后就会把我们
-   *   判成"卡死"，`dsh_takeover` 于是会**杀掉我们正在跑的回合**。
-   *
-   * ★ `DSH_MCP_MAX_LIVE`（保活上限）：`IDLE_TTL_MS=0` 时进程会永远留着（实测约 300-480MB/个 ✗），
-   *   设了上限就在超标时回收**最久没用过**的那个（busy 的绝不回收）—— "内存有界，锁尽量在手"。
-   */
   startReaper() {
     if (this.#reaper) return;
-    const neverReapByIdle = IDLE_TTL_MS === 0;
-    if (neverReapByIdle) {
+    if (IDLE_TTL_MS === 0) {
       this.log.info(
-        `[hub] DSH_MCP_IDLE_TTL_MS=0：不按空闲回收进程（一直握着写锁，GUI 抢不走）` +
+        '[hub] DSH_MCP_IDLE_TTL_MS=0：不按空闲回收进程（一直握着写锁，GUI 抢不走）' +
           (MAX_LIVE > 0 ? `；超过保活上限 ${MAX_LIVE} 时回收最久没用过的` : '；未设保活上限，进程会一直留着'),
       );
     }
@@ -743,149 +596,12 @@ export class Hub {
     this.#reaper.unref?.();
   }
 
-  /**
-   * 一个回收周期（startReaper 定时调用）。永不 reject。
-   * `refreshRss` / `maxRssMb` 只供测试注入：要能复现"读 RSS 期间会话开跑了"的竞态。
-   */
-  async reapOnce({ refreshRss = refreshRssMap, maxRssMb = MAX_RSS_MB } = {}) {
-    // ★ 整个回收周期必须自带防护：这里抛出的异常会变成 unhandled rejection，
-    //   在 Node ≥15 上直接**杀掉进程** —— 而那会连带丢掉所有会话的活进程。
-    try {
-      const cutoff = now() - IDLE_TTL_MS;
-      // 哪些会话可以回收：进程活着、不在跑回合
-      const reapable = [];
-      /** 选中时的 lastUsedAt：停之前对一下，被用过就不再按选中时的判断停它（见下面的循环）。 */
-      const usedAtPick = new Map();
-      for (const c of this.conversations.values()) {
-        if (!c.proc?.alive) continue;
-        // ★ 先续心跳，**包括正在跑回合的**：否则长回合（>90 秒）期间心跳不刷新，
-        //   别的实例会把我们判成失联并抢占，直接把这一轮杀掉。
-        lockHeartbeat(c.id);
-        if (c.busy) continue;
-        reapable.push(c);
-        usedAtPick.set(c, c.lastUsedAt);
-      }
-
-      // 回收哪些：① 空闲超过 TTL；② 超过 MAX_LIVE；③ 超过全局 RSS 预算。
-      // keep_alive 会话不受 ① ② 约束；③ 是系统级硬上限，最后仍可能回收它。
-      const victims = new Set();
-      const reapableNormal = reapable.filter((c) => !c.keepAlive);
-      if (IDLE_TTL_MS > 0) {
-        for (const c of reapableNormal) if (c.lastUsedAt <= cutoff) victims.add(c);
-      }
-      if (MAX_LIVE > 0) {
-        // 保活窗口 = 最近用过的 MAX_LIVE 个；超出的按"最久没用"先回收
-        const byAge = reapableNormal.slice().sort((a, b) => a.lastUsedAt - b.lastUsedAt);
-        const excess = byAge.length - MAX_LIVE;
-        for (let i = 0; i < excess; i++) victims.add(byAge[i]);
-      }
-      if (maxRssMb > 0) {
-        // 按实际 RSS 而不是会话数：上下文大小差异很大，按个数限制经常低估。
-        // 预算判断要用新数字：先异步刷新一次（不阻塞事件循环），下面的 rssMb 读的就是它。
-        await refreshRss();
-        let total = 0;
-        const rss = new Map();
-        const seenPid = new Set();
-        for (const c of this.conversations.values()) {
-          if (!c.proc?.alive) continue;
-          const pid = c.proc.pid;
-          const mb = rssMb(pid) ?? 0;
-          rss.set(c, mb);
-          // 共享进程只算一次
-          if (pid && seenPid.has(pid)) continue;
-          if (pid) seenPid.add(pid);
-          total += mb;
-        }
-        if (total > maxRssMb) {
-          // 先收非 keep_alive 的最久未用者；仍然超预算才动 keep_alive。
-          const pool = reapable
-            .filter((c) => !victims.has(c))
-            .sort((a, b) =>
-              a.keepAlive === b.keepAlive ? a.lastUsedAt - b.lastUsedAt : a.keepAlive ? 1 : -1,
-            );
-          for (const c of pool) {
-            victims.add(c);
-            total -= rss.get(c) ?? 0;
-            if (total <= maxRssMb) break;
-          }
-        }
-      }
-
-      for (const c of victims) {
-        if (c.recycling) await c.recycling;
-        // ★ 选中之后有 await（刷新 RSS、等上一个会话停完）：这期间 dsh_send 可能已经在这个会话上
-        //   开跑（busy），或者跑完了一个短回合（lastUsedAt 变了）。都不能再按选中时的判断停它 ——
-        //   前者会打断正在执行的回合；后者已经不空闲了，下个周期再重新判断。
-        if (!c.proc?.alive || c.busy || c.lastUsedAt !== usedAtPick.get(c)) continue;
-        this.log.info(
-          `[hub] 回收会话 ${c.id} 的进程（${IDLE_TTL_MS > 0 && c.lastUsedAt <= cutoff ? '空闲超时' : `保活上限 ${MAX_LIVE}`}；可 resume 复活）`,
-        );
-        const proc = c.proc;
-        // ★ 先把 stop 登记成 recycling，再 await：stop 可能要几秒，这个窗口里到达的
-        //   dsh_send 会在 ensureAlive 里 await 它，而不是为同一会话再拉一个进程去抢
-        //   **尚未释放**的写锁。proc 也要等 stop 落定后才置空，否则快路径会拿到垂死进程。
-        // 共享进程：detach 只摘掉这个会话（内部 session/close），最后一个离开才停进程。
-        const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
-        c.recycling = stopping
-          .catch(() => false)
-          .then((stopped) => {
-            // ★ 顺序要紧：**先确认子进程真的退出（写锁真的释放），再删登记**。
-            //   反过来的话，一旦它没死透，锁的持有者就变成"无登记的未知进程" ——
-            //   既报不清是谁，连 dsh_takeover 都会拒绝（判成 none）。
-            if (stopped) removeMarker(c.id);
-            return stopped;
-          })
-          .finally(() => {
-            if (c.proc === proc) c.proc = null;
-            c.recycling = null;
-          });
-        await c.recycling;
-      }
-    } catch (e) {
-      this.log.info(`[hub] 回收周期异常（已忽略，下个周期继续）: ${e.message}`);
-    }
+  async reapOnce(options) {
+    return runReapOnce(this, options);
   }
 
-  /**
-   * 释放**所有**活着的会话进程（腾内存用，无损：会话日志都在磁盘上，之后照样 resume）。
-   *
-   * 场景：保活中的会话各常驻一个 DSH 进程（实测约 300-480MB ✗）。
-   * 一批活干完了就调它，内存立刻归零 ✓；下次派活按需 resume ✓。
-   */
-  async releaseAll({ force = false } = {}) {
-    const released = [];
-    const skippedBusy = [];
-    const failed = [];
-    for (const c of this.conversations.values()) {
-      if (c.recycling) await c.recycling;
-      if (!c.proc?.alive) continue;
-      // ★ 默认不打断正在跑的回合：all=true 是"腾内存"，不是"取消任务"。
-      //   确实要连跑着的也停掉时传 force=true。
-      if (c.busy && !force) {
-        skippedBusy.push(c.id);
-        continue;
-      }
-      const proc = c.proc;
-      // stop 期间保持 proc 可见 + recycling 屏障，落定后再置空。
-      const stopping = typeof proc.detach === 'function' ? proc.detach(c) : proc.stop();
-      c.recycling = stopping
-        .catch(() => false)
-        .finally(() => {
-          if (c.proc === proc) c.proc = null;
-          c.recycling = null;
-        });
-      const stopped = await c.recycling;
-      if (stopped) {
-        removeMarker(c.id);
-        released.push(c.id);
-      } else {
-        // 进程没确认退出：保留登记，让 takeover 还能归因这个孤儿。
-        failed.push(c.id);
-        this.log.info(`[hub] 释放 ${c.id} 时进程未确认退出，保留写锁登记`);
-      }
-    }
-    await this.save();
-    return { released: released.length, conversations: released, skipped_busy: skippedBusy, failed };
+  async releaseAll(options) {
+    return runReleaseAll(this, options);
   }
 
   trackRunFinalization(run, finalization) {

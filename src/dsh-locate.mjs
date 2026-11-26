@@ -23,6 +23,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, r
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { isHostAbsolute, windowsSystemExecutable } from './host-executable.mjs';
+import { L } from './lang.mjs';
 
 /** 相对 DSH 包根的入口与包描述。 */
 const DSH_PKG_PARTS = ['@deepseek-ai', 'dsh'];
@@ -476,7 +477,10 @@ export function rankCandidates(list) {
 
 function assertRuntimeFile(path) {
   if (!isRegularFile(path)) {
-    const error = new Error(`DSH_RUNTIME 指向的文件不存在、不可访问或不是文件: ${path}`);
+    const error = new Error(L(
+      `DSH_RUNTIME 指向的文件不存在、不可访问或不是文件: ${path}`,
+      `DSH_RUNTIME does not point to an accessible file: ${path}`,
+    ));
     error.code = 'DSH_RUNTIME_INVALID';
     throw error;
   }
@@ -528,7 +532,10 @@ export function applyRuntimeOverride(list, runtime) {
 /** 显式 DSH_BIN（可选 DSH_RUNTIME）。 */
 function explicitDsh(binPath, runtimePath) {
   if (!isDshEntry(binPath)) {
-    throw new Error(`DSH_BIN 指向的文件不存在、不可访问或不是文件: ${binPath}。请更新路径，或删除 DSH_BIN 后重连以恢复自动探测。`);
+    throw new Error(L(
+      `DSH_BIN 指向的文件不存在、不可访问或不是文件: ${binPath}。请更新路径，或删除 DSH_BIN 后重连以恢复自动探测。`,
+      `DSH_BIN does not point to an accessible file: ${binPath}. Update the path, or unset DSH_BIN and reconnect to resume auto-discovery.`,
+    ));
   }
   const pkg = readDshPackage(binPath);
   const split = splitAsarPath(binPath);
@@ -539,7 +546,10 @@ function explicitDsh(binPath, runtimePath) {
   } else if (split) {
     command = desktopExeForAsar(split.asar);
     if (!command) {
-      throw new Error(`DSH_BIN 在 asar 内（${split.asar}），但找不到配套的桌面版可执行文件；请用 DSH_RUNTIME 指定`);
+      throw new Error(L(
+        `DSH_BIN 在 asar 内（${split.asar}），但找不到配套的桌面版可执行文件；请用 DSH_RUNTIME 指定`,
+        `DSH_BIN is inside an asar (${split.asar}), but its matching desktop executable was not found; set DSH_RUNTIME explicitly`,
+      ));
     }
   }
   const foreign = command !== process.execPath;
@@ -577,10 +587,12 @@ export function resolveDsh({ fresh = false } = {}) {
     }
   }
   if (selected) return selected;
-  throw new Error(
+  throw new Error(L(
     'DSH CLI 未找到：没有发现 DeepSeek Harness 桌面版、npm 全局安装或 npx 缓存里的 @deepseek-ai/dsh。\n' +
       '  安装桌面版即可自动识别；或 npm i -g @deepseek-ai/dsh；或设置 DSH_BIN 指向 @deepseek-ai/dsh/lib/bin.js',
-  );
+    'DSH CLI not found: no DeepSeek Harness desktop app, global npm install, or npx-cached @deepseek-ai/dsh was detected.\n' +
+      '  Install the desktop app for auto-discovery, run `npm i -g @deepseek-ai/dsh`, or set DSH_BIN to @deepseek-ai/dsh/lib/bin.js',
+  ));
 }
 
 /** 实测某个运行时的 Node 版本（体检用；约 0.2s，结果缓存）。 */

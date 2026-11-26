@@ -114,8 +114,7 @@ try {
       const title = statuses.includes('fail') ? 'Some checks failed' : statuses.includes('warn') ? 'Checks passed with warnings' : 'All checks passed';
       check('★ 英文 dsh_doctor：标题反映检查项的状态', enDocText.split('\n')[0] === title, enDocText.slice(0, 80));
       const zhOnly = /体检|会话|孤儿|级别|运行时|来源|桌面版|目录|检查权限|首次启动|[，；（）：]/;
-      // dsh_bin 找不到 DSH 时 detail 是 resolveDsh 的原始报错（另一处的文字，不在本次范围）。
-      const enDocLeft = enDocText.split('\n').filter((l) => zhOnly.test(l) && !/^✗ dsh_bin:/.test(l));
+      const enDocLeft = enDocText.split('\n').filter((l) => zhOnly.test(l));
       check('★ 英文 dsh_doctor：各检查项没有残留中文文案', enDocLeft.length === 0, enDocLeft.join(' | ').slice(0, 300));
       // 中文那份有描述的参数，英文那份也必须有：新加的参数不能悄悄漏翻。
       const untranslated = [];

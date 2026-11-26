@@ -11,6 +11,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cmpVersion, resolveDsh } from './dsh-locate.mjs';
+import { L } from './lang.mjs';
 import { load as yamlLoad } from './yaml-lite.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -272,15 +273,18 @@ export function probeWritableDir(dir, { hardlink = false } = {}) {
  * 在 Hub.load() 启动时调用：宁可服务明确起不来，也不要"看起来正常、
  * 哨兵永远不出现、锁也无法归因"的静默降级。
  */
-export function assertWritableDir(dir, label = '目录', options) {
+export function assertWritableDir(dir, label = L('目录', 'Directory'), options) {
   try {
     probeWritableDir(dir, options);
   } catch (e) {
-    throw new Error(
+    throw new Error(L(
       `${label}不可写: ${dir}\n` +
         `  ${e.message}\n` +
         '  请用 DSH_MCP_STATE / DSH_MCP_RUNS_DIR / DSH_MCP_LOCKS_DIR 指向可写目录。',
-    );
+      `${label} is not writable: ${dir}\n` +
+        `  ${e.message}\n` +
+        '  Point DSH_MCP_STATE / DSH_MCP_RUNS_DIR / DSH_MCP_LOCKS_DIR at a writable directory.',
+    ));
   }
 }
 

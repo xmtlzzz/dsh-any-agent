@@ -40,6 +40,8 @@ if (argv.includes('--help') || argv.includes('-h')) {
     '  dsh-any-agent                 run the MCP server on stdio\n' +
     '  dsh-any-agent team on|off     enable/disable Agent Teams (writes settings.json)\n' +
     '  dsh-any-agent team status     show the effective team mode\n' +
+    '  dsh-any-agent daemon status   list active resident daemon processes\n' +
+    '  dsh-any-agent daemon stop     stop active resident daemon processes\n' +
     '  dsh-any-agent watch [conv]    live call chain of dispatched runs in this terminal\n' +
     '  dsh-any-agent dashboard       same, as a read-only local web page (127.0.0.1 + token);\n' +
     '                                --open launches it in your browser\n' +
@@ -71,6 +73,36 @@ if (argv[0] === 'watch' || argv[0] === 'dashboard') {
   const cli = await import('../src/live-cli.mjs');
   const code = argv[0] === 'watch' ? await cli.runWatch(argv.slice(1)) : await cli.runDashboard(argv.slice(1));
   process.exit(code);
+}
+
+/** `dsh-any-agent daemon status|stop`：查看或停止本机残留的常驻进程。 */
+if (argv[0] === 'daemon') {
+  const { L } = await import('../src/lang.mjs');
+  const { listDaemons, stopDaemons } = await import('../src/daemon.mjs');
+  const action = argv[1] ?? 'status';
+  if (action === 'status') {
+    const list = listDaemons();
+    if (!list.length) {
+      process.stdout.write(L('当前没有正在运行的常驻进程。\n', 'No resident daemon processes found.\n'));
+    } else {
+      process.stdout.write(L('常驻进程列表：\n', 'Resident daemon processes:\n'));
+      for (const d of list) {
+        const st = d.alive ? L('运行中', 'running') : L('已退出(残留信息文件)', 'stopped (stale info file)');
+        process.stdout.write(`  ${d.id}  pid=${d.pid ?? '?'}  v${d.version ?? '?'}  ${st}\n`);
+      }
+    }
+    process.exit(0);
+  }
+  if (action === 'stop') {
+    const { stopped, cleaned } = stopDaemons();
+    process.stdout.write(L(
+      `已向 ${stopped.length} 个常驻进程发送退出信号，清理 ${cleaned.length} 个残留信息文件。\n`,
+      `Signalled ${stopped.length} daemon(s) to stop and cleaned ${cleaned.length} stale info file(s).\n`,
+    ));
+    process.exit(0);
+  }
+  process.stderr.write(L('用法', 'Usage') + ': dsh-any-agent daemon status|stop\n');
+  process.exit(2);
 }
 
 /**
@@ -149,6 +181,11 @@ keepAliveOnRejection(log);
 if (argv[0] === '--daemon') {
   const { runDaemon } = await import('../src/daemon.mjs');
   await runDaemon({ log });
-} else if (!(DAEMON_MODE && (await (await import('../src/daemon.mjs')).runProxy({ log })))) {
-  await runStdioServer(log);
+} else {
+  let daemonFallback = null;
+  const proxied = DAEMON_MODE && (await (await import('../src/daemon.mjs')).runProxy({
+    log,
+    onFallback: (info) => { daemonFallback = info; },
+  }));
+  if (!proxied) await runStdioServer(log, { daemonFallback });
 }

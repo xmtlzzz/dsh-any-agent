@@ -10,6 +10,8 @@
  * 从 conversation.mjs 拆出来；回合号由会话传入（缓冲本身不知道"现在是第几轮"）。
  */
 
+import { L } from './lang.mjs';
+
 /** 条目上限（超出丢最旧的）。 */
 export const MAX_OUT_ENTRIES = 500;
 /** 单条正文的字符上限；超出保留尾部，避免一条超长输出把内存撑爆。 */
@@ -17,7 +19,9 @@ const MAX_OUT_TEXT = 200_000;
 
 const now = () => Date.now();
 const revOf = (e) => (typeof e.rev === 'number' ? e.rev : e.seq);
-const cap = (s) => (s.length > MAX_OUT_TEXT ? `…[已截断，保留尾部 ${MAX_OUT_TEXT} 字]…\n${s.slice(-MAX_OUT_TEXT)}` : s);
+const cap = (s) => (s.length > MAX_OUT_TEXT
+  ? `${L(`…[已截断，保留尾部 ${MAX_OUT_TEXT} 字]…`, `…[truncated, keeping last ${MAX_OUT_TEXT} chars]…`)}\n${s.slice(-MAX_OUT_TEXT)}`
+  : s);
 
 export class OutBuffer {
   constructor() {

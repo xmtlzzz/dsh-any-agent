@@ -34,7 +34,7 @@
 | `DSH_MCP_REVIEWS_DIR` | `<状态文件同目录>/reviews` | 审核裁决的落盘目录（`<此目录>/<会话id>/<run_id>.review.json`）。不可写会让服务启动时明确失败 |
 | `DSH_MCP_LIVE` | `detail` | live 事件流级别（`watch` / `dashboard` 的数据源）。`detail` 带脱敏后的 prompt / 命令 / 路径预览；`meta` 只有工具名、状态、计时、审批类型；`off` 不写。思考内容任何级别都不写 |
 | `DSH_MCP_LIVE_DIR` | `<状态文件同目录>/live` | live 事件流目录（`<此目录>/<会话id>/events.jsonl`，5MB 滚动到 `.1`）。写不进去只会静默跳过，不影响派活；按 `DSH_MCP_SENTINEL_TTL_MS` 清理 |
-| `DSH_MCP_LANG` | 跟随系统 | 语言：`zh` 或 `en`。管两处 —— `watch` / `dashboard` 的界面，以及调用方看到的文字：工具标题、工具描述、参数描述、服务说明与工具返回的正文（少数不常见的报错目前只有中文）。未设置时依次看 `LC_ALL` / `LC_MESSAGES` / `LANG`、系统区域设置；命令行 `--lang` 优先于它 |
+| `DSH_MCP_LANG` | 跟随系统 | 语言：`zh` 或 `en`。管两处 —— `watch` / `dashboard` 的界面，以及调用方看到的文字：工具标题、工具描述、参数描述、服务说明、工具返回正文与报错信息。未设置时依次看 `LC_ALL` / `LC_MESSAGES` / `LANG`、系统区域设置；命令行 `--lang` 优先于它 |
 | `DSH_MCP_PERMISSION` | `workspace-write` | `dsh_start` 未指定时的权限档。设为 `danger-full-access` 还需要 `DSH_MCP_ALLOW_FULL_ACCESS=1` |
 | `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | 是否允许 `permission=danger-full-access`。默认拒绝：该档把整机写权限交给调用方 |
 | `DSH_MCP_REASONING_EFFORT` | `max` | 默认思考深度 |
@@ -43,7 +43,7 @@
 | `DSH_MCP_WATCHDOG_GRACE_MS` | `5000`（5 秒） | 看门狗发出取消后等待 ACP 响应的时间。超时会隔离并终止该 ACP 进程，记录 `watchdog_timeout`。同一共享进程上的其他回合也会中断。 |
 | `DSH_MCP_STALL_MS` | `600000`（10 分钟） | 多久没有任何进展（DSH 推来的正文、思考、工具状态、用量更新）算卡住；有工具在执行时放大 3 倍，等调用方裁决审批时不判。卡住就发 `session/cancel`（同 `dsh_interrupt`），结果带 `watchdog` |
 | `DSH_MCP_TURN_MAX_MS` | `7200000`（2 小时） | 单个回合的总时长上限，**不看进展**（拦得住陷在循环里、一直在输出的回合）。`0` = 不设上限 |
-| `DSH_MCP_DAEMON` | 关 | `1` = 常驻进程模式：客户端拉起的进程只做转发，会话、DSH 进程和正在跑的回合都在一个 detached 的常驻进程里，客户端关掉、重连或崩溃都不会打断回合。同一配置（`DSH_*` 与语言变量、名字以 `_KEY`、`_TOKEN` 或 `_SECRET` 结尾的凭据变量如 `DEEPSEEK_API_KEY` 或 profile 里 `apiKeyEnv` 指的变量、`*_PROXY`，以及 `dsh-any-agent team on/off` 的设置）的客户端共用一个常驻进程，DSH 继承的是它的环境；凭据放在别的名字的变量里不在此列，请改名或别开这个模式。`dsh-any-agent-setup --yes --daemon` 会把它写进客户端配置 |
+| `DSH_MCP_DAEMON` | 运行时默认关（`setup` 默认写入 `1`） | `1` = 常驻进程模式：客户端拉起的进程只做转发，会话、DSH 进程和正在跑的回合都在一个 detached 的常驻进程里，客户端关掉、重连或崩溃都不会打断回合。同一配置（`DSH_*` 与语言变量、名字以 `_KEY`、`_TOKEN` 或 `_SECRET` 结尾的凭据变量如 `DEEPSEEK_API_KEY` 或 profile 里 `apiKeyEnv` 指的变量、`*_PROXY`，以及 `dsh-any-agent team on/off` 的设置）的客户端共用一个常驻进程，DSH 继承的是它的环境；凭据放在别的名字的变量里不在此列，请改名或别开这个模式。`dsh-any-agent-setup --yes` 默认写入 `DSH_MCP_DAEMON=1`，加 `--no-daemon` 退回直连 stdio（`0`），可用 `dsh-any-agent daemon status|stop` 查看与停止 |
 | `DSH_MCP_DAEMON_IDLE_MS` | `600000`（10 分钟） | 常驻进程在没有客户端连着、也没有回合在跑时，空闲多久后自己退出。`0` = 不自动退出 |
 | `DSH_MCP_WORKTREES_DIR` | `<状态目录>/worktrees` | `dsh_start(isolation="worktree")` 建的 worktree 放在哪里 |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |
