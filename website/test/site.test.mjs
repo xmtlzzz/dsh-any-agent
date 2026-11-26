@@ -141,7 +141,9 @@ test('Website docs alignment: compatibility range, 15 tools, dashboard showcase,
   assert.match(enHtml, /dsh_send\(team=false\)<\/code> suppresses the experimental team hint/);
   for (const page of [html, enHtml]) {
     assert.match(page, /0\.1\.7 ~ 0\.2\.2/);
-    assert.match(page, /0\.7\.8/);
+    assert.match(page, /0\.8\.0/);
+    assert.match(page, /0\.8\.1/);
+    assert.doesNotMatch(page, /0\.7\.8/);
     assert.match(page, /0\.2\.2-rc\.3/);
     assert.match(page, /0\.2\.2-rc\.5/);
     assert.match(page, /0\.2\.2-rc\.2/);
@@ -158,6 +160,8 @@ test('Website docs alignment: compatibility range, 15 tools, dashboard showcase,
     for (const tool of expectedTools) assert.ok(page.includes(tool), `page includes ${tool}`);
   }
   assert.match(app, /DSH_BIN/);
+  assert.match(app, /workspace_sync/);
+  assert.match(app, /workspace sync/);
 });
 
 test('Single-client setup (--only), interactive 15-tool inspector, and repair commands are surfaced in both locales', async () => {

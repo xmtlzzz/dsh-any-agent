@@ -115,7 +115,7 @@
 - **对策**：看 `dsh_status` 的 `lock_holder` 字段：
   - `stale-mcp`（**活着但卡死**：心跳超过 90 秒没续；真正的崩溃会让子进程随管道关闭退出、锁自动释放）→ `dsh_takeover` 核实持锁进程身份后接管（无需 `force`）；
   - `live-mcp`（另一个活着的 dsh-any-agent 实例在用）→ 先在那边 `dsh_release`；确实要夺用 `dsh_takeover(force=true)`；
-  - `none`（多半是你自己的 GUI 开着它）→ **本服务绝不杀**，请在那个窗口里关掉该会话后重试。
+  - `none`（多半是你自己的 GUI 开着它）→ **本服务绝不杀**，请重启 DSH 桌面版 / `dsh web` 释放写锁（界面切走或归档不会释放）；平时看进度请用 `dsh-any-agent watch` / `dashboard`。
 
 ### 3.6 ★ "抢锁" = 杀掉持有者，所以必须先知道那是谁
 - **原因**：Windows 上是命名内核信号量，POSIX 上是 `flock`；持有者进程一死，系统就释放 —— 这是**唯一**的夺锁手段。

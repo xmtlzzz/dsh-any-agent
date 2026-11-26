@@ -7,8 +7,8 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 | Situation | Outcome |
 |---|---|
 | **This server holds the lock** (recently used, or `keep_alive=true`) | ✅ Opening it in the GUI is **read-only**: you still **see the content**, but you **cannot take the lock**. Since 0.4.0 the process is reaped only after **10 minutes** idle; `keep_alive=true` sessions are never reaped for idleness |
-| **You open it in the GUI while the lock is free** | ❌ **The GUI keeps it permanently** (navigating away, waiting and archiving all fail to release it) and this server **can never reconnect** — only restarting `dsh web` helps |
-| **Recommended** | Watch progress with **`dsh_read`** (cursor-based incremental reads) or the **sentinel file**; if you must use the GUI, `dsh_release` first (that interrupts a running turn, so it fits the gaps between tasks) |
+| **You open it in the GUI while the lock is free** | ❌ **The GUI keeps it permanently** (navigating away, waiting and archiving all fail to release it) and this server **can never reconnect** — only restarting the DSH desktop app / `dsh web` helps |
+| **Recommended** | Watch progress with **`dsh-any-agent watch`** / **`dashboard`** (read-only side view, never touches the lock), **`dsh_read`** (cursor-based incremental reads), or the **sentinel file**; if you must use the GUI, `dsh_release` first (that interrupts a running turn, so it fits the gaps between tasks) |
 
 **Who holds it** is reported by `dsh_status.lock_holder`; `dsh_takeover` handles the four cases:
 

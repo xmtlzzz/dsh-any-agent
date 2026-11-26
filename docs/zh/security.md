@@ -87,7 +87,7 @@ dsh-any-agent-workspaces --purge-test-sessions   # 删测试会话（规则写�
 | `<状态目录>/live/<会话id>/events.jsonl` | live 事件流：事件类型、时间、工具名、客户端名；默认还带脱敏后的命令 / 路径 / prompt 预览 | 同哨兵，7 天；5 MB 滚动 | `DSH_MCP_LIVE=meta` 去掉预览，`off` 不写 |
 | `<状态目录>/locks/<会话id>.json` | 写锁持有者登记：本服务与 DSH 子进程的 PID、cwd | 释放会话或进程退出后清 | — |
 | `<状态目录>/worktrees/` | `isolation=worktree` 的会话目录（仓库检出 + DSH 的改动） | 干净的随 forget 删；有未提交改动的保留；分支始终保留 | 不用 `isolation=worktree`；`DSH_MCP_WORKTREES_DIR` 换位置 |
-| `<状态目录>/daemon-<id>.json`、`daemon-<id>.log`（POSIX 上还有 `.sock`） | 常驻进程的 PID 与随机令牌（仅本用户可读）；它的 stderr | 信息文件随进程退出删；日志 10 MB 滚动成 `.1` | 不开 `DSH_MCP_DAEMON` |
+| `<状态目录>/daemon-<id>.json`、`daemon-<id>.log`（POSIX 上还有 `.sock`） | 常驻进程的 PID、管道/socket 路径与随机令牌（仅本用户可读）；它的 stderr | 信息文件随进程退出删；日志 10 MB 滚动成 `.1` | `--no-daemon` 退回直连，或 `dsh-any-agent daemon stop` 优雅关闭 |
 | `$DSH_HOME/.dsh-any-agent-forgotten/<会话id>.json` | forget 墓碑：会话 id 与时间 | 会话文件不在了就在启动时清 | — |
 | `DSH_MCP_AUDIT_FILE` 指向的文件 | 元数据审计：事件、id、裁决、计数；不含 prompt、正文、思考、工具输入 | 10 MB 滚动成 `.1` | 默认不写（不设该变量） |
 | `<状态目录>/update-check.json` | `dsh_doctor` 上次从 npm 查到的最新版本号与时间 | 24 小时后重查覆盖 | `DSH_MCP_UPDATE_CHECK=0`（同时不再联网） |

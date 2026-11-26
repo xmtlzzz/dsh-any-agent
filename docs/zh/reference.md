@@ -35,7 +35,7 @@
 | `DSH_MCP_LIVE` | `detail` | live 事件流级别（`watch` / `dashboard` 的数据源）。`detail` 带脱敏后的 prompt / 命令 / 路径预览；`meta` 只有工具名、状态、计时、审批类型；`off` 不写。思考内容任何级别都不写 |
 | `DSH_MCP_LIVE_DIR` | `<状态文件同目录>/live` | live 事件流目录（`<此目录>/<会话id>/events.jsonl`，5MB 滚动到 `.1`）。写不进去只会静默跳过，不影响派活；按 `DSH_MCP_SENTINEL_TTL_MS` 清理 |
 | `DSH_MCP_LANG` | 跟随系统 | 语言：`zh` 或 `en`。管两处 —— `watch` / `dashboard` 的界面，以及调用方看到的文字：工具标题、工具描述、参数描述、服务说明、工具返回正文与报错信息。未设置时依次看 `LC_ALL` / `LC_MESSAGES` / `LANG`、系统区域设置；命令行 `--lang` 优先于它 |
-| `DSH_MCP_PERMISSION` | `workspace-write` | `dsh_start` 未指定时的权限档。设为 `danger-full-access` 还需要 `DSH_MCP_ALLOW_FULL_ACCESS=1` |
+| `DSH_MCP_PERMISSION` | `workspace-write` | `dsh_start` 未指定时的权限档。将其设为 `danger-full-access` 本身即表示机器侧允许完全权限；默认档是其他档位、仅需个别会话使用完全权限时，另设 `DSH_MCP_ALLOW_FULL_ACCESS=1` |
 | `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | 是否允许 `permission=danger-full-access`。默认拒绝：该档把整机写权限交给调用方 |
 | `DSH_MCP_REASONING_EFFORT` | `max` | 默认思考深度 |
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0`（不设超时） | **仅 `wait=true` 时**的等待上限；到期只转后台，不取消回合 |

@@ -98,23 +98,30 @@ try {
   console.log('\n[3b] 实时思考（includereasoning=true，只在回合进行中可见）');
   let sawThinking = false;
   let thinkLen = 0;
+  let thinkSource = '';
   for (let i = 0; i < 8; i++) {
-    const r = await client.callTool('dsh_read', {
-      conversation_id: conv.get('S2').id,
-      cursor: 0,
-      include_reasoning: true,
-    });
-    const s = r?.structuredContent ?? {};
-    if (s.state !== 'running') break; // 回合已结束，思考不再保留（符合"用完即弃"的设计）
-    if (typeof s.live_thinking === 'string' && s.live_thinking.length > 0) {
-      sawThinking = true;
-      thinkLen = s.live_thinking.length;
-      break;
+    let anyRunning = false;
+    for (const c of CASES) {
+      const r = await client.callTool('dsh_read', {
+        conversation_id: conv.get(c.key).id,
+        cursor: 0,
+        include_reasoning: true,
+      });
+      const s = r?.structuredContent ?? {};
+      if (s.state !== 'running') continue; // 回合已结束，思考不再保留（符合"用完即弃"的设计）
+      anyRunning = true;
+      if (typeof s.live_thinking === 'string' && s.live_thinking.length > 0) {
+        sawThinking = true;
+        thinkLen = s.live_thinking.length;
+        thinkSource = c.key;
+        break;
+      }
     }
+    if (sawThinking || !anyRunning) break;
     await sleep(2500);
   }
   check('正在跑的回合里能取到实时思考', sawThinking, `len=${thinkLen}`);
-  console.log(`    S2 实时思考长度: ${thinkLen}`);
+  console.log(`    ${thinkSource || 'S1/S2/S3'} 实时思考长度: ${thinkLen}`);
 
   await sleep(11000); // 让它们继续产出
 

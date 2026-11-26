@@ -59,7 +59,7 @@
         },
         {
           "name": "DSH_MCP_LANG",
-          "description": "Language of the tool descriptions and server instructions: en or zh. Unset follows the system locale.",
+          "description": "Language for tool descriptions, server instructions, tool output, and user-facing errors: en or zh. Unset follows the system locale.",
           "format": "string",
           "isRequired": false,
           "isSecret": false,

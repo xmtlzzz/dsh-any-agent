@@ -35,7 +35,7 @@
 | `DSH_MCP_LIVE` | `detail` | Live event stream level (the data behind `watch` / `dashboard`). `detail` adds redacted prompt / command / path previews; `meta` keeps tool names, status, timing and approval kinds only; `off` writes nothing. Reasoning is never written at any level |
 | `DSH_MCP_LIVE_DIR` | `<state file dir>/live` | Live event stream directory (`<this>/<conversation_id>/events.jsonl`, rolled to `.1` at 5 MB). Write failures are skipped silently and never affect a run; pruned by `DSH_MCP_SENTINEL_TTL_MS` |
 | `DSH_MCP_LANG` | follows the system | Language, `zh` or `en`. It covers two things: the `watch` / `dashboard` interface, and the text the caller sees — tool titles, tool and parameter descriptions, the server instructions, tool output, and user-facing errors. When unset: `LC_ALL` / `LC_MESSAGES` / `LANG`, then the OS locale; the `--lang` flag wins over it |
-| `DSH_MCP_PERMISSION` | `workspace-write` | Default tier for `dsh_start`. `danger-full-access` additionally requires `DSH_MCP_ALLOW_FULL_ACCESS=1` |
+| `DSH_MCP_PERMISSION` | `workspace-write` | Default tier for `dsh_start`. Setting this default to `danger-full-access` authorizes full access by itself; set `DSH_MCP_ALLOW_FULL_ACCESS=1` only when the default is another tier and a caller requests full access per conversation |
 | `DSH_MCP_ALLOW_FULL_ACCESS` | `0` | Whether `permission=danger-full-access` is allowed. Denied by default: it hands the caller whole-machine write access |
 | `DSH_MCP_REASONING_EFFORT` | `max` | Default reasoning effort |
 | `DSH_MCP_PROMPT_TIMEOUT_MS` | `0` (no timeout) | Wait bound for **`wait=true` only**; on expiry the turn merely moves to the background |
