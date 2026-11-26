@@ -7,6 +7,7 @@
  */
 export const SITE_VERSION_URL = '/api/version';
 export const VERSION_CACHE_KEY = 'dsh_release_version_cache';
+export const VERSION_CACHE_TTL_MS = 60 * 1000;
 
 export const VERSION_SOURCES = [
   {
@@ -41,6 +42,42 @@ export function normalizeVersion(value) {
   return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version) ? version : null;
 }
 
+/** 比较两个 semver（a > b 返回正数）；仅用于降级兜底时避免用更旧版本覆盖已知更新版本。 */
+export function compareVersions(a, b) {
+  const parse = (raw) => {
+    const normalized = normalizeVersion(raw);
+    if (!normalized) return null;
+    const [coreWithPre] = normalized.split('+');
+    const dash = coreWithPre.indexOf('-');
+    const core = (dash >= 0 ? coreWithPre.slice(0, dash) : coreWithPre).split('.').map(Number);
+    const pre = dash >= 0 ? coreWithPre.slice(dash + 1).split('.') : [];
+    return { core, pre };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  if (!pa || !pb) return 0;
+  for (let i = 0; i < 3; i += 1) {
+    if (pa.core[i] !== pb.core[i]) return pa.core[i] - pb.core[i];
+  }
+  if (!pa.pre.length && !pb.pre.length) return 0;
+  if (!pa.pre.length) return 1;
+  if (!pb.pre.length) return -1;
+  const len = Math.max(pa.pre.length, pb.pre.length);
+  for (let i = 0; i < len; i += 1) {
+    const ia = pa.pre[i];
+    const ib = pb.pre[i];
+    if (ia === undefined) return -1;
+    if (ib === undefined) return 1;
+    if (ia === ib) continue;
+    const na = /^\d+$/.test(ia);
+    const nb = /^\d+$/.test(ib);
+    if (na && nb) return Number(ia) - Number(ib);
+    if (na !== nb) return na ? -1 : 1;
+    return ia < ib ? -1 : 1;
+  }
+  return 0;
+}
+
 /**
  * 读取本地缓存的最新版本号（供首屏立即填充，网络完成后再静默更新）。
  */
@@ -57,7 +94,8 @@ export function readCachedVersion(storage = (typeof localStorage !== 'undefined'
 }
 
 /**
- * 依次尝试所有来源，返回第一个有效版本；支持 10 分钟 localStorage 缓存与过期兜底。
+ * 依次尝试所有来源，返回第一个有效版本；支持 1 分钟 localStorage 缓存与过期兜底。
+ * 当 `/api/version` 显式标记 `stale: true` 时，继续尝试直连上游且不把它当作新鲜值写回缓存。
  * @param {typeof fetch} [fetchImpl] 便于测试注入
  * @param {Storage | null} [storage] 便于测试注入
  */
@@ -65,16 +103,16 @@ export async function fetchLatestVersion(
   fetchImpl = fetch,
   storage = (typeof localStorage !== 'undefined' ? localStorage : null),
 ) {
-  const CACHE_TTL_MS = 10 * 60 * 1000;
   let staleVersion = null;
   const cached = readCachedVersion(storage);
   if (cached) {
-    if (Date.now() - cached.ts < CACHE_TTL_MS) {
+    if (Date.now() - cached.ts < VERSION_CACHE_TTL_MS) {
       return { version: cached.version, source: 'cache' };
     }
     staleVersion = cached.version;
   }
 
+  let staleSiteVersion = null;
   for (const source of ALL_VERSION_SOURCES) {
     try {
       const response = await fetchImpl(source.url, {
@@ -84,16 +122,23 @@ export async function fetchLatestVersion(
         signal: AbortSignal.timeout(3000),
       });
       if (!response?.ok) continue;
-      const version = normalizeVersion(source.pick(await response.json()));
-      if (version) {
-        try {
-          storage?.setItem(VERSION_CACHE_KEY, JSON.stringify({ version, ts: Date.now() }));
-        } catch {}
-        return { version, source: source.id };
+      const payload = await response.json();
+      const version = normalizeVersion(source.pick(payload));
+      if (!version) continue;
+      if (source.id === 'site' && payload?.stale === true) {
+        staleSiteVersion = version;
+        continue;
       }
+      try {
+        storage?.setItem(VERSION_CACHE_KEY, JSON.stringify({ version, ts: Date.now() }));
+      } catch {}
+      return { version, source: source.id };
     } catch {
       /* 换下一个来源 */
     }
+  }
+  if (staleSiteVersion && (!staleVersion || compareVersions(staleSiteVersion, staleVersion) >= 0)) {
+    return { version: staleSiteVersion, source: 'site-stale' };
   }
   if (staleVersion) return { version: staleVersion, source: 'stale-cache' };
   return { version: null, source: 'unavailable' };
