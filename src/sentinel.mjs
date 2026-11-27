@@ -94,7 +94,13 @@ export function pruneDirTree(dir, ttlMs) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const sub = join(dir, entry.name);
-      for (const f of readdirSync(sub, { withFileTypes: true })) {
+      let files;
+      try {
+        files = readdirSync(sub, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const f of files) {
         if (!f.isFile() || f.name.endsWith('.running')) continue;
         const fp = join(sub, f.name);
         try {

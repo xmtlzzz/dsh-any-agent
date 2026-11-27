@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-11-27
+
+- Concurrent Windows registry writers retry NTFS sharing errors while inspecting and releasing locks. Startup skips busy staging directories and continues pruning abandoned ones.
+- Lock-marker cleanup preserves unreadable heartbeats. Windows run lookups retry busy files and recover the completed result when publication overtakes a receipt read.
+- Daemon shutdown tolerates discovery-file cleanup failures. Fallback termination verifies the process start time and uses the same Windows process handle to terminate it.
+- Sentinel and review retention continues when a conversation directory disappears or cannot be listed.
+
 ## [0.8.2] — 2026-11-27
 
 - Fixed YAML sequence and empty-collection round trips, shared-process eviction, and Git snapshot ordering between queued turns.
@@ -1785,7 +1792,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...v0.8.0

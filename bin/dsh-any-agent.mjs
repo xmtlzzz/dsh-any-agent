@@ -108,8 +108,9 @@ if (argv[0] === 'daemon') {
   if (action === 'stop') {
     const { stopped, cleaned } = await stopDaemons();
     const forced = stopped.filter((d) => !d.graceful).length;
+    const fallback = process.platform === 'win32' ? 'Process.Kill()' : 'SIGTERM';
     const suffix = forced
-      ? L(`（其中 ${forced} 个未响应优雅关闭，已回退 SIGTERM）`, ` (${forced} did not respond to graceful shutdown; fell back to SIGTERM)`)
+      ? L(`（其中 ${forced} 个未响应优雅关闭，已回退 ${fallback}）`, ` (${forced} did not respond to graceful shutdown; fell back to ${fallback})`)
       : '';
     process.stdout.write(L(
       `已停止 ${stopped.length} 个常驻进程${suffix}，清理 ${cleaned.length} 个残留信息文件。\n`,

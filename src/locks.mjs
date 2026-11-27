@@ -241,6 +241,12 @@ export function classifyHolder(conversationId, { knownChildPid = null } = {}) {
  * 的、由本 MCP 登记过的进程调用** —— 调用方负责先做分类。
  */
 export function killHolderChild(pid, { expectedStartedAt = undefined } = {}) {
+  return terminateVerifiedProcess(pid, expectedStartedAt);
+}
+
+/** @param {number} pid @param {number} expectedStartedAt
+ * @param {{signal?: 'SIGKILL' | 'SIGTERM'}} [options] */
+export function terminateVerifiedProcess(pid, expectedStartedAt, { signal = 'SIGKILL' } = {}) {
   if (pid === process.pid || !isPidAlive(pid)) {
     return { killed: false, reason: L('目标进程不可用', 'the target process is unavailable') };
   }
@@ -278,12 +284,13 @@ export function killHolderChild(pid, { expectedStartedAt = undefined } = {}) {
       const actual = processStartTime(pid);
       if (actual === null) return unverified;
       if (actual !== expectedStartedAt) return mismatch;
-      process.kill(pid, 'SIGKILL');
+      process.kill(pid, signal);
     }
   } catch (e) {
     return { killed: false, reason: L(`杀不掉: ${e.message}`, `could not kill it: ${e.message}`) };
   }
-  return { killed: true, reason: L(`已向 PID ${pid} 发送 SIGKILL`, `sent SIGKILL to PID ${pid}`) };
+  const sent = process.platform === 'win32' ? 'SIGKILL' : signal;
+  return { killed: true, reason: L(`已向 PID ${pid} 发送 ${sent}`, `sent ${sent} to PID ${pid}`) };
 }
 
 /**
@@ -347,21 +354,27 @@ export function pruneDeadMarkers() {
   for (const f of readdirSync(LOCKS_DIR)) {
     if (!f.endsWith('.json')) continue;
     const p = join(LOCKS_DIR, f);
-    const m = readJson(p);
-    if (!m) {
-      rmSync(p, { force: true });
-      removed++;
-      continue;
+    let m;
+    try {
+      m = JSON.parse(readFileSync(p, 'utf8'));
+    } catch (error) {
+      // An unreadable marker may belong to a live writer replacing its heartbeat.
+      if (!(error instanceof SyntaxError)) continue;
     }
-    const childAlive = isPidAlive(m.child_pid);
-    const mcpAlive = isPidAlive(m.mcp_pid);
-    const age = typeof m.heartbeat_at === 'number' ? Date.now() - m.heartbeat_at : Infinity;
-    const stale = !mcpAlive || age > STALE_MS;
-    if (!childAlive && stale) {
+    if (m && typeof m === 'object' && !Array.isArray(m)) {
+      const age = typeof m.heartbeat_at === 'number' ? Date.now() - m.heartbeat_at : Infinity;
+      const stale = !isPidAlive(m.mcp_pid) || age > STALE_MS;
+      if (!stale) continue;
+      if (isPidAlive(m.child_pid)) {
+        orphans++;
+        continue;
+      }
+    }
+    try {
       rmSync(p, { force: true });
       removed++;
-    } else if (childAlive && stale) {
-      orphans++;
+    } catch {
+      // Leave this marker for the next cleanup pass.
     }
   }
   return { removed, orphans };

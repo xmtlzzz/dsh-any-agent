@@ -11,11 +11,12 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-daemon-'));
@@ -259,6 +260,7 @@ try {
   const reuseDir = join(root, 'reused');
   mkdirSync(reuseDir);
   const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+  const exited = once(unrelated, 'exit');
   try {
     await once(unrelated, 'spawn');
     const stale = join(reuseDir, 'daemon-eeee.json');
@@ -268,8 +270,19 @@ try {
     });
     await check('A reused PID survives stop and its stale discovery file is removed', () =>
       res.status === 0 && alive(unrelated.pid) && !existsSync(stale) && /cleaned 1 stale/.test(res.stdout));
+    const { readProcessStartTime } = await import('../src/locks.mjs');
+    const startedAt = await readProcessStartTime(unrelated.pid);
+    writeFileSync(stale, JSON.stringify({ pid: unrelated.pid, started_at_ms: startedAt }));
+    await check('Fallback stops the matching process and removes its discovery file', async () => {
+      const { stdout } = await promisify(execFile)(process.execPath, [cli, 'daemon', 'stop'], {
+        env: { ...process.env, ...baseEnv, DSH_MCP_STATE: join(reuseDir, 'state.json'), DSH_MCP_LANG: 'en' },
+        timeout: 15000, windowsHide: true,
+      });
+      return /Stopped 1 daemon/.test(stdout) && !alive(unrelated.pid) && !existsSync(stale);
+    });
   } finally {
-    unrelated.kill();
+    if (unrelated.exitCode === null && unrelated.signalCode === null) unrelated.kill();
+    await exited;
   }
   const stopRes = spawnSync(process.execPath, [cli, 'daemon', 'stop'], {
     env: { ...process.env, ...gracefulEnv, DSH_MCP_LANG: 'en' },

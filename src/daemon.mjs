@@ -23,7 +23,7 @@
 
 import { isPidAlive } from './procstat.mjs';
 import { listDaemons } from './daemon-info.mjs';
-import { readProcessStartTime, processStartTime } from './locks.mjs';
+import { readProcessStartTime, terminateVerifiedProcess } from './locks.mjs';
 import { writeJsonAtomic } from './fs-atomic.mjs';
 export { listDaemons };
 import { spawn } from 'node:child_process';
@@ -363,7 +363,9 @@ export async function runDaemon({ log }) {
       process.exitCode = 1;
     }
     // 只删自己的信息文件：期间如果另一个常驻进程接了班，别把它的删了。
-    if (readInfo(ep)?.pid === process.pid) rmSync(ep.infoFile, { force: true });
+    try {
+      if (readInfo(ep)?.pid === process.pid) rmSync(ep.infoFile, { force: true });
+    } catch {}
     process.exit(process.exitCode ?? 0);
   }
   stopDaemon = (reason) => void stop(reason);
@@ -422,7 +424,7 @@ async function requestShutdown(info, id, timeoutMs) {
 /**
  * 停止所有存活的常驻进程并清理已死进程残留的信息文件。
  * 优先走带令牌的本机控制通道优雅关闭（Windows 上 SIGTERM 等价于强杀，会跳过 hub.shutdown）；
- * 超时或连不上时再回退到 SIGTERM。
+ * 超时或连不上时才核实身份，POSIX 发送 SIGTERM，Windows 在同一进程句柄上核实时刻并终止。
  */
 export async function stopDaemons({ timeoutMs = 3_000 } = {}) {
   const stopped = [];
@@ -437,23 +439,25 @@ export async function stopDaemons({ timeoutMs = 3_000 } = {}) {
       }
       // A failed handshake cannot establish ownership. Only signal a verified incarnation.
       if (!Number.isFinite(info.started_at_ms) || info.started_at_ms <= 0) continue;
-      const actual = processStartTime(d.pid);
+      const actual = await readProcessStartTime(d.pid);
       if (actual === null) continue;
       const current = readInfo(d);
       if (current?.pid !== d.pid || current.started_at_ms !== info.started_at_ms || current.token !== info.token) continue;
-      if (actual !== info.started_at_ms) {
-        rmSync(d.infoFile, { force: true });
-        cleaned.push(d);
-        continue;
-      }
       try {
-        process.kill(d.pid, 'SIGTERM');
+        if (actual !== info.started_at_ms) {
+          rmSync(d.infoFile, { force: true });
+          cleaned.push(d);
+          continue;
+        }
+        if (!terminateVerifiedProcess(d.pid, info.started_at_ms, { signal: 'SIGTERM' }).killed) continue;
         stopped.push({ ...d, graceful: false });
         const deadline = Date.now() + 500;
         while (isPidAlive(d.pid) && Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 50));
         }
-        if (!isPidAlive(d.pid) && readInfo(d)?.token === info.token) rmSync(d.infoFile, { force: true });
+        const latest = readInfo(d);
+        if (!isPidAlive(d.pid) && latest?.pid === d.pid && latest.started_at_ms === info.started_at_ms &&
+            latest.token === info.token) rmSync(d.infoFile, { force: true });
       } catch {}
     } else {
       try {

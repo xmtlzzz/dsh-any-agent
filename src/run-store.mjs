@@ -7,8 +7,9 @@ import {
 } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { REVIEWS_DIR, RUNS_DIR, SENTINEL_TTL_MS } from './config.mjs';
-import { writeJsonAtomic } from './fs-atomic.mjs';
+import { isWinTransient, retryWinTransientSync, writeJsonAtomic } from './fs-atomic.mjs';
 import { assertSafeId } from './ids.mjs';
 import { L } from './lang.mjs';
 import { isPidAlive, processStartTime } from './locks.mjs';
@@ -20,6 +21,7 @@ import { SENTINEL_SCHEMA, pruneDirTree, sanitizeResultForSentinel } from './sent
 const PROCESS_STARTED_AT = Math.round(Date.now() - process.uptime() * 1000);
 /** 标记里的启动时刻与实际进程启动时刻相差多少以内算同一个进程。 */
 const OWNER_START_TOLERANCE_MS = 2 * 60 * 1000;
+const READ_RETRY_MS = 150;
 
 // ── 异步完成哨兵 ────────────────────────────────────────────────
 //
@@ -185,6 +187,18 @@ export function readStoredRun(paths, conversationId, runId) {
   return { ...receipt, status: receipt.status ?? 'running', source: 'receipt', result: null };
 }
 
+async function readRunFile(file) {
+  const deadline = Date.now() + READ_RETRY_MS;
+  for (;;) {
+    try {
+      return await readFile(file, 'utf8');
+    } catch (error) {
+      if (!isWinTransient(error) || Date.now() >= deadline) throw error;
+      await delay(5);
+    }
+  }
+}
+
 export async function readLatestStoredRun(paths, conversationId) {
   const dir = dirname(paths.runSentinelPath(conversationId, 'run'));
   let files;
@@ -204,9 +218,9 @@ export async function readLatestStoredRun(paths, conversationId) {
     const file = join(dir, entry.name);
     let saved;
     try {
-      saved = JSON.parse(await readFile(file, 'utf8'));
+      saved = JSON.parse(await readRunFile(file));
     } catch (e) {
-      if (e.code === 'ENOENT' && ext === '.running') {
+      if (ext === '.running' && (e.code === 'ENOENT' || isWinTransient(e))) {
         // It may have finished since readdir and published its sentinel.
         saved = readStoredRun(paths, conversationId, runId);
       } else if (e.code === 'ENOENT' || e instanceof SyntaxError) continue;
@@ -435,7 +449,7 @@ function writeRunJson(file, value, { exclusive = false, mtime = undefined } = {}
 
 function readRunJson(file) {
   try {
-    return JSON.parse(readFileSync(file, 'utf8'));
+    return JSON.parse(retryWinTransientSync(() => readFileSync(file, 'utf8'), READ_RETRY_MS));
   } catch (e) {
     if (e.code === 'ENOENT' || e instanceof SyntaxError) return null;
     throw e;

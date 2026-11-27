@@ -7,7 +7,9 @@
  *   [4] 非法数值环境变量落到安全侧（负 TTL 不清空哨兵；空串权限/思考档回落默认）
  */
 
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, statSync, truncateSync, utimesSync, readdirSync } from 'node:fs';
+import fs, { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, statSync, truncateSync, utimesSync, readdirSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { mock } from 'node:test';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -182,14 +184,51 @@ try {
   withRegistryLockSync(cfg.STATE_FILE, () => {});
   check('the next writer recovers the stale lock', !existsSync(lockDir));
 
+  mkdirSync(lockDir);
+  writeFileSync(join(lockDir, 'unknown-owner'), '');
+  const list = fs.readdirSync;
+  try {
+    mock.method(fs, 'readdirSync', (dir, ...args) => {
+      if (dir === lockDir) throw Object.assign(new Error('lock access denied'), { code: 'EACCES' });
+      return list(dir, ...args);
+    });
+    syncBuiltinESMExports();
+    let diagnostic, acquisition;
+    try { inspectRegistryLock(cfg.STATE_FILE); } catch (error) { diagnostic = error; }
+    try { withRegistryLockSync(cfg.STATE_FILE, () => {}); } catch (error) { acquisition = error; }
+    check('Persistent lock permissions reach the doctor and fail acquisition',
+      diagnostic?.code === 'EACCES' && (process.platform === 'win32'
+        ? /(?:无法获取注册表锁 |Cannot acquire registry lock )/.test(acquisition?.message ?? '') &&
+          acquisition?.message.includes(lockDir)
+        : acquisition?.code === 'EACCES'));
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+    rmSync(lockDir, { recursive: true });
+  }
+
   // All four processes load the same snapshot before any writer can proceed.
+  const counter = join(root, 'counter.json');
+  writeFileSync(counter, '0');
   const writer = `import { Hub, Conversation } from ${JSON.stringify(HUB)};
+    import { withRegistryLock, withRegistryLockSync, writeRegistry } from ${JSON.stringify(registryModule)};
+    import { readFileSync } from 'node:fs';
+    const counter = ${JSON.stringify(counter)};
     const hub = new Hub();
     await hub.load();
     process.once('message', async () => {
       const id = 'writer-' + process.pid;
       hub.conversations.set(id, new Conversation({ id, cwd: process.cwd() }, hub));
       await hub.save();
+      const increment = () => {
+        const n = JSON.parse(readFileSync(counter, 'utf8'));
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
+        writeRegistry(counter, n + 1);
+      };
+      for (let i = 0; i < 12; i++) {
+        withRegistryLockSync(counter, increment);
+        await withRegistryLock(counter, increment);
+      }
       process.disconnect();
     });
     process.send('ready');`;
@@ -210,15 +249,80 @@ try {
     const persisted = new Set(JSON.parse(readFileSync(cfg.STATE_FILE, 'utf8')).conversations.map((c) => c.id));
     check('四个进程同时新增会话时保留每一条登记', statuses.every(([code]) => code === 0) &&
       persisted.has(entry.id) && children.every(({ pid }) => persisted.has('writer-' + pid)));
+    check('Sync and async registry writers serialize all 96 increments',
+      statuses.every(([code]) => code === 0) && JSON.parse(readFileSync(counter, 'utf8')) === 96);
   } finally {
     for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill();
   }
 
   console.log('\n[4] 哨兵写成功/失败都可见');
-  const run = { run_id: 'run-sentinel-test', status: 'done', ended_at: Date.now(), result: { answer: 'ok' } };
+  const run = { run_id: 'run-sentinel-test', status: 'done', started_at: Date.now(), ended_at: Date.now(), result: { answer: 'ok' } };
   const sentinel = hub.writeRunSentinel('conv-sentinel-test', run);
   check('成功时返回路径', typeof sentinel === 'string' && existsSync(sentinel), String(sentinel));
   check('文件内容是合法 JSON', sentinel ? JSON.parse(readFileSync(sentinel, 'utf8')).status === 'done' : false);
+
+  // Publish after readdir has selected the receipt, before the asynchronous read succeeds.
+  const convId = 'finishing';
+  const receipt = hub.runMarkerPath(convId, run.run_id);
+  const published = hub.runSentinelPath(convId, run.run_id);
+  mkdirSync(dirname(receipt));
+  writeFileSync(receipt, '{}');
+  const asyncRead = fs.promises.readFile;
+  const syncRead = fs.readFileSync;
+  let markerReads = 0;
+  let sentinelReads = 0;
+  let readTime = Date.now();
+  try {
+    // Drive the retry deadline by attempts, independent of disk speed and scheduling.
+    mock.method(Date, 'now', () => readTime);
+    mock.method(fs.promises, 'readFile', async (file, ...args) => {
+      if (file !== receipt) return asyncRead(file, ...args);
+      readTime += 50;
+      if (++markerReads === 1) hub.writeRunSentinel(convId, run);
+      const code = process.platform === 'win32' ? 'EBUSY' : 'ENOENT';
+      throw Object.assign(new Error('receipt replaced'), { code });
+    });
+    mock.method(fs, 'readFileSync', (file, ...args) => {
+      if (file === published && ++sentinelReads === 1 && process.platform === 'win32') {
+        throw Object.assign(new Error('sentinel busy'), { code: 'EPERM' });
+      }
+      return syncRead(file, ...args);
+    });
+    syncBuiltinESMExports();
+    const latest = await hub.readLatestStoredRun(convId);
+    check('A busy or disappearing receipt resolves to its newly published sentinel',
+      latest?.source === 'sentinel' && latest.result?.answer === 'ok' &&
+      (process.platform !== 'win32' || (markerReads > 1 && sentinelReads > 1)));
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+
+  const { pruneDirTree } = await import('../src/sentinel.mjs');
+  const tree = join(root, 'retention');
+  for (const name of ['one', 'two']) {
+    const dir = join(tree, name);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, 'expired.json');
+    writeFileSync(file, '{}');
+    utimesSync(file, old, old);
+  }
+  try {
+    mock.method(fs, 'readdirSync', (dir, options) => {
+      const entries = list(dir, options);
+      if (dir === tree) {
+        rmSync(join(dir, entries[0].name), { recursive: true });
+      }
+      return entries;
+    });
+    syncBuiltinESMExports();
+    const stats = pruneDirTree(tree, 1000);
+    check('Retention prunes the next directory after the first one disappears',
+      stats.pruned === 1 && stats.dirs_removed === 1 && list(tree).length === 0);
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  }
 
   const badRuns = join(root, 'runs-is-a-file');
   writeFileSync(badRuns, 'x');
@@ -264,7 +368,37 @@ try {
   check('返回值区分 released 与 skipped_busy', Array.isArray(r1.skipped_busy) && Array.isArray(r2.skipped_busy));
 
   console.log('\n[7] 锁登记 spawned_at 不跨子进程复用');
-  const { writeMarker, markerPath } = await import('../src/locks.mjs');
+  const { writeMarker, markerPath, pruneDeadMarkers } = await import('../src/locks.mjs');
+  const busy = markerPath('busy');
+  const corruptMarker = markerPath('corrupt');
+  const invalid = markerPath('non-object');
+  const dead = markerPath('dead');
+  const busyRemoval = markerPath('busy-removal');
+  writeFileSync(busy, JSON.stringify({ mcp_pid: process.pid, heartbeat_at: Date.now() }));
+  writeFileSync(corruptMarker, '{');
+  writeFileSync(invalid, 'null');
+  writeFileSync(dead, JSON.stringify({ mcp_pid: Number(deadPid), child_pid: null, heartbeat_at: 1 }));
+  writeFileSync(busyRemoval, '{');
+  const remove = fs.rmSync;
+  try {
+    mock.method(fs, 'readFileSync', (file, ...args) => {
+      if (file === busy) throw Object.assign(new Error('heartbeat busy'), { code: 'EACCES' });
+      return syncRead(file, ...args);
+    });
+    mock.method(fs, 'rmSync', (file, ...args) => {
+      if (file === busyRemoval) throw Object.assign(new Error('marker busy'), { code: 'EPERM' });
+      return remove(file, ...args);
+    });
+    syncBuiltinESMExports();
+    const stats = pruneDeadMarkers();
+    check('An unreadable heartbeat and a temporarily unremovable marker survive cleanup',
+      existsSync(busy) && existsSync(busyRemoval));
+    check('Cleanup still removes corrupt JSON, a non-object and a stale marker with a dead owner',
+      stats.removed === 3 && ![corruptMarker, invalid, dead].some(existsSync));
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  }
   writeMarker('marker-spawn-test', { childPid: 11111, cwd: root });
   const m1 = JSON.parse(readFileSync(markerPath('marker-spawn-test'), 'utf8'));
   await new Promise((r) => setTimeout(r, 5));

@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isPidAlive } from './procstat.mjs';
 import { processStartTime } from './locks.mjs';
+import { isWinTransient, retryWinTransientSync } from './fs-atomic.mjs';
 
 const sleepWord = new Int32Array(new SharedArrayBuffer(4));
 
@@ -32,14 +33,15 @@ export function readRegistry(file) {
 // contender cleaning up a dead owner cannot remove a successor's marker.
 function release(dir, marker) {
   try {
-    if (marker) unlinkSync(join(dir, marker));
+    if (marker) retryWinTransientSync(() => unlinkSync(join(dir, marker)), 250);
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
   try {
-    rmdirSync(dir);
+    retryWinTransientSync(() => rmdirSync(dir), 250);
   } catch (error) {
-    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+    // Once the marker is gone, the next writer can reclaim the empty directory.
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code) && !isWinTransient(error)) throw error;
   }
 }
 
@@ -49,30 +51,34 @@ const ownerPattern = /^(\d+)-[\da-f-]{36}$/;
 
 function lockOwner(dir, startTimeOf) {
   try {
-    if (!lstatSync(dir).isDirectory()) return { state: 'unknown' };
-    const markers = readdirSync(dir);
-    if (!markers.length) return { state: 'empty' };
-    const marker = markers[0];
-    const match = ownerPattern.exec(marker);
-    if (markers.length !== 1 || !match) return { state: 'unknown' };
-    const stat = lstatSync(join(dir, marker));
-    if (!stat.isFile()) return { state: 'unknown' };
-    const pid = Number(match[1]);
-    const ageMs = Math.max(0, Date.now() - stat.mtimeMs);
-    let state = 'held';
-    if (!isPidAlive(pid)) state = 'dead';
-    else if (ageMs >= LOCK_WAIT_MS) {
-      // A process that started after the marker was created cannot own this lock.
-      const started = startTimeOf(pid);
-      const recorded = stat.size <= 32 ? Number(readFileSync(join(dir, marker), 'utf8')) : NaN;
-      const ownerTime = recorded > 0 ? recorded : Math.max(stat.birthtimeMs, stat.mtimeMs);
-      if (started != null && started > ownerTime + 2000) state = 'reused';
-    }
-    return { state, marker, pid, ageMs };
+    return retryWinTransientSync(() => readLockOwner(dir, startTimeOf), 100);
   } catch (error) {
     if (error.code === 'ENOENT') return { state: 'absent' };
     throw error;
   }
+}
+
+function readLockOwner(dir, startTimeOf) {
+  if (!lstatSync(dir).isDirectory()) return { state: 'unknown' };
+  const markers = readdirSync(dir);
+  if (!markers.length) return { state: 'empty' };
+  const marker = markers[0];
+  const match = ownerPattern.exec(marker);
+  if (markers.length !== 1 || !match) return { state: 'unknown' };
+  const stat = lstatSync(join(dir, marker));
+  if (!stat.isFile()) return { state: 'unknown' };
+  const pid = Number(match[1]);
+  const ageMs = Math.max(0, Date.now() - stat.mtimeMs);
+  let state = 'held';
+  if (!isPidAlive(pid)) state = 'dead';
+  else if (ageMs >= LOCK_WAIT_MS) {
+    // A process that started after the marker was created cannot own this lock.
+    const started = startTimeOf(pid);
+    const recorded = stat.size <= 32 ? Number(readFileSync(join(dir, marker), 'utf8')) : NaN;
+    const ownerTime = recorded > 0 ? recorded : Math.max(stat.birthtimeMs, stat.mtimeMs);
+    if (started != null && started > ownerTime + 2000) state = 'reused';
+  }
+  return { state, marker, pid, ageMs };
 }
 
 export function inspectRegistryLock(file) {
@@ -87,9 +93,13 @@ export function pruneRegistryStages(file) {
     const stage = /^(?:(\d+)-)?[a-zA-Z0-9]{6}$/.exec(suffix);
     if (!stage) continue;
     const dir = join(dirname(file), entry.name);
-    const owner = lockOwner(dir, processStartTime);
-    if (owner.state === 'dead' || owner.state === 'reused') release(dir, owner.marker);
-    else if (owner.state === 'empty' && stage[1] && !isPidAlive(Number(stage[1]))) release(dir);
+    try {
+      const owner = lockOwner(dir, processStartTime);
+      if (owner.state === 'dead' || owner.state === 'reused') release(dir, owner.marker);
+      else if (owner.state === 'empty' && stage[1] && !isPidAlive(Number(stage[1]))) release(dir);
+    } catch (error) {
+      if (error.code !== 'ENOENT' && !isWinTransient(error)) throw error;
+    }
   }
 }
 
@@ -119,11 +129,15 @@ function* registryLockAttempts(file, action) {
         renameSync(stage, lock);
         acquired = true;
       } catch (error) {
-        if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES'].includes(error.code)) throw error;
-        const owner = lockOwner(lock, startTimeOf);
-        if (owner.state === 'empty' || owner.state === 'dead' || owner.state === 'reused') {
-          release(lock, owner.marker);
-          if (Date.now() >= deadline && !finalRetry) { finalRetry = true; continue; }
+        if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+        try {
+          const owner = lockOwner(lock, startTimeOf);
+          if (owner.state === 'empty' || owner.state === 'dead' || owner.state === 'reused') {
+            release(lock, owner.marker);
+            if (Date.now() >= deadline && !finalRetry) { finalRetry = true; continue; }
+          }
+        } catch (ownerError) {
+          if (!isWinTransient(ownerError)) throw ownerError;
         }
         if (Date.now() >= deadline) {
           throw new Error(L('无法获取注册表锁 ', 'Cannot acquire registry lock ') + lock + ': ' + error.message);

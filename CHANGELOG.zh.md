@@ -12,6 +12,13 @@
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-11-27
+
+- 多个 Windows 进程并发更新注册表时，检查和释放锁遇到 NTFS 共享冲突会重试。启动清理会跳过正忙的暂存目录，继续回收其他遗留目录。
+- 锁标记清理会保留暂时读不到的心跳。Windows 回合查询遇到文件占用会重试，读取运行收据时若回合恰好完成，会从哨兵取回结果。
+- 常驻进程退出时可容忍信息文件清理失败。回退终止前校验进程启动时间，Windows 使用同一句柄完成校验和终止。
+- 清理过期哨兵及审核记录时，单个会话目录消失或无法列出，不影响其余目录。
+
 ## [0.8.2] — 2026-11-27
 
 - 修复 YAML 序列与空集合往返、共享进程回收及排队回合的 Git 快照竞态。
@@ -1312,7 +1319,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...v0.8.0

@@ -4,6 +4,22 @@ import { dirname } from 'node:path';
 
 const sleepWord = new Int32Array(new SharedArrayBuffer(4));
 
+export const isWinTransient = (error) =>
+  process.platform === 'win32' && ['EPERM', 'EACCES', 'EBUSY'].includes(error?.code);
+
+/** @template T @param {() => T} operation @param {number} timeoutMs */
+export function retryWinTransientSync(operation, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return operation();
+    } catch (error) {
+      if (!isWinTransient(error) || Date.now() >= deadline) throw error;
+      Atomics.wait(sleepWord, 0, 0, 5);
+    }
+  }
+}
+
 /** @param {string} file @param {string | Uint8Array} content
  * @param {{ mode?: number, mtime?: Date | number, exclusive?: boolean }} [options] */
 export function writeFileAtomic(file, content, { mode, mtime, exclusive = false } = {}) {
@@ -23,17 +39,7 @@ export function writeFileAtomic(file, content, { mode, mtime, exclusive = false 
     }
     // Windows readers and indexers can briefly prevent replacement even when
     // this is the only writer. Keep the original in place through every retry.
-    const deadline = Date.now() + 500;
-    for (;;) {
-      try {
-        renameSync(tmp, file);
-        break;
-      } catch (error) {
-        if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) ||
-            Date.now() >= deadline) throw error;
-        Atomics.wait(sleepWord, 0, 0, 10);
-      }
-    }
+    retryWinTransientSync(() => renameSync(tmp, file), 500);
   } finally {
     try { rmSync(tmp, { force: true }); } catch {}
   }
