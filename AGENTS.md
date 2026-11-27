@@ -27,7 +27,7 @@ Whenever **behavior, CLI flags/subcommands, environment variables, defaults, `ds
    - `website/src/index.html` & `website/src/index.en.html` (especially install notes, `#faq-recovery`, `#faq-locking`, `#faq-permissions`, `#faq-versions`).
    - `website/src/app.mjs` (`TOOL_INFO` 15-tool inspector descriptions & manual client config tabs) and `website/test/site.test.mjs`.
    - Never bake a `vX.Y.Z` literal (with leading `v`) into `website/src/index*.html` — `website/test/site.test.mjs` forbids `\bv\d+\.\d+\.\d+\b` because `#release-version` is loaded dynamically at runtime via `/api/version` (`website/src/release.mjs`). Write bare version numbers such as `0.8.1` when citing tested upgrades in FAQ text.
-   - Whenever files under `website/` change, run `npm --prefix website run check` and deploy to Cloudflare Workers via `npm --prefix website run deploy`.
+   - Whenever files under `website/` change, run `npm --prefix website run check`; pushes to `main` deploy automatically via `.github/workflows/website-deploy.yml` once `CLOUDFLARE_API_TOKEN` is configured (otherwise deploy locally via `npm --prefix website run deploy`).
 
 4. **Factual & Numeric Accuracy**
    - Verify every documented default, env-var interaction (e.g. `ALLOW_FULL_ACCESS` in `src/config.mjs`), notification behavior (`progressToken` vs completion sentinels), and recovery rule directly against the implementation.

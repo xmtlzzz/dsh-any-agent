@@ -39,7 +39,7 @@ $env:SITE_URL = 'https://your-domain.example'
 npm run build
 ```
 
-Cloudflare Workers Git 集成可将根目录设为 `website`，构建命令设为 `npm run build`，部署命令设为 `npx wrangler@4.125.0 deploy`。
+Cloudflare Workers Git 集成可将根目录设为 `website`，构建命令设为 `npm run build`，部署命令设为 `npx wrangler@4.125.0 deploy`。仓库也自带 GitHub Actions 自动部署工作流（`.github/workflows/website-deploy.yml`）：在仓库 Actions Secrets 中配置 `CLOUDFLARE_API_TOKEN`（`Workers Scripts: Edit` 权限；多账号时再配 `CLOUDFLARE_ACCOUNT_ID`）后，合并到 `main` 的官网与头图/截图改动会自动通过 `npm --prefix website run check` 并发布。
 
 ### 部署侧行为（不在仓库中）
 

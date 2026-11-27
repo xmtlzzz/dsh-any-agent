@@ -26,7 +26,7 @@ npm run docs:counts:check -- --portable
 #    不一致就是改过测试没更新数字：node test/run.mjs --all --report .state/test-report.json && npm run docs:counts
 #    （模型套件的数字只有带 --all 的报告才会更新，见 docs/zh/tests.md「改了测试之后」）
 node scripts/release-notes.mjs x.y.z   # 预览 Release 页面上会显示的说明
-npm --prefix website run check         # 如有官网改动，校验构建与测试并用 npm --prefix website run deploy 部署
+npm --prefix website run check         # 如有官网改动，校验构建与测试（合并到 main 后由 website-deploy.yml 自动部署，也可手动 npm --prefix website run deploy）
 
 # 3. 确认 tarball 本身：打得出来、装得上、起得来
 npm pack --dry-run
@@ -52,6 +52,8 @@ git push origin vx.y.z
 **一次性配置（只需做一次）**：npmjs.com → 包 `dsh-any-agent` → Settings → Trusted Publisher → GitHub Actions，填仓库 `xmtlzzz/dsh-any-agent`、工作流文件 `release.yml`。没配之前，npm 那一步会报认证错误，GitHub Release 也不会创建；这时可以在本机手动 `npm publish` 兜底，再在 Actions 里重跑：npm 那一步会跳过，GitHub Release 照常创建。
 
 **重发某个旧版本的 Release 说明**：Actions → release → Run workflow，填已有的 tag（如 `v0.6.2`）。npm 那一步会因为版本已存在而跳过。
+
+**官网自动部署（`.github/workflows/website-deploy.yml`）**：合并到 `main` 且改动涉及 `website/**`、`docs/brand/header.jpg` 或 `docs/images/dashboard.{zh,en}.png` 时，工作流会自动跑 `npm --prefix website run check` 并发布到 Cloudflare Workers（也可在 Actions → `website-deploy` → Run workflow 手动触发）。**一次性配置**：仓库 Settings → Secrets and variables → Actions 中添加 `CLOUDFLARE_API_TOKEN`（具备 `Workers Scripts: Edit` 权限；若 token 覆盖多个账号再补 `CLOUDFLARE_ACCOUNT_ID`）。未配置前，push 仍会执行构建与测试并输出配置提示而不会让 CI 报红，仍可用本机 `npm --prefix website run deploy` 手动部署。
 
 **发布后看到 404，不要当成失败。** npm 对新版本是异步入库（返回 `PUT 202` 而不是 `200`），几秒后去查 registry 仍然是 404，看起来像没发成功。CI 发布时看 npm 那一步的日志；本机手动发布时确认 npm 日志里有这一行：
 

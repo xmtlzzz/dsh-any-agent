@@ -26,7 +26,7 @@ npm run docs:counts:check -- --portable
 #    node test/run.mjs --all --report .state/test-report.json && npm run docs:counts
 #    (model-suite numbers only move with a report made using --all; see "After changing tests" in docs/en/tests.md)
 node scripts/release-notes.mjs x.y.z   # preview the notes the Release page will show
-npm --prefix website run check         # if website files changed, run checks and deploy with npm --prefix website run deploy
+npm --prefix website run check         # if website files changed, verify build/tests (merging to main deploys via website-deploy.yml, or run npm --prefix website run deploy locally)
 
 # 3. Verify the tarball itself: builds, installs, starts.
 npm pack --dry-run
@@ -52,5 +52,7 @@ For an MCP protocol or dispatch change, install the candidate tarball in Codex a
 **One-time setup**: npmjs.com → package `dsh-any-agent` → Settings → Trusted Publisher → GitHub Actions, repository `xmtlzzz/dsh-any-agent`, workflow file `release.yml`. Until then the npm job fails with an auth error and no GitHub Release is created; publish locally with `npm publish` as a fallback, then re-run: the npm job skips and the Release is created.
 
 **Refreshing an old Release's notes**: Actions → release → Run workflow with an existing tag (e.g. `v0.6.2`). The npm job skips because the version exists.
+
+**Automatic website deployment (`.github/workflows/website-deploy.yml`)**: pushes to `main` touching `website/**`, `docs/brand/header.jpg`, or `docs/images/dashboard.{zh,en}.png` automatically run `npm --prefix website run check` and deploy to Cloudflare Workers (also triggerable manually via Actions → `website-deploy` → Run workflow). **One-time setup**: add `CLOUDFLARE_API_TOKEN` (with `Workers Scripts: Edit` permission; plus `CLOUDFLARE_ACCOUNT_ID` only if the token spans multiple accounts) under repository Settings → Secrets and variables → Actions. Until configured, pushes still run the build and tests and skip deployment with a notice instead of failing CI, and `npm --prefix website run deploy` remains available locally.
 
 **A 404 right after publishing is not a failure.** npm ingests new versions asynchronously (`PUT 202`, not `200`), so the registry can lag for a minute. For a CI publish read the npm job's log; for a local publish confirm the npm log shows `http fetch PUT 202`, then wait and check `npm view dsh-any-agent dist-tags`.

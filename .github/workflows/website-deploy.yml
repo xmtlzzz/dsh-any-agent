@@ -1,0 +1,80 @@
+name: website-deploy
+
+# Deploys the bilingual static site and /api/* Cloudflare Worker (`website/`)
+# whenever website sources or mirrored brand/dashboard assets change on `main`.
+#
+# One-time setup (GitHub repository Settings → Secrets and variables → Actions):
+#   - CLOUDFLARE_API_TOKEN  (required): Cloudflare API token with "Workers Scripts: Edit"
+#   - CLOUDFLARE_ACCOUNT_ID (optional): needed only when the token spans multiple accounts
+#
+# Behaviour without secrets:
+#   - On push to `main`: runs `npm --prefix website run check` (build + site tests)
+#     and skips deployment with a notice instead of failing CI.
+#   - On manual `workflow_dispatch`: fails loudly if CLOUDFLARE_API_TOKEN is missing.
+#
+# Uses `website/package.json`'s pinned Wrangler version (`npm run deploy`) so there
+# is a single source of truth and zero extra third-party GitHub Actions.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'docs/brand/header.jpg'
+      - 'docs/images/dashboard.zh.png'
+      - 'docs/images/dashboard.en.png'
+      - '.github/workflows/website-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: build, test and deploy website (Cloudflare Workers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Build and verify website
+        run: npm --prefix website run check
+
+      - name: Check Cloudflare credentials
+        id: auth
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${CF_TOKEN:-}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is not configured in repository Actions secrets."
+            exit 1
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping Cloudflare Workers deploy: set repository secret CLOUDFLARE_API_TOKEN (and CLOUDFLARE_ACCOUNT_ID if multi-account) to enable automatic deploys."
+          fi
+
+      - name: Deploy to Cloudflare Workers
+        if: steps.auth.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          npm_config_yes: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${CF_ACCOUNT_ID:-}" ]; then
+            export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID"
+          else
+            unset CLOUDFLARE_ACCOUNT_ID
+          fi
+          npm --prefix website run deploy
