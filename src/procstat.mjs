@@ -59,19 +59,22 @@ function parsePs(out) {
  */
 const READ_TIMEOUT_MS = 15_000;
 
-function readProcessTable() {
-  const win = process.platform === 'win32';
-  const command = win ? windowsSystemExecutable('tasklist.exe') : processListExecutable();
+function queryTable(command, args, parse) {
   if (!command) return Promise.resolve(new Map());
   return new Promise((resolve) => {
-    execFile(
-      command,
-      win ? ['/FO', 'CSV', '/NH'] : ['-axo', 'pid=,rss='],
-      { encoding: 'utf8', timeout: READ_TIMEOUT_MS, windowsHide: true, maxBuffer: 8 << 20 },
-      // 读不到就当作未知
-      (err, stdout) => resolve(err || !stdout ? new Map() : win ? parseTasklist(stdout) : parsePs(stdout)),
-    );
+    execFile(command, args, { encoding: 'utf8', timeout: READ_TIMEOUT_MS, windowsHide: true, maxBuffer: 8 << 20 },
+      (err, stdout) => resolve(err ? new Map() : parse(stdout)));
   });
+}
+
+async function readProcessTable() {
+  if (process.platform !== 'win32') return queryTable(processListExecutable(), ['-axo', 'pid=,rss='], parsePs);
+  const map = await queryTable(windowsSystemExecutable('tasklist.exe'), ['/FO', 'CSV', '/NH'], parseTasklist);
+  if (map.size) return map;
+  // Restricted Windows accounts may have Get-Process access but no tasklist/WMI access.
+  return queryTable(windowsSystemExecutable('WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoProfile', '-NonInteractive', '-Command', 'Get-Process | ForEach-Object { "{0} {1}" -f $_.Id, ($_.WorkingSet64 -shr 10) }'],
+    parsePs);
 }
 
 /**

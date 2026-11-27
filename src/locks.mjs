@@ -26,7 +26,8 @@
  * `heartbeat_at` 由 reaper 周期刷新，保证"活着但卡死"的实例最终会被判为过期。
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, renameSync } from 'node:fs';
+import { writeJsonAtomic } from './fs-atomic.mjs';
+import { readFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { execFile, spawnSync } from 'node:child_process';
 import { processListExecutable, windowsSystemExecutable } from './host-executable.mjs';
 import { join, dirname } from 'node:path';
@@ -67,10 +68,7 @@ function readJson(file) {
 /** 原子写（tmp + rename），避免读到半截。**写失败绝不影响主流程**（登记只是辅助信息）。 */
 function writeJson(file, obj) {
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-    writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
-    renameSync(tmp, file);
+    writeJsonAtomic(file, obj);
     return true;
   } catch {
     // 磁盘满 / 目录被占 / 权限问题都不该让 MCP 服务出问题
@@ -323,7 +321,9 @@ export function processStartTime(pid) {
   }
 }
 
-/** 新建 ACP 进程时在后台读一次启动时间，握手可以并行进行。 */
+/** 新建 ACP 进程时在后台读一次启动时间，握手可以并行进行。
+ * @returns {Promise<number|null>}
+ */
 export async function readProcessStartTime(pid) {
   const query = startTimeQuery(pid);
   if (!query) return null;

@@ -58,6 +58,7 @@ import { homeWorkspaceProblem } from './workspace-guard.mjs';
 import { registerWorkspace } from './workspace.mjs';
 import { ISOLATION_MODES, createWorktree, discardWorktree } from './worktree.mjs';
 import {
+  metaFilePath,
   META_DIR,
   NOOP_LOG,
   forgottenPath,
@@ -84,6 +85,7 @@ export class Hub {
     this.hosts = new Map();
     this.log = log ?? NOOP_LOG;
     /** 当前服务运行形态（直连/常驻/降级原因），供 dsh_doctor 展示。 */
+    /** @type {import('./types.mjs').HubRuntime|null} */
     this.runtime = null;
     /** 最近一次 dsh_list 磁盘探测的结果：{ok, error, cached, at}。 */
     this.lastProbe = { ok: null, error: null, cached: false, at: 0 };
@@ -95,6 +97,7 @@ export class Hub {
   }
 
   #reaper;
+  #metaWritten = new Map();
   /** 已收到 ACP 结果，仍在生成工作区快照及写入哨兵的回合。 */
   #finalizingRuns = new Map();
   /** 同一 id 的磁盘接管 in-flight Promise，防止并发请求各自构造一个 Conversation。 */
@@ -171,7 +174,12 @@ export class Hub {
       writeRegistry(STATE_FILE, doc);
       // 侧车元数据独立于注册表：forget 移除注册表条目后仍然保留，
       // 让按 id 重建的会话不会丢掉审批策略/思考深度/标题/轮数。
-      for (const c of registered) writeConversationMeta(c);
+      for (const c of registered) {
+        const meta = c.toMeta();
+        const serialized = JSON.stringify(meta);
+        if (this.#metaWritten.get(c.id) === serialized && existsSync(metaFilePath(c.id))) continue;
+        if (writeConversationMeta(c, meta)) this.#metaWritten.set(c.id, serialized);
+      }
     });
   }
 
@@ -337,6 +345,7 @@ export class Hub {
 
   async remove(id) {
     this.conversations.delete(id);
+    this.#metaWritten.delete(id);
     // save() 会合并盘上的条目；本实例主动移除的不能被合并回来。
     this.#removed.add(id);
     // 注意：**不删侧车元数据**。forget 的语义是“从注册表移除”，

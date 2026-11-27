@@ -49,8 +49,11 @@ function wakeIdleWaiters(conv, scheduleDrain) {
   scheduleDrain();
 }
 
-/** 一个还没发出就被取消的 run（队列移除、插话等待超时等）的终态落盘。 */
-export function cancelUnstartedRun(conv, { hub, activity }, run, message) {
+/** 一个还没发出就被取消的 run（队列移除、插话等待超时等）的终态落盘。
+ * @param {import('../types.mjs').ConversationContext} ctx
+ */
+export function cancelUnstartedRun(conv, ctx, run, message) {
+  const { hub, activity } = ctx;
   run.status = 'cancelled';
   run.ended_at = now();
   run.elapsed_ms = 0;
@@ -63,13 +66,16 @@ export function cancelUnstartedRun(conv, { hub, activity }, run, message) {
   run.result.sentinel_file = file ?? hub.runSentinelPath?.(conv.id, run.run_id) ?? null;
 }
 
-/** 启动阶段失败或发出前取消时的统一收尾：唤醒等待者 + 写哨兵。 */
-export async function settleFailedRun(conv, { hub, activity, scheduleDrain }, runRecord, error, { status = 'error' } = {}) {
+/** 启动阶段失败或发出前取消时的统一收尾：唤醒等待者 + 写哨兵。
+ * @param {import('../types.mjs').ConversationContext} ctx
+ */
+export async function settleFailedRun(conv, ctx, runRecord, error, { status = 'error' } = {}) {
+  const { hub, activity, scheduleDrain } = ctx;
   const stopReason = status === 'cancelled' ? 'cancelled' : 'error';
-  wakeIdleWaiters(conv, scheduleDrain);
   if (conv.currentRun === runRecord) conv.currentRun = null;
   runRecord.ended_at = now();
   runRecord.status = stopReason;
+  wakeIdleWaiters(conv, scheduleDrain);
   runRecord.error = error?.message ?? String(error);
   runRecord.elapsed_ms = 0;
   activity.finishUsage(runRecord.run_id, { flush: false });
@@ -91,7 +97,9 @@ export async function settleFailedRun(conv, { hub, activity, scheduleDrain }, ru
   return runRecord.result;
 }
 
-function startWatchdog(conv, { hub, activity }, runRecord, c, t0, proc, onUnresponsive) {
+/** @param {import('../types.mjs').ConversationContext} ctx */
+function startWatchdog(conv, ctx, runRecord, c, t0, proc, onUnresponsive) {
+  const { hub, activity } = ctx;
   if (!(WATCHDOG_AFTER_MS > 0 && STALL_MS > 0) && !(TURN_MAX_MS > 0)) return null;
   let graceTimer;
   const timer = setInterval(() => {
@@ -155,6 +163,7 @@ function createCollector() {
   };
 }
 
+/** @param {import('../types.mjs').ConversationContext} ctx */
 async function finalizeTurnBody(conv, ctx, { runRecord, c, before, t0, reasoning, reviewMode, stopReason, failure }) {
   const { hub, activity, scheduleDrain } = ctx;
   const withReview = (result) =>
@@ -193,9 +202,7 @@ async function finalizeTurnBody(conv, ctx, { runRecord, c, before, t0, reasoning
       };
       hub.checkpointRunResult(conv.id, runRecord, withReview(checkpoint), status, now());
     }
-    const afterPromise = gitStatus(conv.cwd);
-    conv.busy = false;
-    if (conv.currentRun === runRecord) conv.currentRun = null;
+    const after = await gitStatus(conv.cwd);
     conv.collector = null;
     conv.currentTool = null;
     for (const [apId, p] of conv.pendingApprovals) {
@@ -224,9 +231,7 @@ async function finalizeTurnBody(conv, ctx, { runRecord, c, before, t0, reasoning
     conv.turnCount += 1;
     conv.lastUsedAt = now();
     await hub.save();
-    wakeIdleWaiters(conv, scheduleDrain);
 
-    const after = await afterPromise;
     activity.finishUsage(runRecord.run_id);
     result.workspace_changed = !sameWorkspaceSnapshot(before, after);
     result.diff_stat = after;
@@ -242,10 +247,7 @@ async function finalizeTurnBody(conv, ctx, { runRecord, c, before, t0, reasoning
     return result;
   } catch (e) {
     hub.log.info(`[conv ${conv.id}] 回合收尾异常（已兜底）: ${e.message}`);
-    conv.busy = false;
-    if (conv.currentRun === runRecord) conv.currentRun = null;
     conv.collector = null;
-    wakeIdleWaiters(conv, scheduleDrain);
     const fallback = withReview(
       terminalResult({
         conversationId: conv.id,
@@ -265,9 +267,14 @@ async function finalizeTurnBody(conv, ctx, { runRecord, c, before, t0, reasoning
     fallback.sentinel_file = sentinelFile ?? hub.runSentinelPath(conv.id, runRecord.run_id);
     if (!sentinelFile) fallback.sentinel_error = runRecord.sentinel_error ?? L('哨兵文件写入失败', 'Failed to write sentinel file');
     return fallback;
+  } finally {
+    if (conv.currentRun === runRecord) conv.currentRun = null;
+    conv.busy = false;
+    wakeIdleWaiters(conv, scheduleDrain);
   }
 }
 
+/** @param {import('../types.mjs').ConversationContext} ctx */
 export async function runTurn(
   conv,
   ctx,

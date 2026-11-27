@@ -5,6 +5,7 @@
  * 因为本服务是被 Codex/Claude 以未知环境拉起的。
  */
 
+import { DSH_PROFILE_IDS, DSH_PROFILE_NAMES } from './dsh-contract.mjs';
 import { randomUUID } from 'node:crypto';
 import { closeSync, linkSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -57,9 +58,6 @@ export const DSH_COMPAT = Object.freeze({
 /**
  * 给一个 DSH 版本打兼容性档位：ok（已验证）/ warn（部分可用、未验证或读不到）。
  * 只是体检提示，不拦启动 —— 未验证不等于不能用。
- *
- * `note` 是中文、`noteEn` 是英文：config 不能 import lang.mjs（lang → live-view → live → config
- * 会成环），所以两种文字都给，由调用方按语言挑。
  */
 export function dshVersionStatus(version) {
   const C = DSH_COMPAT;
@@ -185,14 +183,14 @@ function compatibleTeamBackend(teamProfile, requestedTeamBackend) {
   try {
     const entries = yamlLoad(text);
     if (!Array.isArray(entries)) return null;
-    const team = entries.findLast((entry) => entry?.id === 'agent-team');
-    const tools = entries.findLast((entry) => entry?.id === 'tool-agent-team');
+    const team = entries.findLast((entry) => entry?.id === DSH_PROFILE_IDS.agentTeam);
+    const tools = entries.findLast((entry) => entry?.id === DSH_PROFILE_IDS.toolAgentTeam);
     const experimental = team?.name === '@deepseek-ai/dsh-experimental-agent-team' &&
       tools?.name === '@deepseek-ai/dsh-experimental-tool-agent-team';
     const native = team?.config?.defaultEnabled === true &&
       (team.name === undefined || team.name === '@deepseek-ai/dsh-agent-team') &&
       (tools?.name === undefined || tools.name === '@deepseek-ai/dsh-tool-agent-team');
-    if (BOOTSTRAP_ENABLED && text.includes(MANAGED_PROFILE_MARKER) && (teamProfile === 'dsh-team' || experimental || native)) {
+    if (BOOTSTRAP_ENABLED && text.includes(MANAGED_PROFILE_MARKER) && (teamProfile === DSH_PROFILE_NAMES.team || experimental || native)) {
       return requestedTeamBackend;
     }
     if (team?.disabled === true || tools?.disabled === true) return null;
@@ -204,14 +202,14 @@ function compatibleTeamBackend(teamProfile, requestedTeamBackend) {
 
 /** 对本次选定的 DSH 版本选择 profile 与团队实现。 */
 export function resolveTeamProfile(version = resolveDshVersion()) {
-  const teamProfile = profileOverride ?? 'dsh-team';
+  const teamProfile = profileOverride ?? DSH_PROFILE_NAMES.team;
   let backend = null;
   if (TEAM_MODE && version && cmpVersion(version, '0.1.7-0') >= 0) {
     // DSH 0.2.2-rc.2 起，dsh-base 自带会话团队模式。
     const requested = cmpVersion(version, '0.2.2-rc.2') >= 0 ? 'native' : 'experimental';
     backend = compatibleTeamBackend(teamProfile, requested);
   }
-  return { profile: profileOverride ?? (backend ? teamProfile : 'dsh-mcp'), backend };
+  return { profile: profileOverride ?? (backend ? teamProfile : DSH_PROFILE_NAMES.managed), backend };
 }
 
 /**

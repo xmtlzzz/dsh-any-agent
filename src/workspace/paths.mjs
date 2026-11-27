@@ -2,18 +2,19 @@
  * 工作区与测试会话路径守卫：路径规范化、临时目录判定与清理护栏。
  */
 
+import { DSH_WORKSPACE_REL, DSH_PROJCACHE_REL } from '../dsh-contract.mjs';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { DSH_HOME, PKG_ROOT, REGISTER_WORKSPACE } from '../config.mjs';
 
-export const WORKSPACE_FILE = join(DSH_HOME, 'storages', 'workspace.json');
+export const WORKSPACE_FILE = join(DSH_HOME, ...DSH_WORKSPACE_REL);
 export const SESSIONS_ROOT = join(DSH_HOME, 'sessions');
 /**
  * DSH 的会话投影缓存：每个会话一个 `<id>.json`（标题/用量/cwd 等折叠结果）。
  * ★ 删会话目录**不会**连带删它，所以清理会话必须一并删它。
  */
-export const PROJCACHE_DIR = join(DSH_HOME, 'storages', 'session_projcache', 'sessions');
+export const PROJCACHE_DIR = join(DSH_HOME, ...DSH_PROJCACHE_REL);
 /** forget 墓碑目录（存 id+时间，不含内容）；清掉测试会话时一并清掉其墓碑。 */
 export const FORGOTTEN_DIR = process.env.DSH_MCP_FORGOTTEN_DIR ?? join(DSH_HOME, '.dsh-any-agent-forgotten');
 

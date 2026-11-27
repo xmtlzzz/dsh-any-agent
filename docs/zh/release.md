@@ -20,7 +20,7 @@ npm run lint
 npm run typecheck
 node test/run.mjs
 node test/package-check.mjs
-npm run check:release   # 版本号 / CHANGELOG 这一节与文末链接 / 中英 CHANGELOG 版本一致 / 能否生成 Release 说明 / 文档链接 / 打包清单
+npm run check:release   # 版本号 / CHANGELOG 这一节与文末链接 / 中英 CHANGELOG 版本一致 / 能否生成 Release 说明 / 文档链接 / 打包清单 / 双语文档与机器契约
 npm run docs:counts:check   # tests.md 与 CI 注释里的检查数 = 刚才 node test/run.mjs 写出的报告
 npm run docs:counts:check -- --portable
 #    不一致就是改过测试没更新数字：node test/run.mjs --all --report .state/test-report.json && npm run docs:counts

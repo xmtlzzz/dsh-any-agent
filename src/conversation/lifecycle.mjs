@@ -4,7 +4,7 @@
 
 import { join } from 'node:path';
 import { L } from '../lang.mjs';
-import { ALLOW_FULL_ACCESS, DSH_HOME, PERMISSION_TIERS, SHARED_PROCESS } from '../config.mjs';
+import { ALLOW_FULL_ACCESS, DSH_HOME, PERMISSION_TIERS, resolveTeamProfile, SHARED_PROCESS } from '../config.mjs';
 import { AcpProcess } from '../acp.mjs';
 import { applySessionConfig } from '../acp-session.mjs';
 import { readConversationMeta } from '../titles.mjs';
@@ -22,9 +22,11 @@ import {
 
 const now = () => Date.now();
 
-export async function verifyPermissionRecorded(conv, { hub }, { attempts = undefined, delayMs = 250 } = {}) {
+/** @param {import('../types.mjs').ConversationContext} ctx */
+export async function verifyPermissionRecorded(conv, ctx, { attempts = undefined, delayMs = 250 } = {}) {
+  const { hub } = ctx;
   const tries = Number.isFinite(attempts) ? attempts : conv.permission === 'read-only' ? 40 : 6;
-  const patchFile = join(DSH_HOME, 'profiles', process.env.DSH_MCP_PROFILE ?? 'dsh-mcp', 'cordis.patch.yml');
+  const patchFile = join(DSH_HOME, 'profiles', conv.proc?.teamProfile?.profile ?? resolveTeamProfile().profile, 'cordis.patch.yml');
   for (let i = 0; i < tries; i++) {
     const meta = readConversationMeta(conv.id);
     const recorded = meta?.permissions?.preset;
@@ -68,6 +70,7 @@ export async function verifyPermissionRecorded(conv, { hub }, { attempts = undef
   return null;
 }
 
+/** @param {import('../types.mjs').ConversationContext} ctx */
 export async function ensureAlive(conv, ctx, { retried = false } = {}) {
   const { hub } = ctx;
   if (conv.recycling) await conv.recycling;
@@ -149,6 +152,7 @@ export async function ensureAlive(conv, ctx, { retried = false } = {}) {
   }
 }
 
+/** @param {import('../types.mjs').ConversationContext} ctx */
 export async function takeover(conv, ctx, { force = false } = {}) {
   const { hub, getLastChildStartedAt } = ctx;
   const report = { conversation_id: conv.id, ok: false, holder_kind: null, killed_pid: null, message: '' };
@@ -245,7 +249,9 @@ export async function takeover(conv, ctx, { force = false } = {}) {
   return report;
 }
 
-export async function closeConversation(conv, { hub, activity }, { forget = false } = {}) {
+/** @param {import('../types.mjs').ConversationContext} ctx */
+export async function closeConversation(conv, ctx, { forget = false } = {}) {
+  const { hub, activity } = ctx;
   if (forget) {
     const holder = conv.proc?.alive ? null : classifyHolder(conv.id, { knownChildPid: conv.lastChildPid });
     if (holder?.kind === 'live-mcp') {

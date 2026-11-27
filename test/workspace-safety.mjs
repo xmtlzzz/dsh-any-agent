@@ -8,6 +8,8 @@
  *   [4] 会话目录不可读时 backfill 不清空注册表
  */
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, basename, dirname } from 'node:path';
@@ -118,6 +120,23 @@ try {
   check('测试工作区登记被删', !after.tables.workspaces.testws, JSON.stringify(after.tables.workspaces));
   check('★ 用户真实临时工作区登记保留', Boolean(after.tables.workspaces.realws), JSON.stringify(after.tables.workspaces));
   check('返回值只包含测试项', tw.removed.length === 1 && tw.removed[0].id === 'testws', JSON.stringify(tw.removed));
+
+  const register = new URL('../src/workspace/store.mjs', import.meta.url).href;
+  const worker = [
+    'const { registerWorkspace } = await import(process.argv[1]);',
+    'for (let n = 0; n < 6; n++) {',
+    '  const r = registerWorkspace(process.argv[2], process.argv[3] + n);',
+    '  if (!r.registered) throw new Error(r.error);',
+    '}',
+  ].join('\n');
+  const project = join(root, 'concurrent');
+  await Promise.all(['a', 'b', 'c', 'd'].map((prefix) =>
+    promisify(execFile)(process.execPath, ['--input-type=module', '-e', worker, register, project, prefix],
+      { windowsHide: true, timeout: 30000 })));
+  const saved = JSON.parse(readFileSync(workspaceFile, 'utf8')).tables.workspaces;
+  const registrations = Object.values(saved).filter((w) => w.path === project);
+  check('Concurrent writers retain every registration for the same workspace',
+    registrations.length === 1 && new Set(registrations[0].sessionIds).size === 24);
 } catch (e) {
   failed++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

@@ -61,9 +61,9 @@ if (shippedRepoOnly.length) bad('repo-only paths in the whitelist: ' + shippedRe
 else ok('no repo-only paths (scripts, site, video, images, archived design) in the whitelist');
 
 console.log('\nzero dependencies');
-const runtimeDeps = Object.keys(pkg.dependencies || {});
-if (runtimeDeps.length === 0) ok('no runtime dependencies');
-else bad('runtime dependencies appeared: ' + runtimeDeps.join(', '));
+const dependencyFields = ['dependencies', 'devDependencies'].filter((key) => Object.hasOwn(pkg, key));
+if (dependencyFields.length === 0) ok('no runtime or development dependencies');
+else bad('package.json contains dependency fields: ' + dependencyFields.join(', '));
 
 // engines drifted once already: package.json said >=20 while src/workspace.mjs
 // imported zstdDecompressSync, which only exists from Node 22.15. Users on

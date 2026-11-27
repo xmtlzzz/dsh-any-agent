@@ -2,6 +2,8 @@
 
 # 🔐 Permissions
 
+Approval context masks GitHub, AWS, Slack and JWT tokens, common JSON credential fields inside strings, and X-Api-Key headers. If authenticated daemon shutdown fails, the service sends a termination signal only after verifying the process start time.
+
 | Tier | Approval default | Use for |
 |---|---|---|
 | `workspace-write` (default) | `auto-deny` | DSH limits writes to the workspace. Escalation requests are denied by default. |

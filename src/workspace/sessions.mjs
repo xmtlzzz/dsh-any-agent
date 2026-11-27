@@ -2,6 +2,7 @@
  * DSH 磁盘会话头读取与扫描（同步解压用于 CLI/清理，流式异步用于 MCP 热路径）。
  */
 
+import { DSH_SESSION_LOG_FILE } from '../dsh-contract.mjs';
 import { createReadStream, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -85,7 +86,7 @@ export function scanSessions() {
     }
     for (const d of dirs) {
       if (!d.isDirectory()) continue;
-      const header = readHeader(join(bucketPath, d.name, 'session.v4.jsonl.zstd'));
+      const header = readHeader(join(bucketPath, d.name, DSH_SESSION_LOG_FILE));
       if (!header?.cwd || !header?.id) continue;
       if (!byCwd.has(header.cwd)) byCwd.set(header.cwd, []);
       byCwd.get(header.cwd).push({
@@ -111,7 +112,7 @@ export async function findSessionHeaderStatus(sessionId) {
     return { status: 'error', header: null, reason: L(`会话目录不可读: ${e.message}`, `sessions directory is not readable: ${e.message}`) };
   }
   for (const bucket of buckets) {
-    const f = join(SESSIONS_ROOT, bucket, sessionId, 'session.v4.jsonl.zstd');
+    const f = join(SESSIONS_ROOT, bucket, sessionId, DSH_SESSION_LOG_FILE);
     if (!existsSync(f)) continue;
     const header = await readHeaderAsync(f);
     if (header?.id === sessionId) return { status: 'found', header, file: f };
@@ -146,7 +147,7 @@ export function listSessionEntries() {
       if (!d.isDirectory() || d.isSymbolicLink()) continue;
       const dir = join(bucketPath, d.name);
       if (!isInside(SESSIONS_ROOT, dir)) continue;
-      const header = readHeader(join(dir, 'session.v4.jsonl.zstd'));
+      const header = readHeader(join(dir, DSH_SESSION_LOG_FILE));
       if (!header?.id) continue;
       entries.push({
         id: header.id,

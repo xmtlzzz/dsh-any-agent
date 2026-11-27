@@ -19,7 +19,7 @@ npm run lint
 npm run typecheck
 node test/run.mjs
 node test/package-check.mjs
-npm run check:release   # version / this CHANGELOG section and its links / zh and en CHANGELOG agree / release notes build / doc links / package contents
+npm run check:release   # version / this CHANGELOG section and its links / zh and en CHANGELOG agree / release notes build / doc links / package contents / bilingual docs and machine contracts
 npm run docs:counts:check   # check counts in tests.md and the CI comment = the report node test/run.mjs just wrote
 npm run docs:counts:check -- --portable
 #    A mismatch means tests changed without the numbers being refreshed:

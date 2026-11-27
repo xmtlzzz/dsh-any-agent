@@ -19,6 +19,9 @@
  * 幂等性：用户手改过 profile（删掉 managed 标记）就不再覆盖，只报告。
  */
 
+import { DSH_PROFILE_IDS, DSH_PROFILE_NAMES, DSH_PROFILE_BUNDLES } from './dsh-contract.mjs';
+import { writeFileAtomic, writeJsonAtomic } from './fs-atomic.mjs';
+import { SECRET_KEY, LOOKS_LIKE_SECRET } from './redact.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,22 +36,11 @@ import {
 } from './config.mjs';
 import { load as yamlLoad, dump as yamlDump } from './yaml-lite.mjs';
 
-/** 与 dsh 内置 acp 模板一致的组合包列表。 */
-const PROFILE_BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-acp-app'];
-
-/** 抄路由时依次尝试的来源（前面的优先）。'__home__' 指 $DSH_HOME/cordis.patch.yml。 */
-const DEFAULT_SOURCES = ['__home__', 'desktop', 'web', 'headless', 'acp'];
-
 /** 记下我们上次写了什么，用来区分"没人动过"与"用户手改过"。 */
 const MANAGED_STATE = '.dsh-mcp-bootstrap.json';
 
 /** apiKeyEnv 必须长成环境变量名的样子；否则视为疑似密钥，一律丢弃。 */
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/** 一眼像密钥的值（防止有人把字面密钥写进 apiKeyEnv）。 */
-const LOOKS_LIKE_SECRET = /^(sk-|ak-|Bearer\s|eyJ)/i;
-/** 任何层级都不复制的凭据字段（providers/models 的嵌套对象同样适用）。 */
-const SECRET_KEY = /^(?:api[_-]?key|apikey|authorization|proxy[_-]?authorization|cookie|set[_-]?cookie|password|passwd|secret|token|access[_-]?token|refresh[_-]?token|credentials?|headers|client[_-]?secret|private[_-]?key|access[_-]?key[_-]?id|oauth|env|environment)$/i;
 
 /** 递归剥掉凭据字段；baseURL 里的 userinfo 也一并清掉。 */
 function scrubSecrets(value, key = '') {
@@ -142,9 +134,9 @@ function extractRouting(entries) {
   const byId = new Map();
   for (const e of entries) if (e && typeof e === 'object' && e.id) byId.set(e.id, e);
 
-  const providers = sanitizeProviders(byId.get('llm-pi-ai')?.config?.providers);
-  const agentDefaultModel = sanitizeAgentDefaultModel(byId.get('agent-default-model')?.config);
-  const deepseek = byId.get('llm-deepseek');
+  const providers = sanitizeProviders(byId.get(DSH_PROFILE_IDS.providers)?.config?.providers);
+  const agentDefaultModel = sanitizeAgentDefaultModel(byId.get(DSH_PROFILE_IDS.defaultModel)?.config);
+  const deepseek = byId.get(DSH_PROFILE_IDS.deepseek);
   const llmDeepseek = deepseek ? sanitizeDeepseek(deepseek.config ?? {}) : null;
 
   if (!providers && !agentDefaultModel && !llmDeepseek) return null;
@@ -166,7 +158,7 @@ function sanitizeDeepseek(config) {
 
 /** 依次从候选来源里找第一份能用的路由。 */
 function findRouting() {
-  const candidates = ROUTE_SOURCE_PROFILE ? [ROUTE_SOURCE_PROFILE] : DEFAULT_SOURCES;
+  const candidates = ROUTE_SOURCE_PROFILE ? [ROUTE_SOURCE_PROFILE] : DSH_PROFILE_NAMES.sources;
   const tried = [];
   for (const name of candidates) {
     const file =
@@ -210,7 +202,7 @@ function ensureProfileScaffold(dir, profile) {
       name: 'dsh-profile-' + profile,
       private: true,
       dependencies: {},
-      dsh: { profile: { bundles: [...PROFILE_BUNDLES] } },
+      dsh: { profile: { bundles: [...DSH_PROFILE_BUNDLES] } },
     };
     writeFileSync(manifestPath, JSON.stringify(manifest, undefined, 2) + '\n');
   }
@@ -237,14 +229,14 @@ function buildEntries(routing, backend) {
   const entries = [];
   if (routing.providers) {
     entries.push({
-      id: 'llm-pi-ai',
+      id: DSH_PROFILE_IDS.providers,
       name: '@deepseek-ai/dsh-llm-pi-ai',
       config: { providers: routing.providers },
     });
   }
   if (routing.llmDeepseek) {
     entries.push({
-      id: 'llm-deepseek',
+      id: DSH_PROFILE_IDS.deepseek,
       name: '@deepseek-ai/dsh-llm-deepseek-api-key',
       config: routing.llmDeepseek,
     });
@@ -266,17 +258,17 @@ function buildEntries(routing, backend) {
     ));
   }
   entries.push({
-    id: 'acp',
+    id: DSH_PROFILE_IDS.acp,
     name: '@deepseek-ai/dsh-acp',
     config: { provider: defaultModel.provider, model: defaultModel.model },
   });
-  entries.push({ id: 'agent-default-model', config: defaultModel });
+  entries.push({ id: DSH_PROFILE_IDS.defaultModel, config: defaultModel });
 
   // ★ 与 profile-example 对齐：显式声明三档预设，但**绝不写 defaultPreset**。
   //   defaultPreset 会在会话创建时覆盖 DSH_PERMISSION_MODE，导致 read-only 被静默提权
   //   （test/permission.mjs 实测抓到过）。不写它时，DSH 按 sandbox+approval 组合推断。
   entries.push({
-    id: 'permission',
+    id: DSH_PROFILE_IDS.permission,
     name: '@deepseek-ai/dsh-permission-presets',
     config: {
       presets: {
@@ -289,19 +281,19 @@ function buildEntries(routing, backend) {
 
   if (backend === 'native') {
     // 新版团队由 dsh-base 提供，成员继续使用标准子代理工具。
-    entries.push({ id: 'agent-team', config: { defaultEnabled: true } });
+    entries.push({ id: DSH_PROFILE_IDS.agentTeam, config: { defaultEnabled: true } });
   } else if (backend === 'experimental') {
-    entries.push({ id: 'tool-subagent-control', disabled: true });
-    entries.push({ id: 'tool-subagent-list-agents', disabled: true });
-    entries.push({ id: 'tool-subagent', disabled: true });
-    entries.push({ id: 'tool-subagent-fork', disabled: true });
+    entries.push({ id: DSH_PROFILE_IDS.subagentControl, disabled: true });
+    entries.push({ id: DSH_PROFILE_IDS.subagentList, disabled: true });
+    entries.push({ id: DSH_PROFILE_IDS.subagent, disabled: true });
+    entries.push({ id: DSH_PROFILE_IDS.subagentFork, disabled: true });
     entries.push({
-      id: 'agent-team',
+      id: DSH_PROFILE_IDS.agentTeam,
       name: '@deepseek-ai/dsh-experimental-agent-team',
       config: { maxMembers: 8 },
     });
     entries.push({
-      id: 'tool-agent-team',
+      id: DSH_PROFILE_IDS.toolAgentTeam,
       name: '@deepseek-ai/dsh-experimental-tool-agent-team',
       config: { freshProvider: 'spawn', forkProvider: 'fork' },
     });
@@ -376,7 +368,7 @@ export function ensureProfile({ log, teamProfile = resolveTeamProfile() } = {}) 
     // 原来源不可用时保留已有受管路由，仍可迁移团队配置或清除已关闭的团队设置。
     try {
       const previous = yamlLoad(currentText);
-      const team = Array.isArray(previous) ? previous.findLast((entry) => entry?.id === 'agent-team') : null;
+      const team = Array.isArray(previous) ? previous.findLast((entry) => entry?.id === DSH_PROFILE_IDS.agentTeam) : null;
       const previousBackend = team?.name === '@deepseek-ai/dsh-experimental-agent-team' ? 'experimental'
         : team?.config?.defaultEnabled === true ? 'native' : null;
       const migrateTeam = previousBackend && previousBackend !== backend;
@@ -417,21 +409,14 @@ export function ensureProfile({ log, teamProfile = resolveTeamProfile() } = {}) 
   }
 
   try {
-    writeFileSync(patchPath, text);
-    writeFileSync(
-      join(dir, MANAGED_STATE),
-      JSON.stringify(
-        {
-          version: 1,
-          hash,
-          source: found.source,
-          routes: Object.keys(found.routing.providers || {}),
-          generatedAt: new Date().toISOString(),
-        },
-        undefined,
-        2,
-      ) + '\n',
-    );
+    writeFileAtomic(patchPath, text);
+    writeJsonAtomic(join(dir, MANAGED_STATE), {
+      version: 1,
+      hash,
+      source: found.source,
+      routes: Object.keys(found.routing.providers || {}),
+      generatedAt: new Date().toISOString(),
+    });
   } catch (e) {
     return { ok: false, error: L('写入 profile 失败: ', 'failed to write profile: ') + e.message };
   }

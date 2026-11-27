@@ -312,7 +312,7 @@ export const TOOL_TEXT_EN = {
     title: 'Health check',
     description:
       'Read-only health check: the DSH executable and version, whether the profile exists or has drifted, the state file, ' +
-      'whether the runs/locks directories are writable, orphan locks, the number of sessions and their RSS, and the effective ' +
+      'whether the runs/locks directories are writable, orphan locks, storage format, daemon count, the number of sessions and their RSS, and the effective ' +
       'configuration. It reports and changes nothing; ok=false means at least one check failed.',
     params: {},
   },

@@ -9,6 +9,7 @@
  * No network, no DSH, no tokens. Run before `npm publish`.
  */
 
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +28,11 @@ const bad = (msg) => {
 
 const pkg = JSON.parse(read('package.json'));
 const version = pkg.version;
+try {
+  execFileSync(process.execPath, [path.join(HERE, 'check-docs-sync.mjs')], { stdio: 'inherit' });
+} catch {
+  bad('Documentation contract check failed');
+}
 const changelog = read('CHANGELOG.md');
 
 console.log(`\nrelease check: dsh-any-agent ${version}`);

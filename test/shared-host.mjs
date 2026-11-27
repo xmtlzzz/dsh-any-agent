@@ -16,10 +16,15 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { SessionHost } from '../src/host.mjs';
-import { Conversation, Hub } from '../src/hub.mjs';
-import { SHARED_PROCESS } from '../src/config.mjs';
-import { rssMb, refreshRssMap } from '../src/procstat.mjs';
+const testHome = mkdtempSync(join(tmpdir(), 'dsh-any-agent-host-home-'));
+process.env.DSH_HOME = testHome;
+process.env.DSH_MCP_STATE = join(testHome, 'state.json');
+process.env.DSH_MCP_LOCKS_DIR = join(testHome, 'locks');
+process.on('exit', () => rmSync(testHome, { recursive: true, force: true }));
+const { SessionHost } = await import('../src/host.mjs');
+const { Conversation, Hub } = await import('../src/hub.mjs');
+const { SHARED_PROCESS } = await import('../src/config.mjs');
+const { rssMb, refreshRssMap } = await import('../src/procstat.mjs');
 
 let passed = 0;
 let failed = 0;
@@ -410,6 +415,39 @@ console.log('\n[12] 共享 ACP 进程退出时，失败哨兵保留已收到的�
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
+}
+
+{
+  const hub = new Hub({ log });
+  const stopped = [];
+  const add = (id, pid, age, busy = false, keepAlive = false) => {
+    hub.conversations.set(id, { id, busy, keepAlive, lastUsedAt: Date.now() - age,
+      proc: { alive: true, pid, stop: async () => (stopped.push(id), true) } });
+  };
+  add('busy-sibling', 101, 9000, true);
+  add('idle-sibling', 101, 8000);
+  add('oldest', 102, 7000);
+  add('oldest-sibling', 102, 6000);
+  add('retained', 103, 9000, false, true);
+  add('retained-sibling', 103, 8500);
+  const refreshRss = async () => new Map([[101, 100], [102, 100], [103, 100]]);
+  await hub.reapOnce({ maxLive: 0, maxRssMb: 210, refreshRss });
+  check('RSS evicts an entire idle PID and protects busy and keep-alive siblings', () =>
+    assert.deepEqual(stopped, ['oldest', 'oldest-sibling']));
+  stopped.length = 0;
+  add('idle-host', 104, 4000);
+  await hub.reapOnce({ maxRssMb: 0, maxLive: 2 });
+  check('Protected shared hosts count toward the process cap', () => assert.deepEqual(stopped, ['idle-host']));
+  hub.conversations.clear();
+  stopped.length = 0;
+  const maxLive = 2;
+  for (let i = 0; i < maxLive + 1; i++) add('same-' + i, 200, 9000);
+  await hub.reapOnce({ maxLive, maxRssMb: 0 });
+  check('MAX_LIVE counts a shared PID once', () => assert.equal(stopped.length, 0));
+  for (let i = 0; i < maxLive; i++) add('new-' + i, 300 + i, 10);
+  await hub.reapOnce({ maxLive, maxRssMb: 0 });
+  check('MAX_LIVE evicts the complete least recently used group', () =>
+    assert.deepEqual(stopped, Array.from({ length: maxLive + 1 }, (_, i) => 'same-' + i)));
 }
 
 // 标准汇总行：test/run.mjs 与 scripts/sync-test-counts.mjs 靠它取检查数（别改格式）。

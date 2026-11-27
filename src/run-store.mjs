@@ -99,7 +99,9 @@ export function runMarkerPath(conversationId, runId) {
   return join(RUNS_DIR, conversationId, `${runId}.running`);
 }
 
-/** 先持久化收据，再接单。硬链接原子占位，同时阻止另一个进程接受同一个幂等键。 */
+/** 先持久化收据，再接单。硬链接原子占位，同时阻止另一个进程接受同一个幂等键。
+ * @param {import('./types.mjs').RunRecord} run
+ */
 export function reserveRun(paths, conversationId, run) {
   const marker = paths.runMarkerPath(conversationId, run.run_id);
   const sentinel = paths.runSentinelPath(conversationId, run.run_id);
@@ -366,6 +368,7 @@ export function clearRunSentinel(paths, conversationId, runId) {
   }
 }
 
+/** @returns {import('./types.mjs').SentinelPayload} */
 function runSentinelPayload(conversationId, run) {
   return {
     schema: SENTINEL_SCHEMA,

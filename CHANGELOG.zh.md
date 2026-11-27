@@ -12,6 +12,12 @@
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-27
+
+- 修复 YAML 序列与空集合往返、共享进程回收及排队回合的 Git 快照竞态。
+- 工作区更新在锁内原子写入，元数据侧车仅在变化或缺失时写入。常驻进程停止前核对 PID 启动时间。
+- 新增只读存储格式体检、常驻进程身份排除规则、凭据脱敏和双语文档契约检查。
+
 ## [0.8.1] — 2026-11-26
 
 - 新增零仓内依赖的 JSDoc 静态类型检查（`npm run typecheck`，通过固定版本 `typescript@5.8.3` 与 `@types/node@22` 覆盖 `src/`、`bin/` 与 `scripts/`），在零 `@ts-ignore` 前提下清零全部 126 条 `checkJs` 诊断并修复发现的静态问题（如不可达的 `REGISTER_WORKSPACE === 'off'` 分支及 `test/package-check.mjs` 递归扫描 `src/`），并在 GitHub Actions CI 中强制门禁 `typecheck` 与 `i18n-en`。
@@ -1304,7 +1310,8 @@
 - DSH profile 故意仍然叫 `dsh-mcp`，`DSH_MCP_*` 环境变量和 `# dsh-mcp:managed` 标记行也一样。这些都是已经落盘的
   标识符：改名会让现有的 profile、会话和客户端配置失联。产品名变了，磁盘上的契约没变。见 README 的常见问题。
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...v0.8.0
 [0.7.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...v0.7.9

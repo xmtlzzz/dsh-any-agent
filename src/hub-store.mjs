@@ -6,7 +6,8 @@
  * 不存任何对话/思考正文。
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { writeJsonAtomic } from './fs-atomic.mjs';
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DSH_HOME, STATE_FILE } from './config.mjs';
 import { findSessionHeaderStatus } from './workspace.mjs';
@@ -24,17 +25,14 @@ export const NOOP_LOG = { info: (_m) => {}, debug: (_m) => {}, dshStderr: (_m) =
  * **仅元数据**（不含任何对话/思考正文），让重建后仍与原会话一致。
  */
 export const META_DIR = join(dirname(STATE_FILE), 'meta');
-const metaFilePath = (id) => join(META_DIR, `${id}.json`);
+export const metaFilePath = (id) => join(META_DIR, `${id}.json`);
 
-export function writeConversationMeta(conv) {
+export function writeConversationMeta(conv, meta = undefined) {
   try {
-    mkdirSync(META_DIR, { recursive: true });
-    const file = metaFilePath(conv.id);
-    const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-    writeFileSync(tmp, JSON.stringify(conv.toMeta(), null, 2), 'utf8');
-    renameSync(tmp, file);
+    writeJsonAtomic(metaFilePath(conv.id), meta ?? conv.toMeta());
+    return true;
   } catch {
-    /* 元数据侧车只是辅助信息，写失败不影响主流程 */
+    return false;
   }
 }
 
@@ -63,11 +61,7 @@ export const forgottenPath = (id) => join(FORGOTTEN_DIR, `${id}.json`);
  */
 export function writeTombstone(id) {
   try {
-    mkdirSync(FORGOTTEN_DIR, { recursive: true });
-    const file = forgottenPath(id);
-    const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-    writeFileSync(tmp, JSON.stringify({ id, forgottenAt: Date.now() }, null, 2), 'utf8');
-    renameSync(tmp, file);
+    writeJsonAtomic(forgottenPath(id), { id, forgottenAt: Date.now() });
     return null;
   } catch (e) {
     return e?.message ?? String(e);

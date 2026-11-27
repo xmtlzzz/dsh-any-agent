@@ -18,10 +18,10 @@ export function schemaIssue(schema, value, path) {
   const types = Array.isArray(schema.type) ? schema.type : [schema.type];
   if (schema.type && !types.some((type) => matchesType[type]?.(value))) return `${path} must be ${types.join(' or ')}`;
   if (schema.enum && !schema.enum.includes(value)) return `${path} must be one of: ${schema.enum.join(', ')}`;
-  if (schema.maxLength !== undefined && Array.from(value).length > schema.maxLength) {
+  if (typeof value === 'string' && schema.maxLength !== undefined && Array.from(value).length > schema.maxLength) {
     return `${path} exceeds ${schema.maxLength} characters`;
   }
-  if (schema.minimum !== undefined && value < schema.minimum) return `${path} must be >= ${schema.minimum}`;
+  if (typeof value === 'number' && schema.minimum !== undefined && value < schema.minimum) return `${path} must be >= ${schema.minimum}`;
   if (Array.isArray(value) && schema.items) {
     for (const [index, item] of value.entries()) {
       const issue = schemaIssue(schema.items, item, `${path}[${index}]`);

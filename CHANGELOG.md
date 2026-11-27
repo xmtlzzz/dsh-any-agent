@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-27
+
+- Fixed YAML sequence and empty-collection round trips, shared-process eviction, and Git snapshot ordering between queued turns.
+- Serialized workspace updates, replaced files atomically, and limited metadata writes to changed or missing sidecars. Daemon shutdown verifies process start time before sending a signal.
+- Added storage format diagnostics, daemon identity exclusions, credential redaction patterns, and bilingual documentation checks.
+
 ## [0.8.1] — 2026-11-26
 
 - Added zero-repo-dependency static JSDoc typechecking (`npm run typecheck` via pinned `typescript@5.8.3` + `@types/node@22` over `src/`, `bin/`, and `scripts/`), resolved all 126 `checkJs` diagnostics without `@ts-ignore`, fixed static bugs caught by the checker (including an unreachable `REGISTER_WORKSPACE === 'off'` branch and recursive `src/` scanning in `test/package-check.mjs`), and enforced both `typecheck` and `i18n-en` in GitHub Actions CI.
@@ -1777,7 +1783,8 @@ First public release, published to npm as [`dsh-any-agent`](https://www.npmjs.co
   profiles, sessions and client configs. The product name changed; the on-disk
   contract did not. See the README FAQ.
 
-[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.9...v0.8.0
 [0.7.9]: https://github.com/xmtlzzz/dsh-any-agent/compare/v0.7.8...v0.7.9

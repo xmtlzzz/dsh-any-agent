@@ -18,6 +18,7 @@
  *          或单独设置时作用于自动发现的 npm/npx 候选 —— 桌面版始终用它自带的运行时）。
  */
 
+import { DSH_PKG_PARTS, DSH_ASAR_ROOT } from './dsh-contract.mjs';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { readFile, rm, stat } from 'node:fs/promises';
@@ -30,10 +31,7 @@ import { L } from './lang.mjs';
 const execFileAsync = promisify(execFile);
 
 /** 相对 DSH 包根的入口与包描述。 */
-const DSH_PKG_PARTS = ['@deepseek-ai', 'dsh'];
 const DSH_ENTRY = join(...DSH_PKG_PARTS, 'lib', 'bin.js');
-/** 桌面版 asar 内 DSH 包的位置（实测 0.2.2-rc.1：`app.asar/dsh/node_modules/@deepseek-ai/dsh`）。 */
-const ASAR_DSH_ROOT = ['dsh', 'node_modules', ...DSH_PKG_PARTS];
 
 const SOURCE_RANK = { env: 4, desktop: 3, global: 2, npx: 1 };
 export const SOURCE_LABEL = { env: 'DSH_BIN', desktop: '桌面版', global: 'npm 全局', npx: 'npx 缓存' };
@@ -391,7 +389,7 @@ export function desktopCandidate({ dir, exe = null, displayVersion = null, via }
       ? join(dir, 'Contents', 'Resources', 'app.asar')
       : join(dir, 'resources', 'app.asar');
   if (!existsSync(asar)) return null;
-  const bin = join(asar, ...ASAR_DSH_ROOT, 'lib', 'bin.js');
+  const bin = join(asar, ...DSH_ASAR_ROOT, 'lib', 'bin.js');
   if (!isDshEntry(bin)) return null;
   const runtime = desktopExeForAsar(asar, exe);
   if (!runtime) return null;

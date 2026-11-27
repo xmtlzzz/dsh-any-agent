@@ -2,6 +2,8 @@
 
 # 🧩 Compatibility matrix
 
+Verified standard ACP range is `0.1.7 ~ 0.2.2`.
+
 `dsh-any-agent` drives DSH through its ACP profile. Team mode uses experimental
 plugins or the session team mode, depending on the DSH version. Check this table before
 upgrading DSH, and run `dsh_doctor` afterwards.

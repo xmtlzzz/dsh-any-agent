@@ -513,7 +513,7 @@ export const TOOL_DEFS = [
     annotations: H(true, false, true, true),
     description:
       '只读体检：DSH 可执行文件与版本、profile 是否存在/漂移、状态文件、runs/locks 目录可写、孤儿锁、' +
-      '当前会话数与 RSS、生效配置。只报告不修改；ok=false 表示存在 fail 项。',
+      '存储格式、常驻进程数量、当前会话数与 RSS、生效配置。只报告不修改；ok=false 表示存在 fail 项。',
     inputSchema: S({}, []),
   },
 ];

@@ -20,8 +20,8 @@
 | `DSH_MCP_FORGOTTEN_DIR` | `$DSH_HOME/.dsh-any-agent-forgotten` | `dsh_release(forget=true)` 写的墓碑目录 |
 | `DSH_MCP_LOCK_STALE_MS` | `90000`（3× `REAP_INTERVAL_MS`，下限 30 秒） | 持锁登记多久没续心跳就算"持有者失联"（`dsh_takeover` 核实进程身份后可接管）；改回收间隔会改变推导出的默认值 |
 | `DSH_MCP_IDLE_TTL_MS` | `600000`（10 分钟） | 会话空闲多久回收其 DSH 进程。**默认 10 分钟**：回收后内存释放，下次派活自动 resume（对话不丢），代价是写锁会空出来、GUI 可能拿走。设 `0` = 永不回收（一直握锁，代价是每会话常驻 300–480MB）；需要长期握锁的个别会话用 `dsh_start(keep_alive=true)` |
-| `DSH_MCP_MAX_LIVE` | `4`（最坏约 1.2–1.9GB） | ★ **最多同时保活几个会话进程**（`0` = 不限）。超标时回收**最久没用过**的（**在跑的回合绝不回收**）。`keep_alive=true` 的会话不受本上限约束。用完想立刻放掉空闲会话：`dsh_release(all=true)`（busy 回合默认跳过，`force=true` 才中断） |
-| `DSH_MCP_MAX_RSS_MB` | `0`（关闭） | 全局子进程内存预算（MB）。实际 RSS 超过预算时按"最久未用"回收空闲会话，`keep_alive` 会话最后才动。按实际内存而不是会话数，适合上下文大小差异大的场景 |
+| `DSH_MCP_MAX_LIVE` | `4`（最坏约 1.2–1.9GB） | ★ **最多同时保活几个会话进程**（`0` = 不限）。共享宿主按 PID 计数。超标时回收**最久没用过**的（**在跑的回合绝不回收**）。`keep_alive=true` 的会话不受本上限约束。用完想立刻放掉空闲会话：`dsh_release(all=true)`（busy 回合默认跳过，`force=true` 才中断） |
+| `DSH_MCP_MAX_RSS_MB` | `0`（关闭） | 按 PID 统计子进程 RSS（MB）。超过预算时，仅回收所有会话都空闲的进程，按组内最近一次使用时间从早到晚选择。含 `keep_alive` 会话的组排在最后。 |
 | `DSH_MCP_CHILD_MAX_OLD_SPACE_MB` | `0`（不设） | 给每个 DSH 子进程追加 `--max-old-space-size`，兜底失控的上下文。设太小会让长会话 OOM |
 | `DSH_MCP_SHARED_PROCESS` | `1`（开启） | **默认开启**：同 `(cwd, permission)` 的会话共享一个 ACP 进程。显著省内存与冷启动（实测第二个会话 `session/new` 约 300ms，独立进程约 4s），`dsh_doctor` 的 RSS 也按 PID 去重。代价：进程崩溃会连坐同组会话（统一写 error 哨兵，之后各自 resume），所以 `dsh_takeover` 杀这类进程时要求 `force=true`。设 `0` 回到"一会话一进程" |
 | `DSH_MCP_AUDIT_FILE` | 空（关闭） | 元数据审计 JSONL 路径。只记事件、会话/回合 ID、决定与计数；**不记** prompt、正文、思考、工具输入。10MB 滚动到 `.1` |
@@ -44,6 +44,7 @@
 | `DSH_MCP_STALL_MS` | `600000`（10 分钟） | 多久没有任何进展（DSH 推来的正文、思考、工具状态、用量更新）算卡住；有工具在执行时放大 3 倍，等调用方裁决审批时不判。卡住就发 `session/cancel`（同 `dsh_interrupt`），结果带 `watchdog` |
 | `DSH_MCP_TURN_MAX_MS` | `7200000`（2 小时） | 单个回合的总时长上限，**不看进展**（拦得住陷在循环里、一直在输出的回合）。`0` = 不设上限 |
 | `DSH_MCP_DAEMON` | 运行时默认关（`setup` 默认写入 `1`） | `1` = 常驻进程模式：客户端拉起的进程只做转发，会话、DSH 进程和正在跑的回合都在一个 detached 的常驻进程里，客户端关掉、重连或崩溃都不会打断回合。同一配置（`DSH_*` 与语言变量、名字以 `_KEY`、`_TOKEN` 或 `_SECRET` 结尾的凭据变量如 `DEEPSEEK_API_KEY` 或 profile 里 `apiKeyEnv` 指的变量、`*_PROXY`，以及 `dsh-any-agent team on/off` 的设置）的客户端共用一个常驻进程，DSH 继承的是它的环境；凭据放在别的名字的变量里不在此列，请改名或别开这个模式。`dsh-any-agent-setup --yes` 默认写入 `DSH_MCP_DAEMON=1`，加 `--no-daemon` 退回直连 stdio（`0`），可用 `dsh-any-agent daemon status|stop` 查看与停止 |
+| `DSH_MCP_DAEMON_IGNORE_ENV` | 空 | 逗号分隔的变量名或含 `*` 的模式（如 `FOO_TOKEN,BAR_*`）。排除这些变量后复用常驻进程；常见 IDE 会话令牌默认忽略。仅排除无关变量，凭据和代理通常应参与身份区分。 |
 | `DSH_MCP_DAEMON_IDLE_MS` | `600000`（10 分钟） | 常驻进程在没有客户端连着、也没有回合在跑时，空闲多久后自己退出。`0` = 不自动退出 |
 | `DSH_MCP_WORKTREES_DIR` | `<状态目录>/worktrees` | `dsh_start(isolation="worktree")` 建的 worktree 放在哪里 |
 | `DSH_MCP_REGISTER_WORKSPACE` | `project` | `project` / `all` / `0` |

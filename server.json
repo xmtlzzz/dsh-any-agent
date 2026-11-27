@@ -6,12 +6,12 @@
     "url": "https://github.com/xmtlzzz/dsh-any-agent",
     "source": "github"
   },
-  "version": "0.8.1",
+  "version": "0.8.2",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "dsh-any-agent",
-      "version": "0.8.1",
+      "version": "0.8.2",
       "transport": {
         "type": "stdio"
       },
@@ -31,6 +31,13 @@
           "isSecret": false,
           "default": "0",
           "choices": ["0", "1"]
+        },
+        {
+          "name": "DSH_MCP_DAEMON_IGNORE_ENV",
+          "description": "Comma-separated environment variable names or wildcard patterns to exclude from daemon identity.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false
         },
         {
           "name": "DSH_BIN",

@@ -2,6 +2,7 @@
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,
+    "noImplicitThis": true,
     "noEmit": true,
     "target": "ES2023",
     "module": "NodeNext",

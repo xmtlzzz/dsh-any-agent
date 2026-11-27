@@ -21,9 +21,14 @@
  * 连接后第一行必须带对令牌，否则直接断开。本机别的用户、别的程序连上管道也派不了活。
  */
 
+import { isPidAlive } from './procstat.mjs';
+import { listDaemons } from './daemon-info.mjs';
+import { readProcessStartTime, processStartTime } from './locks.mjs';
+import { writeJsonAtomic } from './fs-atomic.mjs';
+export { listDaemons };
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -49,6 +54,7 @@ const AUTH_TIMEOUT_MS = 3000;
  * `*_PROXY`。不能整个环境都算：客户端环境里有每个会话都不同的变量（会话 id、管道名），
  * 那样每次重连都会另起一个常驻进程。钥匙是高熵随机串，截断的哈希反推不出来。
  */
+const CLIENT_SESSION_ENV = /^(?:VSCODE_.*|WT_SESSION|TERM_SESSION_ID|(?:CURSOR|ANTIGRAVITY)_.*_TOKEN|CLAUDE_CODE_SESSION_.*|CODEX_SESSION_.*)$/i;
 const IDENTITY_ENV = (key) =>
   key.startsWith('DSH_') || key === 'LANG' || key === 'LC_ALL' || key === 'LC_MESSAGES' || /(^|_)(API_?KEY|KEY|TOKEN|SECRET|PROXY)$/i.test(key);
 
@@ -75,8 +81,13 @@ export function daemonEndpoint(env = process.env) {
   // Keep proxies that require the acknowledgement separate from older daemons.
   h.update(`auth-v2\0${SERVER_VERSION}\0${STATE_DIR}`);
   const identity = new Map();
+  const ignore = (env.DSH_MCP_DAEMON_IGNORE_ENV ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const matches = ignore.map((pattern) => new RegExp('^' + pattern.split('*')
+    .map((part) => part.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&')).join('.*') + '$', process.platform === 'win32' ? 'i' : ''));
   for (const name of Object.keys(env).sort()) {
     const key = process.platform === 'win32' ? name.toUpperCase() : name;
+    if (CLIENT_SESSION_ENV.test(key) || key === 'DSH_MCP_DAEMON_IGNORE_ENV') continue;
+    if (matches.some((pattern) => pattern.test(key))) continue;
     if (IDENTITY_ENV(key) && !identity.has(key)) identity.set(key, env[name]);
   }
   for (const key of [...identity.keys()].sort()) h.update(`\0${key}=${identity.get(key)}`);
@@ -92,6 +103,7 @@ export function daemonEndpoint(env = process.env) {
   };
 }
 
+/** @returns {import('./types.mjs').DaemonInfo|null} */
 function readInfo(ep) {
   try {
     return JSON.parse(readFileSync(ep.infoFile, 'utf8'));
@@ -273,17 +285,6 @@ function authenticate(socket, token, onAuthed) {
   socket.on('data', onData);
 }
 
-/** 原子写信息文件（只有当前用户能读：令牌在里面）。 */
-function writeInfo(ep, info) {
-  const tmp = `${ep.infoFile}.tmp.${process.pid}`;
-  try {
-    writeFileSync(tmp, JSON.stringify(info, null, 2), { encoding: 'utf8', mode: 0o600 });
-    renameSync(tmp, ep.infoFile);
-  } finally {
-    try { rmSync(tmp, { force: true }); } catch {}
-  }
-}
-
 function listen(server, path) {
   return new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -372,7 +373,11 @@ export async function runDaemon({ log }) {
     rmSync(ep.infoFile, { force: true });
     hub = await startHub(log);
     hub.runtime = { mode: 'daemon', endpointId: ep.id, pid: process.pid, logFile: ep.logFile };
-    writeInfo(ep, { pid: process.pid, token, path: ep.path, version: SERVER_VERSION, started_at: new Date().toISOString() });
+    const started_at_ms = await readProcessStartTime(process.pid);
+    /** @type {import('./types.mjs').DaemonInfo} */
+    const info = { pid: process.pid, token, path: ep.path, version: SERVER_VERSION,
+      started_at: new Date().toISOString(), started_at_ms };
+    writeJsonAtomic(ep.infoFile, info, { mode: 0o600 });
     lastActive = Date.now();
     warmDshDiscovery();
   } catch (error) {
@@ -398,41 +403,6 @@ export async function runDaemon({ log }) {
   }
 }
 
-function pidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e.code === 'EPERM';
-  }
-}
-
-/** 列出状态目录下所有登记过的常驻进程信息（附存活状态）。 */
-export function listDaemons() {
-  if (!existsSync(STATE_DIR)) return [];
-  const out = [];
-  for (const name of readdirSync(STATE_DIR).sort()) {
-    const m = /^daemon-([0-9a-f]+)\.json$/.exec(name);
-    if (!m) continue;
-    const infoFile = join(STATE_DIR, name);
-    try {
-      const info = JSON.parse(readFileSync(infoFile, 'utf8'));
-      out.push({
-        id: m[1],
-        pid: info.pid ?? null,
-        alive: pidAlive(info.pid),
-        version: info.version ?? null,
-        started_at: info.started_at ?? null,
-        infoFile,
-      });
-    } catch {
-      /* 损坏的旧文件忽略 */
-    }
-  }
-  return out;
-}
-
 async function requestShutdown(info, id, timeoutMs) {
   if (!info?.token) return false;
   const socket = await connectAuth(
@@ -443,10 +413,10 @@ async function requestShutdown(info, id, timeoutMs) {
   if (!socket) return false;
   socket.destroy();
   const deadline = Date.now() + timeoutMs;
-  while (pidAlive(info.pid) && Date.now() < deadline) {
+  while (isPidAlive(info.pid) && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 50));
   }
-  return !pidAlive(info.pid);
+  return !isPidAlive(info.pid);
 }
 
 /**
@@ -459,25 +429,35 @@ export async function stopDaemons({ timeoutMs = 3_000 } = {}) {
   const cleaned = [];
   for (const d of listDaemons()) {
     if (d.alive) {
-      let info = null;
-      try {
-        info = JSON.parse(readFileSync(d.infoFile, 'utf8'));
-      } catch {}
+      const info = readInfo(d);
+      if (info?.pid !== d.pid) continue;
       if (await requestShutdown(info, d.id, timeoutMs)) {
         stopped.push({ ...d, graceful: true });
+        continue;
+      }
+      // A failed handshake cannot establish ownership. Only signal a verified incarnation.
+      if (!Number.isFinite(info.started_at_ms) || info.started_at_ms <= 0) continue;
+      const actual = processStartTime(d.pid);
+      if (actual === null) continue;
+      const current = readInfo(d);
+      if (current?.pid !== d.pid || current.started_at_ms !== info.started_at_ms || current.token !== info.token) continue;
+      if (actual !== info.started_at_ms) {
+        rmSync(d.infoFile, { force: true });
+        cleaned.push(d);
         continue;
       }
       try {
         process.kill(d.pid, 'SIGTERM');
         stopped.push({ ...d, graceful: false });
         const deadline = Date.now() + 500;
-        while (pidAlive(d.pid) && Date.now() < deadline) {
+        while (isPidAlive(d.pid) && Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 50));
         }
-        if (!pidAlive(d.pid)) rmSync(d.infoFile, { force: true });
+        if (!isPidAlive(d.pid) && readInfo(d)?.token === info.token) rmSync(d.infoFile, { force: true });
       } catch {}
     } else {
       try {
+        if (readInfo(d)?.pid !== d.pid || isPidAlive(d.pid)) continue;
         rmSync(d.infoFile, { force: true });
         cleaned.push(d);
       } catch {}

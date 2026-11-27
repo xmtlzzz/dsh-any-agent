@@ -8,13 +8,17 @@
  * 注意：这是**形状匹配**，不是数据分类器。它挡的是常见误写，不是"绝对安全"。
  */
 
-const SECRET_KEY =
-  /^(?:api[_-]?key|authorization|proxy[_-]?authorization|cookie|set[_-]?cookie|password|passwd|secret|token|access[_-]?token|refresh[_-]?token|credentials?|headers|env|environment)$/i;
+export const LOOKS_LIKE_SECRET = /^(?:sk-|ak-|Bearer\s|eyJ|gh[pous]_|github_pat_|AKIA[0-9A-Z]{16}|xox[baprs]-)/i;
+export const SECRET_KEY =
+  /^(?:api[_-]?key|authorization|proxy[_-]?authorization|cookie|set[_-]?cookie|password|passwd|secret|token|access[_-]?token|refresh[_-]?token|credentials?|headers|client[_-]?secret|private[_-]?key|access[_-]?key[_-]?id|oauth|x[_-]?api[_-]?key|auth[_-]?token|env|environment)$/i;
 
 export function sanitizeApprovalContext(value, key = '') {
   if (SECRET_KEY.test(key)) return '[REDACTED]';
   if (typeof value === 'string') {
     return value
+      .replace(/\b(?:gh[pous]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g, '[REDACTED]')
+      .replace(/("(?:api[_-]?key|token|password|secret|authorization)"\s*:\s*)"(?:\\.|[^"\\])*"/gi, '$1"[REDACTED]"')
+      .replace(/(X-Api-Key:\s*)[^\s'";]+/gi, '$1[REDACTED]')
       .replace(/\b(?:sk|ak)-[A-Za-z0-9_-]{8,}/g, '[REDACTED]')
       .replace(/\bBearer\s+[^\s'";]+/gi, 'Bearer [REDACTED]')
       .replace(

@@ -19,7 +19,9 @@ function recordAutoApproval(conv, params, toolCall, desc, options) {
   c.autoApprovals.push(autoApprovalSummary(params, toolCall, desc, options));
 }
 
-export async function handlePermissionRequest(conv, { hub, activity }, params) {
+/** @param {import('../types.mjs').ConversationContext} ctx */
+export async function handlePermissionRequest(conv, ctx, params) {
+  const { hub, activity } = ctx;
   const options = params?.options ?? [];
   const rawToolCall = params?.toolCall ?? {};
   const known = conv.collector?.tools?.get(rawToolCall.toolCallId) ?? null;
@@ -89,7 +91,9 @@ export async function handlePermissionRequest(conv, { hub, activity }, params) {
   });
 }
 
-export function decideApproval(conv, { activity }, approvalId, decision) {
+/** @param {import('../types.mjs').ConversationContext} ctx */
+export function decideApproval(conv, ctx, approvalId, decision) {
+  const { activity } = ctx;
   const p = conv.pendingApprovals.get(approvalId);
   if (!p) throw new Error(L(`没有待决审批: ${approvalId}`, `No pending approval: ${approvalId}`));
   conv.pendingApprovals.delete(approvalId);

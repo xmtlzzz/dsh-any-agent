@@ -36,6 +36,14 @@ const check = (name, cond, detail = '') => {
   }
 };
 
+check('Block scalar preserves sequence mapping and sibling', JSON.stringify(yamlLoad('- a: |\n    hi\n  b: 1')) === JSON.stringify([{ a: 'hi\n', b: 1 }]));
+check('Shallow and empty sequence scalars preserve siblings', JSON.stringify(yamlLoad('- a: |\n  hi\n- a: >\n  b: 1')) === JSON.stringify([{ a: 'hi\n' }, { a: '', b: 1 }]));
+const empties = { a: {}, b: [], list: [{ a: {}, b: [] }, { b: [], a: {} }, [], {}] };
+check('Empty flow collections round trip inline and as indented blocks',
+  yamlDump(empties).includes('- a: {}') && yamlDump(empties).includes('- b: []') &&
+  JSON.stringify(yamlLoad(yamlDump(empties))) === JSON.stringify(empties) &&
+  JSON.stringify(yamlLoad('a:\n  {}\nb:\n  []')) === '{"a":{},"b":[]}');
+
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-bootstrap-'));
 const home = join(root, 'home');
 

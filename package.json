@@ -1,6 +1,6 @@
 {
   "name": "dsh-any-agent",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Drive DeepSeek Harness (DSH) as a long-lived coding agent from any MCP client — Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Zed, Gemini CLI, Antigravity, opencode, VS Code. Resume-aware, interruptible, approval-capable, and it only ever touches the one config entry it owns.",
   "type": "module",
   "mcpName": "io.github.xmtlzzz/dsh-any-agent",
@@ -55,6 +55,7 @@
     "lint": "node ./scripts/lint.mjs",
     "typecheck": "node ./scripts/typecheck.mjs",
     "check:release": "node ./scripts/check-release.mjs",
+    "docs:sync:check": "node ./scripts/check-docs-sync.mjs",
     "docs:counts": "node ./scripts/sync-test-counts.mjs",
     "docs:counts:check": "node ./scripts/sync-test-counts.mjs --check",
     "commit": "node ./scripts/commit.mjs"

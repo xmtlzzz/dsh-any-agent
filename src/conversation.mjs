@@ -69,6 +69,7 @@ export class Conversation {
     this.recycling = null;
     this.lastChildPid = null;
     this.lockConflict = null;
+    /** @type {Map<string, import('./types.mjs').PendingApprovalEntry>} */
     this.pendingApprovals = new Map();
     this.currentRun = null;
     this.collector = null;
@@ -86,6 +87,7 @@ export class Conversation {
     this.lastResult = null;
   }
 
+  /** @returns {import('./types.mjs').ConversationContext} */
   #ctx() {
     return {
       hub: this.#hub,
@@ -123,6 +125,7 @@ export class Conversation {
     }
   }
 
+  /** @returns {import('./types.mjs').ConversationState} */
   toState() {
     return {
       id: this.id,

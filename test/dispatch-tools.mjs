@@ -233,8 +233,7 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
   const got = await handlers.dsh_get({ conversation_id: c.id });
   check('不带 run_id 的 dsh_get 取的也是正在跑的那个', () => assert.equal(got.structured.run?.run_id, running.run_id));
   proc.end();
-  // 收尾先放开 busy，再将状态改成 done：等到状态落定。
-  for (let i = 0; i < 500 && c.getRun(running.run_id).status === 'running'; i++) await tick(10);
+  for (let i = 0; i < 500 && c.busy; i++) await tick(10);
   const st3 = await handlers.dsh_status({ conversation_id: c.id });
   check('跑完以后：run 是刚跑完的那个，不是更晚建、没开跑就取消的排队回合', () =>
     assert.deepEqual([st3.structured.run?.run_id, st3.structured.run?.status], [running.run_id, 'done']));

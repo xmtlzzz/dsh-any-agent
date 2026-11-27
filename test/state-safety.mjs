@@ -7,7 +7,7 @@
  *   [4] 非法数值环境变量落到安全侧（负 TTL 不清空哨兵；空串权限/思考档回落默认）
  */
 
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, utimesSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, statSync, utimesSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -242,6 +242,71 @@ try {
     if (child.exitCode === null && child.signalCode === null) child.kill();
     await exited;
   }
+
+  const { createMcpServer } = await import('../src/mcp.mjs');
+  const { PassThrough } = await import('node:stream');
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const errors = [];
+  output.on('data', (chunk) => errors.push(JSON.parse(chunk)));
+  createMcpServer({ input, output, handlers: {} }).start();
+  input.end('{\n{"jsonrpc":"2.0"}\n{"jsonrpc":"2.0","id":{}}\n');
+  await new Promise((done) => setImmediate(done));
+  check('Malformed JSON and invalid requests return null IDs', errors.length === 3 &&
+    errors.every((e) => e.id === null) && errors.map((e) => e.error.code).join(',') === '-32700,-32600,-32600');
+  const { schemaIssue } = await import('../src/tool-schema.mjs');
+  check('Nullable strings and numbers ignore inapplicable bounds',
+    schemaIssue({ type: ['string', 'null'], maxLength: 1 }, null, 'x') === null &&
+    schemaIssue({ type: ['number', 'null'], minimum: 1 }, null, 'x') === null);
+  const { execFileSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/check-docs-sync.mjs', import.meta.url))]);
+  check('Documentation contract check succeeds', true);
+  const { inspectDshStorageLayout } = await import('../src/dsh-contract.mjs');
+  const formatHome = join(root, 'formats');
+  const workspace = join(formatHome, 'storages', 'workspace.json');
+  mkdirSync(dirname(workspace), { recursive: true });
+  writeFileSync(workspace, '{"unit":{"version":2}}');
+  check('Known workspace schema passes inspection', inspectDshStorageLayout(formatHome).status === 'ok');
+  writeFileSync(workspace, '{"unit":{"version":3}}');
+  check('Unknown workspace schema warns without rewriting it',
+    inspectDshStorageLayout(formatHome).status === 'warn' && readFileSync(workspace, 'utf8') === '{"unit":{"version":3}}');
+  const sessionDir = join(home, 'sessions', 'bucket', 'future');
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(join(sessionDir, 'session.v5.jsonl'), '');
+  writeFileSync(join(dirname(cfg.STATE_FILE), 'daemon-aaaa.json'), JSON.stringify({ pid: process.pid }));
+  writeFileSync(join(dirname(cfg.STATE_FILE), 'daemon-bbbb.json'), JSON.stringify({ pid: process.ppid }));
+  process.env.DSH_MCP_UPDATE_CHECK = '0';
+  const { runDoctor } = await import('../src/doctor.mjs');
+  const doctor = await runDoctor(new Hub());
+  const storage = doctor.structured.checks.find((c) => c.id === 'dsh_storage');
+  check('Doctor warns about a newer session log version', storage?.status === 'warn' && /5/.test(storage.detail));
+  const daemon = doctor.structured.checks.find((c) => c.id === 'daemon');
+  check('Doctor reports multiple active daemons with a configuration hint',
+    daemon?.status === 'warn' && /2/.test(daemon.detail) && /DSH_MCP_DAEMON_IGNORE_ENV/.test(daemon.fix));
+
+  const { writeFileAtomic } = await import('../src/fs-atomic.mjs');
+  const blockedTarget = join(root, 'existing-dir');
+  mkdirSync(blockedTarget);
+  let writeFailed = false;
+  try { writeFileAtomic(blockedTarget, 'content'); } catch { writeFailed = true; }
+  check('Failed replacement cleans temporary files', writeFailed && !readdirSync(root).some((f) => f.startsWith('existing-dir.tmp.')));
+
+  const { metaFilePath } = await import('../src/hub-store.mjs');
+  const dirtyHub = new Hub();
+  const persisted = new Conversation({ id: 'dirty-meta', cwd: root }, dirtyHub);
+  dirtyHub.conversations.set(persisted.id, persisted);
+  const sidecar = metaFilePath(persisted.id);
+  await dirtyHub.save();
+  utimesSync(sidecar, 1000000, 1000000);
+  await dirtyHub.save();
+  check('Unchanged metadata keeps the original sidecar', statSync(sidecar).mtimeMs === 1000000000);
+  persisted.titleHint = 'changed';
+  await dirtyHub.save();
+  check('Changed metadata is persisted', JSON.parse(readFileSync(sidecar, 'utf8')).titleHint === 'changed');
+  rmSync(sidecar);
+  await dirtyHub.save();
+  check('Missing sidecar is recreated', existsSync(sidecar));
 
   console.log('\n[8] workspace_changed 用快照内容比较');
   const { sameWorkspaceSnapshot } = await import('../src/hub.mjs');

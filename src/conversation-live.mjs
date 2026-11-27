@@ -31,7 +31,6 @@ export class ConversationLive {
   }
 
   finishUsage(runId, { flush = true } = {}) {
-    // A newer turn may already have started while the previous Git snapshot was pending.
     if (this.#liveUsage?.runId !== runId) return;
     if (flush) this.usageTick({ force: true });
     this.#liveUsage = null;

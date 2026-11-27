@@ -308,7 +308,7 @@ try {
       const ev2 = events(id);
       return ev2.findIndex((e) => e.type === 'run.end') < ev2.findIndex((e) => e.type === 'usage' && e.final);
     });
-    // 第二轮开始后才放行第一轮收尾，确保第一轮不能清空第二轮的用量基线。
+    // 阻塞第一轮收尾，第二轮应保持排队，各轮独立结算用量。
     const overlapId = 'live-events-overlap';
     const saving = Promise.withResolvers();
     const resume = Promise.withResolvers();
@@ -319,20 +319,19 @@ try {
     overlap.proc.end();
     await Promise.race([saving.promise, first.then(() => { throw new Error('first turn finished before save'); })]);
     writeProj(overlapId, { outputTokens: 20 }, {});
-    const second = overlap.conv.prompt('second', { wait: true });
-    try {
-      await overlap.proc.ready();
-    } finally {
-      resume.resolve();
-    }
-    await first;
+    const { run: second } = overlap.conv.enqueue('second');
+    check('收尾期间仍然忙碌，下一轮保持排队', () =>
+      overlap.conv.busy && overlap.conv.currentRun.status === 'running' && second.status === 'queued');
+    resume.resolve();
+    const firstResult = await first;
+    await overlap.proc.ready();
     writeProj(overlapId, { outputTokens: 27 }, {});
     overlap.proc.end();
-    const secondResult = await second;
+    for (let i = 0; i < 250 && second.status === 'running'; i++) await tick();
     const finalUsage = events(overlapId).filter((e) => e.type === 'usage' && e.final);
-    check('上一轮延迟收尾时，最终用量仍归第二轮并沿用其基线', () =>
-      finalUsage.length === 1 && finalUsage[0].run === secondResult.run_id &&
-      finalUsage[0].turn === 2 && finalUsage[0].tokens.output === 7);
+    check('两轮最终用量分别按自己的基线结算', () =>
+      finalUsage.length === 2 && finalUsage[0].run === firstResult.run_id && finalUsage[0].tokens.output === 10 &&
+      finalUsage[1].run === second.run_id && finalUsage[1].turn === 2 && finalUsage[1].tokens.output === 7);
 
     // 没有投影缓存（DSH 还没写）：不发 usage，也不报错
     const nk = makeConv('live-events-no-proj');

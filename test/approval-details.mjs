@@ -1,4 +1,5 @@
 /** Approval context and lifecycle regression: no DSH process or model request. */
+import { sanitizeApprovalContext } from '../src/redact.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,6 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-approval-details-'));
+process.env.DSH_HOME = join(root, 'home');
 process.env.DSH_MCP_STATE = join(root, 'state.json');
 process.env.DSH_MCP_APPROVAL = 'auto-allow';
 delete process.env.DSH_MCP_APPROVAL_TIMEOUT_MS;
@@ -29,6 +31,15 @@ let checks = 0;
 function check(name, fn) { fn(); checks++; console.log(`  ✓ ${name}`); }
 
 try {
+  check('Token shapes, embedded JSON credentials, headers and structured fields are redacted', () => {
+    const tokens = ['ghp_' + 'a'.repeat(20), 'github_pat_' + 'a_b'.repeat(8), 'AKIA' + '1'.repeat(16),
+      'xoxb-' + 'a'.repeat(12), 'eyJ' + 'a'.repeat(12) + '.' + 'b'.repeat(12) + '.' + 'c'.repeat(12)];
+    for (const token of tokens) assert.equal(sanitizeApprovalContext('use ' + token), 'use [REDACTED]');
+    assert.equal(sanitizeApprovalContext('{"api_key":"hidden"}'), '{"api_key":"[REDACTED]"}');
+    assert.equal(sanitizeApprovalContext('X-Api-Key: hidden'), 'X-Api-Key: [REDACTED]');
+    assert.deepEqual(sanitizeApprovalContext({ private_key: 'one', client_secret: 'two' }),
+      { private_key: '[REDACTED]', client_secret: '[REDACTED]' });
+  });
   console.log('\n[1] ask exposes actionable context without replacing the ID list');
   const outcome = conv.onPermissionRequest(request({ command: 'node ./probe.cjs', description: 'Run read-only production probe', justification: 'Allow local child process', workdir: root }));
   const snap = conv.snapshot();

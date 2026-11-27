@@ -6,12 +6,13 @@
  * 每会话一个纯 JSON 文件，读取不需要解开多帧 zstd 日志，所以这里是首选读取路径。
  */
 
+import { DSH_PROJCACHE_REL, DSH_PROJCACHE_ROWS as ROWS } from './dsh-contract.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DSH_HOME } from './config.mjs';
 
 function projCachePath(sessionId) {
-  return join(DSH_HOME, 'storages', 'session_projcache', 'sessions', `${sessionId}.json`);
+  return join(DSH_HOME, ...DSH_PROJCACHE_REL, `${sessionId}.json`);
 }
 
 /**
@@ -26,17 +27,17 @@ export function readConversationMeta(sessionId) {
     const doc = JSON.parse(readFileSync(p, 'utf8'));
     const rows = doc?.record?.rows ?? {};
     const val = (k) => rows[k]?.val;
-    const model = val('modelSelection');
+    const model = val(ROWS.model);
     return {
-      title: typeof val('title') === 'string' ? val('title') : undefined,
-      lastPromptAt: val('sessionListMetadata')?.lastPromptAt,
-      usage: val('tokenUsage'),
-      pressure: val('contextPressure'),
+      title: typeof val(ROWS.title) === 'string' ? val(ROWS.title) : undefined,
+      lastPromptAt: val(ROWS.metadata)?.lastPromptAt,
+      usage: val(ROWS.usage),
+      pressure: val(ROWS.pressure),
       model: model?.lastUsed,
-      sandboxMode: val('sandboxMode'),
+      sandboxMode: val(ROWS.sandbox),
       /** 会话自己的权限记录：`{preset, sandbox, approval, seeded}`。接管会话时必须尊重它。 */
-      permissions: val('permissions'),
-      turns: val('sessionStats')?.turns,
+      permissions: val(ROWS.permissions),
+      turns: val(ROWS.stats)?.turns,
     };
   } catch {
     return null;

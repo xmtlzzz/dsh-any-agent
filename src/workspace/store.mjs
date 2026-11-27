@@ -2,8 +2,11 @@
  * DSH `workspace.json` 注册表读写、登记、回填、定向摘除与漂移检测。
  */
 
+import { DSH_WORKSPACE_SCHEMA_VERSION } from '../dsh-contract.mjs';
+import { writeJsonAtomic } from '../fs-atomic.mjs';
+import { withRegistryLockSync } from '../registry.mjs';
 import { randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { REGISTER_WORKSPACE } from '../config.mjs';
 import { L } from '../lang.mjs';
@@ -21,7 +24,7 @@ import { scanSessions } from './sessions.mjs';
 
 function emptyDoc() {
   return {
-    unit: { name: 'workspace', version: 2 },
+    unit: { name: 'workspace', version: DSH_WORKSPACE_SCHEMA_VERSION },
     global: {
       initialized: true,
       workspaceIds: [],
@@ -56,20 +59,18 @@ function readDoc() {
 }
 
 function writeDoc(doc) {
-  mkdirSync(dirname(WORKSPACE_FILE), { recursive: true });
   try {
     if (existsSync(WORKSPACE_FILE)) copyFileSync(WORKSPACE_FILE, `${WORKSPACE_FILE}.bak-dsh`);
   } catch {
     /* 备份失败不阻断写入 */
   }
-  const tmp = `${WORKSPACE_FILE}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(tmp, JSON.stringify(doc, null, 2), 'utf8');
-    renameSync(tmp, WORKSPACE_FILE);
-  } catch (e) {
-    try { rmSync(tmp, { force: true }); } catch {}
-    throw e;
-  }
+  writeJsonAtomic(WORKSPACE_FILE, doc);
+}
+
+function workspaceTransaction(dryRun, action) {
+  if (dryRun) return action();
+  mkdirSync(dirname(WORKSPACE_FILE), { recursive: true });
+  return withRegistryLockSync(WORKSPACE_FILE, action);
 }
 
 function dropWorkspace(doc, id) {
@@ -118,13 +119,15 @@ export function registerWorkspace(cwd, sessionId) {
     };
   }
   try {
-    const doc = readDoc();
-    const nowIso = new Date().toISOString();
-    const { wsId, ws, created } = ensureWorkspace(doc, cwd, nowIso);
-    if (sessionId && !ws.sessionIds.includes(sessionId)) ws.sessionIds.push(sessionId);
-    ws.updatedAt = nowIso;
-    writeDoc(doc);
-    return { registered: true, workspace_id: wsId, workspace_created: created };
+    return workspaceTransaction(false, () => {
+      const doc = readDoc();
+      const nowIso = new Date().toISOString();
+      const { wsId, ws, created } = ensureWorkspace(doc, cwd, nowIso);
+      if (sessionId && !ws.sessionIds.includes(sessionId)) ws.sessionIds.push(sessionId);
+      ws.updatedAt = nowIso;
+      writeDoc(doc);
+      return { registered: true, workspace_id: wsId, workspace_created: created };
+    });
   } catch (e) {
     return { registered: false, error: e.message };
   }
@@ -142,50 +145,50 @@ export function backfillWorkspaces({ includeTemp = false, dryRun = false, pruneM
     sessions_pruned: 0,
     error: null,
   };
-  let byCwd;
-  let doc;
   try {
-    byCwd = scanSessions();
-    doc = readDoc();
+    return workspaceTransaction(dryRun, () => {
+      const byCwd = scanSessions();
+      const doc = readDoc();
+      const nowIso = new Date().toISOString();
+      const live = new Set();
+      for (const sessions of byCwd.values()) for (const s of sessions) live.add(s.id);
+
+      for (const [cwd, sessions] of byCwd) {
+        stats.sessions_scanned += sessions.length;
+        if (!includeTemp && isTempPath(cwd)) {
+          stats.temp_skipped_sessions += sessions.length;
+          stats.temp_skipped_workspaces += 1;
+          continue;
+        }
+        const { ws, created } = ensureWorkspace(doc, cwd, nowIso);
+        created ? stats.workspaces_created++ : stats.workspaces_existing++;
+        for (const s of sessions) {
+          if (!ws.sessionIds.includes(s.id)) {
+            ws.sessionIds.push(s.id);
+            stats.sessions_added++;
+          }
+        }
+        ws.updatedAt = nowIso;
+      }
+
+      if (pruneMissing) {
+        for (const id of Object.keys(doc.tables.workspaces)) {
+          const ws = doc.tables.workspaces[id];
+          if (!Array.isArray(ws?.sessionIds)) continue;
+          const kept = ws.sessionIds.filter((sid) => live.has(sid));
+          stats.sessions_pruned += ws.sessionIds.length - kept.length;
+          ws.sessionIds = kept;
+        }
+        doc.global.archivedSessionIds = (doc.global.archivedSessionIds ?? []).filter((sid) => live.has(sid));
+        doc.global.pinnedSessionIds = (doc.global.pinnedSessionIds ?? []).filter((sid) => live.has(sid));
+      }
+
+      if (!dryRun) writeDoc(doc);
+      return stats;
+    });
   } catch (e) {
     return { ...stats, error: e.message };
   }
-  const nowIso = new Date().toISOString();
-  const live = new Set();
-  for (const sessions of byCwd.values()) for (const s of sessions) live.add(s.id);
-
-  for (const [cwd, sessions] of byCwd) {
-    stats.sessions_scanned += sessions.length;
-    if (!includeTemp && isTempPath(cwd)) {
-      stats.temp_skipped_sessions += sessions.length;
-      stats.temp_skipped_workspaces += 1;
-      continue;
-    }
-    const { ws, created } = ensureWorkspace(doc, cwd, nowIso);
-    created ? stats.workspaces_created++ : stats.workspaces_existing++;
-    for (const s of sessions) {
-      if (!ws.sessionIds.includes(s.id)) {
-        ws.sessionIds.push(s.id);
-        stats.sessions_added++;
-      }
-    }
-    ws.updatedAt = nowIso;
-  }
-
-  if (pruneMissing) {
-    for (const id of Object.keys(doc.tables.workspaces)) {
-      const ws = doc.tables.workspaces[id];
-      if (!Array.isArray(ws?.sessionIds)) continue;
-      const kept = ws.sessionIds.filter((sid) => live.has(sid));
-      stats.sessions_pruned += ws.sessionIds.length - kept.length;
-      ws.sessionIds = kept;
-    }
-    doc.global.archivedSessionIds = (doc.global.archivedSessionIds ?? []).filter((sid) => live.has(sid));
-    doc.global.pinnedSessionIds = (doc.global.pinnedSessionIds ?? []).filter((sid) => live.has(sid));
-  }
-
-  if (!dryRun) writeDoc(doc);
-  return stats;
 }
 
 /** 把会话 id 从 DSH 的工作区注册表里定点摘掉，不重新扫描磁盘。 */
@@ -193,61 +196,59 @@ export function unregisterSessions(ids, { dryRun = false } = {}) {
   const set = new Set((ids ?? []).filter((x) => typeof x === 'string' && x));
   const res = { changed: false, sessions_removed: 0, workspaces_dropped: [], error: null };
   if (!set.size) return res;
-  let doc;
   try {
-    doc = readDoc();
+    return workspaceTransaction(dryRun, () => {
+      const doc = readDoc();
+      for (const wsId of Object.keys(doc.tables.workspaces)) {
+        const ws = doc.tables.workspaces[wsId];
+        if (!Array.isArray(ws?.sessionIds)) continue;
+        const kept = ws.sessionIds.filter((sid) => !set.has(sid));
+        const removed = ws.sessionIds.length - kept.length;
+        if (!removed) continue;
+        res.sessions_removed += removed;
+        ws.sessionIds = kept;
+        const isTestWs = isTestTempPath(ws.path) || isTestDesktopPath(ws.path) || isTestScratchPath(ws.path);
+        if (kept.length === 0 && isTestWs) {
+          res.workspaces_dropped.push({ id: wsId, path: ws.path });
+          dropWorkspace(doc, wsId);
+        }
+      }
+      for (const key of ['archivedSessionIds', 'pinnedSessionIds']) {
+        const before = doc.global[key] ?? [];
+        const after = before.filter((sid) => !set.has(sid));
+        if (after.length !== before.length) {
+          res.sessions_removed += before.length - after.length;
+          doc.global[key] = after;
+        }
+      }
+      res.changed = res.sessions_removed > 0;
+      if (res.changed && !dryRun) {
+        writeDoc(doc);
+      }
+      return res;
+    });
   } catch (e) {
     return { ...res, error: e.message };
   }
-  for (const wsId of Object.keys(doc.tables.workspaces)) {
-    const ws = doc.tables.workspaces[wsId];
-    if (!Array.isArray(ws?.sessionIds)) continue;
-    const kept = ws.sessionIds.filter((sid) => !set.has(sid));
-    const removed = ws.sessionIds.length - kept.length;
-    if (!removed) continue;
-    res.sessions_removed += removed;
-    ws.sessionIds = kept;
-    const isTestWs = isTestTempPath(ws.path) || isTestDesktopPath(ws.path) || isTestScratchPath(ws.path);
-    if (kept.length === 0 && isTestWs) {
-      res.workspaces_dropped.push({ id: wsId, path: ws.path });
-      dropWorkspace(doc, wsId);
-    }
-  }
-  for (const key of ['archivedSessionIds', 'pinnedSessionIds']) {
-    const before = doc.global[key] ?? [];
-    const after = before.filter((sid) => !set.has(sid));
-    if (after.length !== before.length) {
-      res.sessions_removed += before.length - after.length;
-      doc.global[key] = after;
-    }
-  }
-  res.changed = res.sessions_removed > 0;
-  if (res.changed && !dryRun) {
-    try {
-      writeDoc(doc);
-    } catch (e) {
-      res.error = e.message;
-    }
-  }
-  return res;
 }
 
 function pruneWorkspacesBy(predicate, { dryRun = false, withCount = true } = {}) {
-  let doc;
   try {
-    doc = readDoc();
+    return workspaceTransaction(dryRun, () => {
+      const doc = readDoc();
+      const removed = [];
+      for (const id of Object.keys(doc.tables.workspaces)) {
+        const ws = doc.tables.workspaces[id];
+        if (!predicate(ws)) continue;
+        removed.push(withCount ? { id, path: ws.path, sessions: ws?.sessionIds?.length ?? 0 } : { id, path: ws.path });
+        dropWorkspace(doc, id);
+      }
+      if (!dryRun) writeDoc(doc);
+      return { removed };
+    });
   } catch (e) {
     return { removed: [], error: e.message };
   }
-  const removed = [];
-  for (const id of Object.keys(doc.tables.workspaces)) {
-    const ws = doc.tables.workspaces[id];
-    if (!predicate(ws)) continue;
-    removed.push(withCount ? { id, path: ws.path, sessions: ws?.sessionIds?.length ?? 0 } : { id, path: ws.path });
-    dropWorkspace(doc, id);
-  }
-  if (!dryRun) writeDoc(doc);
-  return { removed };
 }
 
 /** 清掉"没有会话且路径已不存在"的空工作区条目。 */

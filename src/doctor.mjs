@@ -8,11 +8,14 @@
  * `{ structured: { ok, verdict, checks }, text }`。
  */
 
+import { inspectDshStorageLayout } from './dsh-contract.mjs';
+import { listDaemons } from './daemon-info.mjs';
 import { readdirSync, statSync } from 'node:fs';
 import { inspectRegistryLock, readRegistry } from './registry.mjs';
 import { join } from 'node:path';
 import {
   DEFAULT_PERMISSION,
+  DSH_HOME,
   IDLE_TTL_MS,
   MAX_LIVE,
   MAX_RSS_MB,
@@ -119,6 +122,7 @@ export function inspectLive({ dir = liveSettings().dir, level = liveSettings().l
 }
 
 export async function runDoctor(hub) {
+  /** @type {import('./types.mjs').DoctorCheck[]} */
   const checks = [];
   const add = (id, status, detail, fix = null) => checks.push({ id, status, detail, fix });
   let dshVersion = null;
@@ -226,6 +230,9 @@ export async function runDoctor(hub) {
         ),
     );
   }
+
+  const storage = inspectDshStorageLayout(DSH_HOME);
+  add('dsh_storage', storage.status, L(storage.detailZh, storage.detailEn), L(storage.fixZh, storage.fixEn));
 
   const { profile, backend } = resolveTeamProfile(dshVersion);
   try {
@@ -338,6 +345,7 @@ export async function runDoctor(hub) {
   );
 
   // 常驻模式运行状态：区分真正走常驻、普通直连，以及常驻起不来降级到直连。
+  /** @type {import('./types.mjs').HubRuntime} */
   const rt = hub.runtime ?? { mode: 'direct' };
   if (rt.mode === 'daemon') {
     const idleLabel = DAEMON_IDLE_MS > 0 ? `${Math.round(DAEMON_IDLE_MS / 60000)}m` : 'off';
@@ -371,6 +379,19 @@ export async function runDoctor(hub) {
         'direct stdio mode (restarting the client stops in-flight turns; use dsh-any-agent-setup --yes --daemon to keep turns alive)',
       ),
     );
+  }
+
+  try {
+    const count = listDaemons().filter((d) => d.alive).length;
+    if (count > 1) {
+      const daemon = checks.find((check) => check.id === 'daemon');
+      daemon.status = 'warn';
+      daemon.detail += L('；活动常驻进程数：', '; active daemons: ') + count;
+      daemon.fix = [daemon.fix, L('运行 dsh-any-agent daemon status，检查 DSH_MCP_DAEMON_IGNORE_ENV。',
+        'Run dsh-any-agent daemon status and review DSH_MCP_DAEMON_IGNORE_ENV.')].filter(Boolean).join(' ');
+    }
+  } catch (error) {
+    add('daemon_registry', 'warn', error.message);
   }
 
   // 工作区登记漂移检测：识别运行中的 DSH GUI 内存把 workspace.json 覆盖回去的情况。

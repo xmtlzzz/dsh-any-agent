@@ -181,7 +181,7 @@ export function createMcpServer({
 
   async function handle(msg) {
     if (!isObject(msg) || msg.jsonrpc !== '2.0' || (msg.id !== undefined && !validId(msg.id))) {
-      fail(validId(msg?.id) ? msg.id : undefined, -32600, 'Invalid JSON-RPC request');
+      fail(validId(msg?.id) ? msg.id : null, -32600, 'Invalid JSON-RPC request');
       return;
     }
     const { id, method, params } = msg;
@@ -194,7 +194,7 @@ export function createMcpServer({
       return;
     }
     if (typeof method !== 'string') {
-      if (!Object.hasOwn(msg, 'result') && !Object.hasOwn(msg, 'error')) fail(id, -32600, 'Invalid JSON-RPC request');
+      if (!Object.hasOwn(msg, 'result') && !Object.hasOwn(msg, 'error')) fail(id ?? null, -32600, 'Invalid JSON-RPC request');
       return;
     }
 
@@ -343,7 +343,7 @@ export function createMcpServer({
       try {
         msg = JSON.parse(line);
       } catch {
-        fail(undefined, -32700, 'Invalid JSON');
+        fail(null, -32700, 'Invalid JSON');
         continue;
       }
       Promise.resolve()

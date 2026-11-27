@@ -1,3 +1,4 @@
+import { L } from './lang.mjs';
 import {
   lstatSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync,
 } from 'node:fs';
@@ -92,7 +93,13 @@ export function pruneRegistryStages(file) {
   }
 }
 
-/** Publish a populated lock directory in one rename so even a crash leaves an identifiable owner. */
+/**
+ * Publish a populated lock directory in one rename so even a crash leaves an identifiable owner.
+ * @template T
+ * @param {string} file
+ * @param {()=>T} action
+ * @returns {Generator<number,T>}
+ */
 function* registryLockAttempts(file, action) {
   const lock = file + '.lock';
   const stage = mkdtempSync(lock + '-' + process.pid + '-');
@@ -118,11 +125,13 @@ function* registryLockAttempts(file, action) {
           release(lock, owner.marker);
           if (Date.now() >= deadline && !finalRetry) { finalRetry = true; continue; }
         }
-        if (Date.now() >= deadline) throw new Error(`Cannot acquire conversation registry lock ${lock}: ${error.message}`);
+        if (Date.now() >= deadline) {
+          throw new Error(L('无法获取注册表锁 ', 'Cannot acquire registry lock ') + lock + ': ' + error.message);
+        }
         yield 10;
       }
     }
-    action();
+    return action();
   } finally {
     release(acquired ? lock : stage, marker);
   }
@@ -133,30 +142,20 @@ export async function withRegistryLock(file, action) {
   for (const ms of registryLockAttempts(file, action)) await delay(ms);
 }
 
-// Maintenance commands expose a synchronous cleanup API.
+/**
+ * @template T
+ * @param {string} file
+ * @param {()=>T} action
+ * @returns {T}
+ */
 export function withRegistryLockSync(file, action) {
-  for (const ms of registryLockAttempts(file, action)) Atomics.wait(sleepWord, 0, 0, ms);
+  const attempts = registryLockAttempts(file, action);
+  let step = attempts.next();
+  while (step.done === false) {
+    Atomics.wait(sleepWord, 0, 0, step.value);
+    step = attempts.next();
+  }
+  return step.value;
 }
 
-export function writeRegistry(file, doc) {
-  const tmp = file + '.tmp.' + randomUUID();
-  try {
-    writeFileSync(tmp, JSON.stringify(doc, null, 2), { encoding: 'utf8', flag: 'wx' });
-    // Windows readers and indexers can briefly prevent replacement even when
-    // this is the only writer. Keep the original in place through every retry.
-    const deadline = Date.now() + 500;
-    for (;;) {
-      try {
-        renameSync(tmp, file);
-        break;
-      } catch (error) {
-        if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) ||
-            Date.now() >= deadline) throw error;
-        Atomics.wait(sleepWord, 0, 0, 10);
-      }
-    }
-  } finally {
-    try { unlinkSync(tmp); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
-  }
-}
+export { writeJsonAtomic as writeRegistry } from './fs-atomic.mjs';

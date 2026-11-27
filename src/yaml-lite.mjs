@@ -221,6 +221,9 @@ function parseBlock(tokens, index, indent) {
     const line = tokens[index]?.line ?? '?';
     throw new Error(L(`第 ${line} 行缩进不一致`, `Inconsistent indentation on line ${line}`));
   }
+  if (/^[\[{]/.test(tokens[index].text)) {
+    return { value: parseScalar(tokens[index].text), next: index + 1 };
+  }
   return isSeq(tokens[index].text)
     ? parseSequence(tokens, index, indent)
     : parseMapping(tokens, index, indent);
@@ -263,12 +266,14 @@ function parseSequence(tokens, index, indent) {
       const folded = kv.value === '>';
       const parts = [];
       i++;
-      while (i < tokens.length && tokens[i].indent > indent) {
-        parts.push(tokens[i].text);
+      const keyIndent = indent + (t.text.match(/^-\s*/)?.[0]?.length ?? 2);
+      const blockIndent = tokens[i]?.indent;
+      while (i < tokens.length && tokens[i].indent > indent && tokens[i].indent >= blockIndent) {
+        if (tokens[i].indent <= keyIndent && splitKey(tokens[i].text)) break;
+        parts.push(' '.repeat(tokens[i].indent - blockIndent) + tokens[i].text);
         i++;
       }
-      obj[kv.key] = parts.join(folded ? ' ' : '\n') + '\n';
-      continue;
+      obj[kv.key] = parts.length ? parts.join(folded ? ' ' : '\n') + '\n' : '';
     } else {
       obj[kv.key] = parseScalar(kv.value);
       i++;
@@ -385,6 +390,13 @@ function dumpScalar(v) {
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
+function dumpEntry(key, value, indent) {
+  const field = dumpKey(key) + ':';
+  if (!Array.isArray(value) && !isPlainObject(value)) return field + ' ' + dumpScalar(value);
+  if (!Object.keys(value).length) return field + (Array.isArray(value) ? ' []' : ' {}');
+  return field + '\n' + dumpNode(value, indent);
+}
+
 function dumpNode(v, indent) {
   const pad = ' '.repeat(indent);
   if (Array.isArray(v)) {
@@ -395,16 +407,9 @@ function dumpNode(v, indent) {
         if (Array.isArray(item)) return `${pad}-\n${dumpNode(item, indent + 2)}`;
         const entries = Object.entries(item);
         if (!entries.length) return `${pad}- {}`;
-        const [k, val] = entries[0];
-        let out = isPlainObject(val) || Array.isArray(val)
-          ? `${pad}- ${dumpKey(k)}:\n${dumpNode(val, indent + 4)}`
-          : `${pad}- ${dumpKey(k)}: ${dumpScalar(val)}`;
-        for (const [k2, v2] of entries.slice(1)) {
-          out += isPlainObject(v2) || Array.isArray(v2)
-            ? `\n${pad}  ${dumpKey(k2)}:\n${dumpNode(v2, indent + 4)}`
-            : `\n${pad}  ${dumpKey(k2)}: ${dumpScalar(v2)}`;
-        }
-        return out;
+        return entries.map(([k, val], i) =>
+          pad + (i === 0 ? '- ' : '  ') + dumpEntry(k, val, indent + 4),
+        ).join('\n');
       })
       .join('\n');
   }
@@ -412,11 +417,7 @@ function dumpNode(v, indent) {
     const entries = Object.entries(v);
     if (!entries.length) return `${pad}{}`;
     return entries
-      .map(([k, val]) =>
-        isPlainObject(val) || Array.isArray(val)
-          ? `${pad}${dumpKey(k)}:\n${dumpNode(val, indent + 2)}`
-          : `${pad}${dumpKey(k)}: ${dumpScalar(val)}`,
-      )
+      .map(([k, val]) => pad + dumpEntry(k, val, indent + 2))
       .join('\n');
   }
   return `${pad}${dumpScalar(v)}`;

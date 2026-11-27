@@ -2,6 +2,9 @@
  * Hub 磁盘会话兜底接管（adoptFromDisk）与 ACP `session/list` 合并探测（listConversations）。
  */
 
+import { statSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { homedir } from 'node:os';
 import {
   APPROVAL_POLICIES,
   DEFAULT_REASONING_EFFORT,
@@ -10,6 +13,7 @@ import {
   PERMISSION_TIERS,
   REASONING_EFFORTS,
   REVIEW_MODES,
+  STATE_FILE,
   defaultApprovalPolicy,
 } from '../config.mjs';
 import { L } from '../lang.mjs';
@@ -21,7 +25,9 @@ import { isForgotten, readConversationMetaFile } from '../hub-store.mjs';
 
 const now = () => Date.now();
 
-/** 从 DSH 会话存储按 id 兜底接管一条未在注册表里的会话（未知权限时 fail-closed 到 read-only）。 */
+/** 从 DSH 会话存储按 id 兜底接管一条未在注册表里的会话（未知权限时 fail-closed 到 read-only）。
+ * @param {import('../hub.mjs').Hub} hub
+ */
 export async function adoptConversationFromDisk(hub, id) {
   const found = await findSessionHeaderStatus(id);
   if (found.status === 'error') {
@@ -80,7 +86,19 @@ export async function adoptConversationFromDisk(hub, id) {
   return conv;
 }
 
-/** 合并本进程内存中的会话与 DSH 磁盘上未打开的会话（带 LIST_PROBE_TTL_MS 缓存）。 */
+function probeDirectory() {
+  for (const getDirectory of [process.cwd, () => dirname(STATE_FILE)]) {
+    try {
+      const dir = getDirectory();
+      if (statSync(dir).isDirectory()) return dir;
+    } catch { /* The directory was removed or is inaccessible. */ }
+  }
+  return homedir();
+}
+
+/** 合并本进程内存中的会话与 DSH 磁盘上未打开的会话（带 LIST_PROBE_TTL_MS 缓存）。
+ * @param {import('../hub.mjs').Hub} hub
+ */
 export async function listConversations(hub, { cwd = undefined, includeClosed = true } = {}, probeState) {
   const out = new Map();
   for (const c of hub.conversations.values()) {
@@ -105,7 +123,7 @@ export async function listConversations(hub, { cwd = undefined, includeClosed = 
   } else {
     let proc = null;
     try {
-      proc = new AcpProcess({ cwd: cwd ?? process.cwd(), permission: 'read-only' });
+      proc = new AcpProcess({ cwd: cwd ?? probeDirectory(), permission: 'read-only', log: hub.log });
       proc.start();
       await proc.initialize();
       const res = await proc.request('session/list', cwd ? { cwd } : {});

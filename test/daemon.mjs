@@ -10,17 +10,19 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { McpClient } from './mcp-client.mjs';
-import { cleanupSuite } from './residue.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-daemon-'));
 const stateDir = join(root, 'state');
+process.env.DSH_HOME = join(root, 'home');
+const { McpClient } = await import('./mcp-client.mjs');
+const { cleanupSuite } = await import('./residue.mjs');
 const baseEnv = {
   DSH_MCP_DAEMON: '1',
   DSH_MCP_DAEMON_IDLE_MS: '2000',
@@ -179,8 +181,14 @@ try {
   const token = readInfo(info).token;
   await check('令牌对：先确认握手，再返回 MCP 应答', async () => /^OK\n.*dsh-any-agent/.test(await rawProbe(path, JSON.stringify({ dsh_any_agent_auth: token }))));
   const { daemonEndpoint } = await import('../src/daemon.mjs');
+  await check('Client session tokens and custom wildcard exclusions preserve identity', () => {
+    const env = { DSH_MCP_DAEMON_IGNORE_ENV: 'FOO_TOKEN, BAR_*' };
+    const ephemeral = ['VSCODE_EXAMPLE_TOKEN', 'WT_SESSION', 'TERM_SESSION_ID', 'CURSOR_HOST_TOKEN',
+      'CLAUDE_CODE_SESSION_KEY', 'ANTIGRAVITY_IDE_TOKEN', 'CODEX_SESSION_SECRET', 'FOO_TOKEN', 'BAR_SERVICE_KEY'];
+    return ephemeral.every((key) => daemonEndpoint({ ...env, [key]: 'changing' }).id === daemonEndpoint(env).id);
+  });
   await check('credentials and platform environment casing determine the endpoint', () => {
-    for (const key of ['SERVICE_TOKEN', 'SERVICE_SECRET']) {
+    for (const key of ['SERVICE_TOKEN', 'SERVICE_SECRET', 'MY_API_KEY', 'DEEPSEEK_API_KEY', 'HTTP_PROXY']) {
       if (daemonEndpoint({ [key]: 'a' }).id === daemonEndpoint({ [key]: 'b' }).id) return false;
     }
     const same = daemonEndpoint({ HTTP_PROXY: 'proxy' }).id === daemonEndpoint({ http_proxy: 'proxy' }).id;
@@ -248,6 +256,21 @@ try {
   const gSentinel = gSent?.structuredContent?.sentinel_file;
   writeFileSync(join(gracefulStateDir, 'daemon-0000000000000000.json'), JSON.stringify({ pid: 99999999, token: 'stale', version: '0.0.0' }));
   const cli = join(HERE, '..', 'bin', 'dsh-any-agent.mjs');
+  const reuseDir = join(root, 'reused');
+  mkdirSync(reuseDir);
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+  try {
+    await once(unrelated, 'spawn');
+    const stale = join(reuseDir, 'daemon-eeee.json');
+    writeFileSync(stale, JSON.stringify({ pid: unrelated.pid, started_at_ms: 1 }));
+    const res = spawnSync(process.execPath, [cli, 'daemon', 'stop'], {
+      env: { ...process.env, ...baseEnv, DSH_MCP_STATE: join(reuseDir, 'state.json'), DSH_MCP_LANG: 'en' }, encoding: 'utf8',
+    });
+    await check('A reused PID survives stop and its stale discovery file is removed', () =>
+      res.status === 0 && alive(unrelated.pid) && !existsSync(stale) && /cleaned 1 stale/.test(res.stdout));
+  } finally {
+    unrelated.kill();
+  }
   const stopRes = spawnSync(process.execPath, [cli, 'daemon', 'stop'], {
     env: { ...process.env, ...gracefulEnv, DSH_MCP_LANG: 'en' },
     encoding: 'utf8',

@@ -22,13 +22,13 @@
 
 /**
  * @typedef {object} SentinelPayload
- * @property {number} schema
+ * @property {1} schema
  * @property {string} conversation_id
  * @property {string} run_id
  * @property {string|null} client_run_id
  * @property {'done'|'error'|'cancelled'} status
- * @property {string|null} prompt_preview
- * @property {'off'|'advisory'} review_mode
+ * @property {string|null} [prompt_preview]
+ * @property {'off'|'advisory'} [review_mode]
  * @property {number|null} started_at
  * @property {number|null} start_order
  * @property {number} ended_at
@@ -66,6 +66,33 @@
  * @property {number} created_at
  * @property {number} timeout_ms
  */
+
+/**
+ * Runtime approval entry, including the resolver for the pending ACP request.
+ * @typedef {object} PendingApprovalEntry
+ * @property {ApprovalPending['run_id']} runId
+ * @property {{tool:string, details:Record<string, unknown>}} params
+ * @property {number} createdAt
+ * @property {string|null} allowId
+ * @property {string|null} rejectId
+ * @property {(outcome:object)=>void} resolve
+ */
+
+/**
+ * @typedef {object} ConversationContext
+ * @property {import('./hub.mjs').Hub} hub
+ * @property {import('./conversation-live.mjs').ConversationLive} activity
+ * @property {()=>number|null} getLastChildStartedAt
+ * @property {()=>void} assertNotForgotten
+ * @property {()=>void} scheduleDrain
+ * @property {(run:RunRecord|null)=>void} setUndispatched
+ * @property {()=>void} resetCancelBeforeDispatch
+ * @property {()=>boolean} isCancelledBeforeDispatch
+ */
+
+/** @typedef {{id:string, status:'ok'|'warn'|'fail', detail:string, fix:string|null}} DoctorCheck */
+/** @typedef {{mode:'daemon'|'direct', endpointId?:string, pid?:number, logFile?:string, fallbackReason?:string}} HubRuntime */
+/** @typedef {{pid:number, path:string, token:string, version:string, started_at:string, started_at_ms?:number|null}} DaemonInfo */
 
 /**
  * @typedef {object} ClientPlan

@@ -28,7 +28,9 @@ export function pendingReviewTicket(conv, runId) {
   });
 }
 
-export function submitReview(conv, { hub }, runId, { verdict = undefined, notes = undefined, findings = undefined } = {}) {
+/** @param {import('../types.mjs').ConversationContext} ctx */
+export function submitReview(conv, ctx, runId, { verdict = undefined, notes = undefined, findings = undefined } = {}) {
+  const { hub } = ctx;
   if (typeof runId !== 'string' || runId.trim() === '') {
     throw new Error(L('run_id 不能为空', 'run_id must not be empty'));
   }
