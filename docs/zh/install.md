@@ -272,7 +272,7 @@ tool_timeout_sec = 120.0
 
 本地目录安装时改用 `"command": "node"` 和 `"args": ["/绝对路径/server/bin/dsh-any-agent.mjs"]`。
 
-> Cursor、Windsurf、Cline、Continue 等大部分客户端都吃同一套 `mcpServers` 结构——只要能拉起 stdio MCP 服务，就能用。Zed 是例外：它用 `context_servers`（见上方示例）。
+> Cursor、Windsurf、Cline 和 Continue 使用 `mcpServers`。VS Code 使用 `servers`，Zed 使用 `context_servers`，opencode 使用 `mcp`，其中 `command` 是数组。详见上方客户端表格，也可运行 `dsh-any-agent-setup` 预览配置。
 
 </details>
 

@@ -68,7 +68,7 @@ dsh-any-agent-workspaces --purge-test-sessions   # 删测试会话（规则写�
 **落盘的回合结果默认省略思考正文。** 本服务保存答复和审核证据，便于调用方断线后取回。
 
 - 不写日志（默认静默）；状态文件与 `<状态目录>/meta/` 下的会话元数据侧车都只有元数据（id、cwd、权限、计数、标题提示），冒烟测试里有一条断言专门守注册表。
-- **异步完成哨兵需要把正文写进文件**（否则调用方无法离线收活），载荷还包含用量与（已按审批规则脱敏的）工具输入，但 `result.thinking` 会被**剥掉**，并始终给出布尔 `thinking_omitted`。测试里专门验证了：即使请求 `reasoning=full`，哨兵里也不出现任何思考文本——而同一 run 在内存（`dsh_get`）里仍能看到。设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 可刻意打破这条。
+- **异步完成哨兵保存答复、用量和经过凭证脱敏的工具输入。** 命令和文件内容仍可能敏感。默认情况下，即使请求 `reasoning=full`，哨兵也会剥离 `result.thinking`，用 `thinking_omitted` 表示是否剥离了思考正文。`dsh_get(run_id)` 可从内存中返回它。启用 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 后，保留的 `thinking` 同样经过凭证脱敏。
 - **审核记录是第二个刻意落盘的产物**：`<状态目录>/reviews/<会话id>/<run_id>.review.json` 保存裁决、理由/findings、清单与证据摘要。理由、findings、任务预览、证据**以及每个清单项**都走同一套凭证脱敏（清单会拼接 `result.error`），且**不含思考正文**；但它可能引用代码或路径，同样按敏感数据对待。
 - 哨兵**与审核记录**默认 7 天后由启动清理删除（`DSH_MCP_SENTINEL_TTL_MS`，`0` 表示永久保留）。
 - live 事件流（`<状态目录>/live/`，供 `watch` / `dashboard` 查看）默认带**脱敏后的**命令、路径与 prompt 预览，暴露面不超过哨兵；不含思考内容，同样按 7 天清理。不想落这些预览就设 `DSH_MCP_LIVE=meta`，完全不要就设 `off`。`dashboard` 只监听 `127.0.0.1`，要求一次性 token 并校验 Host 头，且是只读的。
@@ -77,7 +77,7 @@ dsh-any-agent-workspaces --purge-test-sessions   # 删测试会话（规则写�
 
 ### 📁 本服务写到磁盘上的东西
 
-`<状态目录>` 默认是 `~/.dsh/.dsh-any-agent/`，跟随 `DSH_MCP_STATE`。开启 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 后，如果回合返回了 `result.thinking`，完成哨兵和临时的 `.running` 结果检查点都可能保存它。
+`<状态目录>` 默认是 `~/.dsh/.dsh-any-agent/`，跟随 `DSH_MCP_STATE`。开启 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 后，完成哨兵和临时的 `.running` 检查点都会对保留的 `result.thinking` 做凭证脱敏。即使 `DSH_MCP_STATE` 指向其他目录，下表中的设置文件和工作区注册表锁仍默认位于 `$DSH_HOME/.dsh-any-agent/`。
 
 | 路径 | 内容 | 保留多久 | 怎么关 / 清 |
 |---|---|---|---|
@@ -87,6 +87,8 @@ dsh-any-agent-workspaces --purge-test-sessions   # 删测试会话（规则写�
 | `<状态目录>/runs/<会话id>/<run_id>.running` | 接单回执：run ID、调用方幂等键、脱敏任务预览、排队或执行状态、所属进程，以及最终 Git 快照前暂存的脱敏结果 | 写出哨兵时删除 | 状态目录应位于支持硬链接的文件系统 |
 | `<状态目录>/reviews/<会话id>/<run_id>.review.json` | 审核记录：裁决、理由、清单、证据摘要（已脱敏） | 同哨兵，7 天 | `DSH_MCP_REVIEW=off` 不自动出审核单 |
 | `<状态目录>/live/<会话id>/events.jsonl` | live 事件流：事件类型、时间、工具名、客户端名；默认还带脱敏后的命令 / 路径 / prompt 预览 | 同哨兵，7 天；5 MB 滚动 | `DSH_MCP_LIVE=meta` 去掉预览，`off` 不写 |
+| `<状态目录>/settings.json` | `dsh-any-agent team on/off` 写入的团队模式开关 | 重启后保留 | `team off` 关闭，`DSH_MCP_SETTINGS` 可更改文件路径。 |
+| `<状态目录>/workspace-registry.lock` | 更新工作区时使用的临时写锁，暂存在 DSH 的 `storages/` 目录之外 | 更新完成后释放 | 启动时清理遗留的锁暂存目录。 |
 | `<状态目录>/locks/<会话id>.json` | 写锁持有者登记：本服务与 DSH 子进程的 PID、cwd | 释放会话或进程退出后清 | — |
 | `<状态目录>/worktrees/` | `isolation=worktree` 的会话目录（仓库检出 + DSH 的改动） | 干净的随 forget 删；有未提交改动的保留；分支始终保留 | 不用 `isolation=worktree`；`DSH_MCP_WORKTREES_DIR` 换位置 |
 | `<状态目录>/daemon-<id>.json`、`daemon-<id>.log`（POSIX 上还有 `.sock`） | 常驻进程的 PID、管道/socket 路径与随机令牌（仅本用户可读）；它的 stderr | 信息文件随进程退出删；日志 10 MB 滚动成 `.1` | `--no-daemon` 退回直连，或 `dsh-any-agent daemon stop` 优雅关闭 |

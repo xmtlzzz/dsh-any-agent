@@ -26,28 +26,35 @@ export class LiveTail {
     this.titlesAt = 0;
   }
 
-  #readFrom(file, track) {
+  #readFrom(file, track, allowRotated = false) {
     let st;
     try {
       st = statSync(file);
     } catch {
       return false;
     }
-    if (st.size < track.offset) {
+    let changed = false;
+    if (allowRotated && st.size < track.offset) {
+      // Finish the old file, including any partial line retained by the last poll.
+      let previousOffset;
+      do {
+        previousOffset = track.offset;
+        if (this.#readFrom(`${file}.1`, track)) changed = true;
+      } while (track.offset > previousOffset);
       track.offset = 0;
       track.rest = Buffer.alloc(0);
     }
-    if (st.size === track.offset) return false;
+    if (st.size <= track.offset) return changed;
     const len = st.size - track.offset;
     const buf = Buffer.alloc(len);
     let fd, n;
     try {
       fd = openSync(file, 'r');
       n = readSync(fd, buf, 0, len, track.offset);
-      if (n <= 0) return false;
+      if (n <= 0) return changed;
       track.offset += n;
     } catch {
-      return false;
+      return changed;
     } finally {
       if (fd !== undefined) {
         try { closeSync(fd); } catch {}
@@ -55,7 +62,6 @@ export class LiveTail {
     }
     const { lines, rest } = splitLines(Buffer.concat([track.rest, buf.subarray(0, n)]));
     track.rest = Buffer.from(rest);
-    let changed = false;
     for (const line of lines) {
       const ev = parseEvent(line);
       if (ev) {
@@ -95,7 +101,7 @@ export class LiveTail {
           if (this.#readFrom(old, oldTrack)) changed = true;
         }
       }
-      if (this.#readFrom(file, track)) changed = true;
+      if (this.#readFrom(file, track, true)) changed = true;
     }
     if (this.#refreshTitles()) changed = true;
     return changed;

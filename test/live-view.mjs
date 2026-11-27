@@ -155,14 +155,23 @@ try {
     check('没有新内容时 poll 返回 false', () => tail.poll() === false);
     // 滚动：旧文件改名为 .1，新文件从头写
     const f = join(liveDir, 'c-tail', 'events.jsonl');
+    const before = line(ev('c-tail', 'approval', { run: 'r1', approval_id: 'before' }));
+    appendFileSync(f, before.slice(0, 20));
+    tail.poll();
+    appendFileSync(f, before.slice(20));
     renameSync(f, `${f}.1`);
-    writeFileSync(f, line(ev('c-tail', 'run.end', { run: 'r1', status: 'done' })));
+    writeFileSync(f, line(ev('c-tail', 'approval', { run: 'r1', approval_id: 'after' })));
+    tail.poll();
+    check('轮转前后的审批各读一次，顺序不变', () =>
+      tail.state.convs.get('c-tail').runs[0].items.filter((item) => item.kind === 'approval')
+        .map((item) => item.approval_id).join(',') === 'before,after' && !tail.poll());
+    appendFileSync(f, line(ev('c-tail', 'run.end', { run: 'r1', status: 'done' })));
     tail.poll();
     check('滚动后继续读新文件', () => tail.view({ alive: () => true }).groups[0].conversations[0].runs[0].status === 'done');
     const fresh = new LiveTail(liveDir);
     fresh.poll();
     const fr = fresh.view({ alive: () => true }).groups[0].conversations[0].runs[0];
-    check('新查看器先读 .1 旧档再读新文件，时间线完整', () => fr.items.length === 1 && fr.status === 'done');
+    check('新查看器先读 .1 旧档再读新文件，时间线完整', () => fr.items.length === 3 && fr.status === 'done');
     rmSync(join(liveDir, 'c-tail'), { recursive: true, force: true });
     check('会话目录被删（forget）后从视图移除', () => tail.poll() === true && tail.view().totals.conversations === 0);
     const none = new LiveTail(join(root, 'missing'));

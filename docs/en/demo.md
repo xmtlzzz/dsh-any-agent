@@ -39,7 +39,7 @@ Measured: one full run took **57.6 s** on this machine (Windows / Node 24.21.0 /
 
 | Step | Tool | Why it matters |
 |---|---|---|
-| 1 | `initialize` / `tools/list` | Only four standard MCP methods; any MCP-over-stdio client can connect |
+| 1 | `initialize` / `tools/list` | The demo client negotiates the protocol and lists the available tools over stdio |
 | 2 | `dsh_start` | Creates a **long-lived** conversation. The identity is the on-disk `sessionId`; the process is only a cache |
 | 3 | `dsh_send(wait=false)` | Returns `run_id` + `sentinel_file` immediately and runs the turn in the background — your client's own timeout cannot kill the work |
 | 4 | `dsh_interject` ×2 | Change course mid-turn. It is "cancel + immediately start a new turn"; **work already done is not lost** |
@@ -54,7 +54,7 @@ Measured: one full run took **57.6 s** on this machine (Windows / Node 24.21.0 /
 
 **Why doesn't an interjection destroy finished work?** ACP explicitly rejects a concurrent prompt (`a prompt is already in flight`), so `dsh_interject` cancels the current turn and starts a new one with the full history. It is a practical equivalent, not true mid-turn steering — see [known limits](limits.md) item 2.
 
-**Why does the demo use `workspace-write` instead of the default tier?** So the sandbox actually does something: the task should only touch two files inside its workspace. `read-only` cannot start a shell at all, and `danger-full-access` is a poor default example.
+**Why does the demo use `workspace-write` (the default tier)?** The task needs to write two files inside its temporary workspace. `read-only` blocks the shell and `danger-full-access` would grant access outside that workspace.
 
 ## 4. A different task / a zero-cost preview
 

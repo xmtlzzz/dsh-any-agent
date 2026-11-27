@@ -29,6 +29,7 @@ export {
   pruneEmptyWorkspaces,
   pruneTempWorkspaces,
   pruneTestWorkspaces,
+  pruneWorkspaceLockStages,
   registerWorkspace,
   unregisterSessions,
 } from './workspace/store.mjs';

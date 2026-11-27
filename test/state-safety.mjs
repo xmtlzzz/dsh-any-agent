@@ -158,9 +158,14 @@ try {
   const deadPid = markerName.split('-')[0];
   const abandoned = mkdtempSync(cfg.STATE_FILE + '.lock-' + deadPid + '-');
   const active = mkdtempSync(cfg.STATE_FILE + '.lock-' + process.pid + '-');
+  const workspaceStage = (pid) => join(home, '.dsh-any-agent', `workspace-registry.lock-${pid}-abcdef`);
+  mkdirSync(workspaceStage(deadPid));
+  mkdirSync(workspaceStage(process.pid));
   await hub.load();
   check('startup removes an abandoned staging directory and preserves a live writer staging its marker',
     !existsSync(abandoned) && existsSync(active));
+  check('startup prunes only the dead workspace registry writer’s stage',
+    !existsSync(workspaceStage(deadPid)) && existsSync(workspaceStage(process.pid)));
   await hub.save();
   check('持锁进程退出后仍可保存注册表', crash.code === 17 && !existsSync(cfg.STATE_FILE + '.lock'));
   const { inspectRegistryLock, withRegistryLockSync } = await import(registryModule);

@@ -96,25 +96,24 @@ DSH 的工具活动经 ACP 的 `session/update`（`tool_call` / `tool_call_updat
 
 | type | 何时写 | `meta` 字段 | `detail` 追加 |
 |---|---|---|---|
-| `run.start` | 派活开始（`第 N 轮开始` 处） | `prompt_chars`、`permission`、`on_approval` | `prompt_preview`（≤200 字，脱敏） |
-| `tool` | `tool_call` / `tool_call_update` 且**状态变化**时 | `tool_call_id`、`name`、`kind`、`status`、`elapsed_ms` | `title`、`input_preview`（≤300 字，脱敏） |
-| `text` | 正文增量，节流（如每 2 秒或每 2KB 一条） | `chars_total` | `tail_preview`（最后 ≤200 字） |
-| `approval` | 收到 `request_permission` | `mode`（auto-allow / auto-deny / ask / read-only-deny）、`escalation`（如 `danger-full-access`）、`approval_id`（ask 时） | `command_preview`、`reason` |
-| `approval.decided` | `dsh_approval_decide` 或超时 | `approval_id`、`decision`、`by`（caller / timeout） | — |
-| `interject` / `interrupt` | 插话、排队、中断 | `mode` | `text_preview` |
-| `run.end` | 回合终止（成功 / 失败 / 取消） | `status`、`stop_reason`、`duration_ms`、`tool_count`、`auto_approvals`、`auto_escalations`、`usage` | — |
-| `writer.hello` / `writer.bye` | 写者首次写某会话 / 释放或 takeover 交出 | `reason` | — |
+| `conv.open` | `dsh_start` 创建会话 | `cwd`、`permission`、`on_approval`、`model`、`client` | `title_hint` |
+| `conv.close` | 释放会话且未指定 `forget` | `stopped` | — |
+| `run.queued` | `dsh_send(queue=true)` 入队 | `position`、`cwd`、`client` | `prompt_preview` |
+| `run.start` | 回合开始 | `via`（send / queue / interject）、`permission`、`on_approval`、`cwd`、`client` | `prompt_preview`（≤200 字，脱敏） |
+| `tool` | 收到 `tool_call` / `tool_call_update`，且状态变化或首次收到输入 | `tool_call_id`、`name`、`kind`、`status`、`elapsed_ms` | `title`、`input_preview`（≤300 字，脱敏） |
+| `approval` | 收到 `request_permission` | `mode`（auto-allow / auto-deny / ask / read-only-deny）、`escalation`、`approval_id`（ask 时）、`tool`、`tool_call_id` | `title`、`command_preview` |
+| `approval.decided` | `dsh_approval_decide`、超时、回合结束或会话关闭 | `approval_id`、`by`（caller / timeout / turn_end / close）、`decision`、`effective` | — |
+| `interject` / `interrupt` | 插话或中断 | `mode`、`pending_run` / `busy` | `text_preview` |
+| `usage` | 回合中用量变化时最多每 2 秒一次，结束后再发一条 `final: true` | `tokens`（本轮增量，含 input、output、cache_read、cache_write）、`session_tokens`、`context {used, window}` | — |
+| `run.end` | 回合终止（done / error / cancelled） | `status`、`stop_reason`、`duration_ms`、`tool_count`、`auto_approvals`、`auto_escalations` | `error` |
 
-实现与上表的差异（轻量化）：
+实现说明
 
-- 新增 `conv.open`（`dsh_start` 建会话，带 cwd / 权限 / 模型）、`conv.close`（非 forget 的释放）、`run.queued`（`dsh_send(queue=true)` 入队，带位置）。`run.start` 带 `via`（send / queue / interject）与 `cwd`；`conv.open` / `run.queued` / `run.start` 带 `client`（MCP `initialize` 的 `clientInfo.name`），查看端据此把会话挂到"谁派的"下面。
-- **不写** `text` 事件：正文只在哨兵里。
-- **不写** `writer.hello` / `writer.bye`：每条事件已带 `w`，查看端看最后一个写者的 pid 是否存活即可判断"中断"（§6.5）。
-- 排队被取消、插话等待超时、起不来的回合都补一条 `run.end`，查看端不会留下永远"排队 / 运行中"的回合。
-- 新增 `usage`（0.6.2）：本回合 token 增量 `tokens`、会话累计 `session_tokens`、上下文占用 `context {used, window}`。数据来自 DSH 投影缓存的 `tokenUsage.totals` / `contextPressure`。真机实测 DSH 在回合中每个模型步之后就更新它，所以回合开始记基线，工具状态变化 / `usage_update` 时按 2 秒节流发增量，回合结束（git 快照之后）再发一条 `final: true` 的最终值。只是计数，属于 meta 级字段。
-- 真机验证（DSH ACP）发现：`tool_call` **不带 `name`**，工具名在 `title` 里（`read` / `glob` / `write` / `pwsh`），`kind` 恒为 `other`。所以 `title` 是纯标识符时当作 `name` 写进 meta 级字段；带空格的 `title` 仍只进 detail。查看端把路径显示成相对会话目录的形式，并隐藏 `other`。
-
-`tool` 只在状态变化时落盘，避免 DSH 的快照式重复更新刷屏；`tool_call_id` 让查看器原地替换同一工具的行，语义与 `dsh_read` 的"按 seq 替换"一致。
+- 正文保存在哨兵中，实时流不写 `text` 事件。
+- 每条事件都带 `w`，查看器可根据最后一个写者的 PID 是否存活判断中断（§6.5），无需单独的写者交接事件。
+- 排队被取消、插话等待超时、回合无法启动时也会写入 `run.end`，查看器可据此结束排队或运行状态。
+- token 数来自 DSH 投影缓存的 `tokenUsage.totals` 和 `contextPressure`。实测 DSH 在每个模型步后更新计数。本服务在回合开始时记录基线，随后报告增量，在最终 Git 快照后报告最终值，此时 DSH 已写入总量。
+- 实测 DSH ACP 的 `tool_call` 不带 `name`，工具名在 `title` 中（`read` / `glob` / `write` / `pwsh`），`kind` 为 `other`。纯标识符的 `title` 会作为 `name` 写入 `meta`。含空格的 `title` 可能含命令，只进入 `detail`。查看器显示相对于会话目录的路径，并隐藏 `other`。
 
 ### 6.4 写入方式
 
@@ -159,7 +158,8 @@ tail 一个或全部会话，按会话分组、工具行原地刷新、审批高
 | `dsh_read` | 不变。它服务 agent，live 服务用户；两者数据来源相同、出口不同。 |
 | 哨兵 | 不变。哨兵是"回合完成"的闩锁和结果载体，live 是过程流；`run.end` 不替代哨兵。 |
 | 审计日志 | 不变。审计回答"谁对会话做了什么"，live 回答"会话自己在做什么"。 |
-| 写锁 | live 不持锁；查看器永远不触碰锁，也不会因为"在看"而影响 GUI 或 takeover。 |
+| 写锁 | 查看器只读实时流，查看进度不会占锁或影响 GUI 与锁接管。 |
+| `dsh_doctor` | `live` 检查报告事件级别、目录是否可写、会话数、占用空间和最后一条事件，异常时仅提示警告。 |
 
 ## 9. 隐私与安全
 

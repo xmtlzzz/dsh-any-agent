@@ -81,7 +81,8 @@ dsh-any-agent team status        # 团队开关与 profile
 - `dsh_version`：`verified` 为 ok。体检说明引用的是全量套件记录，表中也列出了 0.7.2 安装包工作流等专项验证。`partial` / `unsupported` / `unverified`（如 0.2.3+）/ 读不到版本为 **warn**；
 - `registry_lock` 显示写锁状态和持有进程，`runs_dir` 检查结果目录能否写入和建立硬链接，`worktrees` 在占用超过 500 MiB 或扫描不完整时提示警告。
 - `profile`：是否存在、是否漂移、路由来源；
-- `daemon`：当前运行模式（常驻进程 `daemon`、直连 `direct`，以及因启动失败自动回退到直连时的原因和日志路径）；
+- `daemon` 显示当前运行模式（常驻 `daemon`、直连 `direct`，或回退到直连的原因和日志路径）。检测到多个活跃常驻进程时会给出警告，并提示检查 `DSH_MCP_DAEMON_IGNORE_ENV`。
+- `dsh_storage` 以只读方式检查工作区注册表的 schema，并抽查会话日志文件名。
 - `workspace_sync`：检查注册表里已登记会话是否缺少 DSH 侧工作区同步条目（便于排查 GUI 列表可见性）；
 - `team`：`on` / `off` / `requested but unavailable`（版本或 profile 缺少兼容的团队配置）；
 - `config`：当前 permission、空闲回收、共享进程等生效值；

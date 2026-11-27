@@ -120,6 +120,8 @@ Only using Cursor or VS Code? Add it in one click instead (runs `npx -y dsh-any-
 >
 > <a href="https://dsh-any-agent.xmtlz.dev/en/#video"><img src="https://raw.githubusercontent.com/xmtlzzz/dsh-any-agent/main/website/src/media/promo-poster.jpg" width="560" alt="▶ Play the dsh-any-agent promo (54 seconds)"></a>
 
+> Run the five-minute walkthrough with `npm run demo`. It dispatches a task, interjects twice, then checks the output with `node --test`. Use `npm run demo -- --replay` to replay it without spending tokens. See the [five-minute demo](docs/en/demo.md).
+
 > **Before your first task:** read the [Usage Notes](docs/en/caveats.md), especially the model-config and external-MCP permission boundaries. External MCP tools bypass DSH's sandbox. For a fresh machine, follow [Setup](docs/en/install.md).
 
 > **The default is `workspace-write` with escalation denied.** To review escalation requests individually, set `DSH_MCP_APPROVAL=ask` in the MCP server configuration and reconnect. A tool call may choose a stricter policy. Use `read-only` for untrusted content. See [Permissions & privacy](docs/en/security.md).

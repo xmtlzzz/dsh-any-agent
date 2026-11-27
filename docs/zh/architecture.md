@@ -40,7 +40,7 @@ DSH 自带两个可编程入口。`sdk` profile 看着更简单，但它的 JSON
 
 **进程模型。** 会话的身份是 `sessionId`，进程只是可丢弃的载体。0.5.0 起同一 `(cwd, permission)` 的会话默认共用一个 ACP 进程（`src/host.mjs`）：DSH 的 ACP 服务端支持一条连接上多会话、每个 session 有自己的 Agent，但沙箱根与审批策略是**进程级**的，所以只能按这两项分组。收益是第二个会话建起来约 300ms（独立进程约 4s），内存也按组只付一份；代价是这**一个**进程崩了，组里所有会话的进行中回合会一起断（会话本体无损，下次派活各自 resume）——因此 `dsh_takeover` 不会在不带 `force` 的情况下杀共享进程。要回到「一会话一进程」就设 `DSH_MCP_SHARED_PROCESS=0`。
 
-**常驻进程模式（`src/daemon.mjs`，`dsh-any-agent-setup --yes` 默认开启 `DSH_MCP_DAEMON=1`）。** 客户端拉起的是极薄的转发进程，通过带令牌校验的本机命名管道 / Unix socket 连向 detached 常驻进程；配置（`DSH_*`、语言、`*_KEY`/`*_TOKEN`/`*_SECRET`、`*_PROXY` 及 `team` 设置）相同的客户端连接共用同一个 `Hub`，客户端退出或重连不会打断在跑回合。可用 `dsh-any-agent daemon status|stop` 查看与优雅关闭（经本机控制通道触发 `hub.shutdown()`，无响应时才回退 `SIGTERM`），加 `--no-daemon` 退回直连 stdio。
+**常驻进程模式（`src/daemon.mjs`，`dsh-any-agent-setup --yes` 默认开启 `DSH_MCP_DAEMON=1`）。** 客户端拉起的是极薄的转发进程，通过带令牌校验的本机命名管道 / Unix socket 连向 detached 常驻进程；配置（`DSH_*`、语言、`*_KEY`/`*_TOKEN`/`*_SECRET`、`*_PROXY` 及 `team` 设置）相同的客户端连接共用同一个 `Hub`，客户端退出或重连不会打断在跑回合。可用 `dsh-any-agent daemon status|stop` 查看与优雅关闭（经本机控制通道触发 `hub.shutdown()`，仅在无响应且核实 PID 的系统启动时间与记录相符后才发送 `SIGTERM`），加 `--no-daemon` 退回直连 stdio。
 
 **实时查看（0.6.1 起）。** 直连模式下每个 MCP 客户端各自拉起独立的 stdio 实例，常驻模式下同配置连接共享一个 `Hub`、不同配置仍可能并存多个实例。因此实时查看统一走文件而不是端口：各个服务端把会话活动（回合、工具调用、审批、token 用量）按连接附带的客户端身份追加到 `<状态目录>/live/<会话id>/events.jsonl`。写锁本来就保证一个会话同一时刻只有一个写者，所以"一会话一文件"不需要再加锁。`dsh-any-agent watch` 和 `dsh-any-agent dashboard` 是独立的只读进程，tail 这些文件，因此在直连与常驻模式下都能同时看到所有客户端、所有实例派出的活，服务重启也不丢，并且完全不碰写锁和 DSH：
 
@@ -54,7 +54,7 @@ DSH 自带两个可编程入口。`sdk` profile 看着更简单，但它的 JSON
 
 token 数字取自 DSH 自己的投影缓存（`tokenUsage` / `contextPressure`），DSH 每走一个模型步就会更新它。设计细节见 [实时查看设计](live-view-design.md)。
 
-**MCP 兼容性。** 服务端只使用 `initialize`、`ping`、`tools/list`、`tools/call` 四个标准方法。已用一个协商旧版协议、从不发送 `notifications/initialized` 的原始客户端验证。
+**MCP 兼容性。** 服务端支持 `ping`、`tools/list` 和 `tools/call`。旧版客户端通过 `initialize` 握手，可通过 `roots/list` 提供工作区。MCP `2026-07-28` 用 `server/discover` 发现服务，通过显式 `cwd` 指定工作区。已用一个协商旧版协议、从不发送 `notifications/initialized` 的原始客户端验证。
 
 </details>
 

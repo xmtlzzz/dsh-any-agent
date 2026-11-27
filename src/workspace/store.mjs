@@ -4,7 +4,7 @@
 
 import { DSH_WORKSPACE_SCHEMA_VERSION } from '../dsh-contract.mjs';
 import { writeJsonAtomic } from '../fs-atomic.mjs';
-import { withRegistryLockSync } from '../registry.mjs';
+import { pruneRegistryStages, withRegistryLockSync } from '../registry.mjs';
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -23,6 +23,14 @@ import {
 import { scanSessions } from './sessions.mjs';
 
 const WORKSPACE_LOCK_FILE = join(DSH_HOME, '.dsh-any-agent', 'workspace-registry');
+
+export function pruneWorkspaceLockStages() {
+  try {
+    if (existsSync(dirname(WORKSPACE_LOCK_FILE))) pruneRegistryStages(WORKSPACE_LOCK_FILE);
+  } catch {
+    // Workspace registration is optional. An unreadable directory must not prevent startup.
+  }
+}
 
 function emptyDoc() {
   return {

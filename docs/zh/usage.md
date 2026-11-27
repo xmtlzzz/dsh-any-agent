@@ -66,10 +66,10 @@ while(-not (Test-Path -LiteralPath $f)){ if((Get-Date) -gt $dl){ 'TIMEOUT'; exit
 
 - **不串台**：哨兵路径为 `<状态目录>/runs/<conversation_id>/<run_id>.json`，按会话分目录。`run_id` 的序号是每会话独立计数的，不同会话在同一毫秒可能生成同名 `run_id`——分目录后各写各的，绝不互相覆盖。每个 run 起一个独立后台任务即可，各自完成、各自唤醒。
 - **闩锁语义**：文件写一次并保留。即便 run 在你启动等待任务**之前**就已完成，`[ -f ]` 也立刻为真，不会漏。
-- **原子落地**：`tmp` + `rename`，文件一旦存在内容必然完整；每个 run 用独立 tmp，并发写互不干扰。
+- **原子发布。** 本服务先写好临时文件（`tmp`），再用硬链接（`link`）发布哨兵。先发布者获胜，并发恢复会保留已发布的结果。`dsh_review` 通过临时文件加 `rename` 原子更新哨兵。
 - **完成不靠推送**："跑完通知"完全由这个哨兵文件 + 你的后台等待任务实现，本服务不为此发 MCP 通知。唯一会发的通知是进度：调用带 `progressToken` 时，阻塞中的调用（`dsh_send(wait=true)`、`dsh_interject`）每 5 秒回报一次已等时长、当前工具名和本轮已产出字数，不含命令、路径或正文。
 - **审核不随哨兵消失**：`result.review` 随结果一起写入，所以只读文件的调用方也能看到清单。之后 `dsh_review` 会**原子重写**这个审核块（`status` → `pass`/`partial`/`fail`，并写入 `notes`、`reviewed_at`、`review_file`），闩锁文件本身始终存在。审核记录在 `<状态目录>/reviews/` 下，和哨兵一样按 7 天 TTL 清理。
-- **★ 哨兵里没有思考内容**：载荷含正文、思考**统计**、用量与（已脱敏的）工具输入，但没有思考正文；`result.thinking` 会被剥掉，并始终给出布尔 `thinking_omitted`（剥离了为 `true`，本来没有为 `false`）——本服务自己的落盘物里不写思考。`dsh_get(run_id)` 在内存里仍能看到它（记录还在时）。设 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 可以故意打破这条保证。注意：**DSH 自己的会话日志仍含思考**，见“日志与隐私”。
+- **哨兵中的思考内容。** 哨兵默认省略 `result.thinking`，用 `thinking_omitted` 表示是否剥离了思考正文，并保留答复、思考统计、用量与经过凭证脱敏的工具输入。结果仍在内存中时，`dsh_get(run_id)` 可返回思考正文。详见[日志与隐私](security.md)。
 
 > 服务启动时默认清理超过 7 天的哨兵和审核记录。`DSH_MCP_SENTINEL_TTL_MS` 可调整保留期，设为 `0` 可关闭清理。需要读取正文时请保留哨兵。独立的 `.key` 收据按相同保留期保存原回合 ID。仅剩收据时，用原键重试会返回 `replayed: true` 和 `result_available: false`。升级时会为仍保留的结果补建收据，沿用原文件时间。
 
@@ -125,3 +125,5 @@ DSH 在模型层就把思考与正文分开，ACP 又把它们做成**两条独�
 - `reasoning=hide`（默认）—— 丢弃内容，返回统计
 - `reasoning=marker` / `summary` / `full` —— 逐步放出更多内容（注意上下文预算）
 - `dsh_read(include_reasoning=true)` —— 只返回**当前正在跑那一轮**的实时思考；不进缓冲，回合结束即丢弃
+
+> 本服务自己的日志、状态文件和实时事件流均省略思考正文。完成哨兵和 `.running` 检查点也默认省略，开启 `DSH_MCP_SENTINEL_INCLUDE_REASONING=1` 后，两者都会在写入前对保留的 `thinking` 做凭证脱敏。即使使用 `reasoning=hide`，DSH 自己也始终在 `~/.dsh/sessions/**/session.v4.jsonl.zstd` 中保存完整思考正文，以便恢复会话。

@@ -21,9 +21,27 @@ for (const file of ['README.md', 'README.zh.md', 'website/src/index.html', 'webs
   for (const name of names) assert.match(content, new RegExp('\\b' + name + '\\b'), file + ' missing ' + name);
 }
 
+const inspector = /^const TOOL_INFO\s*=\s*\{([\s\S]*?)^\};/m.exec(read('website/src/app.mjs'));
+assert.ok(inspector, 'Missing website TOOL_INFO declaration');
+const readOnlyHints = new Map();
+for (const [, name, ro] of inspector[1].matchAll(/^\s*(dsh_\w+)\s*:\s*\{\s*ro\s*:\s*(true|false)\s*,/gm)) {
+  assert.ok(!readOnlyHints.has(name), 'Duplicate TOOL_INFO entry for ' + name);
+  readOnlyHints.set(name, ro === 'true');
+}
+assert.deepEqual([...readOnlyHints.keys()].sort(), names, 'Website TOOL_INFO entries differ from TOOL_DEFS');
+for (const tool of TOOL_DEFS) {
+  assert.equal(readOnlyHints.get(tool.name), Boolean(tool.annotations?.readOnlyHint), 'Incorrect TOOL_INFO ro for ' + tool.name);
+}
+
 const server = JSON.parse(read('server.json'));
 const guides = (lang) => readdirSync(new URL('docs/' + lang + '/', root)).filter((f) => f.endsWith('.md')).sort();
 assert.deepEqual(guides('en'), guides('zh'), 'Bilingual guide filenames differ');
+
+function referenceVariables(lang) {
+  const rows = read('docs/' + lang + '/reference.md').matchAll(/^\|\s*`(DSH_[A-Z0-9_]+)`\s*\|/gm);
+  return [...new Set(Array.from(rows, (row) => row[1]))].sort();
+}
+assert.deepEqual(referenceVariables('zh'), referenceVariables('en'), 'Bilingual reference.md environment variables differ');
 
 for (const lang of ['en', 'zh']) {
   const ref = 'docs/' + lang + '/reference.md';
@@ -42,7 +60,7 @@ for (const lang of ['en', 'zh']) {
     assert.ok(read(file).includes(config.DSH_COMPAT.verifiedLabel), file + ' missing verified DSH range');
   }
 }
-console.log('Documentation matches tool names, environment variables, defaults and compatibility range.');
+console.log('Documentation matches tool names, read-only hints, bilingual environment variables, defaults and compatibility range.');
 
 function quote(value) {
   return "`" + value + "`";

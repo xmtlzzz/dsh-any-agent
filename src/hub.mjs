@@ -55,7 +55,7 @@ import { reapOnce as runReapOnce, releaseAll as runReleaseAll } from './hub/reap
 import { pruneRegistryStages, readRegistry, withRegistryLock, writeRegistry } from './registry.mjs';
 import { emitLive, livePreview } from './live.mjs';
 import { homeWorkspaceProblem } from './workspace-guard.mjs';
-import { registerWorkspace } from './workspace.mjs';
+import { pruneWorkspaceLockStages, registerWorkspace } from './workspace.mjs';
 import { ISOLATION_MODES, createWorktree, discardWorktree } from './worktree.mjs';
 import {
   metaFilePath,
@@ -116,6 +116,7 @@ export class Hub {
     assertWritableDir(LOCKS_DIR, L('锁登记目录', 'Lock markers directory'));
     try { pruneRegistryStages(STATE_FILE); }
     catch (error) { this.log.info(`[hub] Registry staging cleanup: ${error.message}`); }
+    pruneWorkspaceLockStages();
 
     // 旧版本的默认状态文件在包安装目录里；一次性迁移到新的用户可写目录。
     // 只在没有显式设置 DSH_MCP_STATE 时做，避免覆盖用户指定的路径。

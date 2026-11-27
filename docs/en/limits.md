@@ -22,7 +22,9 @@
 
 Because renaming it would break things that already exist on disk.
 
-When you first start this server it creates a DSH profile under `~/.dsh/profiles/dsh-mcp/`. That directory name is referenced by three other persisted things:
+When you first start this server it creates a DSH profile under `~/.dsh/profiles/dsh-mcp/`. Since 0.5.0, enabling team mode selects the `dsh-team` profile, which the server also creates automatically. With team mode off (the default), it uses `dsh-mcp`. Both profiles use the same `DSH_MCP_*` variables and `# dsh-mcp:managed` marker.
+
+That directory name is referenced by three other persisted things:
 
 | Persisted identifier | Location | What breaks if renamed |
 |---|---|---|

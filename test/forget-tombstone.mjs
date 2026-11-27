@@ -121,7 +121,8 @@ console.log('\n[5] ★ forget 前已排队的任务不会在 forget 之后被派
   for (let i = 0; i < 300 && proc.prompts < 1; i++) await new Promise((r) => setTimeout(r, 10));
   const queued = q.enqueue('排队任务').run;
   const r = await q.close({ forget: true });
-  await new Promise((res) => setTimeout(res, 300));
+  // The stopped turn may still be saving its final Git snapshot.
+  await q.waitIdle(10_000);
   check('forget 成功', r.forgotten === true, JSON.stringify(r));
   check('★ 排队任务没有被发出（session/prompt 只有 1 次）', proc.prompts === 1, String(proc.prompts));
   check('排队任务以 cancelled 收尾', queued.status === 'cancelled', queued.status);

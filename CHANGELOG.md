@@ -9,13 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.2] - 2026-11-27
+## [0.8.2] — 2026-11-27
 
 - Fixed YAML sequence and empty-collection round trips, shared-process eviction, and Git snapshot ordering between queued turns.
 - Serialized workspace updates, replaced files atomically, and limited metadata writes to changed or missing sidecars. Daemon shutdown verifies process start time before sending a signal.
-- Added storage format diagnostics, daemon identity exclusions, credential redaction patterns, and bilingual documentation checks.
-- Fixed subcommand help and live viewing when a read is short, a run ID is missing, or conversation IDs share a prefix. Live directory paths containing `=` now work.
-- Opt-in reasoning is credential-redacted before checkpoints and sentinels are written. Audit events still append when rotation fails, and workspace registration stages its lock under `$DSH_HOME/.dsh-any-agent/`.
+- Added storage format diagnostics, daemon identity exclusions, credential redaction patterns, and bilingual documentation checks (including website tool read-only hints and bilingual `reference.md` env-var parity).
+- Fixed subcommand help and live viewing when a read is short, a run ID is missing, conversation IDs share a prefix, or `events.jsonl` rotates with unread tail events. Live directory paths containing `=` now work.
+- Opt-in reasoning is credential-redacted before checkpoints and sentinels are written. Audit events still append when rotation fails, workspace registration stages its lock under `$DSH_HOME/.dsh-any-agent/`, and startup removes abandoned workspace-lock staging directories.
 
 ## [0.8.1] — 2026-11-26
 

@@ -8,7 +8,7 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 |---|---|
 | **This server holds the lock** (recently used, or `keep_alive=true`) | ✅ Opening it in the GUI is **read-only**: you still **see the content**, but you **cannot take the lock**. Since 0.4.0 the process is reaped only after **10 minutes** idle; `keep_alive=true` sessions are never reaped for idleness |
 | **You open it in the GUI while the lock is free** | ❌ **The GUI keeps it permanently** (navigating away, waiting and archiving all fail to release it) and this server **can never reconnect** — only restarting the DSH desktop app / `dsh web` helps |
-| **Recommended** | Watch progress with **`dsh-any-agent watch`** / **`dashboard`** (read-only side view, never touches the lock), **`dsh_read`** (cursor-based incremental reads), or the **sentinel file**; if you must use the GUI, `dsh_release` first (that interrupts a running turn, so it fits the gaps between tasks) |
+| **Recommended** | Watch progress with **`dsh-any-agent watch`** / **`dashboard`** (read-only side view, never touches the lock), **`dsh_read`** (cursor-based incremental reads), or the **sentinel file**; to **write** in the GUI, use `dsh_release` first (that interrupts a running turn, so it fits the gaps between tasks) |
 
 **Who holds it** is reported by `dsh_status.lock_holder`; `dsh_takeover` handles the four cases:
 
@@ -21,6 +21,6 @@ DSH conversations carry a **cross-process write lock**: **it never expires while
 
 Process identity consists of the PID and the OS-reported start time. If the start time differs, cannot be read, or is missing from an older registration, release the conversation with `dsh_release` in the original host or close it there, then retry. This check also applies with `force=true`.
 
-> **Two measured footnotes.** ① **A crash leaves no orphan lock** — `SIGKILL` the MCP and its children exit with it (their stdio pipe closes), releasing the lock automatically ✓; so `stale-mcp` really means "**alive but wedged**". ② **Several instances**: the registry is last-writer-wins (a later save drops conversations it never saw), but the **session store is authoritative** — any session on disk is recoverable **by id alone**; if you give instances different `DSH_MCP_STATE` files, **point `DSH_MCP_LOCKS_DIR` at one shared directory**, or they cannot see each other's holder registrations.
+> **Two measured footnotes.** ① **A crash leaves no orphan lock** — `SIGKILL` the MCP and its children exit with it (their stdio pipe closes), releasing the lock automatically ✓; so `stale-mcp` really means "**alive but wedged**". ② **Several instances**: instances sharing `conversations.json` merge their updates under a registry lock. The **session store is authoritative** — any session on disk is recoverable **by id alone**; if you give instances different `DSH_MCP_STATE` files, **point `DSH_MCP_LOCKS_DIR` at one shared directory**, or they cannot see each other's holder registrations.
 >
 > The full measurements (the A/B probe method, the evidence that the GUI opens read-only, why even archiving does not release the lock, and crash-vs-wedge) are in [Usage Notes §3.5–3.12](caveats.md).

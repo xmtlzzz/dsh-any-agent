@@ -255,7 +255,7 @@ tool_timeout_sec = 120.0
 
 For a local checkout, use `"command": "node"` and `"args": ["/absolute/path/to/server/bin/dsh-any-agent.mjs"]`.
 
-> Cursor, Windsurf, Cline, Continue and most other clients use this same `mcpServers` shape — if it can launch a stdio MCP server, it works. Zed is the exception: it uses `context_servers` (shown above).
+> Cursor, Windsurf, Cline and Continue use `mcpServers`. VS Code uses `servers`, Zed uses `context_servers`, and opencode uses `mcp` with a `command` array. See the client table above or run `dsh-any-agent-setup` to preview your configuration.
 
 </details>
 

@@ -6,6 +6,9 @@
  *   DSH_BIN                     DSH CLI 入口（默认自动识别：桌面版 → npm 全局 → npx 缓存）
  *   DSH_RUNTIME                 拉起 DSH 的可执行文件（默认：桌面版用其自带运行时，其余用本进程 node）
  *   DSH_MCP_PROFILE             驱动用的 DSH profile（默认 dsh-mcp）
+ *   DSH_MCP_DAEMON              1 启用常驻进程（setup 默认开启，直接启动默认关闭）
+ *   DSH_MCP_LIVE                实时事件流级别：detail（默认）| meta | off
+ *   DSH_MCP_LANG                界面与工具语言：zh | en（默认跟随系统）
  *   DSH_MCP_STATE               会话注册表路径（默认 $DSH_HOME/.dsh-any-agent/conversations.json）
  *   DSH_MCP_PERMISSION          新建会话的默认权限档（默认 workspace-write）
  *   DSH_MCP_APPROVAL            本机审批上限（workspace-write 默认 auto-deny）
@@ -57,6 +60,8 @@ if (!subcommand && help) {
     '                           (desktop app -> npm global -> npx cache)\n' +
     '  DSH_RUNTIME              executable that launches DSH; auto (desktop app\'s own runtime)\n' +
     '  DSH_MCP_PROFILE          DSH profile to drive (default dsh-mcp)\n' +
+    '  DSH_MCP_DAEMON           1 enables resident mode (setup default); direct launch defaults to off\n' +
+    '  DSH_MCP_LANG             zh | en — interface and tool language (default: system locale)\n' +
     '  DSH_MCP_PERMISSION       danger-full-access | workspace-write | read-only\n' +
     '  DSH_MCP_APPROVAL         auto-allow | auto-deny | ask\n' +
     '  DSH_MCP_REVIEW           advisory (default) | off — caller review ticket on results\n' +

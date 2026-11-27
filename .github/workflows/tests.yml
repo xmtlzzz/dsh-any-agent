@@ -19,7 +19,7 @@ name: tests
 #     read-cursor       dsh_read cursor + answer      26 checks
 #     sentinel-redaction sentinel disk hygiene        28 checks
 #     live-events       live event stream, write side  52 checks
-#     live-view         watch / dashboard viewers      82 checks
+#     live-view         watch / dashboard viewers      83 checks
 #     release-notes     Release notes from CHANGELOG   12 checks
 #     review            caller review tickets        71 checks
 #     forget-tombstone  forget is terminal            25 checks
@@ -27,7 +27,7 @@ name: tests
 #     workspace-safety  data-loss boundaries          25 checks
 #     residue-purge     test residue cleanup, sandboxed 162 checks
 #     permission-adopt  no silent privilege escalation 26 checks
-#     state-safety      state/sentinel/lock storage   56 checks
+#     state-safety      state/sentinel/lock storage   57 checks
 #     workspace-snapshot workspace_changed full fingerprint  32 checks
 #     watchdog          turn watchdog (stall / max duration)  33 checks
 #     worktree          isolation=worktree sessions      31 checks

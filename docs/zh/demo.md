@@ -39,7 +39,7 @@ npm run demo
 
 | 步骤 | 工具 | 为什么这一步重要 |
 |---|---|---|
-| 1 | `initialize` / `tools/list` | 只走 4 个标准 MCP 方法；任何支持 MCP over stdio 的客户端都能接 |
+| 1 | `initialize` / `tools/list` | 演示客户端通过 stdio 协商协议并列出可用工具 |
 | 2 | `dsh_start` | 建一个**长驻**会话。身份是磁盘上的 `sessionId`，进程只是缓存 |
 | 3 | `dsh_send(wait=false)` | 派完立刻返回 `run_id` + `sentinel_file`，回合在后台跑 —— 别让客户端自己的超时把你的活掐掉 |
 | 4 | `dsh_interject` ×2 | 中途改口。走的是"取消 + 立刻开新回合"，**已经做的工作不丢** |
@@ -54,7 +54,7 @@ npm run demo
 
 **插话为什么不毁掉已经做的工作？** ACP 明确拒绝并发 prompt（`a prompt is already in flight`），所以 `dsh_interject` 是"取消当前回合 + 立刻发新回合"，历史完整保留。这是实用等价物，不是真·中途改向 —— 见[已知限制](limits.md)第 2 条。
 
-**为什么 demo 用 `workspace-write` 而不是默认档？** 为了让沙箱真的在起作用：这个任务只该写临时工作区里的两个文件。`read-only` 档连 shell 都起不来，`danger-full-access` 又不适合当默认示范。
+**为什么 demo 用 `workspace-write`（默认权限档）？** 任务需要在临时工作区里写两个文件。`read-only` 无法启动 shell，`danger-full-access` 又会授予工作区以外的权限。
 
 ## 4. 换一个任务 / 零成本预览
 

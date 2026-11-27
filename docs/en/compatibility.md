@@ -85,7 +85,8 @@ In an MCP client, call `dsh_doctor`. The heading distinguishes a clean result, w
 - `dsh_version`: `verified` is ok. The note refers to full-suite testing; the table also records narrower checks such as the 0.7.2 installed package lifecycle. `partial` / `unsupported` / `unverified` (e.g. 0.2.3+) / unreadable are **warn**;
 - `registry_lock` reports the writer lock and its owner. `runs_dir` checks writes and hard links. `worktrees` warns above 500 MiB or when the size scan is incomplete.
 - `profile`: exists, drift, route source;
-- `daemon`: active runtime mode (`daemon`, `direct`, or automatic fallback to `direct` with reason and daemon log path);
+- `daemon` reports the active runtime mode (`daemon`, `direct`, or fallback with the reason and log path). Multiple active resident daemons raise a warning with a `DSH_MCP_DAEMON_IGNORE_ENV` hint.
+- `dsh_storage` checks the workspace registry schema and samples session log filenames. The check is read-only.
 - `workspace_sync`: checks whether registered sessions are missing corresponding entries in DSH's workspace registry;
 - `team`: `on` / `off` / `requested but unavailable` (the version or profile lacks compatible team configuration);
 - `config`: effective permission, idle reaping, shared process, and so on;
