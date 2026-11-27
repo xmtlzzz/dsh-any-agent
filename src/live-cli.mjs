@@ -16,8 +16,10 @@ function parseFlags(args) {
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a.startsWith('--')) {
-      const [k, v] = a.slice(2).split('=', 2);
-      if (v !== undefined) flags[k] = v;
+      const body = a.slice(2);
+      const eq = body.indexOf('=');
+      const k = eq < 0 ? body : body.slice(0, eq);
+      if (eq >= 0) flags[k] = body.slice(eq + 1);
       else if (args[i + 1] !== undefined && !args[i + 1].startsWith('--')) flags[k] = args[++i];
       else flags[k] = true;
     } else positional.push(a);
@@ -46,7 +48,7 @@ export const WATCH_USAGE = {
 export async function runWatch(args, { out = process.stdout } = {}) {
   const { flags, positional } = parseFlags(args);
   const lang = detectLang(typeof flags.lang === 'string' ? flags.lang : null);
-  if (flags.help || flags.h) {
+  if (flags.help || flags.h || args.includes('-h')) {
     out.write(WATCH_USAGE[lang]);
     return 0;
   }
@@ -103,6 +105,8 @@ export async function runWatch(args, { out = process.stdout } = {}) {
     }, interval);
     const stop = () => {
       clearInterval(timer);
+      process.off('SIGINT', stop);
+      process.off('SIGTERM', stop);
       resolve();
     };
     process.once('SIGINT', stop);
@@ -157,7 +161,7 @@ export function openInBrowser(url, { platform = process.platform, spawnFn = unde
 export async function runDashboard(args, { out = process.stdout } = {}) {
   const { flags } = parseFlags(args);
   const lang = detectLang(typeof flags.lang === 'string' ? flags.lang : null);
-  if (flags.help || flags.h) {
+  if (flags.help || flags.h || args.includes('-h')) {
     out.write(DASHBOARD_USAGE[lang]);
     return 0;
   }
@@ -173,7 +177,11 @@ export async function runDashboard(args, { out = process.stdout } = {}) {
   out.write(DASHBOARD_BANNER[lang](url, tail.dir));
   if (flags.open) await openInBrowser(url);
   await new Promise((resolve) => {
-    const stop = () => resolve();
+    const stop = () => {
+      process.off('SIGINT', stop);
+      process.off('SIGTERM', stop);
+      resolve();
+    };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
   });

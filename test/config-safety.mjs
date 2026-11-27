@@ -261,7 +261,7 @@ const backupsIn = (dir) => {
   try { return existsSync(dir) ? readdirSync(dir).filter((f) => f.includes('.bak-dsh-')) : []; } catch { return []; }
 };
 const tempsIn = (dir) => {
-  try { return existsSync(dir) ? readdirSync(dir).filter((f) => /\.tmp-dsh-/.test(f)) : []; } catch { return []; }
+  try { return existsSync(dir) ? readdirSync(dir).filter((f) => f.includes('.tmp.')) : []; } catch { return []; }
 };
 function seedText(home, p, text) {
   assertInsideSandbox(home, p, 'write');

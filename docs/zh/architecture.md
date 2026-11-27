@@ -2,7 +2,7 @@
 
 # ⚡ 为什么不是直接把 DSH 包一层
 
-存储格式常量在 `src/dsh-contract.mjs` 中集中定义。`dsh_storage` 只读检查工作区格式并抽样会话日志文件名。`src/fs-atomic.mjs` 使用同目录临时文件替换目标文件，工作区登记在读改写期间持锁。共享宿主的 RSS 只在其所有会话均可回收时计入释放量。
+存储格式常量在 `src/dsh-contract.mjs` 中集中定义。`dsh_storage` 只读检查工作区格式并抽样会话日志文件名。`src/fs-atomic.mjs` 使用同目录临时文件替换目标文件。工作区登记在读改写期间持有 `$DSH_HOME/.dsh-any-agent/workspace-registry.lock`，并在同一目录暂存锁。共享宿主的 RSS 只在其所有会话均可回收时计入释放量。
 
 DSH 自带两个可编程入口。`sdk` profile 看着更简单，但它的 JSON-RPC 只有 **3 个请求 + 4 个通知**，缺了三样让 agent 实际不可用的能力；`acp` profile（Agent Client Protocol）全都有。以下结论全部针对 DSH `0.2.1-rc.5` 实测得出。
 

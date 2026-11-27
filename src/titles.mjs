@@ -10,6 +10,7 @@ import { DSH_PROJCACHE_REL, DSH_PROJCACHE_ROWS as ROWS } from './dsh-contract.mj
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DSH_HOME } from './config.mjs';
+import { isSafeSessionId } from './ids.mjs';
 
 function projCachePath(sessionId) {
   return join(DSH_HOME, ...DSH_PROJCACHE_REL, `${sessionId}.json`);
@@ -21,6 +22,7 @@ function projCachePath(sessionId) {
  * @returns {{title?:string,lastPromptAt?:number,usage?:object,pressure?:object,model?:object,sandboxMode?:string,permissions?:any,turns?:number}|null}
  */
 export function readConversationMeta(sessionId) {
+  if (!isSafeSessionId(sessionId)) return null;
   const p = projCachePath(sessionId);
   if (!existsSync(p)) return null;
   try {

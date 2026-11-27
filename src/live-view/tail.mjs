@@ -40,10 +40,11 @@ export class LiveTail {
     if (st.size === track.offset) return false;
     const len = st.size - track.offset;
     const buf = Buffer.alloc(len);
-    let fd;
+    let fd, n;
     try {
       fd = openSync(file, 'r');
-      const n = readSync(fd, buf, 0, len, track.offset);
+      n = readSync(fd, buf, 0, len, track.offset);
+      if (n <= 0) return false;
       track.offset += n;
     } catch {
       return false;
@@ -52,7 +53,7 @@ export class LiveTail {
         try { closeSync(fd); } catch {}
       }
     }
-    const { lines, rest } = splitLines(Buffer.concat([track.rest, buf]));
+    const { lines, rest } = splitLines(Buffer.concat([track.rest, buf.subarray(0, n)]));
     track.rest = Buffer.from(rest);
     let changed = false;
     for (const line of lines) {
@@ -77,7 +78,8 @@ export class LiveTail {
     for (const id of [...this.state.convs.keys()]) {
       if (!present.has(id)) {
         this.state.removeConv(id);
-        for (const k of [...this.files.keys()]) if (k.startsWith(join(this.dir, id))) this.files.delete(k);
+        this.files.delete(join(this.dir, id, LIVE_FILE));
+        this.titles.delete(id);
         changed = true;
       }
     }

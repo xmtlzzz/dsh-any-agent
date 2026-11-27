@@ -7,7 +7,7 @@
  *   [4] 非法数值环境变量落到安全侧（负 TTL 不清空哨兵；空串权限/思考档回落默认）
  */
 
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, statSync, utimesSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, statSync, truncateSync, utimesSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -79,6 +79,54 @@ try {
   let threw = null;
   try { cfg.assertWritableDir(join(blocked, 'child'), '测试目录'); } catch (e) { threw = e; }
   check('★ 不可写时抛出可读错误', Boolean(threw) && /不可写/.test(String(threw.message)), String(threw?.message));
+
+  const atomicModule = new URL('../src/fs-atomic.mjs', import.meta.url).href;
+  const atomicFile = join(normal, 'atomic');
+  const { writeFileAtomic } = await import(atomicModule);
+  writeFileAtomic(atomicFile, Buffer.from([0xff, 0]), { mode: 0o600, mtime: 0, exclusive: true });
+  let duplicate;
+  try { writeFileAtomic(atomicFile, 'replacement', { exclusive: true }); } catch (e) { duplicate = e.code; }
+  check('Exclusive publication preserves the first bytes and requested mtime, and clears staging files',
+    duplicate === 'EEXIST' && readFileSync(atomicFile).equals(Buffer.from([0xff, 0])) &&
+    statSync(atomicFile).mtimeMs === 0 && !readdirSync(normal).some((name) => name.includes('.tmp.')));
+  const failedWrite = runNode(`import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    fs.renameSync = () => { throw Object.assign(new Error('rename failed'), { code: 'EIO' }); };
+    fs.rmSync = () => { throw new Error('cleanup failed'); };
+    syncBuiltinESMExports();
+    const { writeFileAtomic } = await import(${JSON.stringify(atomicModule)});
+    try { writeFileAtomic(process.env.TARGET, 'replacement'); }
+    catch (e) { console.log(JSON.stringify(e.code)); }`, { TARGET: atomicFile });
+  check('A temp cleanup failure preserves the rename error and original file',
+    failedWrite.value === 'EIO' && readFileSync(atomicFile).equals(Buffer.from([0xff, 0])));
+  const blockedTarget = join(root, 'existing-dir');
+  mkdirSync(blockedTarget);
+  let writeFailed = false;
+  try { writeFileAtomic(blockedTarget, 'content'); } catch { writeFailed = true; }
+  check('Failed replacement cleans temporary files', writeFailed && !readdirSync(root).some((f) => f.startsWith('existing-dir.tmp.')));
+
+  const { audit } = await import('../src/audit.mjs');
+  const auditFile = join(root, 'audit.jsonl');
+  const auditSize = 10 * 1024 * 1024 + 1;
+  writeFileSync(auditFile, '');
+  truncateSync(auditFile, auditSize);
+  mkdirSync(auditFile + '.1'); // Blocks rotation on both Windows and POSIX.
+  process.env.DSH_MCP_AUDIT_FILE = auditFile;
+  audit('rotation-blocked');
+  delete process.env.DSH_MCP_AUDIT_FILE;
+  check('The current audit event is appended when rotation fails',
+    JSON.parse(readFileSync(auditFile).subarray(auditSize).toString() || 'null')?.event === 'rotation-blocked');
+
+  const { readConversationMeta } = await import('../src/titles.mjs');
+  const { DSH_PROJCACHE_REL } = await import('../src/dsh-contract.mjs');
+  const cache = join(home, ...DSH_PROJCACHE_REL);
+  mkdirSync(cache, { recursive: true });
+  const record = JSON.stringify({ record: { rows: { title: { val: 'fixture' } } } });
+  writeFileSync(join(cache, 'valid-id.json'), record);
+  writeFileSync(join(dirname(cache), 'outside.json'), record);
+  check('Only safe single-segment session IDs can read projection metadata',
+    readConversationMeta('valid-id')?.title === 'fixture' &&
+    ['../outside', '..\\outside', '.', '..', 'x'.repeat(129), null].every((id) => readConversationMeta(id) === null));
 
   console.log('\n[3] Hub.load 创建三个目录');
   const hub = new Hub({ log: { info() {}, debug() {} } });
@@ -284,13 +332,6 @@ try {
   const daemon = doctor.structured.checks.find((c) => c.id === 'daemon');
   check('Doctor reports multiple active daemons with a configuration hint',
     daemon?.status === 'warn' && /2/.test(daemon.detail) && /DSH_MCP_DAEMON_IGNORE_ENV/.test(daemon.fix));
-
-  const { writeFileAtomic } = await import('../src/fs-atomic.mjs');
-  const blockedTarget = join(root, 'existing-dir');
-  mkdirSync(blockedTarget);
-  let writeFailed = false;
-  try { writeFileAtomic(blockedTarget, 'content'); } catch { writeFailed = true; }
-  check('Failed replacement cleans temporary files', writeFailed && !readdirSync(root).some((f) => f.startsWith('existing-dir.tmp.')));
 
   const { metaFilePath } = await import('../src/hub-store.mjs');
   const dirtyHub = new Hub();

@@ -27,11 +27,13 @@ import { SERVER_VERSION } from '../src/mcp.mjs';
  * spawn reapers and touch the registry just to print a version string.
  */
 const argv = process.argv.slice(2);
-if (argv.includes('--version') || argv.includes('-v')) {
+const subcommand = ['watch', 'dashboard', 'daemon', 'team'].includes(argv[0]);
+const help = argv.includes('--help') || argv.includes('-h');
+if (!subcommand && (argv.includes('--version') || argv.includes('-v'))) {
   process.stdout.write(SERVER_VERSION + '\n');
   process.exit(0);
 }
-if (argv.includes('--help') || argv.includes('-h')) {
+if (!subcommand && help) {
   process.stdout.write(
     'dsh-any-agent ' + SERVER_VERSION + '\n\n' +
     'An MCP server that drives DeepSeek Harness (DSH) as a long-lived coding agent.\n' +
@@ -78,6 +80,11 @@ if (argv[0] === 'watch' || argv[0] === 'dashboard') {
 /** `dsh-any-agent daemon status|stop`：查看或停止本机残留的常驻进程。 */
 if (argv[0] === 'daemon') {
   const { L } = await import('../src/lang.mjs');
+  const usage = L('用法', 'Usage') + ': dsh-any-agent daemon status|stop\n';
+  if (help) {
+    process.stdout.write(usage);
+    process.exit(0);
+  }
   const { listDaemons, stopDaemons } = await import('../src/daemon.mjs');
   const action = argv[1] ?? 'status';
   if (action === 'status') {
@@ -105,7 +112,7 @@ if (argv[0] === 'daemon') {
     ));
     process.exit(0);
   }
-  process.stderr.write(L('用法', 'Usage') + ': dsh-any-agent daemon status|stop\n');
+  process.stderr.write(usage);
   process.exit(2);
 }
 
@@ -117,21 +124,23 @@ if (argv[0] === 'daemon') {
  */
 if (argv[0] === 'team') {
   const { L } = await import('../src/lang.mjs');
-  const fs = await import('node:fs');
-  const nodePath = await import('node:path');
+  const usage = L('用法', 'Usage') + ': dsh-any-agent team on|off|status\n';
+  if (help) {
+    process.stdout.write(usage);
+    process.exit(0);
+  }
+  const { readFileSync } = await import('node:fs');
+  const { writeFileAtomic } = await import('../src/fs-atomic.mjs');
   const cfg = await import('../src/config.mjs');
   const readSettings = () => {
     try {
-      return JSON.parse(fs.readFileSync(cfg.TEAM_SETTINGS_FILE, 'utf8'));
+      return JSON.parse(readFileSync(cfg.TEAM_SETTINGS_FILE, 'utf8'));
     } catch {
       return {};
     }
   };
   const writeSettings = (obj) => {
-    fs.mkdirSync(nodePath.dirname(cfg.TEAM_SETTINGS_FILE), { recursive: true });
-    const tmp = `${cfg.TEAM_SETTINGS_FILE}.tmp.${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf8');
-    fs.renameSync(tmp, cfg.TEAM_SETTINGS_FILE);
+    writeFileAtomic(cfg.TEAM_SETTINGS_FILE, JSON.stringify(obj, null, 2) + '\n');
   };
 
   const action = argv[1] ?? 'status';
@@ -166,7 +175,7 @@ if (argv[0] === 'team') {
     );
     process.exit(0);
   }
-  process.stderr.write(L('用法', 'Usage') + ': dsh-any-agent team on|off|status\n');
+  process.stderr.write(usage);
   process.exit(2);
 }
 

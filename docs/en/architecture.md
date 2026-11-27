@@ -2,7 +2,7 @@
 
 # ⚡ Why not just wrap the DSH CLI?
 
-Storage constants live in `src/dsh-contract.mjs`. The read-only `dsh_storage` check inspects the workspace schema and samples session log filenames. `src/fs-atomic.mjs` replaces files using same-directory temporary files. Workspace writers hold a lock across each update. Eviction credits a shared host’s RSS only when all its sessions can be released.
+Storage constants live in `src/dsh-contract.mjs`. The read-only `dsh_storage` check inspects the workspace schema and samples session log filenames. `src/fs-atomic.mjs` replaces files using same-directory temporary files. Workspace writers hold `$DSH_HOME/.dsh-any-agent/workspace-registry.lock` across each update and stage the lock in the same directory. Eviction credits a shared host’s RSS only when all its sessions can be released.
 
 DSH ships two programmable entry points. The `sdk` profile looks simpler, but its JSON-RPC surface has only **3 requests and 4 notifications** — and it lacks three things that make an agent unusable in practice. The `acp` profile (Agent Client Protocol) has all of them. Everything below was verified against DSH `0.2.1-rc.5`.
 

@@ -417,9 +417,13 @@ try {
     writeFileSync(join(legacy, 'reviews', id, 'run-1.review.json'), '{}');
   }
   mkdirSync(join(legacy, 'locks'), { recursive: true });
+  mkdirSync(join(legacy, 'live', L.test), { recursive: true });
+  writeFileSync(join(legacy, 'live', L.test, 'events.jsonl'), '{}\n');
   const legacyDry = residue.sweepLegacyTmpState({ dir: legacy, dryRun: true });
   check('干跑只报告，不删', existsSync(join(legacy, 'runs', L.test)) && legacyDry.removed.runs === 1);
   const lg = residue.sweepLegacyTmpState({ dir: legacy });
+  check('清除最后一个测试会话后也收掉空 live 目录',
+    lg.dirsRemoved.includes(join(legacy, 'live')) && !existsSync(join(legacy, 'live')));
   check('有测试证据的 id：哨兵/审核/元数据都清掉', !existsSync(join(legacy, 'runs', L.test)) && !existsSync(join(legacy, 'reviews', L.test)) && !existsSync(join(legacy, 'meta', `${L.test}.json`)));
   check('★ 证据是真实 cwd 的 id 原样保留', existsSync(join(legacy, 'runs', L.real)) && existsSync(join(legacy, 'reviews', L.real)) && existsSync(join(legacy, 'meta', `${L.real}.json`)));
   check('★ 没有任何证据的 id 原样保留', existsSync(join(legacy, 'runs', L.none)) && existsSync(join(legacy, 'reviews', L.none)));

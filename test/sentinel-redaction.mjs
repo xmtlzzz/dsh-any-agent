@@ -73,12 +73,13 @@ check('title 里的 api_key 被替换', !String(body.title).includes('sk-TITLELE
 console.log('\n[4] INCLUDE_REASONING=1 仍必须脱敏');
 {
   const hubURL = new URL('../src/hub.mjs', import.meta.url).href;
-  const script =
-    `const { sanitizeResultForSentinel } = await import(${JSON.stringify(hubURL)});\n` +
-    'console.log(JSON.stringify(sanitizeResultForSentinel({' +
-    "answer: 'token sk-INCLUDELEAK12345', thinking: 'THINK_KEEP'," +
-    "tools_used: [{ name: 'pwsh', input: { apiKey: 'sk-TOOLLEak12345' } }]" +
-    '})));';
+  const script = `const { sanitizeResultForSentinel } = await import(${JSON.stringify(hubURL)});
+    console.log(JSON.stringify({
+      ...sanitizeResultForSentinel({ answer: 'token sk-INCLUDELEAK12345', thinking: 'THINK_KEEP',
+        tools_used: [{ name: 'pwsh', input: { apiKey: 'sk-TOOLLEak12345' } }] }),
+      mixed: sanitizeResultForSentinel({ thinking: 'keep sk-EXAMPLE12345 Bearer abc123 password: test123' }).thinking,
+      structured: sanitizeResultForSentinel({ thinking: [{ password: 'test123', note: 'keep' }] }).thinking
+    }));`;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     encoding: 'utf8',
     timeout: 30_000,
@@ -87,6 +88,8 @@ console.log('\n[4] INCLUDE_REASONING=1 仍必须脱敏');
   let value = null;
   try { value = JSON.parse(String(r.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop()); } catch {}
   check('INCLUDE_REASONING=1 时保留 thinking', value?.thinking === 'THINK_KEEP', JSON.stringify(value));
+  check('思考正文里的令牌、Bearer 与密码也脱敏', value?.mixed === 'keep [REDACTED] Bearer [REDACTED] password: [REDACTED]');
+  check('结构化思考按字段脱敏', value?.structured?.[0]?.password === '[REDACTED]' && value.structured[0].note === 'keep');
   check('★ 但 answer 仍然脱敏', !String(value?.answer).includes('sk-INCLUDELEAK12345'), String(value?.answer));
   check('★ 工具输入仍然脱敏', value?.tools_used?.[0]?.input?.apiKey === '[REDACTED]', JSON.stringify(value?.tools_used));
   check('thinking_omitted=false', value?.thinking_omitted === false, String(value?.thinking_omitted));

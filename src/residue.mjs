@@ -198,7 +198,7 @@ export function purgeTestResidue({ ids = [], roots = [], stateFiles, dryRun = fa
  * @param {object} opts
  * @param {string|object} opts.state 状态目录规格
  * @param {boolean} [opts.dryRun] 仅预演不删除
- * @param {boolean} [opts.removeEmptyDirs] 清空后把 runs/reviews/locks/meta 这几个空目录也收掉
+ * @param {boolean} [opts.removeEmptyDirs] 清空后把 runs/reviews/locks/meta/live 这几个空目录也收掉
  */
 export function sweepStateDir({ state, dryRun = false, removeEmptyDirs = false }) {
   const spec = resolveState(state);
@@ -223,7 +223,7 @@ export function sweepStateDir({ state, dryRun = false, removeEmptyDirs = false }
   const purged = purgeProjectState({ ids: [...ids], states: [spec], trusted: false, dryRun });
   const dirsRemoved = [];
   if (removeEmptyDirs && !dryRun) {
-    for (const d of [spec.runsDir, spec.reviewsDir, spec.locksDir, spec.metaDir]) {
+    for (const d of [spec.runsDir, spec.reviewsDir, spec.locksDir, spec.metaDir, spec.liveDir]) {
       try {
         if (existsSync(d) && readdirSync(d).length === 0) {
           rmdirSync(d);

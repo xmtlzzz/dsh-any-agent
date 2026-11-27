@@ -10,7 +10,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, basename, dirname } from 'node:path';
 import { zstdCompressSync } from 'node:zlib';
@@ -130,6 +130,8 @@ try {
     '}',
   ].join('\n');
   const project = join(root, 'concurrent');
+  // Occupy the former lock name with an unrelated file to catch even transient staging in storages.
+  writeFileSync(workspaceFile + '.lock', 'keep');
   await Promise.all(['a', 'b', 'c', 'd'].map((prefix) =>
     promisify(execFile)(process.execPath, ['--input-type=module', '-e', worker, register, project, prefix],
       { windowsHide: true, timeout: 30000 })));
@@ -137,6 +139,9 @@ try {
   const registrations = Object.values(saved).filter((w) => w.path === project);
   check('Concurrent writers retain every registration for the same workspace',
     registrations.length === 1 && new Set(registrations[0].sessionIds).size === 24);
+  check('Workspace lock and staging directories stay out of DSH storages',
+    readFileSync(workspaceFile + '.lock', 'utf8') === 'keep' &&
+    !readdirSync(dirname(workspaceFile), { withFileTypes: true }).some((e) => e.isDirectory() && /\.lock(?:-|$)/.test(e.name)));
 } catch (e) {
   failed++;
   console.log(`\n✗ 异常中断: ${e.message}\n${e.stack}`);

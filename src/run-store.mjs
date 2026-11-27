@@ -3,12 +3,12 @@
  * provides the interrupted result when recovery needs session permission data.
  */
 import {
-  existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync,
-  rmSync, statSync, utimesSync, writeFileSync,
+  existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 import { REVIEWS_DIR, RUNS_DIR, SENTINEL_TTL_MS } from './config.mjs';
+import { writeJsonAtomic } from './fs-atomic.mjs';
 import { assertSafeId } from './ids.mjs';
 import { L } from './lang.mjs';
 import { isPidAlive, processStartTime } from './locks.mjs';
@@ -52,7 +52,6 @@ export function runSentinelPath(conversationId, runId) {
 export function writeRunSentinel(paths, conversationId, run, log) {
   const file = paths.runSentinelPath(conversationId, run.run_id);
   try {
-    mkdirSync(dirname(file), { recursive: true });
     publishRunSentinel(file, paths.runMarkerPath(conversationId, run.run_id), runSentinelPayload(conversationId, run));
     return file;
   } catch (e) {
@@ -126,7 +125,6 @@ export function reserveRun(paths, conversationId, run) {
 }
 
 function writeRunMarker(file, conversationId, run, { checkpoint = undefined, exclusive = false, mtime = undefined } = {}) {
-  mkdirSync(dirname(file), { recursive: true });
   writeRunJson(file, {
     conversation_id: conversationId,
     run_id: run.run_id,
@@ -432,15 +430,7 @@ function backfillRunKeys(dir, files, log) {
 }
 
 function writeRunJson(file, value, { exclusive = false, mtime = undefined } = {}) {
-  const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-  try {
-    writeFileSync(tmp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });
-    if (mtime) utimesSync(tmp, mtime, mtime);
-    if (exclusive) linkSync(tmp, file);
-    else renameSync(tmp, file);
-  } finally {
-    try { rmSync(tmp, { force: true }); } catch {}
-  }
+  writeJsonAtomic(file, value, { mode: 0o600, exclusive, mtime });
 }
 
 function readRunJson(file) {

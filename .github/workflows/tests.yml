@@ -17,17 +17,17 @@ name: tests
 #     resume-retry      cold-resume timeout retry     65 checks (fake ACP server)
 #     dispatch-tools    dispatch surface              89 checks (85 off Windows)
 #     read-cursor       dsh_read cursor + answer      26 checks
-#     sentinel-redaction sentinel disk hygiene        26 checks
-#     live-events       live event stream, write side  50 checks
-#     live-view         watch / dashboard viewers      69 checks
+#     sentinel-redaction sentinel disk hygiene        28 checks
+#     live-events       live event stream, write side  52 checks
+#     live-view         watch / dashboard viewers      82 checks
 #     release-notes     Release notes from CHANGELOG   12 checks
 #     review            caller review tickets        71 checks
 #     forget-tombstone  forget is terminal            25 checks
 #     bootstrap-profile zero-dependency bootstrap     42 checks
-#     workspace-safety  data-loss boundaries          24 checks
-#     residue-purge     test residue cleanup, sandboxed 161 checks
+#     workspace-safety  data-loss boundaries          25 checks
+#     residue-purge     test residue cleanup, sandboxed 162 checks
 #     permission-adopt  no silent privilege escalation 26 checks
-#     state-safety      state/sentinel/lock storage   52 checks
+#     state-safety      state/sentinel/lock storage   56 checks
 #     workspace-snapshot workspace_changed full fingerprint  32 checks
 #     watchdog          turn watchdog (stall / max duration)  33 checks
 #     worktree          isolation=worktree sessions      31 checks

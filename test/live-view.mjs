@@ -1,7 +1,9 @@
 /**
  * live 查看端回归：归并器、增量 tail、终端渲染、dashboard 安全边界。离线，不拉 DSH。
  */
-import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { mock } from 'node:test';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { request } from 'node:http';
@@ -9,7 +11,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = mkdtempSync(join(tmpdir(), 'dsh-any-agent-live-view-'));
-const liveDir = join(root, 'live');
+const liveDir = join(root, 'live=a=b');
+process.env.DSH_HOME = join(root, 'home');
 process.env.DSH_MCP_STATE = join(root, 'state.json');
 process.env.DSH_MCP_LIVE_DIR = liveDir;
 
@@ -130,6 +133,13 @@ try {
       d.apply(ev('c2', 'from.the.future', { run: 'r9' }));
       return true;
     });
+    check('缺少 run 的事件不会创建回合，也不会阻断后续事件', () => {
+      const state = new LiveState();
+      for (const type of ['run.queued', 'run.start', 'run.end']) state.apply(ev('c', type));
+      state.apply(ev('c', 'run.start', { run: 'valid' }));
+      const runs = state.convs.get('c').runs;
+      return runs.length === 1 && runs[0].run === 'valid';
+    });
   }
 
   console.log('\n[3] 增量 tail：半行、滚动、删除');
@@ -157,6 +167,29 @@ try {
     check('会话目录被删（forget）后从视图移除', () => tail.poll() === true && tail.view().totals.conversations === 0);
     const none = new LiveTail(join(root, 'missing'));
     check('目录不存在时安静为空', () => none.poll() === false && none.view().totals.conversations === 0);
+
+    writeEvents('c-1', [ev('c-1', 'conv.open', { title_hint: 'first' })]);
+    writeEvents('c-10', [ev('c-10', 'approval', { run: 'r', approval_id: 'a' })]);
+    const siblings = new LiveTail(liveDir);
+    siblings.poll();
+    rmSync(join(liveDir, 'c-1'), { recursive: true });
+    siblings.poll();
+    check('忘记 c-1 后清掉它的标题，且不会重放 c-10 的审批事件', () =>
+      !siblings.titles.has('c-1') && siblings.state.convs.get('c-10').runs[0].items.length === 1);
+
+    const short = new LiveTail(liveDir);
+    const read = fs.readSync;
+    const readLimits = [0, 7];
+    const limited = mock.method(fs, 'readSync', (fd, buf, offset, length, pos) =>
+      read(fd, buf, offset, Math.min(length, readLimits.shift() ?? length), pos));
+    syncBuiltinESMExports();
+    try {
+      check('零字节与短读后仍能从实际偏移量读出完整事件', () =>
+        !short.poll() && !short.poll() && short.poll() && short.state.convs.get('c-10').runs[0].items.length === 1);
+    } finally {
+      limited.mock.restore();
+      syncBuiltinESMExports();
+    }
   }
 
   console.log('\n[4] 终端渲染');
@@ -237,9 +270,29 @@ try {
   {
     writeEvents('c-watch', [ev('c-watch', 'run.start', { run: 'r-watch', client: 'cursor', prompt_preview: 'hello-watch' })]);
     const bin = fileURLToPath(new URL('../bin/dsh-any-agent.mjs', import.meta.url));
-    const r = spawnSync(process.execPath, [bin, 'watch', '--once'], { env: { ...process.env, DSH_MCP_LIVE_DIR: liveDir }, encoding: 'utf8', timeout: 30_000 });
+    const r = spawnSync(process.execPath, [bin, 'watch', '--once', '--dir=' + liveDir], {
+      env: { ...process.env, DSH_MCP_LIVE_DIR: join(root, 'unused') }, encoding: 'utf8', timeout: 30_000,
+    });
     check('watch --once 退出码 0', () => r.status === 0, r.stderr);
     check('watch --once 输出调用链', () => r.stdout.includes('cursor') && r.stdout.includes('r-watch') && r.stdout.includes('hello-watch'), r.stdout);
+    for (const command of ['watch', 'dashboard', 'daemon', 'team']) {
+      for (const [lang, flag] of [['zh', '--help'], ['en', '-h']]) {
+        const help = spawnSync(process.execPath, [bin, command, flag], {
+          env: { ...process.env, DSH_MCP_LANG: lang }, encoding: 'utf8', timeout: 5000,
+        });
+        check(`${command} ${flag} (${lang})`, () => help.status === 0 && help.stderr === '' &&
+          help.stdout.toLowerCase().startsWith((lang === 'zh' ? '用法' : 'usage') + ': dsh-any-agent ' + command + ' '));
+      }
+    }
+    const { runWatch, runDashboard } = await import('../src/live-cli.mjs');
+    for (const run of [runWatch, runDashboard]) {
+      const signals = ['SIGINT', 'SIGTERM'];
+      const before = signals.map((signal) => process.listenerCount(signal));
+      const out = { write() { setImmediate(() => process.emit('SIGINT')); } };
+      await run([], { out });
+      check(run.name + ' 退出时移除两个信号监听器', () =>
+        signals.every((signal, i) => process.listenerCount(signal) === before[i]));
+    }
   }
 
   console.log('\n[5b] dashboard --open 的浏览器启动命令');

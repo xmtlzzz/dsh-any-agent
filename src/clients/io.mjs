@@ -9,15 +9,14 @@ import {
   existsSync,
   readFileSync,
   readdirSync,
-  renameSync,
   statSync,
   unlinkSync,
-  writeFileSync,
   chmodSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { platform } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { writeFileAtomic } from '../fs-atomic.mjs';
 
 /** 写进每个客户端的条目名。同时也是 --remove 唯一的识别依据。 */
 export const ENTRY_NAME = 'dsh-any-agent';
@@ -85,19 +84,9 @@ export function atomicWrite(file, text, { mode = undefined } = {}) {
   if (originalMode === undefined) {
     try { originalMode = statSync(file).mode; } catch { originalMode = null; }
   }
-  const tmp = file + '.tmp-dsh-' + process.pid + '-' + Math.random().toString(36).slice(2, 8);
-  try {
-    writeFileSync(tmp, text, {
-      encoding: 'utf8',
-      ...(originalMode === null ? {} : { mode: originalMode & 0o7777 }),
-    });
-    renameSync(tmp, file);
-    if (originalMode !== null) {
-      try { chmodSync(file, originalMode & 0o7777); } catch { /* 尽力而为 */ }
-    }
-  } catch (e) {
-    try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* 尽力而为 */ }
-    throw e;
+  writeFileAtomic(file, text, { mode: originalMode === null ? undefined : originalMode & 0o7777 });
+  if (originalMode !== null) {
+    try { chmodSync(file, originalMode & 0o7777); } catch { /* 尽力而为 */ }
   }
 }
 

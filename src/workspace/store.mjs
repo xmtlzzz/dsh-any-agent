@@ -7,8 +7,8 @@ import { writeJsonAtomic } from '../fs-atomic.mjs';
 import { withRegistryLockSync } from '../registry.mjs';
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { basename, dirname } from 'node:path';
-import { REGISTER_WORKSPACE } from '../config.mjs';
+import { basename, dirname, join } from 'node:path';
+import { DSH_HOME, REGISTER_WORKSPACE } from '../config.mjs';
 import { L } from '../lang.mjs';
 import {
   WORKSPACE_FILE,
@@ -21,6 +21,8 @@ import {
   shouldRegister,
 } from './paths.mjs';
 import { scanSessions } from './sessions.mjs';
+
+const WORKSPACE_LOCK_FILE = join(DSH_HOME, '.dsh-any-agent', 'workspace-registry');
 
 function emptyDoc() {
   return {
@@ -70,7 +72,8 @@ function writeDoc(doc) {
 function workspaceTransaction(dryRun, action) {
   if (dryRun) return action();
   mkdirSync(dirname(WORKSPACE_FILE), { recursive: true });
-  return withRegistryLockSync(WORKSPACE_FILE, action);
+  mkdirSync(dirname(WORKSPACE_LOCK_FILE), { recursive: true });
+  return withRegistryLockSync(WORKSPACE_LOCK_FILE, action);
 }
 
 function dropWorkspace(doc, id) {

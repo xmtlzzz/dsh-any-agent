@@ -13,6 +13,11 @@ import { L } from './lang.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
 
+/** Single directory or filename component used by live streams and projection caches. */
+export function isSafeSessionId(value) {
+  return typeof value === 'string' && value !== '.' && value !== '..' && /^[A-Za-z0-9._-]{1,128}$/.test(value);
+}
+
 export function assertSafeId(value, label = 'id') {
   if (typeof value !== 'string' || value === '.' || value === '..' || !SAFE_ID.test(value)) {
     throw new Error(L(

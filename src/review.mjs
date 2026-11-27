@@ -15,9 +15,10 @@
  *   - 审核单不含思考正文；落盘前套用与审批上下文相同的凭证脱敏。
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { DEFAULT_REVIEW, REVIEWS_DIR, REVIEW_MODES } from './config.mjs';
+import { writeJsonAtomic } from './fs-atomic.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
 import { assertSafeId } from './ids.mjs';
 import { L } from './lang.mjs';
@@ -241,15 +242,10 @@ export function writeReviewRecord({ ticket, verdict, notes, findings, reviewedAt
       : [],
     evidence: sanitizeApprovalContext(ticket.evidence ?? null),
   };
-  const tmp = `${file}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(tmp, JSON.stringify(payload, null, 2), { encoding: 'utf8', mode: 0o600 });
-    renameSync(tmp, file);
+    writeJsonAtomic(file, payload, { mode: 0o600 });
   } catch (e) {
     throw new Error(L(`写审核记录失败（${file}）: ${e.message}`, `Could not write the review record (${file}): ${e.message}`));
-  } finally {
-    try { rmSync(tmp, { force: true }); } catch {}
   }
   return { file, payload };
 }

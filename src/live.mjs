@@ -21,6 +21,7 @@ import { appendFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { LIVE_DIR, LIVE_LEVEL, LIVE_LEVELS } from './config.mjs';
+import { isSafeSessionId } from './ids.mjs';
 import { sanitizeApprovalContext } from './redact.mjs';
 import { pruneDirTree } from './sentinel.mjs';
 
@@ -30,8 +31,6 @@ export const LIVE_FILE = 'events.jsonl';
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 /** 单行上限；超过先丢掉 detail 字段，仍超就不写。 */
 const MAX_LINE_BYTES = 4096;
-/** 会话 id 会拼进路径：只认安全字符（同 ids.mjs 的约束，宽松到能放下 DSH 的 uuid）。 */
-const SAFE_ID = /^[A-Za-z0-9._-]{1,128}$/;
 /** 这些事件带上客户端名，查看端用它把会话挂到"谁派的"下面。 */
 const CLIENT_TYPES = new Set(['conv.open', 'run.queued', 'run.start']);
 
@@ -147,7 +146,7 @@ export function summarizeToolInput(input, max = 300) {
  */
 export function emitLive(convId, type, fields = {}, detail = null) {
   if (settings.level === 'off') return false;
-  if (typeof convId !== 'string' || !SAFE_ID.test(convId)) return false;
+  if (!isSafeSessionId(convId)) return false;
   try {
     const ev = { v: LIVE_SCHEMA, ts: new Date().toISOString(), conv: convId, w: WRITER, n: ++seq, type };
     const c = CLIENT_TYPES.has(type) ? currentClient() : null;
@@ -194,10 +193,10 @@ export function emitLive(convId, type, fields = {}, detail = null) {
 
 /** forget 时删掉该会话的事件目录。 */
 export function removeLive(convId) {
-  if (typeof convId !== 'string' || !SAFE_ID.test(convId)) return false;
+  if (!isSafeSessionId(convId)) return false;
   try {
     const dir = liveConvDir(convId);
-    for (const k of [...sizes.keys()]) if (k.startsWith(dir)) sizes.delete(k);
+    sizes.delete(join(dir, LIVE_FILE));
     rmSync(dir, { recursive: true, force: true });
     return true;
   } catch {

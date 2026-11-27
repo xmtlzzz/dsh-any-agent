@@ -9,7 +9,9 @@
  *   5. 现有输出不变：tools_used 不混入 live 跟踪字段；
  *   6. 失败路径 / 审批裁决 / 排队 / forget 都有对应事件或清理。
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import fs, { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { mock } from 'node:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -252,6 +254,21 @@ try {
   g.conv.proc = null;
   await g.conv.close({ forget: true });
   check('forget 删除事件目录', () => !existsSync(live.liveConvDir('live-events-forget', liveDir)));
+
+  live.emitLive('c-1', 'conv.open');
+  live.emitLive('c-10', 'conv.open');
+  live.removeLive('c-1');
+  const stat = mock.method(fs, 'statSync');
+  syncBuiltinESMExports();
+  try {
+    check('删除 c-1 后仍使用 c-10 的文件大小缓存', () =>
+      live.emitLive('c-10', 'conv.close') && !stat.mock.calls.some(({ arguments: [file] }) => file === live.liveFilePath('c-10')));
+  } finally {
+    stat.mock.restore();
+    syncBuiltinESMExports();
+  }
+  check('拒绝以点目录作为 live 会话 id', () =>
+    ['.', '..'].every((id) => !live.emitLive(id, 'conv.open') && !live.removeLive(id)));
 
   console.log('\n[7a] 一个进程服务几个客户端：事件记在发起调用的客户端名下');
   {

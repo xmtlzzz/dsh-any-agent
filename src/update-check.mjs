@@ -6,10 +6,11 @@
  * 24 小时。查不到（离线、超时、被墙）只报"未知"，不算问题。DSH_MCP_UPDATE_CHECK=0 完全不联网。
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { PKG_VERSION, STATE_FILE } from './config.mjs';
 import { cmpVersion } from './dsh-locate.mjs';
+import { writeJsonAtomic } from './fs-atomic.mjs';
 
 export const UPDATE_URL = 'https://registry.npmjs.org/dsh-any-agent/latest';
 const CACHE_MS = 24 * 60 * 60 * 1000;
@@ -72,10 +73,7 @@ export async function checkForUpdate({
     ]);
     if (error) return { status: 'unknown', current, error };
     try {
-      mkdirSync(dirname(cacheFile), { recursive: true });
-      const tmp = `${cacheFile}.tmp.${process.pid}`;
-      writeFileSync(tmp, JSON.stringify({ latest, checked_at: now }), 'utf8');
-      renameSync(tmp, cacheFile);
+      writeJsonAtomic(cacheFile, { latest, checked_at: now });
     } catch {
       /* 缓存写不了就下次再查 */
     }

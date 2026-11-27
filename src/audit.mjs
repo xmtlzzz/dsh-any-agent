@@ -18,9 +18,9 @@ export function audit(event, data = {}) {
   if (!file) return;
   try {
     mkdirSync(dirname(file), { recursive: true });
-    if (existsSync(file) && statSync(file).size > MAX_BYTES) {
-      renameSync(file, `${file}.1`);
-    }
+    try {
+      if (existsSync(file) && statSync(file).size > MAX_BYTES) renameSync(file, `${file}.1`);
+    } catch { /* Keep appending if rotation is temporarily blocked. */ }
     appendFileSync(
       file,
       `${JSON.stringify({ ts: new Date().toISOString(), event, ...data })}\n`,

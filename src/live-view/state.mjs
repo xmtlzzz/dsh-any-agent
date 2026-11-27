@@ -188,6 +188,7 @@ export class LiveState {
         break;
       case 'run.queued': {
         const r = this.#run(c, ev.run);
+        if (!r) break;
         r.status = 'queued';
         r.queued_at = ev.ts;
         r.via = 'queue';
@@ -198,6 +199,7 @@ export class LiveState {
       }
       case 'run.start': {
         const r = this.#run(c, ev.run);
+        if (!r) break;
         r.status = 'running';
         r.started_at = ev.ts;
         r.turn = ev.turn ?? r.turn;
@@ -212,6 +214,7 @@ export class LiveState {
       }
       case 'run.end': {
         const r = this.#run(c, ev.run);
+        if (!r) break;
         r.status = ev.status ?? 'done';
         r.ended_at = ev.ts;
         r.duration_ms = ev.duration_ms ?? r.duration_ms;

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, linkSync, mkdirSync, openSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const sleepWord = new Int32Array(new SharedArrayBuffer(4));
 
-/** @param {string} file @param {string | Uint8Array} content @param {{ mode?: number }} [options] */
-export function writeFileAtomic(file, content, { mode } = {}) {
+/** @param {string} file @param {string | Uint8Array} content
+ * @param {{ mode?: number, mtime?: Date | number, exclusive?: boolean }} [options] */
+export function writeFileAtomic(file, content, { mode, mtime, exclusive = false } = {}) {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = file + '.tmp.' + process.pid + '.' + randomUUID();
   const fd = openSync(tmp, 'wx', mode);
@@ -14,6 +15,11 @@ export function writeFileAtomic(file, content, { mode } = {}) {
       writeFileSync(fd, content);
     } finally {
       closeSync(fd);
+    }
+    if (mtime !== undefined) utimesSync(tmp, mtime, mtime);
+    if (exclusive) {
+      linkSync(tmp, file);
+      return;
     }
     // Windows readers and indexers can briefly prevent replacement even when
     // this is the only writer. Keep the original in place through every retry.
@@ -29,7 +35,7 @@ export function writeFileAtomic(file, content, { mode } = {}) {
       }
     }
   } finally {
-    rmSync(tmp, { force: true });
+    try { rmSync(tmp, { force: true }); } catch {}
   }
 }
 

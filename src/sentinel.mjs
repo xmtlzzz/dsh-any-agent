@@ -75,7 +75,9 @@ export function sanitizeResultForSentinel(result) {
   }
   // 始终给出布尔值：调用方才能区分“思考被剥离”与“本来没有思考”。
   const out = { ...rest, thinking_omitted: Boolean(thinking) && !SENTINEL_INCLUDE_REASONING };
-  if (SENTINEL_INCLUDE_REASONING && thinking !== undefined) out.thinking = thinking;
+  if (SENTINEL_INCLUDE_REASONING && thinking !== undefined) {
+    out.thinking = typeof thinking === 'string' ? sanitizeApprovalContext(thinking, 'thinking') : sanitizeApprovalContext(thinking);
+  }
   return out;
 }
 
